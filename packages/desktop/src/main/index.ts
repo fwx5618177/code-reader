@@ -1,7 +1,6 @@
 import { app, BrowserWindow } from 'electron';
-import { join } from 'path';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -20,13 +19,9 @@ function createWindow() {
   // 根据环境加载不同的URL
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173');
-  } else {
-    mainWindow.loadFile(join(__dirname, 'render', 'index.html'));
-  }
-
-  // 开发模式下打开开发者工具
-  if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(join(__dirname, '../render/index.html'));
   }
 }
 

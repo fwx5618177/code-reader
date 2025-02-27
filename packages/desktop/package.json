@@ -4,23 +4,24 @@
   "type": "module",
   "main": "dist/main/index.mjs",
   "scripts": {
+    "dev": "concurrently \"pnpm:watch\" \"wait-on dist/main/index.mjs && pnpm electron\"",
+    "start": "pnpm build && pnpm electron",
     "electron": "cross-env NODE_ENV=development electron .",
-    "start": "concurrently \"pnpm:watch\" \"pnpm:electron\"",
-    "build": "vite build && electron-builder",
-    "dev": "cross-env NODE_ENV=development vite build && pnpm electron",
-    "watch": "vite build --watch"
+    "watch": "vite build --watch",
+    "build": "vite build"
   },
   "dependencies": {
     "@code-reader/ui": "workspace:*",
-    "@vitejs/plugin-react": "^4.3.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "vite": "^6.2.0"
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.2.0",
     "concurrently": "^9.1.2",
     "electron": "^28.0.0",
     "electron-builder": "^24.0.0",
-    "cross-env": "^7.0.3"
+    "cross-env": "^7.0.3",
+    "wait-on": "^7.2.0"
   }
 }
