@@ -1,0 +1,45 @@
+{
+  "name": "code-reader-application",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build:lib": "pnpm --filter @code-reader/lib build",
+    "watch:lib": "pnpm --filter @code-reader/lib watch",
+    "build:cli": "pnpm --filter @code-reader/cli build",
+    "watch:cli": "pnpm --filter @code-reader/cli watch",
+    "build:ui": "pnpm --filter @code-reader/ui build",
+    "watch:ui": "pnpm --filter @code-reader/ui watch",
+    "build:web": "pnpm --filter @code-reader/web build",
+    "watch:web": "pnpm --filter @code-reader/web watch",
+    "build:desktop": "pnpm --filter @code-reader/desktop build",
+    "watch:desktop": "pnpm --filter @code-reader/desktop watch",
+    "start:desktop": "pnpm --filter @code-reader/desktop start",
+    "dev:desktop": "pnpm --filter @code-reader/desktop dev",
+    "lint": "eslint '**/*.{js,jsx,ts,tsx}'",
+    "lint:fix": "eslint '**/*.{js,jsx,ts,tsx}' --fix",
+    "format": "prettier --write '**/*.{js,jsx,ts,tsx,css,md,json}'",
+    "clean": "rimraf **/dist **/build **/out **/node_modules node_modules packages/desktop/node_modules packages/lib/node_modules"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.4.1",
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "eslint": "^9.21.0",
+    "eslint-config-prettier": "^10.0.2",
+    "eslint-plugin-prettier": "^5.2.3",
+    "prettier": "^3.5.2",
+    "rimraf": "^6.0.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  }
+}
