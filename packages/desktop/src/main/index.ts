@@ -5,6 +5,8 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+(app as any).applicationSupportsSecureRestorableState = true;
+
 // 创建Electron窗口
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -16,12 +18,18 @@ function createWindow() {
     },
   });
 
-  // 根据环境加载不同的URL
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(join(__dirname, '../render/index.html'));
+    mainWindow.loadFile(join(__dirname, '../index.html'));
+  }
+
+  // 开发模式下监听渲染进程的重载请求
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.on('did-fail-load', () => {
+      mainWindow.loadURL('http://localhost:5173');
+    });
   }
 }
 

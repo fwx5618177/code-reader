@@ -3,7 +3,7 @@
     "module": "es2022",
     "moduleResolution": "bundler",
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["vite/client", "node", "vite", "@types/node"],
@@ -13,5 +13,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "plugins/**/*"]
 }

@@ -15,17 +15,24 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/main/index.ts'),
-        renderer: resolve(__dirname, 'src/render/index.html'),
+        render: resolve(__dirname, 'index.html'),
       },
       output: {
         format: 'esm',
         entryFileNames: (chunkInfo) => {
           return chunkInfo.name === 'main' ? 'main/index.mjs' : 'render/[name].js';
         },
-        chunkFileNames: 'render/[name].[hash].js',
+        chunkFileNames: 'render/chunks/[name].[hash].js',
         assetFileNames: (assetInfo) => {
-          if (assetInfo.name === 'index.html') {
+          const name = assetInfo.name || '';
+          const info = name.split('.');
+          const ext = info.pop();
+
+          if (name.endsWith('.html')) {
             return 'render/[name].[ext]';
+          }
+          if (ext === 'css') {
+            return 'render/styles/[name].[hash].[ext]';
           }
           return 'render/assets/[name].[hash].[ext]';
         },
@@ -33,6 +40,7 @@ export default defineConfig({
       external: ['electron', 'path', 'url'],
     },
   },
+  base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

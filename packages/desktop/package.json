@@ -4,10 +4,11 @@
   "type": "module",
   "main": "dist/main/index.mjs",
   "scripts": {
-    "dev": "concurrently \"pnpm:watch\" \"wait-on dist/main/index.mjs && pnpm electron\"",
+    "dev": "cross-env NODE_ENV=development concurrently \"pnpm dev:vite\" \"pnpm dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "vite build && wait-on dist/main/index.mjs && nodemon --watch src/main --ext ts,mjs --exec \"vite build && electron .\"",
     "start": "pnpm build && pnpm electron",
-    "electron": "cross-env NODE_ENV=development electron .",
-    "watch": "vite build --watch",
+    "electron": "electron .",
     "build": "vite build"
   },
   "dependencies": {
@@ -22,6 +23,8 @@
     "electron": "^28.0.0",
     "electron-builder": "^24.0.0",
     "cross-env": "^7.0.3",
-    "wait-on": "^7.2.0"
+    "wait-on": "^7.2.0",
+    "sass": "^1.72.0",
+    "nodemon": "^3.1.0"
   }
 }

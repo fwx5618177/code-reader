@@ -38,6 +38,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@parcel/watcher",
       "electron",
       "esbuild"
     ]
