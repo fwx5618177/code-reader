@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "cross-env NODE_ENV=development concurrently \"pnpm dev:vite\" \"pnpm dev:electron\"",
     "dev:vite": "vite",
-    "dev:electron": "vite build && wait-on dist/main/index.mjs && nodemon --watch src/main --ext ts,mjs --exec \"vite build && electron .\"",
+    "dev:electron": "vite build && wait-on dist/main/index.mjs && nodemon --watch src/main --ext ts,mjs --exec \"electron .\"",
     "start": "pnpm build && pnpm electron",
     "electron": "electron .",
     "build": "vite build"
