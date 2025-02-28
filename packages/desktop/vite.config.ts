@@ -12,15 +12,22 @@ export default defineConfig({
   build: {
     outDir: './dist',
     emptyOutDir: true,
+    sourcemap: true,
+    minify: process.env.NODE_ENV === 'production',
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'src/main/index.ts'),
         render: resolve(__dirname, 'index.html'),
+        preload: resolve(__dirname, 'src/main/preload.ts'),
       },
       output: {
         format: 'esm',
         entryFileNames: (chunkInfo) => {
-          return chunkInfo.name === 'main' ? 'main/index.mjs' : 'render/[name].js';
+          return chunkInfo.name === 'main'
+            ? 'main/index.mjs'
+            : chunkInfo.name === 'preload'
+              ? 'main/[name].mjs'
+              : 'render/[name].js';
         },
         chunkFileNames: 'render/chunks/[name].[hash].js',
         assetFileNames: (assetInfo) => {
@@ -36,8 +43,11 @@ export default defineConfig({
           }
           return 'render/assets/[name].[hash].[ext]';
         },
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom'],
+        },
       },
-      external: ['electron', 'path', 'url'],
+      external: ['electron', 'path', 'url', 'fs/promises'],
     },
   },
   base: './',

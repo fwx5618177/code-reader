@@ -1,0 +1,52 @@
+.file-tree {
+  padding: 8px;
+  color: #ccc;
+  font-size: 14px;
+  user-select: none;
+}
+
+.file-tree-item {
+  .item-header {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 4px;
+
+    &:hover {
+      background-color: #2a2a2a;
+    }
+
+    &.directory {
+      color: #ddd;
+      font-weight: 500;
+    }
+
+    &.file {
+      color: #bbb;
+    }
+  }
+
+  .expand-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 4px;
+    font-size: 12px;
+    transition: transform 0.2s;
+
+    &.expanded {
+      transform: rotate(90deg);
+    }
+  }
+
+  .item-children {
+    padding-left: 16px;
+  }
+
+  .item-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
