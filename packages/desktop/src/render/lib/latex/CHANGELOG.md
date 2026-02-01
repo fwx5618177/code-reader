@@ -362,8 +362,8 @@ VCDIFF (RFC 3284) 是一种成熟的二进制增量编码算法，适用于：
 
 | 层级 | 方案 | 复杂度 | 项目实现 |
 |------|------|--------|---------|
-| 文本存储 | Piece Table / Rope | O(log n) | `@code-reader/text-storage` |
-| 增量解析 | Tree-sitter / Lezer | 局部解析 | `@code-reader/incremental-parser` |
+| 文本存储 | Piece Table / Rope | O(log n) | `@code-reader/text-buffer` |
+| 增量解析 | Tree-sitter / Lezer | 局部解析 | `@code-reader/syntax-parser` |
 | 增量渲染 | AST Diff + DOM Patch | 局部更新 | `IncrementalLatexEngine` |
 
 这正是 VS Code、Monaco Editor、Lapce 等成熟编辑器采用的方案。
@@ -758,7 +758,7 @@ const engine = createIncrementalEngine({
 
 ### 新增导出
 ```typescript
-// 从 @code-reader/incremental-parser 导出
+// 从 @code-reader/syntax-parser 导出
 export {
   // LaTeX 解析器类
   LatexLezerParser,

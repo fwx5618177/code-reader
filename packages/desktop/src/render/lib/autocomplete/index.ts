@@ -1,11 +1,11 @@
 // ================================
 // 智能补全模块入口
-// 从 @code-reader/autocomplete 包重新导出
+// 从 @code-reader/autocomplete-service 包重新导出
 // 保持向后兼容性
 // ================================
 
 // ================================
-// 从 @code-reader/autocomplete 包重新导出所有内容
+// 从 @code-reader/autocomplete-service 包重新导出所有内容
 // ================================
 
 export {
@@ -66,7 +66,7 @@ export {
   createMarkdownAutocompleteExtension,
   createCodeAutocompleteExtension,
   createFullAutocompleteExtension,
-} from '@code-reader/autocomplete';
+} from '@code-reader/autocomplete-service';
 
 // ================================
 // 本地扩展提供者（保持向后兼容）
@@ -94,7 +94,7 @@ export type {
 // ================================
 
 // CodeMirrorAutocompleteAdapter 别名（旧名称兼容）
-export { CodeMirrorAdapter as CodeMirrorAutocompleteAdapter } from '@code-reader/autocomplete';
+export { CodeMirrorAdapter as CodeMirrorAutocompleteAdapter } from '@code-reader/autocomplete-service';
 
 // 本地 RadixTree（如有特殊需求可使用）
 export { RadixTree } from './radix-tree';
@@ -107,7 +107,7 @@ export type {
 } from './radix-tree';
 
 // ================================
-// 本地提供者（补充 @code-reader/autocomplete 包）
+// 本地提供者（补充 @code-reader/autocomplete-service 包）
 // ================================
 
 export {

@@ -4,7 +4,7 @@
 // ================================
 
 import type { TextDiffResult, DiffStats } from '@code-reader/diff-algorithm';
-import type { SearchHighlight, SearchDocument } from '@code-reader/content-search';
+import type { SearchHighlight, SearchDocument } from '@code-reader/search-service';
 
 // 重新导出类型以保持向后兼容
 export type { TextDiffResult, DiffStats, SearchHighlight, SearchDocument };

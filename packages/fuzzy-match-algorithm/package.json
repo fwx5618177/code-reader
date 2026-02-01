@@ -1,0 +1,75 @@
+{
+  "name": "@code-reader/fuzzy-match-algorithm",
+  "version": "0.1.0",
+  "description": "自动补全核心算法库 - 提供编辑距离、模糊评分、前缀树等用于智能补全的核心算法实现",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./levenshtein": {
+      "import": "./dist/levenshtein.js",
+      "types": "./dist/levenshtein.d.ts"
+    },
+    "./damerau-levenshtein": {
+      "import": "./dist/damerau-levenshtein.js",
+      "types": "./dist/damerau-levenshtein.d.ts"
+    },
+    "./fuzzy-score": {
+      "import": "./dist/fuzzy-score.js",
+      "types": "./dist/fuzzy-score.d.ts"
+    },
+    "./radix-tree": {
+      "import": "./dist/radix-tree.js",
+      "types": "./dist/radix-tree.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rimraf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "benchmark": "tsx benchmark/index.ts"
+  },
+  "keywords": [
+    "algorithm",
+    "levenshtein",
+    "damerau-levenshtein",
+    "edit-distance",
+    "fuzzy-match",
+    "fuzzy-score",
+    "radix-tree",
+    "patricia-trie",
+    "prefix-tree",
+    "autocomplete",
+    "spell-check"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@vitest/coverage-v8": "^1.3.0",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.3.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  }
+}

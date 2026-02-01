@@ -8,7 +8,7 @@ import {
   createSearchIndex,
   type SearchDocument,
   type SearchOptions,
-} from '@code-reader/content-search';
+} from '@code-reader/search-service';
 import {
   DiffCache,
   createDiffCache,

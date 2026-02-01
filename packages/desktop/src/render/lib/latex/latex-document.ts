@@ -29,7 +29,7 @@ import {
   type Position,
   type Range,
   type TextBufferType,
-} from '@code-reader/text-storage';
+} from '@code-reader/text-buffer';
 
 // ================================
 // 类型定义

@@ -31,7 +31,7 @@ import {
   createTSTreeSitterParser,
   type LatexLezerParseResult,
   type LatexASTNode,
-} from '@code-reader/incremental-parser';
+} from '@code-reader/syntax-parser';
 import { getMemoryMonitor, MemoryPressure, clearAllPools } from './chunk-pool';
 import { getASTCacheManager, type ASTCacheManager } from './ast-cache-manager';
 
@@ -2731,8 +2731,8 @@ export class IncrementalLatexEngine {
    */
   private convertTSTreeSitterASTToRootNode(
     result: {
-      ast: import('@code-reader/incremental-parser').ASTRoot<
-        import('@code-reader/incremental-parser').ASTNode
+      ast: import('@code-reader/syntax-parser').ASTRoot<
+        import('@code-reader/syntax-parser').ASTNode
       >;
     },
     content: string
@@ -2848,9 +2848,9 @@ export class IncrementalLatexEngine {
    * 将 TS Tree-sitter 节点转换为 PreambleNode
    */
   private convertTSToPreambleNode(
-    node: import('@code-reader/incremental-parser').ASTNode,
+    node: import('@code-reader/syntax-parser').ASTNode,
     content: string,
-    nodes: ReadonlyMap<string, import('@code-reader/incremental-parser').ASTNode>
+    nodes: ReadonlyMap<string, import('@code-reader/syntax-parser').ASTNode>
   ): PreambleNode {
     const raw = content.slice(node.from, node.to);
 
@@ -2897,9 +2897,9 @@ export class IncrementalLatexEngine {
    * 将 TS Tree-sitter 节点转换为 DocumentNode
    */
   private convertTSToDocumentNode(
-    node: import('@code-reader/incremental-parser').ASTNode,
+    node: import('@code-reader/syntax-parser').ASTNode,
     content: string,
-    nodes: ReadonlyMap<string, import('@code-reader/incremental-parser').ASTNode>
+    nodes: ReadonlyMap<string, import('@code-reader/syntax-parser').ASTNode>
   ): DocumentNode {
     return {
       type: 'document',
@@ -2918,7 +2918,7 @@ export class IncrementalLatexEngine {
   private convertTSChildren(
     childIds: readonly string[],
     content: string,
-    nodes: ReadonlyMap<string, import('@code-reader/incremental-parser').ASTNode>
+    nodes: ReadonlyMap<string, import('@code-reader/syntax-parser').ASTNode>
   ): LatexNode[] {
     const children: LatexNode[] = [];
     const logPrefix = '[IncrementalEngine TSChildren]';
@@ -2957,9 +2957,9 @@ export class IncrementalLatexEngine {
    * 将 TS Tree-sitter 节点转换为 LatexNode
    */
   private convertTSToLatexNode(
-    node: import('@code-reader/incremental-parser').ASTNode,
+    node: import('@code-reader/syntax-parser').ASTNode,
     content: string,
-    nodes: ReadonlyMap<string, import('@code-reader/incremental-parser').ASTNode>
+    nodes: ReadonlyMap<string, import('@code-reader/syntax-parser').ASTNode>
   ): LatexNode | null {
     const raw = content.slice(node.from, node.to);
     const nodeType = this.mapTSNodeType(node.type);
