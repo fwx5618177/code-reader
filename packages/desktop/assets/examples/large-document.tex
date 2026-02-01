@@ -1,0 +1,502 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{大型 LaTeX 文档示例}
+\author{Code Reader 测试}
+\date{\today}
+
+\newtheorem{theorem}{定理}
+\newtheorem{lemma}{引理}
+\newtheorem{definition}{定义}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\newpage
+
+% ================================
+% 第一章：微积分基础
+% ================================
+
+\section{微积分基础}
+
+\subsection{极限与连续}
+
+\begin{definition}[函数极限]
+设函数 $f(x)$ 在点 $x_0$ 的某去心邻域内有定义，如果存在常数 $A$，对于任意给定的正数 $\epsilon$（无论它多么小），总存在正数 $\delta$，使得当 $0 < |x - x_0| < \delta$ 时，有
+$$|f(x) - A| < \epsilon$$
+则称常数 $A$ 为函数 $f(x)$ 当 $x \to x_0$ 时的极限，记作
+$$\lim_{x \to x_0} f(x) = A$$
+\end{definition}
+
+\begin{theorem}[极限的唯一性]
+如果极限 $\lim_{x \to x_0} f(x)$ 存在，则该极限是唯一的。
+\end{theorem}
+
+\begin{theorem}[夹逼定理]
+设 $g(x) \leq f(x) \leq h(x)$，且
+$$\lim_{x \to x_0} g(x) = \lim_{x \to x_0} h(x) = A$$
+则 $\lim_{x \to x_0} f(x) = A$。
+\end{theorem}
+
+重要极限公式：
+\begin{align}
+\lim_{x \to 0} \frac{\sin x}{x} &= 1 \\
+\lim_{x \to \infty} \left(1 + \frac{1}{x}\right)^x &= e \\
+\lim_{x \to 0} \frac{e^x - 1}{x} &= 1 \\
+\lim_{x \to 0} \frac{\ln(1+x)}{x} &= 1
+\end{align}
+
+\subsection{导数与微分}
+
+\begin{definition}[导数]
+设函数 $y = f(x)$ 在点 $x_0$ 的某个邻域内有定义，当自变量 $x$ 在 $x_0$ 处取得增量 $\Delta x$（点 $x_0 + \Delta x$ 仍在该邻域内）时，相应地函数取得增量 $\Delta y = f(x_0 + \Delta x) - f(x_0)$；如果 $\Delta y$ 与 $\Delta x$ 之比当 $\Delta x \to 0$ 时的极限存在，则称函数 $y = f(x)$ 在点 $x_0$ 处可导，并称这个极限为函数 $y = f(x)$ 在点 $x_0$ 处的导数，记为
+$$f'(x_0) = \lim_{\Delta x \to 0} \frac{\Delta y}{\Delta x} = \lim_{\Delta x \to 0} \frac{f(x_0 + \Delta x) - f(x_0)}{\Delta x}$$
+\end{definition}
+
+基本求导公式：
+\begin{align}
+(c)' &= 0 \\
+(x^n)' &= nx^{n-1} \\
+(\sin x)' &= \cos x \\
+(\cos x)' &= -\sin x \\
+(e^x)' &= e^x \\
+(\ln x)' &= \frac{1}{x} \\
+(a^x)' &= a^x \ln a \\
+(\log_a x)' &= \frac{1}{x \ln a}
+\end{align}
+
+\subsection{积分}
+
+\begin{definition}[不定积分]
+如果在区间 $I$ 上，$F'(x) = f(x)$，则称 $F(x)$ 为 $f(x)$ 在区间 $I$ 上的一个原函数。函数 $f(x)$ 的所有原函数组成的集合称为 $f(x)$ 的不定积分，记作
+$$\int f(x) dx = F(x) + C$$
+其中 $C$ 为任意常数。
+\end{definition}
+
+基本积分公式：
+\begin{align}
+\int x^n dx &= \frac{x^{n+1}}{n+1} + C \quad (n \neq -1) \\
+\int \frac{1}{x} dx &= \ln|x| + C \\
+\int e^x dx &= e^x + C \\
+\int \sin x dx &= -\cos x + C \\
+\int \cos x dx &= \sin x + C \\
+\int \sec^2 x dx &= \tan x + C \\
+\int \csc^2 x dx &= -\cot x + C
+\end{align}
+
+\begin{definition}[定积分]
+设函数 $f(x)$ 在区间 $[a, b]$ 上有界，在 $[a, b]$ 中任意插入若干个分点 $a = x_0 < x_1 < x_2 < \cdots < x_{n-1} < x_n = b$，把区间 $[a, b]$ 分成 $n$ 个小区间。各小区间的长度依次为 $\Delta x_1 = x_1 - x_0$，$\Delta x_2 = x_2 - x_1$，...，$\Delta x_n = x_n - x_{n-1}$。在每个小区间 $[x_{i-1}, x_i]$ 上任取一点 $\xi_i$，作乘积 $f(\xi_i) \Delta x_i$，并作和
+$$S = \sum_{i=1}^{n} f(\xi_i) \Delta x_i$$
+记 $\lambda = \max\{\Delta x_1, \Delta x_2, \ldots, \Delta x_n\}$，如果当 $\lambda \to 0$ 时，极限 $\lim_{\lambda \to 0} S$ 存在，则称此极限为函数 $f(x)$ 在区间 $[a, b]$ 上的定积分，记作
+$$\int_a^b f(x) dx = \lim_{\lambda \to 0} \sum_{i=1}^{n} f(\xi_i) \Delta x_i$$
+\end{definition}
+
+\begin{theorem}[微积分基本定理]
+如果函数 $f(x)$ 在区间 $[a, b]$ 上连续，$F(x)$ 是 $f(x)$ 的一个原函数，则
+$$\int_a^b f(x) dx = F(b) - F(a)$$
+\end{theorem}
+
+% ================================
+% 第二章：线性代数
+% ================================
+
+\section{线性代数}
+
+\subsection{矩阵基础}
+
+\begin{definition}[矩阵]
+由 $m \times n$ 个数 $a_{ij}$（$i = 1, 2, \ldots, m$；$j = 1, 2, \ldots, n$）排成的 $m$ 行 $n$ 列的数表
+$$\mathbf{A} = \begin{pmatrix}
+a_{11} & a_{12} & \cdots & a_{1n} \\
+a_{21} & a_{22} & \cdots & a_{2n} \\
+\vdots & \vdots & \ddots & \vdots \\
+a_{m1} & a_{m2} & \cdots & a_{mn}
+\end{pmatrix}$$
+称为 $m \times n$ 矩阵，简记为 $\mathbf{A} = (a_{ij})_{m \times n}$。
+\end{definition}
+
+\subsection{矩阵运算}
+
+设 $\mathbf{A} = (a_{ij})_{m \times n}$，$\mathbf{B} = (b_{ij})_{m \times n}$，则：
+
+矩阵加法：
+$$\mathbf{A} + \mathbf{B} = (a_{ij} + b_{ij})_{m \times n}$$
+
+数乘矩阵：
+$$k\mathbf{A} = (ka_{ij})_{m \times n}$$
+
+设 $\mathbf{A} = (a_{ij})_{m \times s}$，$\mathbf{B} = (b_{ij})_{s \times n}$，则矩阵乘法：
+$$\mathbf{AB} = \mathbf{C} = (c_{ij})_{m \times n}$$
+其中 $c_{ij} = \sum_{k=1}^{s} a_{ik} b_{kj}$。
+
+\subsection{行列式}
+
+\begin{definition}[行列式]
+$n$ 阶行列式
+$$D = \begin{vmatrix}
+a_{11} & a_{12} & \cdots & a_{1n} \\
+a_{21} & a_{22} & \cdots & a_{2n} \\
+\vdots & \vdots & \ddots & \vdots \\
+a_{n1} & a_{n2} & \cdots & a_{nn}
+\end{vmatrix}$$
+等于所有取自不同行不同列的 $n$ 个元素的乘积 $a_{1p_1} a_{2p_2} \cdots a_{np_n}$ 的代数和，即
+$$D = \sum_{(p_1 p_2 \cdots p_n)} (-1)^{\tau(p_1 p_2 \cdots p_n)} a_{1p_1} a_{2p_2} \cdots a_{np_n}$$
+其中求和遍历 $1, 2, \ldots, n$ 的所有排列，$\tau(p_1 p_2 \cdots p_n)$ 表示排列 $(p_1 p_2 \cdots p_n)$ 的逆序数。
+\end{definition}
+
+常用公式：
+
+二阶行列式：
+$$\begin{vmatrix} a & b \\ c & d \end{vmatrix} = ad - bc$$
+
+三阶行列式（对角线法则）：
+$$\begin{vmatrix}
+a_1 & b_1 & c_1 \\
+a_2 & b_2 & c_2 \\
+a_3 & b_3 & c_3
+\end{vmatrix} = a_1 b_2 c_3 + b_1 c_2 a_3 + c_1 a_2 b_3 - c_1 b_2 a_3 - b_1 a_2 c_3 - a_1 c_2 b_3$$
+
+\subsection{特征值与特征向量}
+
+\begin{definition}[特征值与特征向量]
+设 $\mathbf{A}$ 是 $n$ 阶矩阵，如果存在数 $\lambda$ 和非零向量 $\mathbf{x}$，使得
+$$\mathbf{A}\mathbf{x} = \lambda \mathbf{x}$$
+则称 $\lambda$ 为矩阵 $\mathbf{A}$ 的一个特征值，$\mathbf{x}$ 为矩阵 $\mathbf{A}$ 属于特征值 $\lambda$ 的特征向量。
+\end{definition}
+
+特征多项式：
+$$|\mathbf{A} - \lambda \mathbf{I}| = 0$$
+
+对于 $2 \times 2$ 矩阵 $\mathbf{A} = \begin{pmatrix} a & b \\ c & d \end{pmatrix}$：
+$$\lambda^2 - (a+d)\lambda + (ad-bc) = 0$$
+
+% ================================
+% 第三章：概率论
+% ================================
+
+\section{概率论}
+
+\subsection{基本概念}
+
+\begin{definition}[概率]
+设 $E$ 是随机试验，$\Omega$ 是它的样本空间，对于 $E$ 的每一事件 $A$ 赋予一个实数，记为 $P(A)$，称为事件 $A$ 的概率，如果集合函数 $P(\cdot)$ 满足以下条件：
+\begin{enumerate}
+    \item 非负性：对于每一事件 $A$，有 $P(A) \geq 0$
+    \item 规范性：$P(\Omega) = 1$
+    \item 可列可加性：设 $A_1, A_2, \ldots$ 是两两互不相容的事件，则 $P\left(\bigcup_{i=1}^{\infty} A_i\right) = \sum_{i=1}^{\infty} P(A_i)$
+\end{enumerate}
+\end{definition}
+
+\subsection{条件概率与贝叶斯公式}
+
+\begin{definition}[条件概率]
+设 $A, B$ 是两个事件，且 $P(A) > 0$，则称
+$$P(B|A) = \frac{P(AB)}{P(A)}$$
+为在事件 $A$ 发生条件下事件 $B$ 发生的条件概率。
+\end{definition}
+
+\begin{theorem}[全概率公式]
+设试验 $E$ 的样本空间为 $\Omega$，$A$ 为 $E$ 的事件，$B_1, B_2, \ldots, B_n$ 为 $\Omega$ 的一个划分，且 $P(B_i) > 0$，则
+$$P(A) = \sum_{i=1}^{n} P(B_i) P(A|B_i)$$
+\end{theorem}
+
+\begin{theorem}[贝叶斯公式]
+设试验 $E$ 的样本空间为 $\Omega$，$A$ 为 $E$ 的事件，$B_1, B_2, \ldots, B_n$ 为 $\Omega$ 的一个划分，且 $P(A) > 0$，$P(B_i) > 0$，则
+$$P(B_i|A) = \frac{P(B_i) P(A|B_i)}{\sum_{j=1}^{n} P(B_j) P(A|B_j)}$$
+\end{theorem}
+
+\subsection{常见概率分布}
+
+\subsubsection{离散型分布}
+
+伯努利分布 $B(1, p)$：
+$$P(X = k) = p^k (1-p)^{1-k}, \quad k = 0, 1$$
+
+二项分布 $B(n, p)$：
+$$P(X = k) = \binom{n}{k} p^k (1-p)^{n-k}, \quad k = 0, 1, \ldots, n$$
+
+泊松分布 $P(\lambda)$：
+$$P(X = k) = \frac{\lambda^k e^{-\lambda}}{k!}, \quad k = 0, 1, 2, \ldots$$
+
+\subsubsection{连续型分布}
+
+均匀分布 $U(a, b)$ 的概率密度函数：
+$$f(x) = \begin{cases}
+\frac{1}{b-a}, & a \leq x \leq b \\
+0, & \text{其他}
+\end{cases}$$
+
+指数分布 $E(\lambda)$ 的概率密度函数：
+$$f(x) = \begin{cases}
+\lambda e^{-\lambda x}, & x > 0 \\
+0, & x \leq 0
+\end{cases}$$
+
+正态分布 $N(\mu, \sigma^2)$ 的概率密度函数：
+$$f(x) = \frac{1}{\sqrt{2\pi}\sigma} e^{-\frac{(x-\mu)^2}{2\sigma^2}}$$
+
+标准正态分布 $N(0, 1)$：
+$$\phi(x) = \frac{1}{\sqrt{2\pi}} e^{-\frac{x^2}{2}}$$
+
+\subsection{数字特征}
+
+期望：
+\begin{align}
+E(X) &= \sum_{k} x_k p_k \quad \text{（离散型）} \\
+E(X) &= \int_{-\infty}^{\infty} x f(x) dx \quad \text{（连续型）}
+\end{align}
+
+方差：
+$$D(X) = E[(X - E(X))^2] = E(X^2) - [E(X)]^2$$
+
+协方差：
+$$\text{Cov}(X, Y) = E[(X - E(X))(Y - E(Y))] = E(XY) - E(X)E(Y)$$
+
+相关系数：
+$$\rho_{XY} = \frac{\text{Cov}(X, Y)}{\sqrt{D(X)} \sqrt{D(Y)}}$$
+
+% ================================
+% 第四章：复变函数
+% ================================
+
+\section{复变函数}
+
+\subsection{复数基础}
+
+\begin{definition}[复数]
+形如 $z = x + iy$ 的数称为复数，其中 $x, y$ 为实数，$i$ 为虚数单位，满足 $i^2 = -1$。$x$ 称为 $z$ 的实部，记作 $\text{Re}(z)$；$y$ 称为 $z$ 的虚部，记作 $\text{Im}(z)$。
+\end{definition}
+
+复数的模：
+$$|z| = \sqrt{x^2 + y^2}$$
+
+复数的辐角：
+$$\arg z = \arctan \frac{y}{x}$$
+
+复数的三角形式：
+$$z = r(\cos\theta + i\sin\theta)$$
+
+复数的指数形式（欧拉公式）：
+$$z = re^{i\theta}$$
+
+其中 $e^{i\theta} = \cos\theta + i\sin\theta$。
+
+\subsection{复变函数的导数}
+
+\begin{definition}[复变函数的导数]
+设函数 $w = f(z)$ 在点 $z_0$ 的某一邻域内有定义，如果极限
+$$f'(z_0) = \lim_{\Delta z \to 0} \frac{f(z_0 + \Delta z) - f(z_0)}{\Delta z}$$
+存在，则称 $f(z)$ 在 $z_0$ 处可导。
+\end{definition}
+
+\begin{theorem}[柯西-黎曼方程]
+设 $f(z) = u(x, y) + iv(x, y)$，$z = x + iy$，则 $f(z)$ 在 $z_0$ 处可导的充要条件是 $u, v$ 在 $(x_0, y_0)$ 处可微，且满足柯西-黎曼方程：
+$$\frac{\partial u}{\partial x} = \frac{\partial v}{\partial y}, \quad \frac{\partial u}{\partial y} = -\frac{\partial v}{\partial x}$$
+\end{theorem}
+
+\subsection{复积分}
+
+\begin{theorem}[柯西积分定理]
+如果函数 $f(z)$ 在单连通域 $D$ 内解析，则对 $D$ 内任一简单闭曲线 $C$，有
+$$\oint_C f(z) dz = 0$$
+\end{theorem}
+
+\begin{theorem}[柯西积分公式]
+如果函数 $f(z)$ 在单连通域 $D$ 内解析，$C$ 为 $D$ 内任一正向简单闭曲线，$z_0$ 为 $C$ 内任一点，则
+$$f(z_0) = \frac{1}{2\pi i} \oint_C \frac{f(z)}{z - z_0} dz$$
+\end{theorem}
+
+\subsection{留数定理}
+
+\begin{definition}[留数]
+如果 $z_0$ 是函数 $f(z)$ 的孤立奇点，$f(z)$ 在以 $z_0$ 为中心的圆环域内可展开为洛朗级数
+$$f(z) = \sum_{n=-\infty}^{\infty} c_n (z - z_0)^n$$
+则称 $c_{-1}$ 为 $f(z)$ 在 $z_0$ 处的留数，记作 $\text{Res}[f(z), z_0] = c_{-1}$。
+\end{definition}
+
+\begin{theorem}[留数定理]
+设函数 $f(z)$ 在闭曲线 $C$ 所围区域 $D$ 内除有限个孤立奇点 $z_1, z_2, \ldots, z_n$ 外解析，在 $D$ 的边界 $C$ 上解析，则
+$$\oint_C f(z) dz = 2\pi i \sum_{k=1}^{n} \text{Res}[f(z), z_k]$$
+\end{theorem}
+
+% ================================
+% 第五章：傅里叶分析
+% ================================
+
+\section{傅里叶分析}
+
+\subsection{傅里叶级数}
+
+\begin{definition}[傅里叶级数]
+设 $f(x)$ 是以 $2\pi$ 为周期的函数，且在 $[-\pi, \pi]$ 上可积，则 $f(x)$ 的傅里叶级数为
+$$f(x) \sim \frac{a_0}{2} + \sum_{n=1}^{\infty} (a_n \cos nx + b_n \sin nx)$$
+其中傅里叶系数为
+\begin{align}
+a_n &= \frac{1}{\pi} \int_{-\pi}^{\pi} f(x) \cos nx \, dx, \quad n = 0, 1, 2, \ldots \\
+b_n &= \frac{1}{\pi} \int_{-\pi}^{\pi} f(x) \sin nx \, dx, \quad n = 1, 2, 3, \ldots
+\end{align}
+\end{definition}
+
+\begin{theorem}[狄利克雷收敛定理]
+如果 $f(x)$ 在 $[-\pi, \pi]$ 上满足狄利克雷条件（有限个第一类间断点和有限个极值点），则 $f(x)$ 的傅里叶级数在每一点都收敛：
+\begin{itemize}
+    \item 在 $f(x)$ 的连续点处，级数收敛于 $f(x)$
+    \item 在 $f(x)$ 的间断点 $x_0$ 处，级数收敛于 $\frac{f(x_0^-) + f(x_0^+)}{2}$
+\end{itemize}
+\end{theorem}
+
+\subsection{傅里叶变换}
+
+\begin{definition}[傅里叶变换]
+对于非周期函数 $f(x)$，其傅里叶变换定义为
+$$F(\omega) = \mathcal{F}[f(x)] = \int_{-\infty}^{\infty} f(x) e^{-i\omega x} dx$$
+傅里叶逆变换定义为
+$$f(x) = \mathcal{F}^{-1}[F(\omega)] = \frac{1}{2\pi} \int_{-\infty}^{\infty} F(\omega) e^{i\omega x} d\omega$$
+\end{definition}
+
+常用傅里叶变换对：
+
+\begin{align}
+\mathcal{F}[e^{-a|x|}] &= \frac{2a}{a^2 + \omega^2} \\
+\mathcal{F}[e^{-ax^2}] &= \sqrt{\frac{\pi}{a}} e^{-\frac{\omega^2}{4a}} \\
+\mathcal{F}[\delta(x)] &= 1 \\
+\mathcal{F}[1] &= 2\pi\delta(\omega)
+\end{align}
+
+傅里叶变换的性质：
+
+\begin{enumerate}
+    \item 线性：$\mathcal{F}[af(x) + bg(x)] = aF(\omega) + bG(\omega)$
+    \item 时移：$\mathcal{F}[f(x - x_0)] = e^{-i\omega x_0} F(\omega)$
+    \item 频移：$\mathcal{F}[e^{i\omega_0 x} f(x)] = F(\omega - \omega_0)$
+    \item 尺度变换：$\mathcal{F}[f(ax)] = \frac{1}{|a|} F\left(\frac{\omega}{a}\right)$
+    \item 微分：$\mathcal{F}[f'(x)] = i\omega F(\omega)$
+    \item 卷积：$\mathcal{F}[f * g] = F(\omega) \cdot G(\omega)$
+\end{enumerate}
+
+% ================================
+% 第六章：偏微分方程
+% ================================
+
+\section{偏微分方程}
+
+\subsection{基本方程}
+
+波动方程（双曲型）：
+$$\frac{\partial^2 u}{\partial t^2} = a^2 \frac{\partial^2 u}{\partial x^2}$$
+
+热传导方程（抛物型）：
+$$\frac{\partial u}{\partial t} = a^2 \frac{\partial^2 u}{\partial x^2}$$
+
+拉普拉斯方程（椭圆型）：
+$$\frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} = 0$$
+
+泊松方程：
+$$\frac{\partial^2 u}{\partial x^2} + \frac{\partial^2 u}{\partial y^2} = f(x, y)$$
+
+\subsection{分离变量法}
+
+考虑一维热传导方程的初边值问题：
+\begin{align}
+\frac{\partial u}{\partial t} &= a^2 \frac{\partial^2 u}{\partial x^2}, \quad 0 < x < l, \quad t > 0 \\
+u(0, t) &= 0, \quad u(l, t) = 0 \\
+u(x, 0) &= \phi(x)
+\end{align}
+
+设 $u(x, t) = X(x)T(t)$，代入方程得：
+$$\frac{T'(t)}{a^2 T(t)} = \frac{X''(x)}{X(x)} = -\lambda$$
+
+解得：
+\begin{align}
+X_n(x) &= \sin\frac{n\pi x}{l} \\
+T_n(t) &= e^{-\left(\frac{n\pi a}{l}\right)^2 t}
+\end{align}
+
+一般解为：
+$$u(x, t) = \sum_{n=1}^{\infty} b_n \sin\frac{n\pi x}{l} e^{-\left(\frac{n\pi a}{l}\right)^2 t}$$
+
+其中
+$$b_n = \frac{2}{l} \int_0^l \phi(x) \sin\frac{n\pi x}{l} dx$$
+
+% ================================
+% 第七章：数值分析
+% ================================
+
+\section{数值分析}
+
+\subsection{数值积分}
+
+\subsubsection{梯形公式}
+$$\int_a^b f(x) dx \approx \frac{b-a}{2}[f(a) + f(b)]$$
+
+\subsubsection{辛普森公式}
+$$\int_a^b f(x) dx \approx \frac{b-a}{6}\left[f(a) + 4f\left(\frac{a+b}{2}\right) + f(b)\right]$$
+
+\subsubsection{复合梯形公式}
+$$\int_a^b f(x) dx \approx \frac{h}{2}\left[f(a) + 2\sum_{k=1}^{n-1}f(x_k) + f(b)\right]$$
+其中 $h = \frac{b-a}{n}$，$x_k = a + kh$。
+
+\subsection{常微分方程数值解}
+
+\subsubsection{欧拉法}
+$$y_{n+1} = y_n + hf(x_n, y_n)$$
+
+\subsubsection{改进欧拉法}
+\begin{align}
+\bar{y}_{n+1} &= y_n + hf(x_n, y_n) \\
+y_{n+1} &= y_n + \frac{h}{2}[f(x_n, y_n) + f(x_{n+1}, \bar{y}_{n+1})]
+\end{align}
+
+\subsubsection{四阶龙格-库塔法}
+\begin{align}
+k_1 &= f(x_n, y_n) \\
+k_2 &= f\left(x_n + \frac{h}{2}, y_n + \frac{h}{2}k_1\right) \\
+k_3 &= f\left(x_n + \frac{h}{2}, y_n + \frac{h}{2}k_2\right) \\
+k_4 &= f(x_n + h, y_n + hk_3) \\
+y_{n+1} &= y_n + \frac{h}{6}(k_1 + 2k_2 + 2k_3 + k_4)
+\end{align}
+
+\subsection{插值法}
+
+\subsubsection{拉格朗日插值}
+$$L_n(x) = \sum_{k=0}^{n} y_k l_k(x)$$
+其中
+$$l_k(x) = \prod_{j=0, j \neq k}^{n} \frac{x - x_j}{x_k - x_j}$$
+
+\subsubsection{牛顿插值}
+$$N_n(x) = f[x_0] + f[x_0, x_1](x - x_0) + f[x_0, x_1, x_2](x - x_0)(x - x_1) + \cdots$$
+其中差商定义为：
+\begin{align}
+f[x_k] &= f(x_k) \\
+f[x_k, x_{k+1}] &= \frac{f[x_{k+1}] - f[x_k]}{x_{k+1} - x_k} \\
+f[x_k, x_{k+1}, \ldots, x_{k+n}] &= \frac{f[x_{k+1}, \ldots, x_{k+n}] - f[x_k, \ldots, x_{k+n-1}]}{x_{k+n} - x_k}
+\end{align}
+
+% ================================
+% 结论
+% ================================
+
+\section{结论}
+
+本文档涵盖了高等数学、线性代数、概率论、复变函数、傅里叶分析、偏微分方程和数值分析等多个数学领域的基本内容。这是一个大型文档，用于测试 LaTeX 编辑器在处理大文件时的性能，包括：
+
+\begin{enumerate}
+    \item 增量解析器的性能
+    \item 渲染缓存的效果
+    \item IntersectionObserver 可视区域优先渲染
+    \item Tree-sitter 大文件自动切换
+    \item Web Worker 后台渲染
+\end{enumerate}
+
+通过这个示例，可以验证编辑器在处理复杂数学文档时的稳定性和响应速度。
+
+\end{document}

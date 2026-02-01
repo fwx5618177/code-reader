@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "watch": "vite build --watch"
+    "watch": "vite build --watch",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@code-reader/ui": "workspace:*"

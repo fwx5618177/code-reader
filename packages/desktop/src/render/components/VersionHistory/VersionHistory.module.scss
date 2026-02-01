@@ -1,0 +1,581 @@
+// ================================
+// Version History Styles - CSS Module
+// 版本历史组件样式模块
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 面板容器
+// ================================
+
+.versionHistoryPanel {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  height: 100%;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-primary);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+}
+
+.headerTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+}
+
+.versionCount {
+  font-weight: $font-weight-normal;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.closeBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.panelContent {
+  flex: 1;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+// ================================
+// 状态
+// ================================
+
+.loadingState,
+.emptyState {
+  @include flex-center;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-8);
+  color: var(--text-muted);
+  text-align: center;
+
+  svg {
+    opacity: 0.5;
+  }
+
+  p {
+    font-size: var(--font-size-xs);
+    margin: 0;
+  }
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-primary);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.errorMessage {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3);
+  margin: var(--spacing-3);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// ================================
+// 版本列表
+// ================================
+
+.versionsList {
+  padding: var(--spacing-3);
+}
+
+.versionItem {
+  display: flex;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-2);
+
+  &:last-child {
+    .timelineLine {
+      display: none;
+    }
+  }
+}
+
+.versionItemCurrent {
+  .timelineDot {
+    background: var(--accent-primary);
+    box-shadow: 0 0 0 3px var(--accent-primary, 0.2);
+  }
+}
+
+// ================================
+// 时间线
+// ================================
+
+.versionTimeline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+.timelineDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--bg-quaternary);
+  border: 2px solid var(--border-secondary);
+  z-index: 1;
+}
+
+.timelineDotCreate {
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.timelineDotEdit {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.timelineDotAutoSave {
+  background: var(--text-muted);
+  border-color: var(--text-muted);
+}
+
+.timelineDotRestore {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
+.timelineDotAiUpdate {
+  background: var(--color-info);
+  border-color: var(--color-info);
+}
+
+.timelineLine {
+  flex: 1;
+  width: 2px;
+  background: var(--border-primary);
+  margin-top: var(--spacing-1);
+  min-height: 20px;
+}
+
+// ================================
+// 版本内容
+// ================================
+
+.versionContent {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.versionHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  cursor: pointer;
+  transition: background $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.versionInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex: 1;
+  min-width: 0;
+}
+
+.versionNumber {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.currentBadge {
+  display: inline-block;
+  margin-left: var(--spacing-1);
+  padding: 1px 6px;
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  font-size: 10px;
+  font-weight: $font-weight-semibold;
+  border-radius: var(--radius-full);
+  text-transform: uppercase;
+}
+
+.changeType {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.changeTypeCreate {
+  color: var(--color-success);
+}
+
+.changeTypeEdit {
+  color: var(--accent-primary);
+}
+
+.changeTypeRestore {
+  color: var(--color-warning);
+}
+
+.changeTypeAiUpdate {
+  color: var(--color-info);
+}
+
+.versionMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.author,
+.date {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.expandBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+// ================================
+// 版本详情
+// ================================
+
+.versionDetails {
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-3);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--font-size-sm);
+}
+
+.versionDescription {
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-2);
+}
+
+.versionTitlePreview {
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-2);
+
+  strong {
+    color: var(--text-primary);
+  }
+}
+
+.versionSize {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  margin-bottom: var(--spacing-2);
+}
+
+.versionActions {
+  display: flex;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+}
+
+.actionBtn {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+  transition: $transition-fast;
+}
+
+.actionBtnPreview {
+  background: var(--bg-quaternary);
+  color: var(--text-secondary);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.actionBtnRestore {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+
+  &:hover {
+    background: var(--accent-primary-hover);
+  }
+}
+
+// ================================
+// 加载更多按钮
+// ================================
+
+.loadMoreBtn {
+  @include button-reset;
+  display: block;
+  width: 100%;
+  padding: var(--spacing-3);
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  border-radius: var(--radius-md);
+  transition: $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// ================================
+// 版本预览模态框
+// ================================
+
+.versionPreviewOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-modal;
+}
+
+.versionPreview {
+  width: 90%;
+  max-width: 600px;
+  max-height: 80vh;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+}
+
+.previewTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+}
+
+.previewCloseBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.previewMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--font-size-sm);
+}
+
+.metaItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  color: var(--text-muted);
+}
+
+.changeBadge {
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+}
+
+.changeBadgeCreate {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.changeBadgeEdit {
+  background: var(--bg-highlight);
+  color: var(--accent-primary);
+}
+
+.changeBadgeAutoSave {
+  background: var(--bg-quaternary);
+  color: var(--text-muted);
+}
+
+.changeBadgeRestore {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.changeBadgeAiUpdate {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.previewDescription {
+  padding: var(--spacing-2) var(--spacing-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.previewContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-4);
+  @include scrollbar;
+}
+
+.contentTitle {
+  margin-bottom: var(--spacing-3);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+
+  strong {
+    color: var(--text-primary);
+  }
+}
+
+.contentText {
+  margin: 0;
+  padding: var(--spacing-3);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  font-family: $font-mono;
+  font-size: var(--font-size-sm);
+  line-height: $line-height-relaxed;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.contentEmpty {
+  @include flex-center;
+  padding: var(--spacing-6);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.previewFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+  border-top: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+}
+
+.cancelBtn,
+.restoreBtn {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  transition: $transition-fast;
+}
+
+.cancelBtn {
+  background: var(--bg-quaternary);
+  color: var(--text-secondary);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.restoreBtn {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+
+  &:hover {
+    background: var(--accent-primary-hover);
+  }
+}

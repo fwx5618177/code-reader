@@ -1,0 +1,507 @@
+// ================================
+// CodeViewer 组件样式
+// CSS Modules 版本
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 主容器
+// ================================
+
+.codeViewer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+// ================================
+// 空状态
+// ================================
+
+.empty {
+  @include flex-center;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-8);
+  max-width: 320px;
+
+  svg {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  h3 {
+    font-size: var(--font-size-lg);
+    font-weight: $font-weight-medium;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  p {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    margin: 0;
+    line-height: $line-height-relaxed;
+  }
+}
+
+// ================================
+// 加载状态
+// ================================
+
+.loading {
+  @include flex-center;
+}
+
+.loadingSpinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-3);
+  color: var(--text-muted);
+
+  span {
+    font-size: var(--font-size-sm);
+  }
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--border-primary);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+// ================================
+// 错误状态
+// ================================
+
+.error {
+  @include flex-center;
+}
+
+.errorState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-8);
+
+  h3 {
+    font-size: var(--font-size-lg);
+    font-weight: $font-weight-medium;
+    color: var(--color-error);
+    margin: 0;
+  }
+
+  p {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    margin: 0;
+  }
+}
+
+.errorIcon {
+  font-size: 32px;
+}
+
+// ================================
+// 全屏模式
+// ================================
+
+.fullscreen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: $z-modal;
+}
+
+// ================================
+// 头部
+// ================================
+
+.codeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0 var(--spacing-3);
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.fileInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+  flex: 1;
+}
+
+.fileIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.fileName {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  @include truncate;
+}
+
+.fileLanguage {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  padding: 2px 6px;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  text-transform: lowercase;
+  flex-shrink: 0;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.lineCount {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  padding-right: var(--spacing-2);
+  border-right: 1px solid var(--border-primary);
+}
+
+.actionButton {
+  @include button-reset;
+  @include flex-center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:active {
+    background-color: var(--bg-active);
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+// ================================
+// 代码内容区域
+// ================================
+
+.codeContent {
+  flex: 1;
+  display: flex;
+  overflow: auto;
+  @include scrollbar;
+  background-color: var(--bg-primary);
+  transition: background-color 0.3s ease;
+}
+
+// ================================
+// 行号
+// ================================
+
+.lineNumbers {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-3) 0;
+  padding-right: var(--spacing-3);
+  padding-left: var(--spacing-4);
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border-subtle);
+  text-align: right;
+  user-select: none;
+  flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.lineNumber {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--text-faint);
+  min-width: 32px;
+
+  &:hover {
+    color: var(--text-muted);
+  }
+}
+
+// ================================
+// 代码 Pre/Code
+// ================================
+
+.codePre {
+  flex: 1;
+  margin: 0;
+  padding: var(--spacing-3) var(--spacing-4);
+  overflow-x: auto;
+  background-color: transparent;
+
+  code {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    tab-size: 2;
+    white-space: pre;
+    color: var(--text-primary);
+    display: block;
+  }
+}
+
+// ================================
+// 页脚
+// ================================
+
+.codeFooter {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--spacing-3);
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-primary);
+  flex-shrink: 0;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.filePath {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  @include truncate;
+}
+
+// ================================
+// 语法高亮主题
+// 使用 CSS 变量支持主题切换
+// ================================
+
+// 注释
+:global(.token.comment),
+:global(.token.prolog),
+:global(.token.doctype),
+:global(.token.cdata) {
+  color: var(--code-comment);
+  font-style: italic;
+}
+
+// 标点符号
+:global(.token.punctuation) {
+  color: var(--code-punctuation);
+}
+
+// 命名空间
+:global(.token.namespace) {
+  opacity: 0.7;
+}
+
+// 属性、标签、布尔值、数字、常量、符号
+:global(.token.property),
+:global(.token.tag),
+:global(.token.boolean),
+:global(.token.number),
+:global(.token.constant),
+:global(.token.symbol) {
+  color: var(--code-number);
+}
+
+// 选择器、属性名、字符串、字符、内置、插入
+:global(.token.selector),
+:global(.token.attr-name),
+:global(.token.string),
+:global(.token.char),
+:global(.token.builtin),
+:global(.token.inserted) {
+  color: var(--code-string);
+}
+
+// 运算符、实体、URL
+:global(.token.operator),
+:global(.token.entity),
+:global(.token.url),
+:global(.language-css .token.string),
+:global(.style .token.string) {
+  color: var(--code-operator);
+}
+
+// At 规则、属性值、关键字
+:global(.token.atrule),
+:global(.token.attr-value),
+:global(.token.keyword) {
+  color: var(--code-keyword);
+}
+
+// 函数、类名
+:global(.token.function),
+:global(.token.class-name) {
+  color: var(--code-function);
+}
+
+// 正则、重要、变量
+:global(.token.regex),
+:global(.token.important),
+:global(.token.variable) {
+  color: var(--code-variable);
+}
+
+// 重要、粗体
+:global(.token.important),
+:global(.token.bold) {
+  font-weight: bold;
+}
+
+// 斜体
+:global(.token.italic) {
+  font-style: italic;
+}
+
+// 实体
+:global(.token.entity) {
+  cursor: help;
+}
+
+// 删除
+:global(.token.deleted) {
+  color: var(--code-deleted);
+}
+
+// 插入
+:global(.token.inserted) {
+  color: var(--code-inserted);
+}
+
+// TypeScript/JavaScript 特定
+:global(.token.template-string) {
+  color: var(--code-string);
+}
+
+:global(.token.template-punctuation) {
+  color: var(--code-keyword);
+}
+
+:global(.token.interpolation) {
+  color: var(--code-function);
+}
+
+:global(.token.interpolation-punctuation) {
+  color: var(--code-keyword);
+}
+
+// JSON 特定
+:global(.language-json .token.property) {
+  color: var(--code-property);
+}
+
+:global(.language-json .token.string) {
+  color: var(--code-string);
+}
+
+// Markdown 特定
+:global(.language-markdown .token.title) {
+  color: var(--code-keyword);
+  font-weight: bold;
+}
+
+:global(.language-markdown .token.bold) {
+  color: var(--code-function);
+  font-weight: bold;
+}
+
+:global(.language-markdown .token.italic) {
+  color: var(--code-regex);
+  font-style: italic;
+}
+
+:global(.language-markdown .token.code) {
+  color: var(--code-string);
+  background-color: var(--bg-tertiary);
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+:global(.language-markdown .token.url) {
+  color: var(--code-url);
+}
+
+// YAML 特定
+:global(.language-yaml .token.key) {
+  color: var(--code-property);
+}
+
+// CSS/SCSS 特定
+:global(.language-css .token.property),
+:global(.language-scss .token.property) {
+  color: var(--code-property);
+}
+
+:global(.language-css .token.selector),
+:global(.language-scss .token.selector) {
+  color: var(--code-tag);
+}
+
+:global(.language-css .token.function),
+:global(.language-scss .token.function) {
+  color: var(--code-function);
+}
+
+// Bash 特定
+:global(.language-bash .token.function) {
+  color: var(--code-function);
+}
+
+:global(.language-bash .token.parameter) {
+  color: var(--code-property);
+}
+
+// ================================
+// 动画
+// ================================
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,428 @@
+// ================================
+// FileTree 组件样式
+// CSS Modules 版本
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 主容器
+// ================================
+
+.fileTree {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-2) 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  user-select: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  @include scrollbar;
+
+  // 空状态
+  &.empty {
+    flex: 1;
+    @include flex-center;
+    padding: var(--spacing-6);
+  }
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--spacing-2);
+  color: var(--text-muted);
+
+  svg {
+    opacity: 0.5;
+    margin-bottom: var(--spacing-2);
+  }
+
+  p {
+    font-size: var(--font-size-md);
+    font-weight: $font-weight-medium;
+    color: var(--text-secondary);
+    margin-bottom: 0;
+  }
+}
+
+.hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+// ================================
+// 文件树项
+// ================================
+
+.fileTreeItem {
+  // 空规则，用作容器
+}
+
+.itemRow {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding-right: var(--spacing-3);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  margin: 0 var(--spacing-1);
+  transition: $transition-fast;
+  gap: var(--spacing-1);
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+    background-color: var(--bg-hover);
+  }
+}
+
+.selected {
+  background-color: var(--bg-selected);
+  color: var(--text-primary);
+
+  .itemName {
+    color: var(--text-primary);
+  }
+
+  .folderIcon,
+  .fileIcon {
+    color: var(--text-primary);
+  }
+}
+
+.directory {
+  .itemName {
+    font-weight: $font-weight-medium;
+    color: var(--text-primary);
+  }
+}
+
+.file {
+  .itemName {
+    color: var(--text-secondary);
+  }
+
+  &:hover .itemName {
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 展开/折叠图标
+// ================================
+
+.expandIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform $transition-fast;
+
+  &.expanded {
+    color: var(--text-secondary);
+  }
+}
+
+.expandSpacer {
+  width: 16px;
+}
+
+// ================================
+// 文件/文件夹图标
+// ================================
+
+.itemIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-right: var(--spacing-1);
+}
+
+.folderIcon {
+  color: $color-folder;
+
+  &.open {
+    color: #e8b84c;
+  }
+}
+
+.fileIcon {
+  color: var(--text-muted);
+
+  &.code {
+    color: $color-file-ts;
+  }
+
+  &.json {
+    color: $color-file-json;
+  }
+
+  &.text {
+    color: $color-file-md;
+  }
+
+  &.style {
+    color: $color-file-scss;
+  }
+
+  &.image {
+    color: var(--color-success);
+  }
+
+  &.audio {
+    color: var(--accent-primary);
+  }
+
+  &.video {
+    color: var(--color-error);
+  }
+
+  &.archive {
+    color: var(--color-warning);
+  }
+
+  &.config {
+    color: var(--text-muted);
+  }
+
+  &.default {
+    color: var(--text-muted);
+  }
+}
+
+// ================================
+// 文件/文件夹名称
+// ================================
+
+.itemName {
+  flex: 1;
+  @include truncate;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
+// ================================
+// 子项容器
+// ================================
+
+.itemChildren {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+
+  // 缩进引导线
+  &::before {
+    content: '';
+    position: absolute;
+    left: 19px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background-color: var(--border-subtle);
+    opacity: 0;
+    transition: opacity $transition-normal;
+  }
+
+  &:hover::before {
+    opacity: 1;
+  }
+}
+
+// 文件树悬停时显示引导线
+.fileTree:hover {
+  .itemChildren::before {
+    opacity: 0.5;
+  }
+}
+
+// ================================
+// 文件树头部
+// ================================
+
+.fileTreeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.title {
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-semibold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+
+  button {
+    @include button-reset;
+    @include flex-center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    transition: $transition-colors;
+
+    &:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    svg {
+      width: 14px;
+      height: 14px;
+    }
+  }
+}
+
+// ================================
+// 搜索/过滤
+// ================================
+
+.fileTreeSearch {
+  padding: var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  position: relative;
+
+  input {
+    width: 100%;
+    height: 28px;
+    padding: 0 var(--spacing-2);
+    padding-left: 28px;
+    background-color: var(--bg-primary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-primary);
+    transition: $transition-colors;
+
+    &::placeholder {
+      color: var(--text-muted);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      background-color: var(--bg-tertiary);
+    }
+  }
+}
+
+.searchIcon {
+  position: absolute;
+  left: calc(var(--spacing-2) + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+// ================================
+// 右键菜单
+// ================================
+
+.contextMenu {
+  position: fixed;
+  z-index: $z-popover;
+  min-width: 160px;
+  background-color: var(--bg-quaternary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-1);
+  box-shadow: var(--shadow-lg);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  height: 28px;
+  padding: 0 var(--spacing-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: $transition-fast;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+    color: var(--text-muted);
+  }
+
+  &.danger {
+    color: var(--color-error);
+
+    &:hover {
+      background-color: var(--color-error-bg);
+    }
+
+    svg {
+      color: var(--color-error);
+    }
+  }
+}
+
+.menuDivider {
+  height: 1px;
+  background-color: var(--border-primary);
+  margin: var(--spacing-1) 0;
+}
+
+// ================================
+// 亮色主题调整
+// ================================
+
+:global([data-theme='light']) {
+  .selected {
+    background-color: var(--bg-selected);
+  }
+
+  .directory .itemName {
+    color: var(--text-primary);
+  }
+
+  .folderIcon {
+    color: #c9920c;
+
+    &.open {
+      color: #b8840a;
+    }
+  }
+
+  .contextMenu {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .fileTreeSearch input {
+    background-color: var(--bg-secondary);
+
+    &:focus {
+      background-color: var(--bg-primary);
+    }
+  }
+}

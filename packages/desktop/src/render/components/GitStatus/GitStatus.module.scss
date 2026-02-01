@@ -1,0 +1,427 @@
+// ================================
+// Git Status Styles
+// CSS Modules 版本
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 容器
+// ================================
+
+.gitStatus {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  font-size: var(--font-size-sm);
+
+  &.notRepo {
+    .notRepoMessage {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-2);
+      padding: var(--spacing-2);
+      color: var(--text-muted);
+      font-size: var(--font-size-xs);
+    }
+  }
+}
+
+// ================================
+// 头部
+// ================================
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-1) var(--spacing-2);
+
+  .repoName {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+
+  .refreshBtn {
+    @include button-reset;
+    @include flex-center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    transition: $transition-fast;
+
+    &:hover:not(:disabled) {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// ================================
+// Git 状态徽章
+// ================================
+
+.statusBadge {
+  @include flex-center;
+  flex-shrink: 0;
+
+  &.sm {
+    width: 16px;
+    height: 16px;
+  }
+
+  &.md {
+    width: 20px;
+    height: 20px;
+  }
+
+  &.modified {
+    color: #e0a84c;
+  }
+
+  &.added {
+    color: var(--color-success);
+  }
+
+  &.deleted {
+    color: var(--color-error);
+  }
+
+  &.renamed,
+  &.copied {
+    color: var(--color-info);
+  }
+
+  &.untracked {
+    color: var(--text-muted);
+  }
+
+  &.conflicted {
+    color: var(--color-warning);
+  }
+}
+
+// ================================
+// 分支选择器
+// ================================
+
+.branchSelector {
+  position: relative;
+}
+
+.branchButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  transition: $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.branchName {
+  flex: 1;
+  text-align: left;
+  @include truncate;
+}
+
+.syncIndicator {
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+
+  &.ahead {
+    color: var(--color-success);
+    background: var(--color-success-bg);
+  }
+
+  &.behind {
+    color: var(--color-warning);
+    background: var(--color-warning-bg);
+  }
+}
+
+.branchDropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--spacing-1);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: $z-dropdown;
+  max-height: 300px;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.branchSection {
+  padding: var(--spacing-1);
+
+  &:not(:last-child) {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+}
+
+.sectionTitle {
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-semibold;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.branchItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  transition: $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &.current {
+    color: var(--accent-primary);
+    font-weight: $font-weight-medium;
+  }
+
+  &.remote {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+}
+
+// ================================
+// 更改的文件
+// ================================
+
+.changedFiles,
+.recentCommits {
+  .sectionHeader {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-2);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    font-weight: $font-weight-medium;
+    transition: $transition-fast;
+
+    &:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .count {
+      margin-left: auto;
+      padding: 1px 6px;
+      background: var(--bg-quaternary);
+      border-radius: var(--radius-full);
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+    }
+  }
+}
+
+.noChanges {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3);
+  color: var(--color-success);
+  font-size: var(--font-size-sm);
+
+  svg {
+    opacity: 0.7;
+  }
+}
+
+.filesList {
+  padding: var(--spacing-1);
+}
+
+.fileGroup {
+  margin-bottom: var(--spacing-2);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.groupTitle {
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-semibold;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.fileItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.fileName {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  @include truncate;
+}
+
+.filePath {
+  flex: 1;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: right;
+  @include truncate;
+}
+
+// ================================
+// 最近提交
+// ================================
+
+.commitsList {
+  padding: var(--spacing-1);
+}
+
+.loading,
+.empty {
+  padding: var(--spacing-3);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.commitItem {
+  position: relative;
+  padding: var(--spacing-2);
+  margin-bottom: var(--spacing-1);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  transition: $transition-fast;
+
+  &:hover {
+    background: var(--bg-quaternary);
+
+    .commitLink {
+      opacity: 1;
+    }
+  }
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.commitHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-1);
+}
+
+.commitHash {
+  font-family: $font-mono;
+  font-size: var(--font-size-xs);
+  color: var(--accent-primary);
+}
+
+.commitDate {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.commitMessage {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-1);
+  @include truncate;
+}
+
+.commitAuthor {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.commitLink {
+  position: absolute;
+  top: var(--spacing-2);
+  right: var(--spacing-2);
+  @include flex-center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: $transition-fast;
+  text-decoration: none;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--accent-primary);
+  }
+}

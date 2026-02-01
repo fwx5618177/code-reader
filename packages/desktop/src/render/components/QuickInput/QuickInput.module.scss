@@ -1,0 +1,545 @@
+// ================================
+// QuickInput 组件样式模块
+// 使用 CSS Modules 实现样式隔离
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 遮罩层
+// ================================
+
+.overlay {
+  @include overlay;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10vh;
+  z-index: $z-modal;
+  animation: fadeIn 0.15s ease;
+}
+
+// ================================
+// 模态框
+// ================================
+
+.modal {
+  width: 560px;
+  max-width: 90vw;
+  max-height: 80vh;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideDown 0.2s ease;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+// ================================
+// 头部
+// ================================
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--border-primary);
+  transition: border-color 0.3s ease;
+
+  h2 {
+    font-size: var(--font-size-lg);
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin: 0;
+  }
+}
+
+.closeButton {
+  @include button-reset;
+  @include flex-center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 类型选择器
+// ================================
+
+.typeSelector {
+  display: flex;
+  gap: var(--spacing-1);
+  padding: var(--spacing-3) var(--spacing-4);
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.typeButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background-color: transparent;
+  border-radius: var(--radius-md);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.typeButtonActive {
+  background-color: var(--accent-primary);
+  color: var(--text-on-accent);
+
+  &:hover {
+    background-color: var(--accent-primary);
+    color: var(--text-on-accent);
+  }
+}
+
+// ================================
+// 内容区域
+// ================================
+
+.contentArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-4);
+  gap: var(--spacing-3);
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+// 标题输入框
+.titleInput {
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  font-size: var(--font-size-md);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  background-color: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-primary);
+  outline: none;
+  transition: border-color $transition-normal;
+
+  &::placeholder {
+    color: var(--text-muted);
+    font-weight: $font-weight-normal;
+  }
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+}
+
+// 内容文本域
+.contentInput {
+  width: 100%;
+  min-height: 120px;
+  padding: var(--spacing-3);
+  font-size: var(--font-size-md);
+  line-height: $line-height-relaxed;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  outline: none;
+  transition: $transition-colors;
+  @include scrollbar;
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+
+  &:focus {
+    border-color: var(--accent-primary);
+    box-shadow: $shadow-focus;
+  }
+}
+
+// ================================
+// 语音录制
+// ================================
+
+.voiceRecorder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-8);
+  background-color: var(--bg-primary);
+  border: 2px dashed var(--border-primary);
+  border-radius: var(--radius-lg);
+  gap: var(--spacing-4);
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.recordButton,
+.stopButton {
+  @include button-reset;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-4);
+  border-radius: var(--radius-lg);
+  transition: $transition-colors;
+
+  svg {
+    width: 48px;
+    height: 48px;
+  }
+
+  span {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+  }
+}
+
+.recordButton {
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--accent-primary);
+
+    span {
+      color: var(--text-primary);
+    }
+  }
+}
+
+.stopButton {
+  color: var(--color-error);
+
+  &:hover {
+    background-color: var(--color-error-bg);
+  }
+}
+
+.recordingIndicator {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.pulse {
+  width: 12px;
+  height: 12px;
+  background-color: var(--color-error);
+  border-radius: 50%;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.time {
+  font-size: var(--font-size-2xl);
+  font-weight: $font-weight-semibold;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+// ================================
+// 附件预览
+// ================================
+
+.attachmentsPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.attachmentItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.attachmentName {
+  color: var(--text-primary);
+  max-width: 150px;
+  @include truncate;
+}
+
+.attachmentSize {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.removeAttachment {
+  @include button-reset;
+  @include flex-center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--color-error-bg);
+    color: var(--color-error);
+  }
+}
+
+// ================================
+// 标签区域
+// ================================
+
+.tagsSection {
+  // 容器样式
+}
+
+.tagsHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-secondary);
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+    transition: transform $transition-normal;
+  }
+}
+
+.tagsHeaderRotate svg {
+  transform: rotate(180deg);
+}
+
+.tagsContent {
+  padding: var(--spacing-2);
+  padding-top: var(--spacing-3);
+}
+
+.tagsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-2);
+}
+
+.tagItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-sm);
+  color: var(--accent-secondary);
+  background-color: var(--bg-highlight);
+  border-radius: var(--radius-full);
+
+  button {
+    @include button-reset;
+    @include flex-center;
+    width: 14px;
+    height: 14px;
+    color: var(--accent-secondary);
+    opacity: 0.7;
+    transition: opacity $transition-fast;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+}
+
+.tagInput {
+  width: 100%;
+  padding: var(--spacing-2);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: $transition-colors;
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+}
+
+// ================================
+// 底部
+// ================================
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-4);
+  background-color: var(--bg-tertiary);
+  border-top: 1px solid var(--border-primary);
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.footerLeft,
+.footerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+}
+
+.attachButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-secondary);
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.submitButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-on-accent);
+  background-color: var(--accent-primary);
+  border-radius: var(--radius-md);
+  transition: $transition-colors;
+
+  &:hover:not(:disabled) {
+    background-color: var(--accent-primary-hover);
+  }
+
+  &:active:not(:disabled) {
+    background-color: var(--accent-primary-active);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+// ================================
+// 动画
+// ================================
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.1);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

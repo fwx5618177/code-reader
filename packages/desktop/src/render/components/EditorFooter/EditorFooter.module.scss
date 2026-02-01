@@ -1,0 +1,93 @@
+// ================================
+// EditorFooter Component Styles
+// Reusable footer for writing/focus modes
+// ================================
+
+@use '../../styles/variables' as *;
+
+.editorFooter {
+  @include editor-footer;
+}
+
+.stats {
+  @include editor-stats;
+}
+
+.statItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+
+  svg {
+    width: 12px;
+    height: 12px;
+    opacity: 0.7;
+  }
+
+  &.unsaved {
+    color: var(--color-warning);
+  }
+
+  &.saving {
+    color: var(--text-muted);
+  }
+
+  &.saved {
+    color: var(--color-success);
+  }
+}
+
+.spinIcon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+
+  button {
+    @include button-reset;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-1);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    transition: $transition-fast;
+
+    &:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    svg {
+      width: 14px;
+      height: 14px;
+    }
+  }
+}
+
+.hints {
+  @include editor-hints;
+}
+
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.separator {
+  color: var(--text-faint);
+  margin: 0 var(--spacing-1);
+}

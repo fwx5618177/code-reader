@@ -1,0 +1,340 @@
+// ================================
+// WelcomeGuide Component Styles - CSS Module
+// 欢迎引导组件样式模块
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 遮罩层
+// ================================
+
+.welcomeGuideOverlay {
+  @include overlay;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-modal;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+// ================================
+// 模态框
+// ================================
+
+.welcomeGuideModal {
+  @include card;
+  display: flex;
+  flex-direction: column;
+  width: 90%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow: hidden;
+  animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ================================
+// 头部
+// ================================
+
+.welcomeGuideHeader {
+  @include flex-between;
+  padding: var(--spacing-4) var(--spacing-5);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.headerTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+
+  svg {
+    color: var(--accent-primary);
+  }
+
+  h2 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+}
+
+.closeButton {
+  @include button-reset;
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 内容区
+// ================================
+
+.welcomeGuideContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-4) var(--spacing-5);
+  @include scrollbar;
+}
+
+.intro {
+  margin: 0 0 var(--spacing-4);
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  line-height: $line-height-relaxed;
+}
+
+// ================================
+// 引导区块
+// ================================
+
+.guideSection {
+  margin-bottom: var(--spacing-4);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.guideSectionTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin: 0 0 var(--spacing-2);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+
+  svg {
+    color: var(--accent-secondary);
+  }
+}
+
+.guideSectionText {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: $line-height-relaxed;
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 var(--spacing-1);
+  margin: 0 2px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: $font-sans;
+  color: var(--text-muted);
+}
+
+// 高亮区块（如焦点模式）
+.guideSectionHighlight {
+  background-color: var(--bg-highlight);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-3);
+  margin-top: var(--spacing-3);
+
+  .guideSectionTitle {
+    color: var(--accent-primary);
+
+    svg {
+      color: var(--accent-primary);
+    }
+  }
+}
+
+// ================================
+// 引导列表
+// ================================
+
+.guideList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.guideListItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.guideListItemKbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 50px;
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  font-family: $font-sans;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.guideListItemText {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+// 紧凑变体（用于较长列表）
+.guideListCompact {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-1) var(--spacing-4);
+
+  .guideListItem {
+    padding: var(--spacing-1) 0;
+    border-bottom: none;
+  }
+
+  .guideListItemKbd {
+    min-width: 40px;
+  }
+}
+
+// ================================
+// 快捷键网格
+// ================================
+
+.shortcutGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-2);
+}
+
+.shortcutItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2);
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.shortcutCode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  padding: 2px var(--spacing-1);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  font-family: $font-mono;
+  font-size: var(--font-size-xs);
+  color: var(--accent-secondary);
+  flex-shrink: 0;
+}
+
+.shortcutText {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+// ================================
+// 底部
+// ================================
+
+.welcomeGuideFooter {
+  @include flex-between;
+  padding: var(--spacing-3) var(--spacing-5);
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+
+.footerHint {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.footerHintKey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background-color: var(--bg-quaternary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.startButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  background-color: var(--accent-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-on-accent);
+  transition: background-color $transition-fast;
+
+  &:hover {
+    background-color: var(--accent-primary-hover);
+  }
+
+  &:active {
+    background-color: var(--accent-primary-active);
+  }
+}

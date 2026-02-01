@@ -1,0 +1,178 @@
+// ================================
+// Tooltip Component Styles (CSS Module)
+// Integrates with theme system
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// Trigger Wrapper Styles
+// ================================
+
+.trigger {
+  display: contents;
+}
+
+.triggerInlineFlex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.triggerInline {
+  display: inline;
+}
+
+.triggerBlock {
+  display: block;
+}
+
+.triggerFlex {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// ================================
+// Tooltip Container
+// ================================
+
+.tooltip {
+  position: fixed;
+  z-index: $z-tooltip;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.95);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+// ================================
+// Tooltip Content
+// ================================
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  max-width: 250px;
+  min-width: 40px;
+  font-family: var(--font-family-sans);
+}
+
+// ================================
+// Tooltip Text
+// ================================
+
+.text {
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  line-height: 1.4;
+  white-space: nowrap;
+  text-align: left;
+}
+
+// ================================
+// Tooltip Shortcut
+// ================================
+
+.shortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  font-family: var(--font-family-mono);
+  font-size: 10px;
+  font-weight: $font-weight-medium;
+  color: var(--text-muted);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+}
+
+// ================================
+// Tooltip Arrow
+// ================================
+
+.arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-secondary);
+  transform: rotate(45deg);
+}
+
+.arrowTop {
+  bottom: -5px;
+  left: 50%;
+  margin-left: -4px;
+  border-top: none;
+  border-left: none;
+}
+
+.arrowBottom {
+  top: -5px;
+  left: 50%;
+  margin-left: -4px;
+  border-bottom: none;
+  border-right: none;
+}
+
+.arrowLeft {
+  right: -5px;
+  top: 50%;
+  margin-top: -4px;
+  border-top: none;
+  border-right: none;
+}
+
+.arrowRight {
+  left: -5px;
+  top: 50%;
+  margin-top: -4px;
+  border-bottom: none;
+  border-left: none;
+}
+
+// ================================
+// Size Variants
+// ================================
+
+.small {
+  .content {
+    padding: var(--spacing-1) var(--spacing-2);
+  }
+
+  .text {
+    font-size: 11px;
+  }
+}
+
+.large {
+  .content {
+    padding: var(--spacing-3) var(--spacing-4);
+    max-width: 320px;
+  }
+
+  .text {
+    font-size: var(--font-size-sm);
+  }
+}

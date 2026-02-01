@@ -1,0 +1,1208 @@
+// ================================
+// SettingsPanel Component Styles - CSS Module
+// 设置面板组件样式模块
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 遮罩层
+// ================================
+
+.settingsPanelOverlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-bg);
+  backdrop-filter: blur(8px);
+  z-index: $z-modal;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+// ================================
+// 面板
+// ================================
+
+.settingsPanel {
+  width: 90%;
+  max-width: 800px;
+  max-height: 85vh;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: scaleIn 0.2s ease-out;
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+// ================================
+// 头部
+// ================================
+
+.settingsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-4) var(--spacing-5);
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+
+.settingsTitle {
+  font-size: var(--font-size-lg);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.closeBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 内容区
+// ================================
+
+.settingsContent {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+// ================================
+// 侧边栏
+// ================================
+
+.settingsSidebar {
+  width: 200px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-primary);
+  padding: var(--spacing-3);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.sidebarTab {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  text-align: left;
+  transition: all $transition-fast;
+
+  svg {
+    flex-shrink: 0;
+    opacity: 0.7;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+
+    svg {
+      opacity: 1;
+    }
+  }
+}
+
+.sidebarTabActive {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  color: var(--accent-primary);
+
+  svg {
+    opacity: 1;
+  }
+}
+
+// ================================
+// 主内容
+// ================================
+
+.settingsMain {
+  flex: 1;
+  padding: var(--spacing-5);
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.settingsTab {
+  animation: fadeIn 0.15s ease-out;
+}
+
+// ================================
+// 区块
+// ================================
+
+.section {
+  margin-bottom: var(--spacing-6);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-4);
+}
+
+.sectionTitle {
+  font-size: var(--font-size-md);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.sectionDescription {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-4);
+}
+
+.addBtn {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--accent-primary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+  }
+}
+
+// ================================
+// 空状态
+// ================================
+
+.emptyState {
+  @include flex-center;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  padding: var(--spacing-8);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-secondary);
+  border-radius: var(--radius-lg);
+  text-align: center;
+
+  svg {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+
+  p {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    margin: 0;
+  }
+}
+
+.addFirstBtn {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--accent-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-on-accent);
+  transition: background $transition-fast;
+
+  &:hover {
+    background: var(--accent-primary-hover);
+  }
+}
+
+// ================================
+// 提供者列表
+// ================================
+
+.providerList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+}
+
+// ================================
+// 提供者卡片
+// ================================
+
+.providerCard {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: all $transition-fast;
+}
+
+.providerCardDisabled {
+  opacity: 0.6;
+}
+
+.providerCardHover {
+  border-color: var(--border-secondary);
+}
+
+.providerHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3) var(--spacing-4);
+  cursor: pointer;
+  transition: background $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.providerInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.providerName {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.providerType {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+// ================================
+// 提供者状态
+// ================================
+
+.providerStatus {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.statusBadge {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+}
+
+.statusBadgeHealthy {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.statusBadgeError {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+.statusBadgeDegraded {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.expandIcon {
+  color: var(--text-muted);
+  transition: transform $transition-fast;
+}
+
+.expandIconExpanded {
+  transform: rotate(180deg);
+}
+
+// ================================
+// 提供者详情
+// ================================
+
+.providerDetails {
+  padding: var(--spacing-3) var(--spacing-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.detailRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-3);
+
+  &:last-of-type {
+    margin-bottom: 0;
+  }
+}
+
+.detailLabel {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.detailInput {
+  flex: 1;
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color $transition-fast;
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+
+  &:read-only {
+    background: var(--bg-quaternary);
+    cursor: default;
+  }
+}
+
+// ================================
+// API Key 字段
+// ================================
+
+.apiKeyField {
+  display: flex;
+  gap: var(--spacing-2);
+  flex: 1;
+}
+
+.apiKeyInput {
+  flex: 1;
+}
+
+.apiKeyToggle {
+  @include button-reset;
+  @include flex-center;
+  width: 36px;
+  height: 36px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 详情操作
+// ================================
+
+.detailActions {
+  display: flex;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-4);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.actionButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  transition: all $transition-fast;
+}
+
+.testBtn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.testBtnSpinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.deleteBtn {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+
+  &:hover {
+    background: color-mix(in srgb, var(--color-error) 20%, transparent);
+  }
+}
+
+// ================================
+// 设置列表
+// ================================
+
+.settingsList {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.settingItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--border-subtle);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.settingInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.settingLabel {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+}
+
+.settingDescription {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+// ================================
+// 开关
+// ================================
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggleInput {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+
+  &:checked + .toggleSlider {
+    background: var(--accent-primary);
+
+    &::before {
+      transform: translateX(20px);
+    }
+  }
+
+  &:focus + .toggleSlider {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  }
+}
+
+.toggleSlider {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  transition: all $transition-fast;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    transition: transform $transition-fast;
+  }
+}
+
+// ================================
+// 设置选择
+// ================================
+
+.settingSelect {
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+  min-width: 150px;
+
+  &:hover {
+    border-color: var(--border-secondary);
+  }
+
+  &:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+  }
+}
+
+// ================================
+// 设置输入
+// ================================
+
+.settingInputWrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.settingInput {
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  outline: none;
+  width: 200px;
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+
+  &:read-only {
+    background: var(--bg-quaternary);
+  }
+}
+
+.inputAction {
+  @include button-reset;
+  @include flex-center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 滑块
+// ================================
+
+.settingSliderWrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  min-width: 200px;
+}
+
+.settingSlider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  outline: none;
+
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform $transition-fast;
+
+    &:hover {
+      transform: scale(1.1);
+    }
+  }
+}
+
+.sliderValue {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  min-width: 40px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+// ================================
+// 主题网格
+// ================================
+
+.themeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-3);
+}
+
+.themeCard {
+  @include button-reset;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all $transition-fast;
+  position: relative;
+
+  &:hover {
+    border-color: var(--border-secondary);
+  }
+}
+
+.themeCardActive {
+  border-color: var(--accent-primary);
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: var(--spacing-2);
+    right: var(--spacing-2);
+    width: 20px;
+    height: 20px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.themePreview {
+  aspect-ratio: 16 / 10;
+  background: #1e1e2e;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.previewHeader {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.previewDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #45475a;
+}
+
+.previewBody {
+  flex: 1;
+  display: flex;
+}
+
+.previewSidebar {
+  width: 30%;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.previewContent {
+  flex: 1;
+  padding: 8px;
+}
+
+.previewLine {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  margin-bottom: 4px;
+}
+
+.previewLineShort {
+  width: 60%;
+}
+
+// 主题变体
+.themePreviewDark {
+  background: #1e1e2e;
+
+  .previewDotRed {
+    background: #f38ba8;
+  }
+
+  .previewDotYellow {
+    background: #f9e2af;
+  }
+
+  .previewDotGreen {
+    background: #a6e3a1;
+  }
+}
+
+.themePreviewLight {
+  background: #eff1f5;
+
+  .previewHeader {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  .previewDotRed {
+    background: #d20f39;
+  }
+
+  .previewDotYellow {
+    background: #df8e1d;
+  }
+
+  .previewDotGreen {
+    background: #40a02b;
+  }
+
+  .previewSidebar {
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  .previewLine {
+    background: rgba(0, 0, 0, 0.1);
+  }
+}
+
+.themePreviewSystem {
+  background: linear-gradient(135deg, #1e1e2e 50%, #eff1f5 50%);
+}
+
+.themeInfo {
+  padding: var(--spacing-2) var(--spacing-3);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.themeIcon {
+  color: var(--text-tertiary);
+}
+
+.themeName {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.themeCheck {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  background: var(--accent-primary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+// ================================
+// 颜色网格
+// ================================
+
+.colorGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+}
+
+.colorBtn {
+  @include button-reset;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all $transition-fast;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    transform: scale(1.1);
+  }
+}
+
+.colorBtnActive {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--bg-primary);
+
+  svg {
+    color: white;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+  }
+}
+
+// ================================
+// 快捷键列表
+// ================================
+
+.shortcutsList {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.shortcutItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-2) var(--spacing-4);
+  border-bottom: 1px solid var(--border-subtle);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.shortcutAction {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.shortcutKey {
+  display: flex;
+  gap: var(--spacing-1);
+  font-size: var(--font-size-xs);
+  font-family: $font-mono;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-primary);
+}
+
+// ================================
+// 模态框
+// ================================
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-modal + 1;
+}
+
+.modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+
+.addProviderModal {
+  width: 480px;
+  max-width: 90%;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--border-primary);
+
+  h3 {
+    font-size: var(--font-size-md);
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+    margin: 0;
+  }
+}
+
+.modalCloseBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.modalBody {
+  flex: 1;
+  padding: var(--spacing-4);
+  overflow-y: auto;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+  border-top: 1px solid var(--border-primary);
+  background: var(--bg-secondary);
+}
+
+.cancelBtn {
+  @include button-reset;
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.submitBtn {
+  @include button-reset;
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--accent-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-on-accent);
+  transition: all $transition-fast;
+
+  &:hover:not(:disabled) {
+    background: var(--accent-primary-hover);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// ================================
+// 表单组
+// ================================
+
+.formGroup {
+  margin-bottom: var(--spacing-4);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.formLabel {
+  display: block;
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-2);
+}
+
+.formRequired {
+  color: var(--color-error);
+  margin-left: 2px;
+}
+
+.formInput {
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color $transition-fast;
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+
+  &:hover {
+    border-color: var(--border-secondary);
+  }
+
+  &:focus {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+  }
+}
+
+.helpLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  margin-top: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--accent-primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// ================================
+// 预设网格
+// ================================
+
+.presetGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-4);
+}
+
+.presetCard {
+  @include button-reset;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  svg {
+    color: var(--text-tertiary);
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-secondary);
+
+    svg {
+      color: var(--text-primary);
+    }
+  }
+}
+
+.presetCardSelected {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+
+  svg {
+    color: var(--accent-primary);
+  }
+}
+
+.presetName {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+}
+
+.presetDesc {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+// ================================
+// 亮色主题调整
+// ================================
+
+:global([data-theme='light']) {
+  .settingsPanel {
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  }
+
+  .modal {
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  }
+}

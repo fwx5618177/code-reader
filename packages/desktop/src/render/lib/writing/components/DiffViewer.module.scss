@@ -1,0 +1,320 @@
+// ================================
+// DiffViewer 组件样式
+// 可复用的差分查看组件样式
+// ================================
+
+// 容器
+.container {
+  width: 100%;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--bg-color, #fff);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+// 头部
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background-color: var(--header-bg, #f8f9fa);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+// 头部标题
+.headerTitle {
+  font-weight: 600;
+  color: var(--text-color, #333);
+  font-size: 14px;
+}
+
+// 头部控制按钮组
+.headerControls {
+  display: flex;
+  gap: 4px;
+}
+
+// 模式切换按钮
+.modeButton {
+  padding: 4px 8px;
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 4px;
+  background-color: var(--bg-color, #fff);
+  color: var(--text-muted, #666);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+
+  &:hover {
+    background-color: var(--hover-bg, #f5f5f5);
+    color: var(--text-color, #333);
+  }
+
+  &.active {
+    background-color: var(--primary-color, #007bff);
+    color: #fff;
+    border-color: var(--primary-color, #007bff);
+  }
+}
+
+// 统计栏
+.statsBar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 12px;
+  background-color: var(--stats-bg, #fafafa);
+  border-bottom: 1px solid var(--border-color-light, #eee);
+  font-size: 12px;
+  color: var(--text-muted, #666);
+}
+
+// 统计项
+.statItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+// 插入统计
+.statInsert {
+  color: var(--insert-color, #28a745);
+}
+
+// 删除统计
+.statDelete {
+  color: var(--delete-color, #dc3545);
+}
+
+// 内容区域
+.content {
+  overflow: auto;
+  max-height: 500px;
+}
+
+// 内联模式内容
+.inlineContent {
+  padding: 0;
+}
+
+// 内联行
+.inlineLine {
+  display: flex;
+  min-height: 1.5em;
+}
+
+// 行号
+.lineNumber {
+  flex-shrink: 0;
+  width: 50px;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--line-number-color, #999);
+  background-color: var(--line-number-bg, #f8f9fa);
+  border-right: 1px solid var(--border-color-light, #eee);
+  user-select: none;
+  font-size: 12px;
+}
+
+// 行内容
+.lineContent {
+  flex: 1;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+// 插入行
+.lineInsert {
+  background-color: var(--insert-line-bg, #e6ffed);
+}
+
+// 删除行
+.lineDelete {
+  background-color: var(--delete-line-bg, #ffeef0);
+}
+
+// 未变更行
+.lineEqual {
+  background-color: transparent;
+}
+
+// 插入文本
+.textInsert {
+  background-color: var(--insert-text-bg, #acf2bd);
+  text-decoration: none;
+}
+
+// 删除文本
+.textDelete {
+  background-color: var(--delete-text-bg, #fdb8c0);
+  text-decoration: line-through;
+}
+
+// 分栏容器
+.splitContainer {
+  display: flex;
+}
+
+// 分栏面板
+.splitPane {
+  flex: 1;
+  overflow: auto;
+
+  &.left {
+    border-right: 1px solid var(--border-color, #e0e0e0);
+  }
+}
+
+// 分栏头部
+.splitHeader {
+  padding: 6px 12px;
+  background-color: var(--header-bg, #f8f9fa);
+  border-bottom: 1px solid var(--border-color-light, #eee);
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-muted, #666);
+}
+
+// 折叠区域
+.collapsedSection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px;
+  background-color: var(--collapsed-bg, #f5f5f5);
+  color: var(--text-muted, #888);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  border-top: 1px solid var(--border-color-light, #eee);
+  border-bottom: 1px solid var(--border-color-light, #eee);
+  transition: background-color 0.15s;
+
+  &:hover {
+    background-color: var(--hover-bg, #ebebeb);
+    color: var(--text-color, #333);
+  }
+}
+
+// 加载状态
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--text-muted, #666);
+  gap: 8px;
+}
+
+// 空状态
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--text-muted, #888);
+  font-size: 14px;
+}
+
+// 无变更提示
+.noChanges {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted, #888);
+  font-size: 14px;
+}
+
+// 加载动画
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// 行号容器（双列）
+.lineNumbers {
+  display: flex;
+}
+
+// 源行号
+.sourceLineNumber {
+  width: 40px;
+  padding: 0 4px;
+  text-align: right;
+  color: var(--line-number-color, #999);
+  background-color: var(--line-number-bg, #f8f9fa);
+  font-size: 12px;
+  user-select: none;
+}
+
+// 目标行号
+.targetLineNumber {
+  width: 40px;
+  padding: 0 4px;
+  text-align: right;
+  color: var(--line-number-color, #999);
+  background-color: var(--line-number-bg, #f8f9fa);
+  border-right: 1px solid var(--border-color-light, #eee);
+  font-size: 12px;
+  user-select: none;
+}
+
+// 操作符号
+.operationSign {
+  width: 20px;
+  text-align: center;
+  font-weight: 600;
+  user-select: none;
+
+  &.insert {
+    color: var(--insert-color, #28a745);
+    background-color: var(--insert-line-bg, #e6ffed);
+  }
+
+  &.delete {
+    color: var(--delete-color, #dc3545);
+    background-color: var(--delete-line-bg, #ffeef0);
+  }
+
+  &.equal {
+    color: var(--text-muted, #999);
+  }
+}
+
+// 展开按钮
+.expandButton {
+  background: none;
+  border: none;
+  color: var(--primary-color, #007bff);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+
+  &:hover {
+    background-color: var(--primary-color-light, rgba(0, 123, 255, 0.1));
+  }
+}
+
+// 折叠图标
+.collapseIcon {
+  margin-right: 4px;
+  transition: transform 0.2s;
+
+  &.expanded {
+    transform: rotate(90deg);
+  }
+}

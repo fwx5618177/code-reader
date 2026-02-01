@@ -1,0 +1,612 @@
+// ================================
+// TitleBar Component Styles
+// 自定义无边框窗口标题栏
+// CSS Modules 版本
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 主容器
+// ================================
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: $titlebar-height;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+  user-select: none;
+  position: relative;
+  z-index: $z-sticky;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+
+  &.blurred {
+    .title,
+    .subtitle,
+    .subtitleRight {
+      color: var(--text-muted);
+    }
+
+    .button {
+      opacity: 0.7;
+    }
+
+    .tab {
+      opacity: 0.7;
+    }
+  }
+
+  &.mac {
+    .windowControls {
+      display: none;
+    }
+  }
+
+  &.windows {
+    .trafficLights {
+      display: none;
+    }
+  }
+}
+
+// ================================
+// macOS 红绿灯区域
+// ================================
+
+.trafficLights {
+  width: 78px;
+  height: 100%;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+// ================================
+// 左侧区域（导航）
+// ================================
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding-left: var(--spacing-2);
+  -webkit-app-region: no-drag;
+}
+
+.navButton {
+  @include button-reset;
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-secondary);
+  }
+
+  &:active:not(:disabled) {
+    background-color: var(--bg-active);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+// ================================
+// 中间区域（标题、标签和面包屑）
+// ================================
+
+.center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 var(--spacing-4);
+  height: 100%;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-2);
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+}
+
+.tab {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 26px;
+  padding: 0 var(--spacing-3);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+  color: var(--text-secondary);
+  background-color: transparent;
+  border-radius: var(--radius-md);
+  transition: all $transition-fast;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
+  }
+
+  &.active {
+    color: var(--text-primary);
+    background-color: var(--bg-primary);
+    box-shadow: var(--shadow-sm);
+
+    .tabIcon {
+      opacity: 1;
+      color: var(--accent-primary);
+    }
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+.tabIcon {
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+}
+
+.tabLabel {
+  // 在非常小的屏幕上可以隐藏
+}
+
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-secondary);
+  @include truncate;
+  max-width: 400px;
+  text-align: center;
+}
+
+.folderIcon {
+  display: inline-flex;
+  margin-right: var(--spacing-1);
+  vertical-align: middle;
+  color: var(--text-muted);
+}
+
+.modeIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: var(--spacing-2);
+  color: var(--text-muted);
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  max-width: 100%;
+}
+
+.breadcrumbItem {
+  display: flex;
+  align-items: center;
+  padding: 2px var(--spacing-2);
+  border-radius: var(--radius-sm);
+  @include truncate;
+  max-width: 150px;
+  transition: $transition-colors;
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:last-child {
+    color: var(--text-primary);
+    font-weight: $font-weight-medium;
+  }
+}
+
+.breadcrumbSeparator {
+  color: var(--text-faint);
+  flex-shrink: 0;
+
+  svg {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+// ================================
+// 标题栏按钮
+// ================================
+
+.button {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background-color: var(--bg-quaternary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  transition: $transition-colors;
+  -webkit-app-region: no-drag;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-secondary);
+  }
+
+  &:active {
+    background-color: var(--bg-active);
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &.iconOnly {
+    width: 24px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  &.searchBtn {
+    min-width: 100px;
+    justify-content: flex-start;
+    background-color: var(--bg-secondary);
+  }
+
+  &.focusBtn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+    background-color: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    border-radius: var(--radius-md);
+
+    &:hover {
+      background-color: var(--accent-primary);
+      border-color: var(--accent-primary);
+      color: var(--text-on-accent);
+    }
+
+    svg {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  &.newWindowBtn {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0 var(--spacing-2);
+    background-color: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+
+    &:hover {
+      background-color: var(--bg-hover);
+      border-color: var(--border-primary);
+      color: var(--accent-primary);
+
+      svg:last-child {
+        transform: translate(1px, -1px);
+      }
+    }
+
+    svg {
+      transition: transform 0.15s ease;
+    }
+
+    svg:last-child {
+      margin-left: -2px;
+      opacity: 0.7;
+    }
+  }
+}
+
+.shortcut {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  background-color: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+}
+
+.separator {
+  color: var(--text-faint);
+  margin: 0 var(--spacing-1);
+}
+
+.subtitle {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  @include truncate;
+  max-width: 200px;
+}
+
+.subtitleRight {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  @include truncate;
+  max-width: 150px;
+  margin-right: var(--spacing-2);
+  padding: 2px var(--spacing-2);
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+}
+
+.subtitleBadge {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  padding: var(--spacing-1) var(--spacing-2);
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-primary);
+  @include truncate;
+  max-width: 160px;
+}
+
+// ================================
+// 右侧区域（操作）
+// ================================
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding-right: var(--spacing-2);
+  -webkit-app-region: no-drag;
+}
+
+.actionButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 26px;
+  padding: 0 var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background-color: transparent;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-secondary);
+  }
+
+  &:active {
+    background-color: var(--bg-active);
+  }
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  &.primary {
+    background-color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-on-accent);
+
+    &:hover {
+      background-color: var(--accent-primary-hover);
+      border-color: var(--accent-primary-hover);
+    }
+
+    &:active {
+      background-color: var(--accent-primary-active);
+      border-color: var(--accent-primary-active);
+    }
+  }
+}
+
+// ================================
+// 窗口控制按钮（Windows/Linux）
+// ================================
+
+.windowControls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin-left: var(--spacing-2);
+  -webkit-app-region: no-drag;
+}
+
+.windowControl {
+  @include button-reset;
+  @include flex-center;
+  width: 46px;
+  height: 100%;
+  color: var(--text-secondary);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &.close:hover {
+    background-color: var(--window-control-close-hover);
+    color: white;
+  }
+
+  svg {
+    width: 12px;
+    height: 12px;
+  }
+}
+
+// ================================
+// 搜索框
+// ================================
+
+.search {
+  display: flex;
+  align-items: center;
+  width: 220px;
+  height: 26px;
+  padding: 0 var(--spacing-2);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  transition:
+    $transition-colors,
+    width $transition-normal;
+  -webkit-app-region: no-drag;
+
+  &:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-focus);
+    width: 280px;
+  }
+}
+
+.searchIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-right: var(--spacing-2);
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.searchInput {
+  flex: 1;
+  height: 100%;
+  background: transparent;
+  border: none;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  outline: none;
+  min-width: 0;
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+.searchShortcut {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  padding: 2px 4px;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  margin-left: var(--spacing-1);
+}
+
+// ================================
+// 平台特定样式
+// ================================
+
+:global(.platform-darwin) .titlebar {
+  height: 38px;
+}
+
+:global(.platform-darwin) .center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+
+  .title,
+  .breadcrumb,
+  .tabs {
+    pointer-events: auto;
+  }
+}
+
+:global(.platform-win32) .titlebar {
+  height: 32px;
+}
+
+:global(.platform-win32) .left {
+  padding-left: var(--spacing-3);
+}
+
+:global(.platform-win32) .trafficLights {
+  display: none;
+}
+
+:global(.platform-linux) .titlebar {
+  height: 32px;
+}
+
+// ================================
+// 浅色主题覆盖
+// ================================
+
+:global([data-theme='light']) {
+  .titlebar {
+    background-color: var(--bg-tertiary);
+    border-bottom-color: var(--border-primary);
+  }
+
+  .button {
+    background-color: var(--bg-secondary);
+
+    &:hover {
+      background-color: var(--bg-hover);
+    }
+  }
+
+  .subtitleRight {
+    background-color: var(--bg-quaternary);
+  }
+
+  .search {
+    background-color: var(--bg-secondary);
+
+    &:focus-within {
+      background-color: var(--bg-primary);
+    }
+  }
+}

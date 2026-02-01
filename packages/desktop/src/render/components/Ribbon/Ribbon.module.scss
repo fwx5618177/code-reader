@@ -1,0 +1,224 @@
+// ================================
+// Ribbon Component Styles
+// Compact icon-based left sidebar
+// CSS Modules 版本
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 容器
+// ================================
+
+.ribbon {
+  display: flex;
+  flex-direction: column;
+  width: $ribbon-width;
+  min-width: $ribbon-width;
+  max-width: $ribbon-width;
+  height: 100%;
+  background-color: var(--bg-secondary);
+  border-right: 1px solid var(--border-primary);
+  flex-shrink: 0;
+  user-select: none;
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+// ================================
+// 顶部区域
+// ================================
+
+.top {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-2) 0;
+  gap: var(--spacing-1);
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  // 隐藏滚动条
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+// ================================
+// 底部区域
+// ================================
+
+.bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--spacing-2) 0;
+  gap: var(--spacing-1);
+  border-top: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+
+// ================================
+// 区块
+// ================================
+
+.section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+// ================================
+// 模式按钮区域
+// ================================
+
+.modes {
+  padding-bottom: var(--spacing-2);
+}
+
+.modeButton {
+  position: relative;
+  color: var(--text-tertiary);
+
+  svg {
+    transition: all $transition-fast;
+  }
+
+  &:hover {
+    color: var(--button-color, var(--text-primary));
+    background-color: color-mix(in srgb, var(--button-color, var(--bg-hover)) 10%, transparent);
+  }
+
+  &.active {
+    color: var(--button-color, var(--accent-primary));
+    background-color: color-mix(
+      in srgb,
+      var(--button-color, var(--accent-primary)) 15%,
+      transparent
+    );
+
+    // 左侧指示条
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 20px;
+      background-color: var(--button-color, var(--accent-primary));
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+
+    svg {
+      filter: drop-shadow(0 0 4px color-mix(in srgb, var(--button-color) 50%, transparent));
+    }
+  }
+}
+
+// ================================
+// Ribbon 按钮
+// ================================
+
+.button {
+  @include button-reset;
+  @include flex-center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: $transition-normal;
+  position: relative;
+
+  svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 1.75;
+  }
+
+  &:hover:not(.disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:active:not(.disabled) {
+    background-color: var(--bg-active);
+  }
+
+  &.active {
+    background-color: var(--bg-active);
+    color: var(--accent-secondary);
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 18px;
+      background-color: var(--accent-primary);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+  }
+
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+// ================================
+// 徽章
+// ================================
+
+.badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: $font-weight-semibold;
+  color: var(--text-on-accent);
+  background-color: var(--accent-primary);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+// ================================
+// 分隔线
+// ================================
+
+.divider {
+  width: 24px;
+  height: 1px;
+  background-color: var(--border-primary);
+  margin: var(--spacing-2) 0;
+  flex-shrink: 0;
+}
+
+// ================================
+// 浅色主题调整
+// ================================
+
+:global([data-theme='light']) {
+  .button {
+    &.active {
+      background-color: var(--bg-selected);
+    }
+  }
+}

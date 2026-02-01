@@ -1,0 +1,996 @@
+// ================================
+// MaterialsLibrary Component Styles - CSS Module
+// 素材库组件样式模块
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 根容器
+// ================================
+
+.materialsLibrary {
+  display: flex;
+  height: 100%;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+// ================================
+// 状态
+// ================================
+
+.loadingState,
+.errorState {
+  @include flex-center;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-8);
+  color: var(--text-muted);
+  text-align: center;
+  width: 100%;
+}
+
+.loadingSpinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-primary);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.errorIcon {
+  color: var(--color-error);
+}
+
+.errorMessage {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+// ================================
+// 侧边栏
+// ================================
+
+.materialsSidebar {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  min-width: 200px;
+  max-width: 320px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+
+.sidebarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.sidebarTitle {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+}
+
+.sidebarActionBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.sidebarFooter {
+  padding: var(--spacing-3);
+  border-top: 1px solid var(--border-primary);
+  margin-top: auto;
+}
+
+.importBtn {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-secondary);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+  }
+}
+
+// ================================
+// 集合列表
+// ================================
+
+.collectionsList {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-2);
+  @include scrollbar;
+}
+
+.collectionItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all $transition-fast;
+  text-align: left;
+
+  &:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.collectionItemSelected {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+
+  .collectionName {
+    color: var(--accent-primary);
+    font-weight: $font-weight-medium;
+  }
+}
+
+// 缩进级别
+@for $i from 0 through 5 {
+  .collectionLevel#{$i} {
+    padding-left: calc(var(--spacing-2) + #{$i * 16px});
+  }
+}
+
+.toggleBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--bg-secondary);
+  }
+}
+
+.toggleSpacer {
+  width: 18px;
+  flex-shrink: 0;
+}
+
+.collectionColor {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.collectionName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collectionCount {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+}
+
+// ================================
+// 主内容区
+// ================================
+
+.materialsMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+// ================================
+// 工具栏
+// ================================
+
+.materialsToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+
+.toolbarLeft,
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.toolbarBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+  position: relative;
+
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.toolbarBtnActive {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  color: var(--accent-primary);
+}
+
+.filterBadge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent-primary);
+  border-radius: var(--radius-full);
+}
+
+// ================================
+// 搜索框
+// ================================
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex: 1;
+  max-width: 320px;
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  transition: all $transition-fast;
+
+  &:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+  }
+}
+
+.searchIcon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+.clearBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  opacity: 0.7;
+  transition: all $transition-fast;
+
+  &:hover {
+    opacity: 1;
+    background: var(--bg-hover);
+  }
+}
+
+// ================================
+// 排序选择
+// ================================
+
+.sortSelect {
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  outline: none;
+
+  &:hover {
+    border-color: var(--border-secondary);
+  }
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+}
+
+// ================================
+// 视图切换
+// ================================
+
+.viewToggle {
+  display: flex;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+
+.viewToggleBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
+.viewToggleBtnActive {
+  background: var(--bg-primary);
+  color: var(--accent-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+// ================================
+// 添加按钮
+// ================================
+
+.addBtn {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--accent-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--accent-primary-hover);
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+// ================================
+// 过滤面板
+// ================================
+
+.filterPanel {
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.filterSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  margin-bottom: var(--spacing-3);
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.filterLabel {
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.filterTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+}
+
+.filterTag {
+  @include button-reset;
+  padding: var(--spacing-1) var(--spacing-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-secondary);
+  }
+}
+
+.filterTagActive {
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.clearFilters {
+  @include button-reset;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  transition: color $transition-fast;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 内容区
+// ================================
+
+.materialsContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-4);
+  @include scrollbar;
+}
+
+// ================================
+// 网格布局
+// ================================
+
+.materialsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--spacing-4);
+}
+
+// ================================
+// 网格卡片
+// ================================
+
+.materialCardGrid {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all $transition-fast;
+
+  &:hover {
+    border-color: var(--border-secondary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+
+    .favoriteBtn {
+      opacity: 1;
+    }
+  }
+}
+
+.materialCardGridSelected {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 30%, transparent);
+}
+
+.cardThumbnail {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.typeIcon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+
+  svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+.favoriteBtn {
+  @include button-reset;
+  position: absolute;
+  top: var(--spacing-2);
+  right: var(--spacing-2);
+  width: 28px;
+  height: 28px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: all $transition-fast;
+  box-shadow: var(--shadow-sm);
+
+  &:hover {
+    color: var(--color-warning);
+  }
+}
+
+.favoriteBtnActive {
+  opacity: 1;
+  color: var(--color-warning);
+}
+
+.cardInfo {
+  padding: var(--spacing-3);
+}
+
+.cardName {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: var(--spacing-1);
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.typeBadge {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.cardTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-3) var(--spacing-3);
+}
+
+.tag {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.tagMore {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+// ================================
+// 列表布局
+// ================================
+
+.materialsList {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.listHeader {
+  display: grid;
+  grid-template-columns: 32px 1fr 80px 80px 100px 60px;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.listIcon,
+.listName,
+.listType,
+.listSize,
+.listDate,
+.listActions {
+  display: flex;
+  align-items: center;
+}
+
+.listName {
+  overflow: hidden;
+}
+
+.listSize,
+.listDate {
+  justify-content: flex-end;
+}
+
+.listActions {
+  justify-content: center;
+}
+
+// ================================
+// 列表项
+// ================================
+
+.materialCardList {
+  display: grid;
+  grid-template-columns: 32px 1fr 80px 80px 100px 60px;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background $transition-fast;
+  cursor: pointer;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+
+    .favoriteBtn,
+    .moreBtn {
+      opacity: 1;
+    }
+  }
+}
+
+.materialCardListSelected {
+  background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
+
+.listItemIcon {
+  @include flex-center;
+  width: 32px;
+  height: 32px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+}
+
+.listItemName {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listItemType {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.listItemSize,
+.listItemDate {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.listItemActions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-1);
+}
+
+.moreBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: all $transition-fast;
+
+  &:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 空状态
+// ================================
+
+.emptyState {
+  @include flex-center;
+  flex-direction: column;
+  gap: var(--spacing-4);
+  padding: var(--spacing-12);
+  text-align: center;
+}
+
+.emptyIcon {
+  width: 64px;
+  height: 64px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.emptyTitle {
+  font-size: var(--font-size-lg);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.emptyDescription {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  max-width: 300px;
+  margin: 0;
+}
+
+.emptyAction {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  background: var(--accent-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  transition: background $transition-fast;
+
+  &:hover {
+    background: var(--accent-primary-hover);
+  }
+}
+
+// ================================
+// 上下文菜单
+// ================================
+
+.contextMenuBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: $z-dropdown;
+}
+
+.contextMenu {
+  position: fixed;
+  min-width: 160px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  padding: var(--spacing-1);
+  z-index: $z-dropdown + 1;
+  animation: contextMenuEnter 0.15s ease-out;
+}
+
+@keyframes contextMenuEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.contextMenuItem {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  text-align: left;
+  transition: background $transition-fast;
+
+  svg {
+    color: var(--text-tertiary);
+  }
+
+  &:hover {
+    background: var(--bg-hover);
+
+    svg {
+      color: var(--text-primary);
+    }
+  }
+}
+
+.contextMenuItemDanger {
+  color: var(--color-error);
+
+  svg {
+    color: var(--color-error);
+  }
+
+  &:hover {
+    background: var(--color-error-bg);
+  }
+}
+
+.menuDivider {
+  height: 1px;
+  background: var(--border-primary);
+  margin: var(--spacing-1) 0;
+}
+
+// ================================
+// 亮色主题调整
+// ================================
+
+:global([data-theme='light']) {
+  .materialsSidebar {
+    background: var(--bg-tertiary);
+  }
+
+  .materialsToolbar {
+    background: var(--bg-tertiary);
+  }
+
+  .searchBox {
+    background: var(--bg-primary);
+  }
+
+  .materialCardGrid {
+    &:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .cardThumbnail {
+      .favoriteBtn {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+      }
+    }
+  }
+
+  .materialsList {
+    background: var(--bg-tertiary);
+  }
+
+  .listHeader {
+    background: var(--bg-secondary);
+  }
+
+  .contextMenu {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  }
+
+  .filterPanel {
+    background: var(--bg-secondary);
+  }
+
+  .filterTag {
+    background: var(--bg-tertiary);
+  }
+}
+
+// ================================
+// 响应式
+// ================================
+
+@media (max-width: 768px) {
+  .materialsSidebar {
+    display: none;
+  }
+
+  .materialsGrid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--spacing-3);
+  }
+
+  .cardThumbnail {
+    aspect-ratio: 1;
+  }
+
+  .searchBox {
+    max-width: none;
+    flex: 1;
+  }
+
+  .materialsToolbar {
+    flex-wrap: wrap;
+
+    .toolbarLeft,
+    .toolbarRight {
+      flex-wrap: wrap;
+    }
+  }
+}

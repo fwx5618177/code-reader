@@ -1,0 +1,1075 @@
+// ================================
+// WritingSidebar 组件样式
+// 统一的文件夹和文档树结构（VS Code 风格）
+// 上下文菜单通过 Portal 渲染以避免溢出裁剪
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 主容器
+// ================================
+
+.writingSidebar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+// ================================
+// 头部
+// ================================
+
+.sidebarHeader {
+  @include flex-between;
+  padding: var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+.sidebarTitle {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-secondary);
+}
+
+.sidebarCollapseBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.headerActionBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.newBtn {
+  &:hover {
+    background-color: var(--accent-primary);
+    color: var(--text-on-accent);
+  }
+}
+
+.folderBtn {
+  &:hover {
+    color: $color-folder;
+  }
+}
+
+.helpBtn {
+  &:hover {
+    color: var(--accent-secondary);
+  }
+}
+
+.dangerBtn {
+  opacity: 0.6;
+
+  &:hover {
+    background-color: var(--color-error-bg, rgba(255, 85, 85, 0.1));
+    color: var(--color-error, #ff5555);
+    opacity: 1;
+  }
+}
+
+.searchBtn {
+  &.active {
+    background-color: var(--accent-primary);
+    color: var(--text-on-accent);
+  }
+
+  &:hover:not(.active) {
+    color: var(--accent-primary);
+  }
+}
+
+// ================================
+// 搜索区域
+// ================================
+
+.sidebarSearch {
+  padding: var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.searchInputWrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+
+  &:focus-within {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary-alpha);
+  }
+}
+
+.searchIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  min-width: 0;
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+.searchClearBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.searchLoading {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-subtle);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: searchSpin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes searchSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.searchResults {
+  margin-top: var(--spacing-2);
+  max-height: 300px;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.searchResultItem {
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+
+  &:hover,
+  &:focus {
+    background-color: var(--bg-hover);
+    outline: none;
+  }
+
+  & + & {
+    margin-top: var(--spacing-1);
+  }
+}
+
+.resultTitle {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  @include truncate;
+}
+
+.resultSnippet {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+
+  // 搜索高亮样式
+  :global(mark),
+  :global(em),
+  :global(b) {
+    background-color: var(--bg-highlight, rgba(255, 215, 0, 0.3));
+    color: inherit;
+    font-style: normal;
+    font-weight: $font-weight-medium;
+    padding: 0 2px;
+    border-radius: 2px;
+  }
+}
+
+.resultScore {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+.searchNoResults {
+  padding: var(--spacing-3);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+// ================================
+// 内容区域
+// ================================
+
+.sidebarContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  @include scrollbar;
+}
+
+// ================================
+// 树视图
+// ================================
+
+.treeView {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-1);
+  overflow: hidden;
+  min-height: 0; // 对于 flex 子元素很重要
+}
+
+// ================================
+// 虚拟化树视图
+// ================================
+
+.virtualizedTreeView {
+  flex: 1;
+  min-height: 0; // 对于 flex 子元素很重要
+  position: relative;
+  // 允许上下文菜单溢出（它们通过 Portal 渲染）
+  overflow: visible;
+}
+
+.virtualizedTreeList {
+  @include scrollbar;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+
+  // 确保正确渲染项目
+  > div {
+    position: relative;
+    pointer-events: auto;
+  }
+}
+
+// ================================
+// 树节点
+// ================================
+
+.treeNode {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  padding-right: var(--spacing-1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+  position: relative;
+  min-height: 28px;
+  height: 28px; // 固定高度以保持虚拟化一致性
+  box-sizing: border-box;
+  white-space: nowrap;
+  user-select: none;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+
+    .nodeMenuBtn {
+      opacity: 1;
+    }
+  }
+
+  &:focus {
+    outline: none;
+    background-color: var(--bg-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: -2px;
+  }
+}
+
+.selected {
+  background-color: var(--bg-selected);
+  color: var(--text-primary);
+
+  .nodeMenuBtn {
+    opacity: 0.7;
+  }
+
+  &:hover {
+    background-color: var(--bg-selected);
+  }
+}
+
+.allDocuments {
+  margin-bottom: var(--spacing-1);
+  padding-left: var(--spacing-2);
+  color: var(--text-secondary);
+  font-weight: $font-weight-medium;
+  height: auto; // 允许"所有文档"有灵活的高度
+  min-height: 28px;
+  flex-shrink: 0;
+
+  .nodeIcon {
+    opacity: 0.6;
+  }
+}
+
+// ================================
+// 节点展开/折叠切换
+// ================================
+
+.nodeToggle {
+  @include button-reset;
+  @include flex-center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: $transition-colors;
+  border-radius: var(--radius-sm);
+
+  &:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-active);
+  }
+
+  &:focus {
+    outline: none;
+  }
+}
+
+// ================================
+// 节点图标
+// ================================
+
+.nodeIcon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.folderIcon {
+  color: $color-folder;
+}
+
+.documentIcon {
+  color: var(--text-muted);
+}
+
+.documentIconWrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.indicator {
+  position: absolute;
+  bottom: -2px;
+  right: -4px;
+}
+
+.pinned {
+  color: var(--accent-primary);
+}
+
+.favorite {
+  color: $color-warning;
+}
+
+// ================================
+// 节点名称
+// ================================
+
+.nodeName {
+  @include truncate;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+// ================================
+// 节点徽章（子项计数）
+// ================================
+
+.nodeBadge {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--spacing-1);
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 18px;
+}
+
+// ================================
+// 节点菜单按钮
+// ================================
+
+.nodeMenuBtn {
+  @include button-reset;
+  @include flex-center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-active);
+    color: var(--text-primary);
+    opacity: 1 !important;
+  }
+
+  &:focus {
+    outline: none;
+    opacity: 1;
+  }
+}
+
+// ================================
+// 节点上下文菜单
+// 通过 Portal 渲染以避免溢出裁剪
+// ================================
+
+.nodeContextMenu {
+  // 位置通过 ContextMenuPortal 的内联样式（fixed）设置
+  min-width: 160px;
+  padding: var(--spacing-1);
+  background-color: var(--bg-quaternary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  // z-index 由 ContextMenuPortal 内联设置（10000）
+  pointer-events: auto;
+  animation: contextMenuFadeIn 0.1s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.menuButton {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:focus {
+    outline: none;
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: -2px;
+  }
+
+  svg {
+    flex-shrink: 0;
+    opacity: 0.8;
+  }
+}
+
+.menuButtonDanger {
+  &:hover,
+  &:focus {
+    background-color: var(--color-error-bg);
+    color: var(--color-error);
+  }
+}
+
+.menuDivider {
+  height: 1px;
+  margin: var(--spacing-1) 0;
+  background-color: var(--border-subtle);
+}
+
+// ================================
+// 空状态
+// ================================
+
+.emptyHint {
+  flex: 1;
+  @include flex-center;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-4);
+  text-align: center;
+  color: var(--text-muted);
+
+  svg {
+    opacity: 0.5;
+  }
+
+  p {
+    font-size: var(--font-size-sm);
+    margin: 0;
+  }
+}
+
+// ================================
+// 拖放状态
+// ================================
+
+// 容器上的激活拖动状态
+.isDraggingActive {
+  .treeNode {
+    // 拖动期间稍微降低不透明度以显示上下文
+    transition:
+      background-color 0.15s ease,
+      opacity 0.15s ease,
+      border-color 0.15s ease;
+  }
+}
+
+// 正在拖动的节点
+.isDragging {
+  opacity: 0.5;
+  background-color: var(--bg-tertiary);
+  cursor: grabbing;
+}
+
+// 节点是有效的放置目标
+.isDragOver {
+  position: relative;
+}
+
+// 有效放置指示器
+.canDrop {
+  background-color: rgba(var(--accent-primary-rgb, 0, 122, 204), 0.1);
+}
+
+// 放置位置指示器
+.dropPositionBefore::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 0;
+  height: 2px;
+  background-color: var(--accent-primary);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.dropPositionAfter::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  background-color: var(--accent-primary);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.dropPositionInside {
+  background-color: rgba(var(--accent-primary-rgb, 0, 122, 204), 0.15);
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+
+  &::before,
+  &::after {
+    display: none;
+  }
+}
+
+// 无效放置指示器
+.cannotDrop {
+  background-color: rgba(var(--color-error-rgb, 255, 85, 85), 0.1);
+  cursor: not-allowed;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border: 2px dashed var(--color-error);
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+  }
+}
+
+// 可拖动节点悬停状态
+.draggable {
+  cursor: grab;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+// 文件夹的放置区域视觉反馈
+.folder.isDragOver.canDrop.dropPositionInside {
+  .folderIcon {
+    color: var(--accent-primary);
+    transform: scale(1.1);
+    transition: transform 0.15s ease;
+  }
+}
+
+// 拖动预览（在 JS 中动态渲染）
+.fileTreeDragPreview {
+  // 样式在 dnd.ts 中内联设置
+  // 此类用于未来可能的 CSS 自定义
+}
+
+// ================================
+// 文件类型选择对话框
+// ================================
+
+.fileTypeDialogOverlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--overlay-bg, rgba(0, 0, 0, 0.5));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-modal;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.fileTypeDialog {
+  width: 360px;
+  max-width: 90vw;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  animation: scaleIn 0.15s ease-out;
+  overflow: hidden;
+}
+
+.fileTypeDialogHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-3) var(--spacing-4);
+  border-bottom: 1px solid var(--border-subtle);
+
+  h3 {
+    margin: 0;
+    font-size: var(--font-size-md);
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+}
+
+.fileTypeDialogClose {
+  @include button-reset;
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.fileTypeDialogContent {
+  padding: var(--spacing-2);
+  max-height: 400px;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.fileTypeOption {
+  @include button-reset;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-3);
+  width: 100%;
+  padding: var(--spacing-3);
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    transform 0.1s ease;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+
+  &:active {
+    transform: scale(0.99);
+  }
+
+  &:focus {
+    outline: none;
+    background-color: var(--bg-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: -2px;
+  }
+
+  & + & {
+    margin-top: var(--spacing-1);
+  }
+}
+
+.fileTypeIcon {
+  @include flex-center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  color: var(--accent-primary);
+}
+
+.fileTypeInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fileTypeName {
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+}
+
+.fileTypeDesc {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.fileTypeExt {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.fileTypeDialogFooter {
+  padding: var(--spacing-2) var(--spacing-4) var(--spacing-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.fileTypeHint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+}
+
+// 动画关键帧
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+// ================================
+// 示例按钮样式
+// ================================
+
+.exampleBtn {
+  &:hover {
+    color: var(--accent-primary);
+  }
+}
+
+// ================================
+// 对话框遮罩层（通用）
+// ================================
+
+.dialogOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  // 使用 SCSS 变量，确保在 latexEditorContainer (z-index: 1) 之上
+  z-index: $z-modal;
+  animation: fadeIn 0.15s ease;
+}
+
+// ================================
+// LaTeX 示例对话框样式
+// ================================
+
+.exampleDialog {
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  width: 400px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: scaleIn 0.2s ease;
+}
+
+.exampleDialogHeader {
+  padding: var(--spacing-4);
+  border-bottom: 1px solid var(--border-primary);
+
+  h3 {
+    margin: 0 0 var(--spacing-1) 0;
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+  }
+}
+
+.exampleDialogContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+
+  @include scrollbar;
+}
+
+.exampleItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacing-1);
+  padding: var(--spacing-3);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+  text-align: left;
+  width: 100%;
+
+  &:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    border-color: var(--accent-primary);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.exampleItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: var(--spacing-2);
+}
+
+.exampleName {
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.exampleTag {
+  padding: 2px 6px;
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.exampleTagSmall {
+  background-color: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.exampleTagLarge {
+  background-color: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.exampleTagHuge {
+  background-color: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.exampleDescription {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.exampleSize {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.exampleLoading {
+  font-size: var(--font-size-xs);
+  color: var(--accent-primary);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.exampleDialogFooter {
+  padding: var(--spacing-3) var(--spacing-4);
+  border-top: 1px solid var(--border-primary);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.exampleCancelBtn {
+  padding: var(--spacing-2) var(--spacing-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}

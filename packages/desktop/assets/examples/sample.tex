@@ -1,0 +1,111 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\title{LaTeX 编辑器示例文档}
+\author{Code Reader}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{简介}
+
+这是一个用于测试 LaTeX 编辑器功能的示例文档。本文档包含了常见的 LaTeX 元素，包括文本格式、数学公式、列表和环境等。
+
+\section{文本格式}
+
+LaTeX 支持多种文本格式：
+
+\begin{itemize}
+    \item \textbf{粗体文本} 使用 \texttt{\textbackslash textbf} 命令
+    \item \textit{斜体文本} 使用 \texttt{\textbackslash textit} 命令
+    \item \underline{下划线文本} 使用 \texttt{\textbackslash underline} 命令
+    \item \texttt{等宽字体} 使用 \texttt{\textbackslash texttt} 命令
+\end{itemize}
+
+\section{数学公式}
+
+\subsection{行内公式}
+
+行内公式可以使用美元符号包围，例如 $E = mc^2$ 是爱因斯坦著名的质能方程。勾股定理可以表示为 $a^2 + b^2 = c^2$。
+
+\subsection{块级公式}
+
+著名的欧拉公式：
+$$e^{i\pi} + 1 = 0$$
+
+二次方程的求根公式：
+\begin{equation}
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+\end{equation}
+
+多行对齐公式：
+\begin{align}
+(a + b)^2 &= a^2 + 2ab + b^2 \\
+(a - b)^2 &= a^2 - 2ab + b^2 \\
+(a + b)(a - b) &= a^2 - b^2
+\end{align}
+
+\subsection{复杂数学表达式}
+
+矩阵表示：
+$$
+\mathbf{A} = \begin{pmatrix}
+a_{11} & a_{12} & a_{13} \\
+a_{21} & a_{22} & a_{23} \\
+a_{31} & a_{32} & a_{33}
+\end{pmatrix}
+$$
+
+积分公式：
+$$\int_{0}^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}$$
+
+求和公式：
+$$\sum_{n=1}^{\infty} \frac{1}{n^2} = \frac{\pi^2}{6}$$
+
+\section{列表}
+
+\subsection{无序列表}
+
+\begin{itemize}
+    \item 第一项
+    \item 第二项
+    \item 第三项
+\end{itemize}
+
+\subsection{有序列表}
+
+\begin{enumerate}
+    \item 步骤一：准备环境
+    \item 步骤二：编写代码
+    \item 步骤三：测试验证
+    \item 步骤四：部署上线
+\end{enumerate}
+
+\section{特殊字符}
+
+LaTeX 中的特殊字符需要转义：
+
+\begin{itemize}
+    \item 百分号：\%
+    \item 美元符号：\$
+    \item 与符号：\&
+    \item 井号：\#
+    \item 下划线：\_
+    \item 花括号：\{ \}
+\end{itemize}
+
+\section{希腊字母}
+
+常用希腊字母：$\alpha$, $\beta$, $\gamma$, $\delta$, $\epsilon$, $\theta$, $\lambda$, $\mu$, $\pi$, $\sigma$, $\phi$, $\omega$
+
+大写希腊字母：$\Gamma$, $\Delta$, $\Theta$, $\Lambda$, $\Pi$, $\Sigma$, $\Phi$, $\Omega$
+
+\section{结论}
+
+本文档展示了 LaTeX 编辑器支持的主要功能。通过这些示例，可以验证编辑器的解析和渲染能力是否正常工作。
+
+\end{document}

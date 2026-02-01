@@ -1,0 +1,249 @@
+// ================================
+// CodeMirror 自动补全样式覆盖
+// 统一使用主题变量系统
+// ================================
+
+@use './variables' as *;
+
+// ================================
+// 补全提示框容器
+// ================================
+
+:global {
+  .cm-tooltip-autocomplete {
+    background-color: var(--bg-secondary) !important;
+    border: 1px solid var(--border-primary) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-lg) !important;
+    padding: var(--spacing-1) 0 !important;
+    overflow: hidden;
+    z-index: $z-popover;
+
+    // 补全列表
+    > ul {
+      font-family: var(--font-sans) !important;
+      max-height: 280px !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      list-style: none !important;
+
+      // 补全项
+      > li {
+        padding: var(--spacing-2) var(--spacing-3) !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: var(--spacing-2) !important;
+        line-height: 1.4 !important;
+        cursor: pointer;
+        transition: background-color $transition-fast;
+
+        &:hover {
+          background-color: var(--bg-hover) !important;
+        }
+
+        // 选中状态
+        &[aria-selected='true'] {
+          background-color: var(--bg-selected) !important;
+          color: var(--text-on-accent) !important;
+
+          .cm-completionDetail {
+            color: var(--text-on-accent) !important;
+            opacity: 0.8;
+          }
+
+          .cm-completionMatchedText {
+            color: inherit !important;
+            font-weight: $font-weight-bold !important;
+          }
+        }
+
+        // 补全图标
+        .cm-completionIcon {
+          width: 20px !important;
+          height: 20px !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          font-size: var(--font-size-md) !important;
+          opacity: 1 !important;
+          flex-shrink: 0;
+
+          // 不同类型的图标颜色
+          &-keyword::after {
+            color: var(--code-keyword);
+          }
+
+          &-function::after {
+            color: var(--code-function);
+          }
+
+          &-variable::after {
+            color: var(--code-variable);
+          }
+
+          &-class::after {
+            color: var(--code-class-name);
+          }
+
+          &-property::after {
+            color: var(--code-property);
+          }
+
+          &-constant::after {
+            color: var(--code-number);
+          }
+
+          &-type::after {
+            color: var(--code-class-name);
+          }
+
+          &-text::after {
+            color: var(--text-muted);
+          }
+
+          &-method::after {
+            color: var(--code-function);
+          }
+
+          &-interface::after {
+            color: var(--color-info);
+          }
+
+          &-enum::after {
+            color: var(--color-warning);
+          }
+        }
+
+        // 补全标签
+        .cm-completionLabel {
+          flex: 1 !important;
+          font-size: var(--font-size-sm) !important;
+          font-weight: $font-weight-medium !important;
+          color: var(--text-primary) !important;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        // 补全详情
+        .cm-completionDetail {
+          font-size: var(--font-size-xs) !important;
+          color: var(--text-muted) !important;
+          margin-left: auto !important;
+          font-style: normal !important;
+          flex-shrink: 0;
+          max-width: 120px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        // 匹配文本高亮
+        .cm-completionMatchedText {
+          color: var(--accent-primary) !important;
+          font-weight: $font-weight-semibold !important;
+          text-decoration: none !important;
+        }
+      }
+    }
+
+    // 自定义滚动条
+    @include scrollbar;
+  }
+
+  // ================================
+  // 补全信息面板（文档预览）
+  // ================================
+
+  .cm-completionInfo {
+    padding: var(--spacing-2) var(--spacing-3) !important;
+    font-size: var(--font-size-xs) !important;
+    background-color: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-primary) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-md) !important;
+    color: var(--text-secondary) !important;
+    max-width: 320px !important;
+    max-height: 200px !important;
+    overflow-y: auto !important;
+    line-height: $line-height-normal !important;
+
+    // 代码块
+    code {
+      font-family: var(--font-mono) !important;
+      font-size: 11px;
+      padding: 2px var(--spacing-1);
+      background-color: var(--bg-quaternary);
+      border-radius: var(--radius-sm);
+      color: var(--code-string);
+    }
+
+    // 预格式化代码块
+    pre {
+      margin: var(--spacing-2) 0;
+      padding: var(--spacing-2);
+      background-color: var(--bg-quaternary);
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+
+      code {
+        padding: 0;
+        background: none;
+      }
+    }
+
+    @include scrollbar;
+  }
+
+  // ================================
+  // 补全提示（参数提示）
+  // ================================
+
+  .cm-tooltip-signature {
+    background-color: var(--bg-secondary) !important;
+    border: 1px solid var(--border-primary) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-md) !important;
+    padding: var(--spacing-2) var(--spacing-3) !important;
+    font-size: var(--font-size-sm) !important;
+    color: var(--text-primary) !important;
+
+    .cm-signature-activeParameter {
+      font-weight: $font-weight-semibold;
+      color: var(--accent-primary);
+    }
+  }
+
+  // ================================
+  // 诊断提示（错误/警告）
+  // ================================
+
+  .cm-tooltip-lint {
+    background-color: var(--bg-secondary) !important;
+    border: 1px solid var(--border-primary) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: var(--shadow-md) !important;
+    padding: var(--spacing-2) var(--spacing-3) !important;
+
+    .cm-diagnostic {
+      font-size: var(--font-size-sm) !important;
+      line-height: $line-height-normal;
+      color: var(--text-primary);
+
+      &-error {
+        border-left: 3px solid var(--color-error);
+        padding-left: var(--spacing-2);
+      }
+
+      &-warning {
+        border-left: 3px solid var(--color-warning);
+        padding-left: var(--spacing-2);
+      }
+
+      &-info {
+        border-left: 3px solid var(--color-info);
+        padding-left: var(--spacing-2);
+      }
+    }
+  }
+}

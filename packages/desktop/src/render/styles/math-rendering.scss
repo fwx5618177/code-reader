@@ -1,0 +1,1005 @@
+// ================================
+// 数学公式渲染样式
+// 纯 CSS 实现数学排版
+// 不依赖 KaTeX，完全自主实现
+// ================================
+
+@use './variables' as *;
+
+// ================================
+// 基础公式容器
+// ================================
+
+.math-formula {
+  font-family: 'Times New Roman', 'Cambria Math', 'STIX Two Math', serif;
+  font-style: normal;
+  white-space: nowrap;
+  line-height: 1.4;
+  vertical-align: baseline;
+  font-size: 1.15em;
+
+  // 行内公式
+  &.math-inline {
+    display: inline;
+    font-size: 1.1em;
+  }
+
+  // 块级公式
+  &.math-display {
+    display: block;
+    text-align: center;
+    margin: var(--spacing-4) 0;
+    font-size: 1.3em;
+    overflow-x: auto;
+    padding: var(--spacing-2) 0;
+
+    @include scrollbar;
+  }
+}
+
+// ================================
+// 公式包装器
+// ================================
+
+.math-inline-wrapper {
+  display: inline;
+}
+
+.math-block-wrapper {
+  display: block;
+  text-align: center;
+  margin: var(--spacing-4) 0;
+  padding: var(--spacing-3);
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+
+  @include scrollbar;
+}
+
+// ================================
+// 文本和数字
+// ================================
+
+.math-text {
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-size: 1em;
+}
+
+.math-number {
+  font-family: 'Times New Roman', serif;
+  font-style: normal;
+  font-size: 1.05em;
+}
+
+// ================================
+// 变量
+// ================================
+
+.math-variable {
+  font-style: italic;
+  font-family: 'Times New Roman', 'Cambria Math', serif;
+  font-size: 1.05em;
+}
+
+// ================================
+// 符号
+// ================================
+
+.math-symbol {
+  font-style: normal;
+}
+
+// ================================
+// 运算符
+// ================================
+
+.math-operator {
+  font-style: normal;
+  padding: 0 0.1em;
+}
+
+.math-op-large {
+  font-size: 1.4em;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+// ================================
+// 积分运算符（使用斜式上下标，即上下标在符号右侧）
+// ================================
+
+.math-integral-op {
+  font-style: normal;
+  font-size: 2.4em;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+// 积分的上下标容器 - 使用专门的类名确保斜式布局
+// 积分符号的上下标在符号右侧，而不是正上方/正下方
+.math-integral-script {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  vertical-align: middle !important;
+
+  > .math-script-base {
+    display: inline-block !important;
+    order: 0 !important;
+  }
+
+  > .math-sub {
+    display: inline-block !important;
+    font-size: 0.9em !important;
+    vertical-align: sub !important;
+    position: relative !important;
+    top: 0.2em !important;
+    order: 1 !important;
+    margin-left: -0.05em;
+  }
+
+  > .math-sup {
+    display: inline-block !important;
+    font-size: 0.9em !important;
+    vertical-align: super !important;
+    position: relative !important;
+    top: -0.3em !important;
+    order: 2 !important;
+    margin-left: 0;
+  }
+
+  // 同时有上下标时 - 上下标在积分符号右侧垂直堆叠
+  // 布局：∫ 然后右侧是 b(上) 和 a(下) 堆叠
+  > .math-scripts {
+    display: inline-flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    vertical-align: middle !important;
+    margin-left: -0.05em;
+    line-height: 1;
+
+    > .math-sup {
+      display: block !important;
+      font-size: 0.9em !important;
+      line-height: 1.2 !important;
+      order: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    > .math-sub {
+      display: block !important;
+      font-size: 0.9em !important;
+      line-height: 1.2 !important;
+      order: 1 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+  }
+}
+
+.math-op-rel {
+  padding: 0 0.25em;
+}
+
+.math-op-bin {
+  padding: 0 0.2em;
+}
+
+// ================================
+// 函数名
+// ================================
+
+.math-function-name {
+  font-family: 'Times New Roman', serif;
+  font-style: normal;
+  margin-right: 0.1em;
+}
+
+.math-function-args {
+  font-style: normal;
+}
+
+// ================================
+// 分数
+// ================================
+
+.math-frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin: 0 0.15em;
+  text-align: center;
+}
+
+.math-frac-num {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.05em 0.25em 0.1em;
+  font-size: 0.85em;
+  min-width: 1em;
+  line-height: 1.2;
+}
+
+.math-frac-line {
+  display: block;
+  width: 100%;
+  height: 1px;
+  background-color: var(--text-primary);
+  min-width: 0.8em;
+  margin: 0;
+}
+
+.math-frac-den {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.1em 0.25em 0.05em;
+  font-size: 0.85em;
+  min-width: 1em;
+  line-height: 1.2;
+}
+
+// ================================
+// 根号
+// ================================
+
+.math-sqrt {
+  display: inline-flex;
+  align-items: stretch;
+  vertical-align: middle;
+}
+
+.math-sqrt-symbol {
+  font-size: 1.2em;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.math-sqrt-content {
+  display: inline-flex;
+  align-items: center;
+  border-top: 1px solid var(--text-primary);
+  padding: 0.1em 0.2em 0;
+  margin-left: -0.1em;
+}
+
+.math-sqrt-nth {
+  .math-sqrt-index {
+    font-size: 0.65em;
+    vertical-align: super;
+    margin-right: -0.3em;
+    position: relative;
+    top: -0.3em;
+  }
+}
+
+// ================================
+// 上下标
+// ================================
+
+.math-script {
+  display: inline-flex;
+  align-items: flex-start;
+  vertical-align: baseline;
+}
+
+.math-script-base {
+  display: inline;
+}
+
+.math-sup {
+  display: inline;
+  font-size: 0.7em;
+  vertical-align: super;
+  line-height: 1;
+}
+
+.math-sub {
+  display: inline;
+  font-size: 0.7em;
+  vertical-align: sub;
+  line-height: 1;
+}
+
+.math-subsup {
+  .math-scripts {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    vertical-align: middle;
+    margin-left: 0.05em;
+
+    .math-sup {
+      vertical-align: baseline;
+      position: relative;
+      top: -0.3em;
+    }
+
+    .math-sub {
+      vertical-align: baseline;
+      position: relative;
+      top: 0.3em;
+    }
+  }
+}
+
+// ================================
+// 极限类运算符（lim, sum, int 等）
+// 下标/上标应在正下方/正上方
+// ================================
+
+.math-limit-op,
+.math-large-op {
+  font-style: normal;
+  font-weight: normal;
+}
+
+// 极限式布局（渲染器输出类名为 math-limit-style）
+// HTML 结构: .math-script.math-limit-style > .math-script-base + .math-sub.math-under
+// 或者: .math-script.math-subsup.math-limit-style > .math-script-base + .math-scripts > (.math-sup.math-over + .math-sub.math-under)
+// 关键：只对直接子元素应用 block 布局，不影响嵌套的下标（如 x_0 中的 0）
+//
+// 期望布局（以 \sum_{i=1}^{n} 或 \lim_{x \to 0} 为例）：
+//     n      <- 上标 (order: -1)
+//     Σ      <- base (order: 0)
+//    i=1     <- 下标 (order: 1)
+.math-script.math-limit-style {
+  // 使用 flexbox 垂直堆叠布局
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  vertical-align: middle !important;
+  text-align: center !important;
+
+  // 基础元素（如 lim, sum, Σ）- 直接子元素
+  > .math-script-base {
+    display: block !important;
+    order: 0 !important;
+    line-height: 1.2;
+    flex-shrink: 0;
+
+    // 大型运算符符号放大显示
+    .math-op-large {
+      font-size: 2.6em;
+      line-height: 1;
+    }
+
+    // lim 等函数名放大
+    .math-function-name {
+      font-size: 1.2em;
+    }
+  }
+
+  // 下标在基础元素正下方 - 匹配所有直接子元素下标
+  > .math-sub {
+    display: block !important;
+    font-size: 0.9em !important;
+    line-height: 1.1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    vertical-align: baseline !important;
+    position: static !important;
+    top: auto !important;
+    order: 1 !important;
+    flex-shrink: 0;
+    text-align: center;
+  }
+
+  // 上标在基础元素正上方 - 匹配所有直接子元素上标
+  > .math-sup {
+    display: block !important;
+    font-size: 0.9em !important;
+    line-height: 1.1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    vertical-align: baseline !important;
+    position: static !important;
+    top: auto !important;
+    order: -1 !important;
+    flex-shrink: 0;
+    text-align: center;
+  }
+}
+
+// 极限式布局 - 同时有上下标的情况（使用 Grid 布局）
+.math-script.math-subsup.math-limit-style {
+  display: inline-grid !important;
+  grid-template-rows: auto auto auto;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-items: center;
+
+  > .math-script-base {
+    grid-row: 2;
+    grid-column: 1;
+    display: block !important;
+
+    .math-op-large {
+      font-size: 2.6em;
+      line-height: 1;
+    }
+
+    .math-function-name {
+      font-size: 1.2em;
+    }
+  }
+
+  > .math-scripts {
+    display: contents !important;
+
+    > .math-sup,
+    > .math-sup.math-over {
+      grid-row: 1;
+      grid-column: 1;
+      display: block !important;
+      font-size: 0.9em;
+      line-height: 1.1;
+      margin: 0 !important;
+      text-align: center;
+    }
+
+    > .math-sub,
+    > .math-sub.math-under {
+      grid-row: 3;
+      grid-column: 1;
+      display: block !important;
+      font-size: 0.9em;
+      line-height: 1.1;
+      margin: 0 !important;
+      text-align: center;
+    }
+  }
+}
+
+// 保留旧的类名以兼容可能存在的旧代码
+// 注意：直接复制样式而不是使用 @extend，因为复合选择器的 @extend 可能导致编译问题
+.math-limit-script {
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center;
+  vertical-align: middle;
+  text-align: center;
+
+  .math-script-base {
+    display: block !important;
+    line-height: 1.2;
+    order: 1;
+  }
+}
+
+// ================================
+// 矩阵
+// ================================
+
+.math-matrix {
+  display: inline-flex;
+  align-items: stretch;
+  vertical-align: middle;
+  position: relative;
+}
+
+.math-matrix-left,
+.math-matrix-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Times New Roman', 'Cambria Math', serif;
+  font-weight: 100;
+  line-height: 1;
+  // 默认字体大小 - 使用 stretch 让括号自动适应高度
+  font-size: 1.5em;
+  // 让括号在垂直方向上拉伸以匹配内容高度
+  align-self: stretch;
+  // 减少水平空间
+  margin: 0;
+  padding: 0.1em 0;
+  // 确保括号颜色正确
+  color: var(--text-primary);
+}
+
+.math-matrix-left {
+  margin-right: 0.15em;
+}
+
+.math-matrix-right {
+  margin-left: 0.15em;
+}
+
+// 根据行数动态调整括号大小 - 使用 :has() 在父容器上
+// HTML 结构: .math-matrix > .math-matrix-left + .math-matrix-table + .math-matrix-right
+.math-matrix {
+  // 2 行矩阵
+  &:has(.math-matrix-table tr:nth-child(2)) {
+    > .math-matrix-left,
+    > .math-matrix-right {
+      font-size: 1.8em;
+    }
+  }
+
+  // 3 行矩阵
+  &:has(.math-matrix-table tr:nth-child(3)) {
+    > .math-matrix-left,
+    > .math-matrix-right {
+      font-size: 2.2em;
+    }
+  }
+
+  // 4 行及以上矩阵
+  &:has(.math-matrix-table tr:nth-child(4)) {
+    > .math-matrix-left,
+    > .math-matrix-right {
+      font-size: 2.6em;
+    }
+  }
+
+  // 5 行及以上矩阵
+  &:has(.math-matrix-table tr:nth-child(5)) {
+    > .math-matrix-left,
+    > .math-matrix-right {
+      font-size: 3em;
+    }
+  }
+}
+
+.math-matrix-table {
+  border-collapse: collapse;
+  margin: 0 0.2em;
+  display: inline-table;
+}
+
+.math-matrix-row {
+  vertical-align: middle;
+}
+
+.math-matrix-cell {
+  padding: 0.25em 0.5em;
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+// ================================
+// Cases 分支
+// ================================
+
+.math-cases {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.math-cases-left {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Times New Roman', 'Cambria Math', serif;
+  font-size: 3em;
+  line-height: 1;
+  font-weight: 100;
+  margin-right: 0.2em;
+  color: var(--text-primary);
+}
+
+// 根据行数动态调整大括号大小
+.math-cases:has(.math-cases-row:nth-child(3)) .math-cases-left {
+  font-size: 3.5em;
+}
+
+.math-cases:has(.math-cases-row:nth-child(4)) .math-cases-left {
+  font-size: 4em;
+}
+
+.math-cases-table {
+  border-collapse: collapse;
+}
+
+.math-cases-row {
+  vertical-align: middle;
+}
+
+.math-cases-result {
+  padding: 0.2em 0.4em;
+  text-align: left;
+}
+
+.math-cases-condition {
+  padding: 0.2em 0.4em;
+  text-align: left;
+  color: var(--text-secondary);
+
+  // 只在有内容时显示 "if"
+  &:not(:empty)::before {
+    content: 'if ';
+    font-style: italic;
+    color: var(--text-muted);
+  }
+}
+
+// ================================
+// Aligned 对齐（多行对齐公式）
+// ================================
+
+.math-aligned {
+  display: inline-block;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.math-aligned-table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  margin: 0 auto;
+  display: inline-table;
+}
+
+.math-aligned-row {
+  vertical-align: baseline;
+  line-height: 2;
+}
+
+.math-aligned-cell {
+  padding: 0.2em 0.25em;
+  vertical-align: baseline;
+  white-space: nowrap;
+
+  // 奇数列靠右对齐（到等号前）
+  &.math-align-right {
+    text-align: right;
+    padding-right: 0.1em;
+  }
+
+  // 偶数列靠左对齐（从等号后）
+  &.math-align-left {
+    text-align: left;
+    padding-left: 0.1em;
+  }
+
+  // 第一列不需要左边距
+  &:first-child {
+    padding-left: 0;
+  }
+
+  // 最后一列不需要右边距
+  &:last-child {
+    padding-right: 0;
+  }
+}
+
+// ================================
+// Gathered 居中（多行居中公式）
+// ================================
+
+.math-gathered {
+  display: inline-block;
+  vertical-align: middle;
+  text-align: center;
+}
+
+.math-gathered-table {
+  border-collapse: collapse;
+  margin: 0 auto;
+  display: inline-table;
+}
+
+.math-gathered-row {
+  line-height: 2;
+}
+
+.math-gathered-cell {
+  padding: 0.2em 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+// ================================
+// 换行节点（普通公式中的 \\ 渲染为换行）
+// ================================
+
+.math-linebreak {
+  display: block;
+  height: 0.5em;
+  content: '';
+}
+
+// 在块级公式中，换行应该创建视觉分隔
+.math-display {
+  .math-linebreak {
+    display: block;
+    height: 0.8em;
+  }
+}
+
+// ================================
+// Split 环境
+// ================================
+
+.math-split {
+  display: inline-block;
+  vertical-align: middle;
+  text-align: left;
+}
+
+.math-split-table {
+  border-collapse: collapse;
+  margin: 0 auto;
+}
+
+.math-split-row {
+  line-height: 2.2;
+}
+
+.math-split-cell {
+  padding: 0.1em 0.2em;
+  vertical-align: baseline;
+
+  &.math-align-right {
+    text-align: right;
+  }
+
+  &.math-align-left {
+    text-align: left;
+  }
+}
+
+// ================================
+// 空格
+// ================================
+
+.math-space {
+  display: inline-block;
+}
+
+// ================================
+// 重音符号
+// ================================
+
+.math-accent {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: baseline;
+}
+
+.math-accent-base {
+  display: inline;
+}
+
+.math-accent-mark {
+  display: inline;
+  font-size: 0.8em;
+  line-height: 0.5;
+  margin-bottom: -0.5em;
+  position: relative;
+  top: -0.8em;
+}
+
+// ================================
+// 分隔符
+// ================================
+
+.math-delimited {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.math-delimiter-left,
+.math-delimiter-right {
+  font-size: 1.2em;
+  line-height: 1;
+  font-weight: 300;
+}
+
+.math-delimiter-content {
+  display: inline;
+  padding: 0 0.1em;
+}
+
+// ================================
+// 错误状态
+// ================================
+
+.math-error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1) var(--spacing-2);
+  background-color: var(--color-error-bg);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+}
+
+.math-error-icon {
+  font-size: 0.9em;
+}
+
+.math-error-source {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background-color: var(--bg-tertiary);
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.math-error-raw {
+  color: var(--color-error);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+// ================================
+// 主题适配
+// ================================
+
+:root[data-theme='dark'] {
+  .math-frac-num {
+    border-bottom-color: var(--text-primary);
+  }
+
+  .math-sqrt-content {
+    border-top-color: var(--text-primary);
+  }
+
+  .math-block-wrapper {
+    background-color: var(--bg-tertiary);
+  }
+}
+
+// ================================
+// 响应式适配
+// ================================
+
+@media (max-width: 768px) {
+  .math-formula {
+    &.math-display {
+      font-size: 1em;
+    }
+  }
+
+  .math-block-wrapper {
+    padding: var(--spacing-2);
+    margin: var(--spacing-3) 0;
+  }
+}
+
+// ================================
+// TOC 目录样式
+// ================================
+
+.latex-toc {
+  margin: var(--spacing-4) 0;
+  padding: var(--spacing-4);
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.latex-toc-title {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-bottom: var(--spacing-3);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: var(--spacing-2);
+}
+
+.latex-toc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.latex-toc-item {
+  padding: var(--spacing-1) 0;
+  line-height: 1.6;
+
+  a {
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: var(--color-primary);
+      text-decoration: underline;
+    }
+  }
+}
+
+// 不同层级的样式
+.latex-toc-chapter {
+  font-weight: 600;
+  font-size: 1.05em;
+}
+
+.latex-toc-section {
+  font-weight: 500;
+}
+
+.latex-toc-subsection {
+  font-weight: normal;
+  font-size: 0.95em;
+}
+
+.latex-toc-subsubsection {
+  font-weight: normal;
+  font-size: 0.9em;
+  color: var(--text-secondary);
+}
+
+.latex-toc-paragraph,
+.latex-toc-subparagraph {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+// TOC 占位符样式
+.latex-toc-placeholder {
+  padding: var(--spacing-3);
+  background-color: var(--bg-tertiary);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+// ================================
+// 矩阵和 cases 环境额外样式
+// ================================
+
+.latex-math-matrix,
+.latex-math-cases {
+  .math-matrix,
+  .math-cases {
+    margin: 0 auto;
+  }
+}
+
+.latex-math-align {
+  text-align: center;
+}
+
+.latex-math-gather {
+  text-align: center;
+}
+
+.latex-math-equation {
+  text-align: center;
+}
+
+// ================================
+// 打印样式
+// ================================
+
+@media print {
+  .math-block-wrapper {
+    background-color: transparent;
+    border: none;
+  }
+
+  .math-error {
+    border: 1px solid #ccc;
+    background-color: #f5f5f5;
+  }
+
+  .latex-toc {
+    background-color: transparent;
+    border: 1px solid #ccc;
+  }
+}
