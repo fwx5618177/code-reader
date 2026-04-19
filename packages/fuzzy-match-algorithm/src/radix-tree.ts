@@ -369,11 +369,14 @@ export class RadixTree<T = CompletionMeta> {
     }
     // 如果叶子节点只有一个子节点且不是终端，合并
     else if (leaf.children.size === 1 && !leaf.isTerminal) {
-      const [, child] = [...leaf.children.entries()][0];
-      leaf.label = leaf.label + child.label;
-      leaf.children = child.children;
-      leaf.values = child.values;
-      leaf.isTerminal = child.isTerminal;
+      const entry = [...leaf.children.entries()][0];
+      if (entry) {
+        const [, child] = entry;
+        leaf.label = leaf.label + child.label;
+        leaf.children = child.children;
+        leaf.values = child.values;
+        leaf.isTerminal = child.isTerminal;
+      }
     }
   }
 

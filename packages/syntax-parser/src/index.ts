@@ -3,7 +3,7 @@
 //
 // 提供高性能增量解析功能：
 // - 增量解析：基于 Lezer 的 O(log n) 增量解析
-// - Tree-sitter 适配器：可选的高性能解析器
+// - LaTeX Block Scanner：快速文档结构扫描
 // - AST 缓存：LRU 缓存策略，节点级缓存
 // - Worker 支持：后台解析，避免阻塞主线程
 // - 手写 LaTeX 增量解析器：无需依赖 @lezer/latex
@@ -73,7 +73,6 @@ export {
   // 解析器
   LezerIncrementalParser,
   createLezerParser,
-  resetNodeIdCounter,
   // 缓存
   ASTCache,
   createASTCache,
@@ -81,9 +80,6 @@ export {
   createLightweightCache,
   // 便捷函数
   createCachedLezerParser,
-  createLatexLezerParserFromLR,
-  createMarkdownLezerParser,
-  createJavaScriptLezerParser,
   // 工具函数
   estimateSize,
   hashString,
@@ -145,59 +141,88 @@ export {
 } from './lezer';
 
 // ================================
-// Tree-sitter 适配器
+// LaTeX Block Scanner（块级结构扫描器）
 // ================================
 
 export {
-  // 适配器类
-  TreeSitterAdapter,
-  createTreeSitterAdapter,
-  resetTreeSitterNodeIdCounter,
-  // 纯 TypeScript 实现的 Tree-sitter 解析器（不依赖 WASM）
-  TSTreeSitterParser,
-  createTSTreeSitterParser,
-  resetTSNodeIdCounter,
+  // 块级扫描器
+  LatexBlockScanner,
+  createLatexBlockScanner,
+  // 后向兼容别名
+  LatexBlockScanner as TSTreeSitterParser,
+  createLatexBlockScanner as createTSTreeSitterParser,
   // 语言配置
-  TREE_SITTER_LANGUAGES,
+  SUPPORTED_LANGUAGES,
   getLanguageByExtension,
   getLanguageByName,
-} from './tree-sitter';
+  isLanguageSupported,
+} from './block-scanner';
 
 export type {
-  // 纯 TS Tree-sitter 类型
+  // Block scanner 类型
   TSNode,
   TSTree,
-  TSTreeSitterConfig,
-  // 语言配置
-  TreeSitterLanguageConfig,
+  LatexBlockScannerConfig,
+  LatexBlockScannerConfig as TSTreeSitterConfig,
   // 位置和范围
   TreeSitterPoint,
   TreeSitterRange,
-  TreeSitterInputEdit,
-  // 节点类型
-  TreeSitterNode,
-  TreeSitterTreeCursor,
-  TreeSitterTree,
-  TreeSitterLanguage,
-  TreeSitterParser,
-  TreeSitterInput,
-  TreeSitterParseOptions,
-  // 查询类型
-  TreeSitterQuery,
-  TreeSitterQueryOptions,
-  TreeSitterQueryMatch,
-  TreeSitterQueryCapture,
-  // 适配器配置
-  TreeSitterAdapterConfig,
-  TreeSitterParseState,
-  TreeSitterNodeMapping,
-  // 接口
-  ITreeSitterParser,
-  // 工具类型
-  TreeSitterNodeTransformer,
-  TreeSitterInitState,
-  TreeSitterErrorType,
-} from './tree-sitter';
+  LanguageConfig,
+} from './block-scanner';
+
+// ================================
+// 语言注册系统
+// ================================
+
+export {
+  // 注册中心
+  LanguageRegistry,
+  getLanguageRegistry,
+  registerLanguage,
+  createParserForFile,
+  // 高亮引擎
+  HighlightEngine,
+  createHighlightEngine,
+  // Lezer 适配器（快速接入新语言）
+  createLezerLanguageContribution,
+  // 内置语言
+  LATEX_CONTRIBUTION,
+  LATEX_HIGHLIGHT_RULES,
+  LATEX_LANGUAGE_CONFIGURATION,
+  // 适配器
+  BlockScannerAdapter,
+  BlockScannerAdapter as TreeSitterParserAdapter,
+  // 初始化
+  initBuiltinLanguages,
+} from './language-registry';
+
+export type {
+  // 语言标识
+  LanguageId,
+  // Token 类型
+  TokenKind,
+  TokenModifier,
+  HighlightToken,
+  HighlightResult,
+  // 高亮规则
+  HighlightRule,
+  HighlightCondition,
+  // 解析器接口
+  ILanguageParser,
+  LanguageParserFactory,
+  // 语言贡献
+  LanguageContribution,
+  // 语言配置
+  LanguageConfiguration,
+  AutoClosingPair,
+  IndentationRules,
+  FoldingMarkers,
+  // Lezer 适配器选项
+  LezerLanguageContributionOptions,
+  // 事件
+  LanguageRegistryEvent,
+  LanguageRegistryListener,
+} from './language-registry';
 
 // ================================
 // 文本缓冲区已移至 @code-reader/text-buffer
@@ -218,13 +243,7 @@ import {
   getLatexLezerParser,
 } from './lezer';
 
-import {
-  TreeSitterAdapter,
-  createTreeSitterAdapter,
-  TREE_SITTER_LANGUAGES,
-  TSTreeSitterParser,
-  createTSTreeSitterParser,
-} from './tree-sitter';
+import { LatexBlockScanner, createLatexBlockScanner, SUPPORTED_LANGUAGES } from './block-scanner';
 
 // 文本缓冲区已移至 @code-reader/text-buffer，不再从此处导出
 
@@ -233,33 +252,22 @@ import {
 // ================================
 
 /**
- * Lezer vs Tree-sitter 选择指南：
+ * 解析器选择指南：
  *
- * 使用 Lezer（推荐，当前默认）：
- * - 纯 Web 应用
- * - 与 CodeMirror 6 集成
- * - 包体积敏感
- * - 中等规模文档（< 1MB）
+ * 使用 Lezer（推荐，真正增量解析）：
+ * - 需要外部 LRParser 语法，适合有 Lezer 生态的语言
+ * - O(log n) 增量解析，性能最优
+ * - 与 CodeMirror 6 深度集成
  *
- * 使用 Tree-sitter：
- * - Electron/Native 应用
- * - 需要解析超大文件（> 1MB）
- * - 需要与 GitHub/Neovim 保持语法一致
- * - 对解析性能有极高要求
+ * 使用手写 LaTeX 解析器 (LatexLezerParser)：
+ * - 无需任何外部依赖
+ * - 完整的 LaTeX 语法支持（token 级解析）
+ * - 适合语法高亮和深度代码分析
  *
- * 使用手写 LaTeX 解析器：
- * - 无需安装 @lezer/latex 依赖
- * - 完整的 LaTeX 语法支持
- * - 支持增量解析
- * - 错误恢复机制
- *
- * 性能对比（参考值）：
- * | 场景 | Lezer | Tree-sitter | 手写 LaTeX |
- * |-----|-------|-------------|-----------|
- * | 100KB 增量解析 | < 5ms | < 2ms | < 10ms |
- * | 1MB 完整解析 | < 100ms | < 30ms | < 150ms |
- * | 包体积 | ~50KB | ~300KB（含 WASM）| ~20KB |
- * | 初始化时间 | 即时 | 需加载 WASM | 即时 |
+ * 使用 LaTeX Block Scanner (LatexBlockScanner)：
+ * - 块级粒度，适合文档大纲/结构导航
+ * - 速度快，适合实时预览
+ * - 不适合精细语法高亮
  */
 
 // ================================
@@ -278,12 +286,8 @@ export default {
   LatexLezerParser,
   getLatexLezerParser,
 
-  // Tree-sitter 适配器（需要 WASM）
-  TreeSitterAdapter,
-  createTreeSitterAdapter,
-  TREE_SITTER_LANGUAGES,
-
-  // 纯 TypeScript Tree-sitter 解析器（不需要 WASM，推荐大文件使用）
-  TSTreeSitterParser,
-  createTSTreeSitterParser,
+  // LaTeX Block Scanner
+  LatexBlockScanner,
+  createLatexBlockScanner,
+  SUPPORTED_LANGUAGES,
 };

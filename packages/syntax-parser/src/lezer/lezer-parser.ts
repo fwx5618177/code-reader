@@ -79,23 +79,6 @@ interface ParseState {
 // 工具函数
 // ================================
 
-/** 节点 ID 计数器 */
-let nodeIdCounter = 0;
-
-/**
- * 生成唯一节点 ID
- */
-function generateNodeId(): string {
-  return `lezer_node_${++nodeIdCounter}`;
-}
-
-/**
- * 重置节点 ID 计数器
- */
-export function resetNodeIdCounter(): void {
-  nodeIdCounter = 0;
-}
-
 /**
  * 计算字符串哈希值（FNV-1a）
  */
@@ -156,6 +139,9 @@ export class LezerIncrementalParser {
   /** 配置 */
   private readonly config: Required<LezerParserConfig>;
 
+  /** 节点 ID 计数器（实例级，支持并发安全） */
+  private nodeIdCounter = 0;
+
   /** 默认配置 */
   private static readonly DEFAULT_CONFIG: Omit<Required<LezerParserConfig>, 'parser' | 'language'> =
     {
@@ -189,6 +175,20 @@ export class LezerIncrementalParser {
   // ================================
   // 公共方法
   // ================================
+
+  /**
+   * 生成唯一节点 ID（实例级，避免并发 ID 冲突）
+   */
+  private generateNodeId(): string {
+    return `lezer_node_${++this.nodeIdCounter}`;
+  }
+
+  /**
+   * 重置节点 ID 计数器（仅用于测试）
+   */
+  resetNodeIdCounter(): void {
+    this.nodeIdCounter = 0;
+  }
 
   /**
    * 解析完整文档
@@ -365,7 +365,7 @@ export class LezerIncrementalParser {
       version: 0,
       nodeMap: new Map(),
     };
-    resetNodeIdCounter();
+    this.resetNodeIdCounter();
   }
 
   // ================================
@@ -463,7 +463,7 @@ export class LezerIncrementalParser {
    */
   private treeToAST(tree: Tree, content: string): ASTRoot<ASTNode> {
     const nodes = new Map<string, ASTNode>();
-    const rootId = generateNodeId();
+    const rootId = this.generateNodeId();
 
     // 遍历树并创建节点
     const cursor = tree.cursor();
@@ -483,7 +483,7 @@ export class LezerIncrementalParser {
 
     // 深度优先遍历
     do {
-      const nodeId = generateNodeId();
+      const nodeId = this.generateNodeId();
       const nodeContent = content.slice(cursor.from, cursor.to);
       const nodeHash = hashString(nodeContent);
 
@@ -583,7 +583,7 @@ export class LezerIncrementalParser {
    * 创建空 AST
    */
   private createEmptyAST(): ASTRoot<ASTNode> {
-    const rootId = generateNodeId();
+    const rootId = this.generateNodeId();
     const rootNode: ASTNode = {
       type: 'root',
       id: rootId,

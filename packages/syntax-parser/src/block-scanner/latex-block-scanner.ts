@@ -1,11 +1,13 @@
 // ================================
-// 纯 TypeScript 实现的 Tree-sitter 风格增量解析器
+// LaTeX Block Scanner
+//
+// 基于正则匹配的 LaTeX 文档块级结构扫描器
+// 用于快速提取文档大纲/结构（section、environment、math 等）
 //
 // 特点：
-// 1. 不依赖 WASM，完全使用 TypeScript 实现
-// 2. 支持真正的增量解析
-// 3. 与 LezerIncrementalParser 接口兼容
-// 4. 适用于大型文档的高性能解析
+// 1. 零依赖，纯 TypeScript 实现
+// 2. 块级粒度，适合文档大纲和结构导航
+// 3. 与 ILanguageParser 接口兼容
 // ================================
 
 import type {
@@ -17,7 +19,6 @@ import type {
   ParseWarning,
   ParserConfig,
   TextChangeSet,
-  Position,
 } from '../types';
 
 // ================================
@@ -95,8 +96,8 @@ interface NodeMapping {
 }
 
 /** 解析器配置 */
-export interface TSTreeSitterConfig extends ParserConfig {
-  /** 语言名称 */
+export interface LatexBlockScannerConfig extends ParserConfig {
+  /** 语言名称（仅支持 latex） */
   language?: string;
   /** 最大缓存节点数 */
   maxCachedNodes?: number;
@@ -140,43 +141,9 @@ const LATEX_BLOCK_PATTERNS: RegExp[] = [
   /\n\s*\n/,
 ];
 
-/** 内联元素模式（保留供未来扩展使用） */
-const _INLINE_PATTERNS: RegExp[] = [
-  /\$[^$\n]+\$/,
-  /\\textbf\{[^}]*\}/,
-  /\\textit\{[^}]*\}/,
-  /\\emph\{[^}]*\}/,
-  /\\underline\{[^}]*\}/,
-  /\\texttt\{[^}]*\}/,
-  /\\cite\{[^}]*\}/,
-  /\\ref\{[^}]*\}/,
-  /\\label\{[^}]*\}/,
-  /\\href\{[^}]*\}\{[^}]*\}/,
-  /\\url\{[^}]*\}/,
-];
-// Export to prevent unused variable warning
-export { _INLINE_PATTERNS as INLINE_PATTERNS };
-
 // ================================
 // 工具函数
 // ================================
-
-/** 节点 ID 计数器 */
-let nodeIdCounter = 0;
-
-/**
- * 生成唯一节点 ID
- */
-function generateNodeId(): string {
-  return `ts_node_${++nodeIdCounter}`;
-}
-
-/**
- * 重置节点 ID 计数器
- */
-export function resetNodeIdCounter(): void {
-  nodeIdCounter = 0;
-}
 
 /**
  * 计算字符串哈希值（FNV-1a）
@@ -190,27 +157,6 @@ function hashString(str: string): string {
   }
   return hash.toString(16);
 }
-
-/**
- * 根据偏移量计算行列位置（保留供未来使用）
- */
-function _offsetToPosition(content: string, offset: number): Position {
-  let line = 0;
-  let column = 0;
-
-  for (let i = 0; i < content.length && i < offset; i++) {
-    if (content[i] === '\n') {
-      line++;
-      column = 0;
-    } else {
-      column++;
-    }
-  }
-
-  return { line, column, offset };
-}
-// Export to prevent unused variable warning
-export { _offsetToPosition as offsetToPosition };
 
 /**
  * 根据偏移量计算行列（使用索引加速）
@@ -255,15 +201,15 @@ function buildLineIndex(content: string): number[] {
 // ================================
 
 /**
- * 纯 TypeScript 实现的 Tree-sitter 风格增量解析器
+ * LaTeX 块级结构扫描器
  *
  * 核心特性：
- * 1. 真正的增量解析：只重新解析变更的部分
+ * 1. 块级粒度扫描：提取 section、environment、math 等结构
  * 2. 语法树缓存：重用未变更的节点
- * 3. AST 映射：将语法树转换为统一的 AST 格式
+ * 3. AST 映射：将扫描结果转换为统一 AST 格式
  * 4. 错误恢复：自动处理语法错误
  */
-export class TSTreeSitterParser {
+export class LatexBlockScanner {
   /** 语言名称 */
   readonly language: string;
 
@@ -271,10 +217,13 @@ export class TSTreeSitterParser {
   private state: ParseState;
 
   /** 配置 */
-  private readonly config: Required<TSTreeSitterConfig>;
+  private readonly config: Required<LatexBlockScannerConfig>;
 
   /** 块级模式（存储供增量解析扩展使用） */
   private readonly _blockPatterns: RegExp[];
+
+  /** 节点 ID 计数器（实例级，支持并发安全） */
+  private nodeIdCounter = 0;
 
   /** 获取块级模式 */
   get blockPatterns(): RegExp[] {
@@ -282,7 +231,7 @@ export class TSTreeSitterParser {
   }
 
   /** 默认配置 */
-  private static readonly DEFAULT_CONFIG: Omit<Required<TSTreeSitterConfig>, 'language'> = {
+  private static readonly DEFAULT_CONFIG: Omit<Required<LatexBlockScannerConfig>, 'language'> = {
     strict: false,
     maxDepth: 100,
     timeout: 10000,
@@ -294,9 +243,9 @@ export class TSTreeSitterParser {
     blockPatterns: LATEX_BLOCK_PATTERNS,
   };
 
-  constructor(config?: TSTreeSitterConfig) {
+  constructor(config?: LatexBlockScannerConfig) {
     this.config = {
-      ...TSTreeSitterParser.DEFAULT_CONFIG,
+      ...LatexBlockScanner.DEFAULT_CONFIG,
       language: 'latex',
       ...config,
     };
@@ -315,6 +264,20 @@ export class TSTreeSitterParser {
   // ================================
   // 公共方法
   // ================================
+
+  /**
+   * 生成唯一节点 ID（实例级，避免并发 ID 冲突）
+   */
+  private generateNodeId(): string {
+    return `bs_node_${++this.nodeIdCounter}`;
+  }
+
+  /**
+   * 重置节点 ID 计数器（仅用于测试）
+   */
+  resetNodeIdCounter(): void {
+    this.nodeIdCounter = 0;
+  }
 
   /**
    * 解析完整文档
@@ -459,7 +422,7 @@ export class TSTreeSitterParser {
       };
     } catch (error) {
       // 增量解析失败，回退到完整解析
-      console.warn('[TSTreeSitter] 增量解析失败，回退到完整解析:', error);
+      // 增量解析失败，回退到完整解析
       const result = this.parse(content);
       return {
         ...result,
@@ -504,7 +467,7 @@ export class TSTreeSitterParser {
       nodeMap: new Map(),
       lineIndex: [0],
     };
-    resetNodeIdCounter();
+    this.resetNodeIdCounter();
   }
 
   // ================================
@@ -515,7 +478,7 @@ export class TSTreeSitterParser {
    * 解析文档
    */
   private parseDocument(content: string, lineIndex: number[]): TSTree {
-    const rootId = generateNodeId();
+    const rootId = this.generateNodeId();
 
     // 分析文档结构
     const blocks = this.tokenizeBlocks(content, lineIndex);
@@ -569,7 +532,7 @@ export class TSTreeSitterParser {
         const wsText = wsMatch[0];
         // 检查是否为段落分隔符（两个以上换行）
         if (/\n\s*\n/.test(wsText)) {
-          const wsId = generateNodeId();
+          const wsId = this.generateNodeId();
           blocks.push({
             type: 'ParagraphBreak',
             id: wsId,
@@ -670,7 +633,7 @@ export class TSTreeSitterParser {
       /^\\(chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\{([^}]*)\}/
     );
     if (sectionMatch) {
-      const sectionName = sectionMatch[1];
+      const sectionName = sectionMatch[1]!;
       // 使用 SectionXxx 前缀来区分章节命令和文本段落
       const type = 'Section' + sectionName.charAt(0).toUpperCase() + sectionName.slice(1);
       return this.createBlockNode(
@@ -750,6 +713,7 @@ export class TSTreeSitterParser {
 
   /**
    * 匹配段落（直到下一个块级元素或段落分隔符）
+   * 使用 startsWith/indexOf 避免 O(n²) 字符串分配
    */
   private matchParagraph(
     content: string,
@@ -757,99 +721,126 @@ export class TSTreeSitterParser {
     lineIndex: number[]
   ): { node: TSNode; endPos: number } | null {
     let endPos = pos;
-    let text = '';
 
     while (endPos < content.length) {
-      const remaining = content.slice(endPos);
+      const ch = content[endPos]!;
 
-      // 检查段落分隔符
-      const paraBreakMatch = remaining.match(/^\n\s*\n/);
-      if (paraBreakMatch) {
+      // 检查段落分隔符：\n 后跟空白和 \n
+      if (ch === '\n') {
+        let j = endPos + 1;
+        while (
+          j < content.length &&
+          (content[j] === ' ' || content[j] === '\t' || content[j] === '\r')
+        )
+          j++;
+        if (j < content.length && content[j] === '\n') break;
+      }
+
+      // 检查块级元素开始（仅在 \ 或 $ 时检测，避免逐字符全量正则）
+      if ((ch === '\\' || ch === '$') && this.isBlockStartAt(content, endPos)) {
         break;
       }
 
-      // 检查块级元素开始
-      if (this.isBlockStart(remaining)) {
-        break;
-      }
-
-      // 读取一个字符或内联元素
-      const inlineResult = this.matchInline(content, endPos, lineIndex);
+      // 匹配内联元素（用 indexOf 替代 slice）
+      const inlineResult = this.matchInlineAt(content, endPos);
       if (inlineResult) {
-        text += inlineResult.text;
         endPos = inlineResult.endPos;
       } else {
-        text += content[endPos];
         endPos++;
       }
     }
 
-    if (text.trim().length === 0) {
-      return null;
-    }
+    if (endPos <= pos) return null;
+    const text = content.slice(pos, endPos);
+    if (text.trim().length === 0) return null;
 
     return this.createBlockNode('Paragraph', pos, endPos, text, lineIndex);
   }
 
   /**
-   * 匹配内联元素
+   * 匹配内联元素（无 slice 版本）
    */
-  private matchInline(
-    content: string,
-    pos: number,
-    _lineIndex: number[]
-  ): { text: string; endPos: number } | null {
-    const remaining = content.slice(pos);
+  private matchInlineAt(content: string, pos: number): { endPos: number } | null {
+    const ch = content[pos];
 
     // 匹配内联数学 $...$（非 $$）
-    if (remaining[0] === '$' && remaining[1] !== '$') {
-      const endIdx = remaining.indexOf('$', 1);
-      if (endIdx > 0 && !remaining.slice(1, endIdx).includes('\n')) {
-        const text = remaining.slice(0, endIdx + 1);
-        return { text, endPos: pos + endIdx + 1 };
+    if (ch === '$' && content[pos + 1] !== '$') {
+      const endIdx = content.indexOf('$', pos + 1);
+      if (endIdx > 0 && !content.substring(pos + 1, endIdx).includes('\n')) {
+        return { endPos: endIdx + 1 };
       }
     }
 
     // 匹配内联数学 \(...\)
-    if (remaining.startsWith('\\(')) {
-      const endIdx = remaining.indexOf('\\)');
+    if (ch === '\\' && content[pos + 1] === '(') {
+      const endIdx = content.indexOf('\\)', pos + 2);
       if (endIdx > 0) {
-        const text = remaining.slice(0, endIdx + 2);
-        return { text, endPos: pos + endIdx + 2 };
+        return { endPos: endIdx + 2 };
       }
     }
 
-    // 匹配命令
-    const cmdMatch = remaining.match(/^\\(\w+)(?:\{([^}]*)\})?/);
-    if (cmdMatch) {
-      return { text: cmdMatch[0], endPos: pos + cmdMatch[0].length };
+    // 匹配命令 \word{...}
+    if (ch === '\\') {
+      let j = pos + 1;
+      while (j < content.length && /\w/.test(content[j]!)) j++;
+      if (j > pos + 1) {
+        // 检查是否有 {...}
+        if (content[j] === '{') {
+          const closeIdx = content.indexOf('}', j + 1);
+          if (closeIdx > 0) return { endPos: closeIdx + 1 };
+        }
+        return { endPos: j };
+      }
     }
 
     return null;
   }
 
   /**
-   * 判断是否为块级元素开始
+   * 判断是否为块级元素开始（无 slice 版本，使用 startsWith）
    */
-  private isBlockStart(text: string): boolean {
-    const blockStarters = [
-      /^\\documentclass/,
-      /^\\usepackage/,
-      /^\\begin\{/,
-      /^\\chapter\*?\{/,
-      /^\\section\*?\{/,
-      /^\\subsection\*?\{/,
-      /^\\subsubsection\*?\{/,
-      /^\\paragraph\*?\{/,
-      /^\\title\{/,
-      /^\\author\{/,
-      /^\\date\{/,
-      /^\\maketitle/,
-      /^\$\$/,
-      /^\\\[/,
-    ];
+  private isBlockStartAt(content: string, pos: number): boolean {
+    return (
+      content.startsWith('\\documentclass', pos) ||
+      content.startsWith('\\usepackage', pos) ||
+      content.startsWith('\\begin{', pos) ||
+      content.startsWith('\\chapter', pos) ||
+      content.startsWith('\\section', pos) ||
+      content.startsWith('\\subsection', pos) ||
+      content.startsWith('\\subsubsection', pos) ||
+      content.startsWith('\\paragraph', pos) ||
+      content.startsWith('\\title{', pos) ||
+      content.startsWith('\\author{', pos) ||
+      content.startsWith('\\date{', pos) ||
+      content.startsWith('\\maketitle', pos) ||
+      content.startsWith('$$', pos) ||
+      content.startsWith('\\[', pos)
+    );
+  }
 
-    return blockStarters.some((pattern) => pattern.test(text));
+  /**
+   * 判断是否为块级命令（matchParagraphWithOffset 使用，包含更多命令）
+   */
+  private isBlockCommandAt(content: string, pos: number): boolean {
+    return (
+      content.startsWith('\\begin', pos) ||
+      content.startsWith('\\section', pos) ||
+      content.startsWith('\\subsection', pos) ||
+      content.startsWith('\\subsubsection', pos) ||
+      content.startsWith('\\chapter', pos) ||
+      content.startsWith('\\paragraph', pos) ||
+      content.startsWith('\\subparagraph', pos) ||
+      content.startsWith('\\maketitle', pos) ||
+      content.startsWith('\\tableofcontents', pos) ||
+      content.startsWith('\\newpage', pos) ||
+      content.startsWith('\\clearpage', pos) ||
+      content.startsWith('\\cleardoublepage', pos) ||
+      content.startsWith('\\listoffigures', pos) ||
+      content.startsWith('\\listoftables', pos) ||
+      content.startsWith('\\appendix', pos) ||
+      content.startsWith('\\bibliography', pos) ||
+      content.startsWith('\\printbibliography', pos)
+    );
   }
 
   /**
@@ -863,32 +854,18 @@ export class TSTreeSitterParser {
     fullText: string,
     lineIndex: number[]
   ): { node: TSNode; endPos: number } {
-    const id = generateNodeId();
-    const logPrefix = '[TSTreeSitter parseDocumentEnvironment]';
+    const id = this.generateNodeId();
 
     // 提取内部内容（去除 \begin{document} 和 \end{document}）
     const innerStart = beginTag.length;
     const innerEnd = fullText.length - endTag.length;
     const innerContent = fullText.slice(innerStart, innerEnd);
 
-    console.log(
-      `${logPrefix} 解析 document 环境: fullText.length=${fullText.length}, ` +
-        `innerContent.length=${innerContent.length}, beginTag="${beginTag}", endTag="${endTag}"`
-    );
-
     // 递归解析内部内容
     const innerBlocks = this.tokenizeBlocksWithOffset(
       innerContent,
       startPos + innerStart,
       lineIndex
-    );
-
-    console.log(
-      `${logPrefix} 解析完成: innerBlocks.length=${innerBlocks.length}, ` +
-        `types=${innerBlocks
-          .map((b) => b.type)
-          .slice(0, 10)
-          .join(', ')}${innerBlocks.length > 10 ? '...' : ''}`
     );
 
     // 创建 DocumentBody 节点
@@ -927,18 +904,12 @@ export class TSTreeSitterParser {
   ): TSNode[] {
     const blocks: TSNode[] = [];
     let pos = 0;
-    const logPrefix = '[TSTreeSitter tokenizeBlocksWithOffset]';
     let loopCount = 0;
     const maxLoops = content.length + 1000; // 防止无限循环
-
-    console.log(
-      `${logPrefix} 开始分词: content.length=${content.length}, globalOffset=${globalOffset}`
-    );
 
     while (pos < content.length) {
       loopCount++;
       if (loopCount > maxLoops) {
-        console.error(`${logPrefix} 检测到可能的无限循环，pos=${pos}, blocks=${blocks.length}`);
         break;
       }
 
@@ -947,7 +918,7 @@ export class TSTreeSitterParser {
       if (commentLineMatch) {
         // 创建注释节点
         const globalPos = globalOffset + pos;
-        const commentId = generateNodeId();
+        const commentId = this.generateNodeId();
         blocks.push({
           type: 'Comment',
           id: commentId,
@@ -971,7 +942,7 @@ export class TSTreeSitterParser {
         const wsText = wsMatch[0];
         // 检查是否为段落分隔符（两个以上换行）
         if (/\n\s*\n/.test(wsText)) {
-          const wsId = generateNodeId();
+          const wsId = this.generateNodeId();
           const globalPos = globalOffset + pos;
           blocks.push({
             type: 'ParagraphBreak',
@@ -1010,8 +981,6 @@ export class TSTreeSitterParser {
       // 无法匹配，跳过一个字符
       pos++;
     }
-
-    console.log(`${logPrefix} 分词完成: blocks.length=${blocks.length}, loopCount=${loopCount}`);
 
     return blocks;
   }
@@ -1193,7 +1162,7 @@ export class TSTreeSitterParser {
   }
 
   /**
-   * 匹配段落（带偏移量版本）
+   * 匹配段落（带偏移量版本，使用 startsWith/indexOf 避免 O(n²)）
    */
   private matchParagraphWithOffset(
     content: string,
@@ -1202,67 +1171,60 @@ export class TSTreeSitterParser {
     lineIndex: number[]
   ): { node: TSNode; localEndPos: number } | null {
     let endPos = localPos;
-    let text = '';
 
     while (endPos < content.length) {
-      const remaining = content.slice(endPos);
+      const ch = content[endPos]!;
 
       // 遇到段落分隔符停止
-      if (/^\n\s*\n/.test(remaining)) {
-        break;
+      if (ch === '\n') {
+        let j = endPos + 1;
+        while (
+          j < content.length &&
+          (content[j] === ' ' || content[j] === '\t' || content[j] === '\r')
+        )
+          j++;
+        if (j < content.length && content[j] === '\n') break;
       }
 
       // 遇到注释行停止（以 % 开头）
-      if (/^%/.test(remaining)) {
-        break;
-      }
+      if (ch === '%') break;
 
       // 遇到块级命令停止
-      if (
-        /^\\(begin|section|subsection|subsubsection|chapter|paragraph|subparagraph|maketitle|tableofcontents|newpage|clearpage|cleardoublepage|listoffigures|listoftables|appendix|bibliography|printbibliography)\b/.test(
-          remaining
-        )
-      ) {
-        break;
-      }
+      if (ch === '\\' && this.isBlockCommandAt(content, endPos)) break;
 
       // 遇到块级数学停止
-      if (/^(\$\$|\\\[)/.test(remaining)) {
+      if (
+        (ch === '$' && content[endPos + 1] === '$') ||
+        (ch === '\\' && content[endPos + 1] === '[')
+      )
         break;
-      }
 
       // 获取下一行或到末尾
-      const lineMatch = remaining.match(/^[^\n]*\n?/);
-      if (lineMatch) {
-        // 检查这一行是否包含注释（行内注释）
-        // 如果是纯注释行（去除空白后以 % 开头），跳过
-        const lineContent = lineMatch[0];
-        const trimmedLine = lineContent.trimStart();
-        if (trimmedLine.startsWith('%')) {
-          // 跳过纯注释行，不添加到段落中
-          endPos += lineMatch[0].length;
-          continue;
-        }
-        text += lineMatch[0];
-        endPos += lineMatch[0].length;
-      } else {
-        break;
+      const nextNewline = content.indexOf('\n', endPos);
+      const lineEnd = nextNewline >= 0 ? nextNewline + 1 : content.length;
+      const lineContent = content.substring(endPos, lineEnd);
+      const trimmedLine = lineContent.trimStart();
+      if (trimmedLine.startsWith('%')) {
+        // 跳过纯注释行
+        endPos = lineEnd;
+        continue;
       }
+      endPos = lineEnd;
     }
 
-    if (text.trim().length === 0) {
-      return null;
-    }
+    if (endPos <= localPos) return null;
+    const text = content.substring(localPos, endPos);
+    if (text.trim().length === 0) return null;
 
     const globalPos = globalOffset + localPos;
-    const id = generateNodeId();
+    const id = this.generateNodeId();
     const node: TSNode = {
       type: 'Paragraph',
       id,
       startIndex: globalPos,
-      endIndex: globalPos + text.length,
+      endIndex: globalPos + (endPos - localPos),
       startPosition: offsetToRowColumn(globalPos, lineIndex),
-      endPosition: offsetToRowColumn(globalPos + text.length, lineIndex),
+      endPosition: offsetToRowColumn(globalPos + (endPos - localPos), lineIndex),
       parent: null,
       children: [],
       hash: hashString(text),
@@ -1328,7 +1290,7 @@ export class TSTreeSitterParser {
     text: string,
     lineIndex: number[]
   ): { node: TSNode; endPos: number } {
-    const id = generateNodeId();
+    const id = this.generateNodeId();
 
     const node: TSNode = {
       type,
@@ -1351,15 +1313,11 @@ export class TSTreeSitterParser {
    * 添加节点到映射
    */
   private addNodeToMap(node: TSNode, nodes: Map<string, TSNode>): void {
-    const logPrefix = '[TSTreeSitter addNodeToMap]';
     nodes.set(node.id, node);
 
     // 如果有 childNodes（如 DocumentBody），递归添加
     const nodeWithChildren = node as TSNode & { childNodes?: TSNode[] };
     if (nodeWithChildren.childNodes) {
-      console.log(
-        `${logPrefix} 节点 ${node.type}(${node.id}) 有 childNodes: ${nodeWithChildren.childNodes.length} 个`
-      );
       for (const childNode of nodeWithChildren.childNodes) {
         this.addNodeToMap(childNode, nodes);
       }
@@ -1485,14 +1443,6 @@ export class TSTreeSitterParser {
    */
   private treeToAST(tree: TSTree, content: string): ASTRoot<ASTNode> {
     const nodes = new Map<string, ASTNode>();
-    const logPrefix = '[TSTreeSitter treeToAST]';
-
-    // 调试日志：显示输入 tree 的节点数
-    console.log(
-      `${logPrefix} 输入 tree.nodes.size=${tree.nodes.size}, ` +
-        `rootNode.id=${tree.rootNode.id}, ` +
-        `rootNode.children=${tree.rootNode.children?.length ?? 0}`
-    );
 
     // 转换所有节点
     for (const [id, tsNode] of tree.nodes) {
@@ -1508,42 +1458,9 @@ export class TSTreeSitterParser {
       nodes.set(id, astNode);
     }
 
-    console.log(`${logPrefix} 转换后 nodes.size=${nodes.size}`);
-
     const rootNode = nodes.get(tree.rootNode.id);
     if (!rootNode) {
-      console.error(`${logPrefix} 根节点不存在! tree.rootNode.id=${tree.rootNode.id}`);
-      console.error(
-        `${logPrefix} 可用的节点 ID: ${Array.from(nodes.keys()).slice(0, 10).join(', ')}`
-      );
-      throw new Error('根节点不存在');
-    }
-
-    console.log(
-      `${logPrefix} 根节点: type=${rootNode.type}, children=${rootNode.children?.length ?? 0}`
-    );
-
-    // 验证子节点是否都能找到
-    if (rootNode.children && rootNode.children.length > 0) {
-      const foundChildren: string[] = [];
-      const missingChildren: string[] = [];
-      for (const childId of rootNode.children) {
-        if (nodes.has(childId)) {
-          const child = nodes.get(childId)!;
-          foundChildren.push(`${child.type}(${childId.slice(0, 10)})`);
-        } else {
-          missingChildren.push(childId);
-        }
-      }
-      console.log(
-        `${logPrefix} 子节点验证: 找到=${foundChildren.length}, 缺失=${missingChildren.length}`
-      );
-      if (foundChildren.length > 0) {
-        console.log(`${logPrefix} 找到的子节点: ${foundChildren.slice(0, 10).join(', ')}...`);
-      }
-      if (missingChildren.length > 0) {
-        console.warn(`${logPrefix} 缺失的子节点 ID: ${missingChildren.slice(0, 5).join(', ')}`);
-      }
+      throw new Error(`Root node not found: ${tree.rootNode.id}`);
     }
 
     return {
@@ -1588,7 +1505,7 @@ export class TSTreeSitterParser {
    * 创建空 AST
    */
   private createEmptyAST(): ASTRoot<ASTNode> {
-    const rootId = generateNodeId();
+    const rootId = this.generateNodeId();
     const rootNode: ASTNode = {
       type: 'Document',
       id: rootId,
@@ -1619,14 +1536,19 @@ export class TSTreeSitterParser {
 // ================================
 
 /**
- * 创建 TSTreeSitter 解析器
+ * 创建 LaTeX 块级扫描器
  */
-export function createTSTreeSitterParser(config?: TSTreeSitterConfig): TSTreeSitterParser {
-  return new TSTreeSitterParser(config);
+export function createLatexBlockScanner(config?: LatexBlockScannerConfig): LatexBlockScanner {
+  return new LatexBlockScanner(config);
 }
+
+// 后向兼容别名
+export { LatexBlockScanner as TSTreeSitterParser };
+export type { LatexBlockScannerConfig as TSTreeSitterConfig };
+export { createLatexBlockScanner as createTSTreeSitterParser };
 
 // ================================
 // 导出
 // ================================
 
-export default TSTreeSitterParser;
+export default LatexBlockScanner;

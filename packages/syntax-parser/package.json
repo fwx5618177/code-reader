@@ -1,7 +1,7 @@
 {
   "name": "@code-reader/syntax-parser",
   "version": "0.1.0",
-  "description": "高性能增量解析库 - 提供 Lezer/Tree-sitter 增量解析、AST 缓存等功能（文本存储已移至 @code-reader/text-buffer）",
+  "description": "高性能增量解析库 - 提供 Lezer 增量解析、纯 TS Tree-sitter 风格解析器、AST 缓存等功能",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -15,9 +15,9 @@
       "import": "./dist/lezer/index.js",
       "types": "./dist/lezer/index.d.ts"
     },
-    "./tree-sitter": {
-      "import": "./dist/tree-sitter/index.js",
-      "types": "./dist/tree-sitter/index.d.ts"
+    "./block-scanner": {
+      "import": "./dist/block-scanner/index.js",
+      "types": "./dist/block-scanner/index.d.ts"
     }
   },
   "files": [
@@ -31,7 +31,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "benchmark": "tsx benchmark/index.ts",
+    "benchmark": "tsx benchmark/parser-benchmark.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

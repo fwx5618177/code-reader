@@ -252,3 +252,136 @@ function levenshteinWithSteps(
   t: string,
   originalSource: string,
   originalTarget: string,
+  opts: Required<LevenshteinOptions>
+): LevenshteinResult {
+  const m = s.length;
+  const n = t.length;
+
+  // 构建完整 DP 矩阵
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i]![0] = i * opts.deleteCost;
+  for (let j = 0; j <= n; j++) dp[0]![j] = j * opts.insertCost;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : opts.replaceCost;
+      dp[i]![j] = Math.min(
+        dp[i - 1]![j]! + opts.deleteCost,
+        dp[i]![j - 1]! + opts.insertCost,
+        dp[i - 1]![j - 1]! + cost
+      );
+    }
+  }
+
+  // 回溯编辑路径
+  const steps: EditStep[] = [];
+  let i = m;
+  let j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && s[i - 1] === t[j - 1]) {
+      steps.unshift({
+        operation: EditOperation.None,
+        sourceIndex: i - 1,
+        targetIndex: j - 1,
+        char: originalSource[i - 1],
+      });
+      i--;
+      j--;
+    } else if (i > 0 && j > 0 && dp[i]![j] === dp[i - 1]![j - 1]! + opts.replaceCost) {
+      steps.unshift({
+        operation: EditOperation.Replace,
+        sourceIndex: i - 1,
+        targetIndex: j - 1,
+        char: originalTarget[j - 1],
+        replacedChar: originalSource[i - 1],
+      });
+      i--;
+      j--;
+    } else if (j > 0 && dp[i]![j] === dp[i]![j - 1]! + opts.insertCost) {
+      steps.unshift({
+        operation: EditOperation.Insert,
+        sourceIndex: i,
+        targetIndex: j - 1,
+        char: originalTarget[j - 1],
+      });
+      j--;
+    } else {
+      steps.unshift({
+        operation: EditOperation.Delete,
+        sourceIndex: i - 1,
+        targetIndex: j,
+        char: originalSource[i - 1],
+      });
+      i--;
+    }
+  }
+
+  const distance = dp[m]![n]!;
+  const maxLen = Math.max(m, n);
+  const similarity = maxLen === 0 ? 1 : 1 - distance / maxLen;
+
+  return { distance, similarity, steps };
+}
+
+// ================================
+// 便捷函数
+// ================================
+
+/**
+ * 计算两个字符串的相似度（0-1）
+ *
+ * @param source 源字符串
+ * @param target 目标字符串
+ * @param options 算法选项
+ * @returns 相似度，1 表示完全相同，0 表示完全不同
+ */
+export function stringSimilarity(
+  source: string,
+  target: string,
+  options?: LevenshteinOptions
+): number {
+  const result = levenshteinFull(source, target, options);
+  return result.similarity;
+}
+
+/**
+ * 判断两个字符串的编辑距离是否不超过指定值
+ *
+ * @param source 源字符串
+ * @param target 目标字符串
+ * @param maxDistance 最大允许距离
+ * @param options 算法选项
+ * @returns 是否在距离范围内
+ */
+export function isWithinDistance(
+  source: string,
+  target: string,
+  maxDistance: number,
+  options?: LevenshteinOptions
+): boolean {
+  const distance = levenshteinDistance(source, target, { ...options, maxDistance });
+  return distance <= maxDistance;
+}
+
+/**
+ * 批量计算一个源字符串与多个目标字符串的编辑距离
+ *
+ * @param source 源字符串
+ * @param targets 目标字符串列表
+ * @param options 算法选项
+ * @returns 按距离排序的结果列表
+ */
+export function batchLevenshtein(
+  source: string,
+  targets: string[],
+  options?: LevenshteinOptions
+): Array<{ target: string; distance: number; similarity: number }> {
+  return targets
+    .map((target) => {
+      const result = levenshteinFull(source, target, options);
+      return { target, distance: result.distance, similarity: result.similarity };
+    })
+    .sort((a, b) => a.distance - b.distance);
+}

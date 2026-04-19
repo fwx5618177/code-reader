@@ -250,24 +250,6 @@ export class LatexLezerParser {
   private parseDocument(): LatexASTNode {
     const start = this.currentToken()?.from ?? 0;
     const children: LatexASTNode[] = [];
-    const logPrefix = '[LatexLezerParser]';
-
-    // 调试日志：显示 token 数量
-    if (typeof globalThis !== 'undefined' && (globalThis as Record<string, unknown>).__DEV__) {
-      console.log(
-        `${logPrefix} 开始解析文档，tokens 数量: ${this.state!.tokens.length}, ` +
-          `当前索引: ${this.state!.tokenIndex}`
-      );
-      if (this.state!.tokens.length > 0 && this.state!.tokens.length <= 10) {
-        console.log(`${logPrefix} Token 类型: ${this.state!.tokens.map((t) => t.type).join(', ')}`);
-      } else if (this.state!.tokens.length > 10) {
-        console.log(
-          `${logPrefix} 前 10 个 Token 类型: ${this.state!.tokens.slice(0, 10)
-            .map((t) => t.type)
-            .join(', ')}...`
-        );
-      }
-    }
 
     // 查找 \documentclass 和 \begin{document}
     let hasPreamble = false;
@@ -310,19 +292,12 @@ export class LatexLezerParser {
       }
     } else {
       // 没有 \begin{document}，解析整个内容
-      // 调试日志
-      console.log(
-        `${logPrefix} 没有 \\begin{document}，直接解析内容，` +
-          `hasPreamble=${hasPreamble}, tokenIndex=${this.state!.tokenIndex}, ` +
-          `totalTokens=${this.state!.tokens.length}`
-      );
       let lastPos = -1;
       let iterationCount = 0;
       const maxIterations = this.state!.tokens.length * 2 + 1000; // 安全限制
       while (!this.isAtEnd()) {
         iterationCount++;
         if (iterationCount > maxIterations) {
-          console.error(`${logPrefix} 检测到可能的无限循环，强制退出`);
           break;
         }
         // 防止无限循环：检查位置是否前进
@@ -343,15 +318,6 @@ export class LatexLezerParser {
 
     const end = this.previousToken()?.to ?? this.getInputLength();
     const doc = this.createNode(NodeType.Document, start, end, children);
-
-    // 调试日志：显示解析结果
-    console.log(
-      `${logPrefix} 文档解析完成，children: ${children.length}, ` +
-        `hasPreamble: ${hasPreamble}, documentBodyStart: ${documentBodyStart}`
-    );
-    if (children.length > 0) {
-      console.log(`${logPrefix} 子节点类型: ${children.map((c) => c.name).join(', ')}`);
-    }
 
     return doc;
   }

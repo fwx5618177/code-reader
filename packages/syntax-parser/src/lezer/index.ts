@@ -13,6 +13,10 @@
 // 类型导出
 // ================================
 
+// 将 @lezer/lr 的 LRParser 类型从此处统一导出
+// 其他模块应从此处导入，而不是直接引用 @lezer/lr
+export type { LRParser } from '@lezer/lr';
+
 export type {
   ASTNode,
   ASTRoot,
@@ -35,14 +39,12 @@ import type { LezerParserConfig as LezerParserConfigType } from './lezer-parser'
 // Lezer 解析器
 // ================================
 
-export {
-  LezerIncrementalParser,
-  createLezerParser,
-  resetNodeIdCounter,
-  type LezerParserConfig,
-} from './lezer-parser';
+export { LezerIncrementalParser, createLezerParser, type LezerParserConfig } from './lezer-parser';
 
 export type { NodeMapping, ParseState } from './lezer-parser';
+
+import { LezerIncrementalParser, createLezerParser } from './lezer-parser';
+import { ASTCache, createASTCache } from './ast-cache';
 
 // ================================
 // AST 缓存
@@ -114,10 +116,6 @@ export {
 // 便捷工厂函数
 // ================================
 
-import type { LRParser } from '@lezer/lr';
-import { LezerIncrementalParser, createLezerParser } from './lezer-parser';
-import { ASTCache, createASTCache } from './ast-cache';
-
 /**
  * 创建带缓存的 Lezer 增量解析器
  *
@@ -137,60 +135,6 @@ export function createCachedLezerParser<T extends ASTNode = ASTNode>(
   return { parser, cache };
 }
 
-/**
- * 创建 LaTeX 增量解析器（需要 @lezer/latex）
- *
- * 注意：需要安装 @lezer/latex 包
- * pnpm add @lezer/latex
- *
- * @param latexParser @lezer/latex 的 parser 实例
- */
-export function createLatexLezerParserFromLR(latexParser: LRParser): LezerIncrementalParser {
-  return new LezerIncrementalParser({
-    parser: latexParser,
-    language: 'latex',
-    enableFragmentCache: true,
-    maxCachedFragments: 200,
-    parseTimeout: 5000,
-  });
-}
-
-/**
- * 创建 Markdown 增量解析器（需要 @lezer/markdown）
- *
- * 注意：需要安装 @lezer/markdown 包
- * pnpm add @lezer/markdown
- *
- * @param markdownParser @lezer/markdown 的 parser 实例
- */
-export function createMarkdownLezerParser(markdownParser: LRParser): LezerIncrementalParser {
-  return new LezerIncrementalParser({
-    parser: markdownParser,
-    language: 'markdown',
-    enableFragmentCache: true,
-    maxCachedFragments: 200,
-    parseTimeout: 5000,
-  });
-}
-
-/**
- * 创建 JavaScript 增量解析器（需要 @lezer/javascript）
- *
- * 注意：需要安装 @lezer/javascript 包
- * pnpm add @lezer/javascript
- *
- * @param jsParser @lezer/javascript 的 parser 实例
- */
-export function createJavaScriptLezerParser(jsParser: LRParser): LezerIncrementalParser {
-  return new LezerIncrementalParser({
-    parser: jsParser,
-    language: 'javascript',
-    enableFragmentCache: true,
-    maxCachedFragments: 300,
-    parseTimeout: 10000,
-  });
-}
-
 // ================================
 // 重新导入用于默认导出
 // ================================
@@ -202,14 +146,11 @@ import { LatexLezerParser, getLatexLezerParser } from './latex';
 // ================================
 
 export default {
-  // Lezer 解析器
   LezerIncrementalParser,
   ASTCache,
   createLezerParser,
   createASTCache,
   createCachedLezerParser,
-
-  // LaTeX 解析器（手写实现）
   LatexLezerParser,
   getLatexLezerParser,
 };
