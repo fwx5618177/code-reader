@@ -73,8 +73,15 @@ const DEFAULT_OPTIONS: Required<FuzzyScoreOptions> = {
 // ================================
 
 /**
+ * 检查字符是否为分隔符（空白、下划线、连字符、点、路径分隔符）
+ */
+function isSeparator(char: string): boolean {
+  return /[\s_\-./\\]/.test(char);
+}
+
+/**
  * 检查字符是否为单词边界
- * 包括：大写字母（驼峰）、下划线后、连字符后、数字与字母交界
+ * 包括：分隔符之后（空白、下划线、连字符、点、路径分隔符）、驼峰边界、数字与字母交界
  */
 function isBoundaryChar(text: string, index: number): boolean {
   if (index === 0) return true;
@@ -82,8 +89,8 @@ function isBoundaryChar(text: string, index: number): boolean {
   const char = text[index];
   const prevChar = text[index - 1];
 
-  // 下划线或连字符后
-  if (prevChar === '_' || prevChar === '-') return true;
+  // 分隔符之后
+  if (isSeparator(prevChar)) return true;
 
   // 驼峰边界：前一个小写，当前大写
   if (/[a-z]/.test(prevChar) && /[A-Z]/.test(char)) return true;
@@ -91,17 +98,7 @@ function isBoundaryChar(text: string, index: number): boolean {
   // 数字与字母交界
   if (/\d/.test(prevChar) !== /\d/.test(char)) return true;
 
-  // 空格后
-  if (/\s/.test(prevChar)) return true;
-
   return false;
-}
-
-/**
- * 检查字符是否为分隔符
- */
-function isSeparator(char: string): boolean {
-  return /[\s_\-./\\]/.test(char);
 }
 
 // ================================

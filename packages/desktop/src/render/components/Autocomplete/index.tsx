@@ -3,7 +3,7 @@
 // 提供通用的补全 UI，可用于 ProseMirror 或其他编辑器
 // ================================
 
-import { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import styles from './Autocomplete.module.scss';
 
 // ================================

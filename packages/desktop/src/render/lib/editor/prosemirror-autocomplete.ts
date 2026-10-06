@@ -119,6 +119,15 @@ export interface AutocompletePluginOptions {
 
 const PLUGIN_KEY = new PluginKey<AutocompleteState>('prosemirror-autocomplete');
 
+/** 未激活的补全状态 */
+const INACTIVE_STATE: AutocompleteState = {
+  active: false,
+  items: [],
+  selectedIndex: 0,
+  context: null,
+  loading: false,
+};
+
 const DEFAULT_OPTIONS: Required<
   Omit<AutocompletePluginOptions, 'providers' | 'container' | 'onSelect' | 'onOpen' | 'onClose'>
 > = {
@@ -378,11 +387,8 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
 
   const allTriggers = getAllTriggers();
 
-  /** 更新补全 */
-  const updateCompletions = async (
-    view: EditorView,
-    context: CompletionContext
-  ): Promise<CompletionItem[]> => {
+  /** 收集所有激活提供者的补全项 */
+  const updateCompletions = async (context: CompletionContext): Promise<CompletionItem[]> => {
     const allItems: CompletionItem[] = [];
 
     for (const provider of opts.providers) {
@@ -423,29 +429,33 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
     options.onSelect?.(item, view);
   };
 
+  /** 关闭补全：隐藏面板并将插件状态置为未激活（仅用于事件处理器，不可在 view.update 中同步调用） */
+  const closeCompletion = (view: EditorView): void => {
+    panel?.hide();
+    if (!view.isDestroyed && PLUGIN_KEY.getState(view.state)?.active) {
+      view.dispatch(view.state.tr.setMeta(PLUGIN_KEY, INACTIVE_STATE));
+    }
+    options.onClose?.();
+  };
+
   return new Plugin({
     key: PLUGIN_KEY,
 
     state: {
       init(): AutocompleteState {
-        return {
-          active: false,
-          items: [],
-          selectedIndex: 0,
-          context: null,
-          loading: false,
-        };
+        return INACTIVE_STATE;
       },
 
       apply(tr: Transaction, state: AutocompleteState): AutocompleteState {
-        // 如果文档没有变化，保持状态
-        if (!tr.docChanged && !tr.selectionSet) {
-          return state;
+        // 插件自身通过 meta 写入的状态（打开面板、切换选中项、关闭）
+        const meta: Partial<AutocompleteState> | undefined = tr.getMeta(PLUGIN_KEY);
+        if (meta) {
+          return { ...state, ...meta };
         }
 
-        // 选择变化时关闭补全
-        if (tr.selectionSet && !tr.docChanged) {
-          return { ...state, active: false, items: [], context: null };
+        // 文档或选区变化后旧的补全上下文失效，等待防抖后重新计算
+        if (tr.docChanged || tr.selectionSet) {
+          return state.active ? INACTIVE_STATE : state;
         }
 
         return state;
@@ -453,8 +463,8 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
     },
 
     view(editorView: EditorView) {
-      // 创建面板
-      const container = options.container || document.body;
+      // 创建面板：面板坐标相对编辑器 DOM 计算，未指定容器时挂载到编辑器父节点
+      const container = options.container || editorView.dom.parentElement || document.body;
       panel = new AutocompletePanel(container, {
         maxResults: opts.maxResults,
         minTriggerLength: opts.minTriggerLength,
@@ -463,7 +473,12 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
       });
 
       return {
-        update(view: EditorView) {
+        update(view: EditorView, prevState: EditorState) {
+          // 仅插件 meta 变化（如切换选中项）时无需重新计算补全
+          if (prevState.doc.eq(view.state.doc) && prevState.selection.eq(view.state.selection)) {
+            return;
+          }
+
           // 清除之前的定时器
           if (debounceTimer) {
             clearTimeout(debounceTimer);
@@ -510,13 +525,18 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
           };
 
           // 防抖更新
+          const scheduledDoc = state.doc;
           debounceTimer = setTimeout(async () => {
             try {
-              const items = await updateCompletions(view, context);
+              const items = await updateCompletions(context);
+
+              // 异步收集期间文档已变化或编辑器已销毁，结果作废
+              if (view.isDestroyed || !view.state.doc.eq(scheduledDoc)) {
+                return;
+              }
 
               if (items.length === 0) {
-                panel?.hide();
-                options.onClose?.();
+                closeCompletion(view);
                 return;
               }
 
@@ -533,9 +553,19 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
                 },
                 (item) => {
                   acceptCompletion(view, item, context);
-                  panel?.hide();
-                  options.onClose?.();
+                  closeCompletion(view);
                 }
+              );
+
+              // 写入插件状态，供键盘导航与确认使用
+              view.dispatch(
+                view.state.tr.setMeta(PLUGIN_KEY, {
+                  active: true,
+                  items,
+                  selectedIndex: 0,
+                  context,
+                  loading: false,
+                })
               );
 
               options.onOpen?.();
@@ -557,10 +587,11 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
 
     props: {
       handleKeyDown(view: EditorView, event: KeyboardEvent): boolean {
+        // 面板可见且插件状态处于激活时才拦截按键，避免吞掉普通回车/Tab
         if (!panel?.isVisible()) return false;
 
         const pluginState = PLUGIN_KEY.getState(view.state);
-        if (!pluginState?.active && !panel.isVisible()) return false;
+        if (!pluginState?.active) return false;
 
         switch (event.key) {
           case 'ArrowDown': {
@@ -597,8 +628,7 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
               const item = state.items[state.selectedIndex];
               if (item) {
                 acceptCompletion(view, item, state.context);
-                panel?.hide();
-                options.onClose?.();
+                closeCompletion(view);
               }
             }
             return true;
@@ -606,8 +636,7 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
 
           case 'Escape': {
             event.preventDefault();
-            panel?.hide();
-            options.onClose?.();
+            closeCompletion(view);
             return true;
           }
 
@@ -617,11 +646,10 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
       },
 
       handleDOMEvents: {
-        blur(): boolean {
+        blur(view: EditorView): boolean {
           // 延迟关闭，允许点击补全项
           setTimeout(() => {
-            panel?.hide();
-            options.onClose?.();
+            closeCompletion(view);
           }, 150);
           return false;
         },

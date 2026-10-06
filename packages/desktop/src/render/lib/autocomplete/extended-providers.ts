@@ -67,6 +67,14 @@ export interface HistoryItem {
 }
 
 /**
+ * 携带强类型业务数据的补全元数据
+ * 让基数树中存储的 data 字段在读取时无需类型断言
+ */
+interface TypedCompletionMeta<D> extends CompletionMeta {
+  data: D;
+}
+
+/**
  * 持久化索引配置
  */
 export interface PersistentIndexConfig {
@@ -103,11 +111,11 @@ export class FilePathProvider implements CompletionProvider {
   readonly triggerCharacters = ['/', '.', '@'];
 
   private files: Map<string, FilePathInfo> = new Map();
-  private tree: RadixTree<FilePathInfo>;
+  private tree: RadixTree<TypedCompletionMeta<FilePathInfo>>;
   private projectRoot: string = '';
 
   constructor() {
-    this.tree = new RadixTree<FilePathInfo>({
+    this.tree = new RadixTree<TypedCompletionMeta<FilePathInfo>>({
       caseSensitive: false,
       maxResults: 30,
     });
@@ -129,7 +137,7 @@ export class FilePathProvider implements CompletionProvider {
       id: info.path,
       label: info.name,
       type: info.isDirectory ? 'folder' : 'file',
-      detail: info.path,
+      detail: this.toProjectRelativePath(info.path),
       priority: info.isDirectory ? 60 : 50,
       data: info,
     });
@@ -187,15 +195,14 @@ export class FilePathProvider implements CompletionProvider {
     });
 
     return results.map((result) => {
-      const meta = result.values[0];
-      const fileInfo = meta.data as FilePathInfo;
+      const fileInfo = result.values[0].data;
 
       return {
         id: `file-${fileInfo.path}`,
         label: fileInfo.name,
         insertText: this.formatInsertText(fileInfo, pathMatch),
         type: fileInfo.isDirectory ? 'folder' : 'file',
-        detail: fileInfo.path,
+        detail: this.toProjectRelativePath(fileInfo.path),
         documentation: this.formatDocumentation(fileInfo),
         priority: this.calculatePriority(fileInfo, searchQuery),
         icon: fileInfo.isDirectory ? 'folder' : this.getFileIcon(fileInfo.extension),
@@ -263,7 +270,19 @@ export class FilePathProvider implements CompletionProvider {
       // 相对于当前路径
       return fileInfo.name;
     }
-    return fileInfo.path;
+    return this.toProjectRelativePath(fileInfo.path);
+  }
+
+  /**
+   * 将绝对路径转换为相对项目根目录的路径
+   * 未设置项目根目录或路径不在根目录下时原样返回
+   */
+  private toProjectRelativePath(path: string): string {
+    if (!this.projectRoot) {
+      return path;
+    }
+    const root = this.projectRoot.endsWith('/') ? this.projectRoot : `${this.projectRoot}/`;
+    return path.startsWith(root) ? path.slice(root.length) : path;
   }
 
   /**
@@ -374,10 +393,10 @@ export class DocumentTitleProvider implements CompletionProvider {
   readonly triggerCharacters = ['[', '#'];
 
   private documents: Map<string, DocumentInfo> = new Map();
-  private tree: RadixTree<DocumentInfo>;
+  private tree: RadixTree<TypedCompletionMeta<DocumentInfo>>;
 
   constructor() {
-    this.tree = new RadixTree<DocumentInfo>({
+    this.tree = new RadixTree<TypedCompletionMeta<DocumentInfo>>({
       caseSensitive: false,
       maxResults: 30,
       fuzzy: true,
@@ -464,8 +483,7 @@ export class DocumentTitleProvider implements CompletionProvider {
     });
 
     return results.map((result) => {
-      const meta = result.values[0];
-      const docInfo = meta.data as DocumentInfo;
+      const docInfo = result.values[0].data;
 
       return {
         id: `doc-${docInfo.id}`,
@@ -619,12 +637,12 @@ export class HistoryProvider implements CompletionProvider {
   readonly priority = 80;
 
   private history: Map<string, HistoryItem> = new Map();
-  private tree: RadixTree<HistoryItem>;
+  private tree: RadixTree<TypedCompletionMeta<HistoryItem>>;
   private maxItems: number;
 
   constructor(maxItems: number = 1000) {
     this.maxItems = maxItems;
-    this.tree = new RadixTree<HistoryItem>({
+    this.tree = new RadixTree<TypedCompletionMeta<HistoryItem>>({
       caseSensitive: false,
       maxResults: 20,
     });
@@ -705,7 +723,7 @@ export class HistoryProvider implements CompletionProvider {
 
     return results.map((result) => {
       const meta = result.values[0];
-      const historyItem = meta.data as HistoryItem;
+      const historyItem = meta.data;
 
       return {
         id: `history-${meta.id}`,

@@ -191,7 +191,8 @@ export function printAlgorithmSummary(): void {
   console.log('='.repeat(60));
 
   for (const [key, info] of Object.entries(ALGORITHM_REGISTRY)) {
-    console.log(`\n【${info.name}】(${info.englishName})`);
+    // 输出注册表键名，便于通过 getAlgorithmInfo(key) 反查
+    console.log(`\n【${info.name}】(${info.englishName}) [${key}]`);
     console.log(`  文件: ${info.file}`);
     console.log(`  时间复杂度: ${info.timeComplexity}`);
     console.log(`  空间复杂度: ${info.spaceComplexity}`);
