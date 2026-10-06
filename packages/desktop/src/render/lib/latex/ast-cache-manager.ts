@@ -369,6 +369,17 @@ class SourceDocumentManager {
 // AST 缓存管理器（单例）
 // ================================
 
+/** 转换轻量级节点时不进入 props 的字段（基础字段已单独存储，raw 不存储以节省内存） */
+const LIGHTWEIGHT_EXCLUDED_KEYS: ReadonlySet<string> = new Set([
+  'type',
+  'id',
+  'start',
+  'end',
+  'raw',
+  'hash',
+  'children',
+]);
+
 /**
  * AST 缓存管理器
  *
@@ -628,23 +639,16 @@ class ASTCacheManagerImpl {
     };
 
     // 收集子节点 ID
-    if ('children' in node && Array.isArray((node as any).children)) {
-      lightweight.childIds = ((node as any).children as LatexNode[]).map((c) => c.id);
+    if (node.children) {
+      lightweight.childIds = node.children.map((c) => c.id);
     }
 
-    // 保存非 raw 的属性
+    // 保存非 raw 的属性（各具体节点类型的扩展字段，如 content、level、args 等）
     const props: Record<string, unknown> = {};
-    for (const key of Object.keys(node)) {
-      if (
-        key !== 'type' &&
-        key !== 'id' &&
-        key !== 'start' &&
-        key !== 'end' &&
-        key !== 'raw' &&
-        key !== 'hash' &&
-        key !== 'children'
-      ) {
-        props[key] = (node as any)[key];
+    const entries: Array<[string, unknown]> = Object.entries(node);
+    for (const [key, value] of entries) {
+      if (!LIGHTWEIGHT_EXCLUDED_KEYS.has(key)) {
+        props[key] = value;
       }
     }
     if (Object.keys(props).length > 0) {

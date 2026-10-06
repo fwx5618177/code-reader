@@ -20,7 +20,6 @@ import type {
   SectionNode,
   ListNode,
   ListItemNode,
-  ErrorNode,
   PackageInfo,
   MacroDefinition,
   LatexParserOptions,
@@ -333,8 +332,6 @@ export class LatexParser {
       this.skipWhitespace();
       if (this.pos >= this.length) break;
 
-      const char = this.peek();
-
       // 检查段落分隔（双换行）
       if (this.checkParagraphBreak()) {
         if (currentParagraph.length > 0) {
@@ -389,7 +386,6 @@ export class LatexParser {
     if (this.pos >= this.length) return null;
 
     const char = this.peek();
-    const start = this.pos;
 
     // 注释
     if (char === '%') {
@@ -540,7 +536,10 @@ export class LatexParser {
   /**
    * 解析环境
    */
-  private parseEnvironment(offset: number, start: number): EnvironmentNode | ListNode | null {
+  private parseEnvironment(
+    offset: number,
+    start: number
+  ): EnvironmentNode | ListNode | MathBlockNode | null {
     // 解析环境名称
     this.skipWhitespace();
     if (this.peek() !== '{') {
@@ -594,9 +593,9 @@ export class LatexParser {
         raw,
         hash: hashString(raw),
         content: content.trim(),
-        delimiter: envName.replace('*', '') as MathBlockNode['delimiter'],
+        delimiter: envName.replace('*', ''),
         numbered: !envName.endsWith('*'),
-      } as MathBlockNode;
+      };
     }
 
     // 处理列表环境
@@ -689,7 +688,6 @@ export class LatexParser {
     const items: ListItemNode[] = [];
     const itemRegex = /\\item(?:\[([^\]]*)\])?/g;
     let match: RegExpExecArray | null;
-    let lastEnd = 0;
     const positions: { start: number; label?: string }[] = [];
 
     while ((match = itemRegex.exec(content)) !== null) {
@@ -876,6 +874,9 @@ export class LatexParser {
       content += this.consume();
     }
 
+    if (this.pos >= this.length) {
+      this.addWarning(`行内公式缺少结束符 ${endDelimiter}`, offset + start, offset + this.pos);
+    }
     this.pos += endDelimiter.length;
 
     const raw = this.input.slice(start, this.pos);
@@ -909,6 +910,9 @@ export class LatexParser {
       content += this.consume();
     }
 
+    if (this.pos >= this.length) {
+      this.addWarning(`块级公式缺少结束符 ${endDelimiter}`, offset + start, offset + this.pos);
+    }
     this.pos += endDelimiter.length;
 
     const raw = this.input.slice(start, this.pos);
@@ -1147,6 +1151,17 @@ export class IncrementalLatexParser {
   ): IncrementalParseResult {
     const startTime = performance.now();
 
+    // 内容未变化时直接复用缓存的 AST，无需重新解析
+    if (this.cachedAST && newContent === this.cachedContent) {
+      return {
+        ast: this.cachedAST,
+        affectedNodeIds: [],
+        dirtyNodeIds: [],
+        fullReparse: false,
+        parseTime: performance.now() - startTime,
+      };
+    }
+
     // 如果没有缓存或变更过大，进行完整解析
     if (!this.cachedAST || this.shouldFullReparse(changes, newContent)) {
       const parser = new LatexParser(newContent, options);
@@ -1172,8 +1187,8 @@ export class IncrementalLatexParser {
     const parser = new LatexParser(newContent, options);
     const newAST = parser.parse().ast;
 
-    // 合并新旧 AST
-    const mergedAST = this.mergeAST(this.cachedAST, newAST, affectedNodes);
+    // 合并新旧 AST：复用未受影响的旧节点，收集需要重新渲染的新节点
+    const { ast: mergedAST, dirtyNodeIds } = this.mergeAST(this.cachedAST, newAST, affectedNodes);
 
     this.cachedAST = mergedAST;
     this.cachedContent = newContent;
@@ -1181,7 +1196,7 @@ export class IncrementalLatexParser {
     return {
       ast: mergedAST,
       affectedNodeIds: affectedNodes.map(n => n.id),
-      dirtyNodeIds: affectedNodes.map(n => n.id),
+      dirtyNodeIds,
       fullReparse: false,
       parseTime: performance.now() - startTime,
     };
@@ -1265,17 +1280,42 @@ export class IncrementalLatexParser {
 
   /**
    * 合并 AST
+   * 对文档顶层子节点做结构共享：旧节点未与变更范围重叠、且内容哈希与位置都和新节点一致时，
+   * 复用旧节点（保留节点 ID，使下游按 ID 的渲染缓存继续有效）；其余新节点标记为脏节点
    */
   private mergeAST(
     oldAST: RootNode,
     newAST: RootNode,
     affectedNodes: LatexNode[]
-  ): RootNode {
-    // 简化实现：直接使用新 AST
-    // 完整实现需要精确的节点匹配和更新
+  ): { ast: RootNode; dirtyNodeIds: string[] } {
+    const version = oldAST.version + 1;
+    if (!oldAST.document || !newAST.document) {
+      return { ast: { ...newAST, version }, dirtyNodeIds: this.getAllNodeIds(newAST) };
+    }
+
+    const affectedIds = new Set(affectedNodes.map(n => n.id));
+    const reusable = new Map<string, LatexNode>();
+    for (const oldChild of oldAST.document.children) {
+      if (!affectedIds.has(oldChild.id)) {
+        reusable.set(`${oldChild.hash}:${oldChild.start}:${oldChild.end}`, oldChild);
+      }
+    }
+
+    const dirtyNodeIds: string[] = [];
+    const children = newAST.document.children.map((newChild) => {
+      const key = `${newChild.hash}:${newChild.start}:${newChild.end}`;
+      const oldChild = reusable.get(key);
+      if (oldChild) {
+        reusable.delete(key);
+        return oldChild;
+      }
+      dirtyNodeIds.push(newChild.id);
+      return newChild;
+    });
+
     return {
-      ...newAST,
-      version: oldAST.version + 1,
+      ast: { ...newAST, document: { ...newAST.document, children }, version },
+      dirtyNodeIds,
     };
   }
 

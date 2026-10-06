@@ -396,9 +396,3 @@ self.onerror = (event) => {
 self.onmessageerror = (event) => {
   console.error('Math Worker 消息错误:', event);
 };
-
-// ================================
-// 导出类型
-// ================================
-
-export type { MathRenderRequest, MathRenderResponse };

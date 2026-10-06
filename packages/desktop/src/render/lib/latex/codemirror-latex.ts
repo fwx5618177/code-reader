@@ -346,8 +346,9 @@ function tokenCommand(stream: StringStream, state: LatexState): string | null {
   // 处理环境名称
   if (ch === '{') {
     stream.next();
+    // StringStream.match 传入正则时返回匹配数组，需排除字符串模式下的布尔返回值
     const envMatch = stream.match(/^([a-zA-Z*]+)\}/, true);
-    if (envMatch) {
+    if (envMatch && typeof envMatch !== 'boolean') {
       const envName = envMatch[1];
 
       // 检查是否为数学环境

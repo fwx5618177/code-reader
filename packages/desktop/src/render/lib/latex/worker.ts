@@ -47,6 +47,12 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     return;
   }
 
+  // 重置请求：丢弃缓存的增量解析器与渲染器（主线程清空缓存时同步触发）
+  if (request.type === 'reset') {
+    resetState();
+    return;
+  }
+
   // 设置当前请求
   currentRequestId = request.id;
   isCancelled = false;

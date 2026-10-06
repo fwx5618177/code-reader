@@ -156,13 +156,20 @@ export interface MathInlineNode extends LatexNode {
   delimiter: '$' | '\\(';
 }
 
+/**
+ * 块级公式分隔符
+ * 取值为 $$、\[ 或数学环境名（equation、align、gather、pmatrix、cases 等），
+ * 解析器遇到未知数学环境时会原样保留环境名，因此需要允许任意字符串
+ */
+export type MathBlockDelimiter = '$$' | '\\[' | (string & {});
+
 /** 块级公式节点 */
 export interface MathBlockNode extends LatexNode {
   type: 'math_block';
   /** 公式内容（不含分隔符） */
   content: string;
-  /** 使用的分隔符类型 */
-  delimiter: '$$' | '\\[' | 'equation' | 'align' | 'gather';
+  /** 使用的分隔符类型或数学环境名 */
+  delimiter: MathBlockDelimiter;
   /** 是否有编号 */
   numbered: boolean;
   /** 标签 */
@@ -193,8 +200,8 @@ export interface ParagraphNode extends LatexNode {
 /** 章节节点 */
 export interface SectionNode extends LatexNode {
   type: 'section';
-  /** 章节级别：chapter, section, subsection, subsubsection, paragraph, subparagraph */
-  level: 'chapter' | 'section' | 'subsection' | 'subsubsection' | 'paragraph' | 'subparagraph';
+  /** 章节级别：part, chapter, section, subsection, subsubsection, paragraph, subparagraph */
+  level: 'part' | 'chapter' | 'section' | 'subsection' | 'subsubsection' | 'paragraph' | 'subparagraph';
   /** 标题内容 */
   title: LatexNode[];
   /** 是否为星号版本（无编号） */
@@ -435,7 +442,8 @@ export type WorkerMessageType =
   | 'parse_incremental'
   | 'render'
   | 'render_block'
-  | 'cancel';
+  | 'cancel'
+  | 'reset';
 
 /** 发送给 Worker 的消息 */
 export interface WorkerRequest {

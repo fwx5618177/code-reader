@@ -15,12 +15,12 @@ import type {
   TextNode,
   MathInlineNode,
   MathBlockNode,
-  CommentNode,
   ParagraphNode,
   SectionNode,
   ListNode,
   ListItemNode,
   ErrorNode,
+  AnyLatexNode,
   LatexRenderOptions,
   LatexRenderResult,
   RenderBlock,
@@ -33,7 +33,6 @@ import {
   processMathContent,
   extractMathContent,
   extractEnvName,
-  getEnvInfo,
   getEnvCssClass,
   getEnvHtmlAttributes,
   formatHtmlAttributes,
@@ -437,7 +436,7 @@ export class LatexRenderer {
       if (node.type === 'section') {
         const sectionNode = node as SectionNode;
         // 只收集编号的 section（非星号版本）
-        if (sectionNode.numbered !== false) {
+        if (!sectionNode.star) {
           const titleText = this.getChildrenText(sectionNode.title);
           const id = `section-${sectionNode.id}`;
           this.preCollectedTocEntries!.push({
@@ -659,7 +658,7 @@ export class LatexRenderer {
       if (node.type === 'section') {
         const sectionNode = node as SectionNode;
         // 只收集编号的 section（非星号版本）
-        if (sectionNode.numbered !== false) {
+        if (!sectionNode.star) {
           const titleText = this.getChildrenText(sectionNode.title);
           const id = `section-${sectionNode.id}`;
           this.tocEntries.push({
@@ -1636,86 +1635,46 @@ export class LatexRenderer {
 
     const name = node.name;
 
-    // 检查是否为数学环境 - 与 types.ts 中的 MATH_ENVIRONMENTS 保持一致
-    const mathEnvironments = [
-      // 基本公式环境
-      'equation',
-      'equation*',
-      // 对齐公式环境
-      'align',
-      'align*',
-      'alignat',
-      'alignat*',
-      'flalign',
-      'flalign*',
-      'eqnarray',
-      'eqnarray*',
-      // 居中多行公式环境
-      'gather',
-      'gather*',
-      'multline',
-      'multline*',
-      // 嵌套/子环境
-      'split',
-      'aligned',
-      'gathered',
-      'alignedat',
-      // 矩阵环境
-      'array',
-      'matrix',
-      'pmatrix',
-      'bmatrix',
-      'vmatrix',
-      'Vmatrix',
-      'Bmatrix',
-      'smallmatrix',
-      // 分段函数环境
-      'cases',
-      'dcases',
-      'rcases',
-      // 子公式环境
-      'subequations',
-    ];
-
-    if (mathEnvironments.includes(name)) {
+    // 检查是否为数学环境（统一使用 math-env-handler 的环境集合；subequations 作为公式组同样按数学环境渲染）
+    if (isMathEnv(name) || name === 'subequations') {
       return this.renderMathEnvironment(node);
     }
 
     switch (name) {
       case 'center':
-        return `<div class="${this.prefix}-center">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-center" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'flushleft':
-        return `<div class="${this.prefix}-left">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-left" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'flushright':
-        return `<div class="${this.prefix}-right">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-right" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'quote':
       case 'quotation':
-        return `<blockquote class="${this.prefix}-quote">${this.renderChildren(node.children)}</blockquote>`;
+        return `<blockquote class="${this.prefix}-quote" ${blockAttrs}>${this.renderChildren(node.children)}</blockquote>`;
       case 'verbatim':
-        return `<pre class="${this.prefix}-verbatim"><code>${this.escapeHtml(this.getChildrenText(node.children))}</code></pre>`;
+        return `<pre class="${this.prefix}-verbatim" ${blockAttrs}><code>${this.escapeHtml(this.getChildrenText(node.children))}</code></pre>`;
       case 'figure':
-        return `<figure class="${this.prefix}-figure">${this.renderChildren(node.children)}</figure>`;
+        return `<figure class="${this.prefix}-figure" ${blockAttrs}>${this.renderChildren(node.children)}</figure>`;
       case 'table':
-        return `<div class="${this.prefix}-table-container">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-table-container" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'tabular':
-        return this.renderTabular(node);
+        return this.renderTabular(node, blockAttrs);
       case 'abstract':
-        return `<div class="${this.prefix}-abstract"><h3>摘要</h3>${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-abstract" ${blockAttrs}><h3>摘要</h3>${this.renderChildren(node.children)}</div>`;
       case 'theorem':
-        return `<div class="${this.prefix}-theorem"><strong>定理</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-theorem" ${blockAttrs}><strong>定理</strong> ${this.renderChildren(node.children)}</div>`;
       case 'lemma':
-        return `<div class="${this.prefix}-lemma"><strong>引理</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-lemma" ${blockAttrs}><strong>引理</strong> ${this.renderChildren(node.children)}</div>`;
       case 'proof':
-        return `<div class="${this.prefix}-proof"><em>证明：</em>${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-proof" ${blockAttrs}><em>证明：</em>${this.renderChildren(node.children)}</div>`;
       case 'definition':
-        return `<div class="${this.prefix}-definition"><strong>定义</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-definition" ${blockAttrs}><strong>定义</strong> ${this.renderChildren(node.children)}</div>`;
       case 'example':
-        return `<div class="${this.prefix}-example"><strong>例</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-example" ${blockAttrs}><strong>例</strong> ${this.renderChildren(node.children)}</div>`;
       case 'remark':
-        return `<div class="${this.prefix}-remark"><em>注：</em>${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-remark" ${blockAttrs}><em>注：</em>${this.renderChildren(node.children)}</div>`;
       default:
         // 通用环境
-        return `<div class="${this.prefix}-env-${this.escapeHtml(name)}">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-env-${this.escapeHtml(name)}" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
     }
   }
 
@@ -1790,11 +1749,11 @@ export class LatexRenderer {
   /**
    * 渲染表格环境
    */
-  private renderTabular(node: EnvironmentNode): string {
+  private renderTabular(node: EnvironmentNode, blockAttrs: string): string {
     const content = this.getChildrenText(node.children);
     const rows = content.split('\\\\').filter((r) => r.trim());
 
-    let html = `<table class="${this.prefix}-tabular"><tbody>`;
+    let html = `<table class="${this.prefix}-tabular" ${blockAttrs}><tbody>`;
 
     for (const row of rows) {
       if (row.includes('\\hline')) continue;

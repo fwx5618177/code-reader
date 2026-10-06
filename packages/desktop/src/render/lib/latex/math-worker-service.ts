@@ -303,7 +303,7 @@ export class MathWorkerService {
     this.workerError = new Error(event.message);
 
     // 拒绝所有待处理请求
-    for (const [id, pending] of this.pendingRequests) {
+    for (const pending of this.pendingRequests.values()) {
       clearTimeout(pending.timeoutId);
       pending.reject(new Error('Worker 发生错误'));
     }
