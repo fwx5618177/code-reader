@@ -228,6 +228,14 @@ export class WritingService implements IWritingService {
     this.searchHistory = [];
     this.initPromise = null;
 
+    // 资源已释放：同步重置运行态标记，避免外部读取到“已初始化 / Worker 就绪”的过期状态
+    // 缓存命中统计与最后持久化时间属于历史数据，予以保留
+    this.updateState({
+      isInitialized: false,
+      isWorkerReady: false,
+      indexedDocumentCount: 0,
+    });
+
     this.log('WritingService destroyed');
   }
 
