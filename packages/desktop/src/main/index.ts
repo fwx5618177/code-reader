@@ -21,8 +21,6 @@ import { initializeTray } from './tray/tray-manager';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-(app as any).applicationSupportsSecureRestorableState = true;
-
 let mainWindow: BrowserWindow | null = null;
 const childWindows: Map<string, BrowserWindow> = new Map();
 

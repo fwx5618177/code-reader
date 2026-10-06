@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { knowledgeStorage } from '../services/knowledgeStorage';
-import type { KnowledgeItem, Folder } from '../types/knowledge';
+import type { KnowledgeItem, KnowledgeItemType, Folder } from '../types/knowledge';
 
 // ================================
 // 类型定义
@@ -118,8 +118,8 @@ function knowledgeTypeToMaterialType(type: string): MaterialType {
 /**
  * 将 MaterialType 转换为 KnowledgeItemType
  */
-function materialTypeToKnowledgeType(type: MaterialType): string {
-  const typeMap: Record<MaterialType, string> = {
+function materialTypeToKnowledgeType(type: MaterialType): KnowledgeItemType {
+  const typeMap: Record<MaterialType, KnowledgeItemType> = {
     image: 'image',
     document: 'document',
     audio: 'audio',
@@ -276,7 +276,7 @@ export function useMaterials(): UseMaterialsReturn {
         // 创建知识条目
         const item = await knowledgeStorage.createItem({
           title: material.name,
-          type: materialTypeToKnowledgeType(material.type) as any,
+          type: materialTypeToKnowledgeType(material.type),
           content: material.content,
           filePath: material.filePath,
           fileSize: material.size,

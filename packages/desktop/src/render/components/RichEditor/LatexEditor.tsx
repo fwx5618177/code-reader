@@ -396,7 +396,6 @@ const ZOOM_LEVELS = [80, 100, 120, 150, 180, 200, 250, 300];
 const DEFAULT_ZOOM = 100;
 const MIN_ZOOM = 80;
 const MAX_ZOOM = 300;
-const ZOOM_STEP = 20;
 
 interface RenderPreviewProps {
   /** 渲染的 HTML 内容 */

@@ -9,9 +9,17 @@
 // ================================
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import type { RootNode, DocumentChange } from '../lib/latex/types';
-import type { ParseBlock, PositionMapping } from '../lib/latex/streaming-pipeline';
-import type { HeightMap as HeightMapType } from '../lib/latex/height-map';
+import type { RootNode, DocumentChange, LatexNode, LatexNodeType } from '../lib/latex/types';
+import type {
+  ParseBlock,
+  ParseBlockType,
+  PositionMapping,
+} from '../lib/latex/streaming-pipeline';
+import type { HeightMap as HeightMapType, HeightBlockType } from '../lib/latex/height-map';
+// 仅导入类型：运行时仍通过动态 import 加载，避免循环依赖
+import type { PipelineIntegration } from '../lib/latex/pipeline-integration';
+import type { ParseWorkerService } from '../lib/latex/parse-worker-service';
+import type { ScrollSyncController } from '../lib/latex/scroll-sync';
 
 // 内联定义需要的类型，避免循环依赖
 interface ScrollSyncResultType {
@@ -28,6 +36,47 @@ interface ScrollStateType {
   viewportHeight: number;
   contentHeight: number;
   timestamp: number;
+}
+
+// ================================
+// 类型映射
+// ================================
+
+/** 作为解析块收集的 AST 节点类型及其对应的块类型（根节点视为整篇文档块） */
+const BLOCK_NODE_TYPE_MAP: Partial<Record<LatexNodeType, ParseBlockType>> = {
+  root: 'document',
+  section: 'section',
+  paragraph: 'paragraph',
+  math_block: 'math_block',
+  environment: 'environment',
+  list: 'list',
+};
+
+/** 解析块类型到 HeightMap 块类型的映射（两者命名风格不同：下划线 / 连字符） */
+const HEIGHT_BLOCK_TYPE_MAP: Record<ParseBlockType, HeightBlockType> = {
+  preamble: 'preamble',
+  document: 'document',
+  section: 'section',
+  paragraph: 'paragraph',
+  math_inline: 'math-inline',
+  math_block: 'math-block',
+  environment: 'environment',
+  list: 'list',
+  table: 'table',
+  command: 'command',
+  text: 'text',
+  comment: 'unknown',
+  error: 'error',
+};
+
+/**
+ * 根据管道统计的真实命中/未命中次数计算缓存命中率（0-1）
+ */
+function computeCacheHitRate(pipeline: PipelineIntegration | null): number {
+  if (!pipeline) return 0;
+  const { cacheHits, cacheMisses } = pipeline.getStats();
+  const total = cacheHits + cacheMisses;
+  return total > 0 ? cacheHits / total : 0;
 }
 
 // ================================
@@ -180,9 +229,9 @@ export function useLatexPipeline(
   const versionRef = useRef<number>(0);
   const abortControllerRef = useRef<AbortController | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pipelineRef = useRef<any>(null);
-  const workerServiceRef = useRef<any>(null);
-  const scrollControllerRef = useRef<any>(null);
+  const pipelineRef = useRef<PipelineIntegration | null>(null);
+  const workerServiceRef = useRef<ParseWorkerService | null>(null);
+  const scrollControllerRef = useRef<ScrollSyncController | null>(null);
   const heightMapRef = useRef<HeightMapType | null>(null);
   const blockIndexRef = useRef<Map<string, ParseBlock>>(new Map());
 
@@ -210,12 +259,13 @@ export function useLatexPipeline(
 
         // 创建 Worker 服务（如果启用）
         if (fullConfig.enableWorker) {
-          workerServiceRef.current = new ParseWorkerService({
+          const workerService = new ParseWorkerService({
             largeFileThreshold: fullConfig.largeFileThreshold,
             hugeFileThreshold: fullConfig.hugeFileThreshold,
             debug: fullConfig.debug,
           });
-          await workerServiceRef.current.init();
+          workerServiceRef.current = workerService;
+          await workerService.init();
         }
 
         // 创建滚动同步控制器
@@ -289,12 +339,14 @@ export function useLatexPipeline(
         let result: { html: string; ast: RootNode | null; blocks: ParseBlock[] };
 
         // 根据配置选择解析方式
-        if (fullConfig.enableWorker && workerServiceRef.current && sizeType !== 'small') {
+        const workerService = workerServiceRef.current;
+        const pipeline = pipelineRef.current;
+        if (fullConfig.enableWorker && workerService && sizeType !== 'small') {
           // 使用 Worker 进行后台解析
-          result = await parseWithWorker(content, abortController.signal);
-        } else if (pipelineRef.current) {
+          result = await parseWithWorker(workerService, content, abortController.signal);
+        } else if (pipeline) {
           // 使用管道集成器
-          result = await parseWithPipeline(content, abortController.signal);
+          result = await parseWithPipeline(pipeline, content, abortController.signal);
         } else {
           // Fallback: 同步解析
           result = await parseFallback(content);
@@ -333,7 +385,7 @@ export function useLatexPipeline(
           parseTime,
           renderTime: 0,
           blockCount: result.blocks.length,
-          cacheHitRate: pipelineRef.current?.getStats()?.cacheHitRate || 0,
+          cacheHitRate: computeCacheHitRate(pipelineRef.current),
           error: null,
         });
 
@@ -369,11 +421,10 @@ export function useLatexPipeline(
 
   // 使用 Worker 解析
   const parseWithWorker = async (
+    workerService: ParseWorkerService,
     content: string,
     signal: AbortSignal
   ): Promise<{ html: string; ast: RootNode | null; blocks: ParseBlock[] }> => {
-    const workerService = workerServiceRef.current;
-
     const ast = await workerService.parse(content, {
       chunked: true,
       onProgress: (progress: number) => {
@@ -403,11 +454,10 @@ export function useLatexPipeline(
 
   // 使用管道解析
   const parseWithPipeline = async (
+    pipeline: PipelineIntegration,
     content: string,
     signal: AbortSignal
   ): Promise<{ html: string; ast: RootNode | null; blocks: ParseBlock[] }> => {
-    const pipeline = pipelineRef.current;
-
     const result = await pipeline.setContent(content, {
       onProgress: (progress: number) => {
         setParseState((prev) => ({ ...prev, progress }));
@@ -451,18 +501,17 @@ export function useLatexPipeline(
     const blocks: ParseBlock[] = [];
     let blockId = 0;
 
-    const traverse = (node: any, depth: number = 0): void => {
-      const blockTypes = ['section', 'paragraph', 'math_block', 'environment', 'list'];
-      const nodeType = node.type || '';
+    const traverse = (node: LatexNode): void => {
+      const blockType = BLOCK_NODE_TYPE_MAP[node.type];
 
-      if (blockTypes.includes(nodeType) || depth === 0) {
+      if (blockType) {
         const start = node.start || 0;
         const end = node.end || content.length;
         const raw = node.raw || content.slice(start, end);
 
         blocks.push({
           id: node.id || `block-${blockId++}`,
-          type: nodeType as any,
+          type: blockType,
           sourceStart: start,
           sourceEnd: end,
           sourceStartLine: getLineNumber(content, start),
@@ -481,7 +530,7 @@ export function useLatexPipeline(
 
       if (node.children) {
         for (const child of node.children) {
-          traverse(child, depth + 1);
+          traverse(child);
         }
       }
     };
@@ -519,7 +568,7 @@ export function useLatexPipeline(
           sourceEndLine: block.sourceEndLine,
           sourceStartOffset: block.sourceStart,
           sourceEndOffset: block.sourceEnd,
-          type: block.type as any,
+          type: HEIGHT_BLOCK_TYPE_MAP[block.type],
           renderTop: block.renderTop,
           renderHeight: block.estimatedHeight,
           measured: false,

@@ -176,9 +176,12 @@ export interface TranscriptionProviderConfig extends BaseProviderConfig {
 /**
  * Preset configuration for quick setup
  */
-export interface ProviderPreset {
+export interface ProviderPreset<
+  TType extends AIProviderType | TranscriptionProviderType = AIProviderType | TranscriptionProviderType,
+  TModel extends ModelConfig | TranscriptionModelConfig = ModelConfig | TranscriptionModelConfig,
+> {
   /** Provider type */
-  type: AIProviderType | TranscriptionProviderType;
+  type: TType;
   /** Display name */
   name: string;
   /** Description */
@@ -189,8 +192,8 @@ export interface ProviderPreset {
   defaultBaseUrl: string;
   /** Documentation URL */
   docsUrl: string;
-  /** Available models */
-  availableModels: (ModelConfig | TranscriptionModelConfig)[];
+  /** Available models（按服务商类别区分为 LLM 模型或转写模型） */
+  availableModels: TModel[];
   /** Required fields */
   requiredFields: string[];
   /** Optional fields */
@@ -436,7 +439,7 @@ export const DEFAULT_AI_CONFIG: AIConfig = {
 // Provider Presets Data
 // ================================
 
-export const LLM_PROVIDER_PRESETS: ProviderPreset[] = [
+export const LLM_PROVIDER_PRESETS: ProviderPreset<AIProviderType, ModelConfig>[] = [
   {
     type: 'openai',
     name: 'OpenAI',
@@ -643,7 +646,10 @@ export const LLM_PROVIDER_PRESETS: ProviderPreset[] = [
   },
 ];
 
-export const TRANSCRIPTION_PROVIDER_PRESETS: ProviderPreset[] = [
+export const TRANSCRIPTION_PROVIDER_PRESETS: ProviderPreset<
+  TranscriptionProviderType,
+  TranscriptionModelConfig
+>[] = [
   {
     type: 'openai-whisper',
     name: 'OpenAI Whisper',

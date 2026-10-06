@@ -196,7 +196,7 @@ class AIConfigService {
       type,
       apiKey: obfuscateKey(config.apiKey),
       baseUrl: config.baseUrl || preset?.defaultBaseUrl,
-      models: config.models.length > 0 ? config.models : (preset?.availableModels as any) || [],
+      models: config.models.length > 0 ? config.models : preset?.availableModels ?? [],
       createdAt: now,
       updatedAt: now,
     };
@@ -321,7 +321,7 @@ class AIConfigService {
       apiKey: obfuscateKey(config.apiKey),
       appSecret: config.appSecret ? obfuscateKey(config.appSecret) : undefined,
       baseUrl: config.baseUrl || preset?.defaultBaseUrl,
-      models: config.models.length > 0 ? config.models : (preset?.availableModels as any) || [],
+      models: config.models.length > 0 ? config.models : preset?.availableModels ?? [],
       createdAt: now,
       updatedAt: now,
     };
