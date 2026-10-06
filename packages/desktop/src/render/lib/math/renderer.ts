@@ -33,7 +33,6 @@ import {
   type AccentNode,
   type DelimiterNode,
   type ErrorNode,
-  type LineBreakNode,
 } from './parser';
 
 // ================================

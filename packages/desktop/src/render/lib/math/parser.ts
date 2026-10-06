@@ -749,7 +749,7 @@ export class MathParser {
   /**
    * 解析命令
    */
-  private parseCommand(): MathNode {
+  private parseCommand(): MathNode | null {
     this.pos++; // 跳过反斜杠
 
     // 读取命令名
@@ -859,7 +859,7 @@ export class MathParser {
     // 跳过 \right（在 parseLeftRight 中处理）
     if (name === 'right') {
       this.pos -= name.length + 1; // 回退
-      return null as unknown as MathNode;
+      return null;
     }
 
     // 环境
@@ -1752,7 +1752,7 @@ export class MathParser {
   /**
    * 解析 equation 环境（单行公式）
    */
-  private parseEquation(): AlignedNode {
+  private parseEquation(): GroupNode {
     const children: MathNode[] = [];
 
     this.pushDepth();
@@ -1805,6 +1805,8 @@ export class MathParser {
         this.pos++;
       }
     }
+
+    this.popDepth();
 
     return {
       type: 'group',
