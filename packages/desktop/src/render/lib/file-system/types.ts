@@ -531,6 +531,7 @@ export enum FileSystemErrorCode {
   FileNotFound = 'FileNotFound',
   FileNotADirectory = 'FileNotADirectory',
   FileIsADirectory = 'FileIsADirectory',
+  DirectoryNotEmpty = 'DirectoryNotEmpty',
   NoPermissions = 'NoPermissions',
   Unavailable = 'Unavailable',
   Unknown = 'Unknown',
@@ -578,6 +579,17 @@ export class FileSystemError extends Error {
     return new FileSystemError(
       FileSystemErrorCode.FileIsADirectory,
       uri ? `Is a directory: ${uri.toString()}` : 'Is a directory',
+      uri
+    );
+  }
+
+  /** 非递归删除非空目录 */
+  static DirectoryNotEmpty(uri?: Uri): FileSystemError {
+    return new FileSystemError(
+      FileSystemErrorCode.DirectoryNotEmpty,
+      uri
+        ? `Directory not empty. Use recursive delete: ${uri.toString()}`
+        : 'Directory not empty. Use recursive delete.',
       uri
     );
   }

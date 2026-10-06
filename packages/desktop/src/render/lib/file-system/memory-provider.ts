@@ -294,11 +294,7 @@ export class MemoryFileSystemProvider implements IFileSystemProvider {
       );
 
       if (hasChildren && !options.recursive) {
-        throw new FileSystemError(
-          'Unknown' as any,
-          'Directory not empty. Use recursive delete.',
-          uri
-        );
+        throw FileSystemError.DirectoryNotEmpty(uri);
       }
 
       // Delete children
