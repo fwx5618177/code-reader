@@ -10,6 +10,7 @@ import type {
   PluginId,
   Disposable,
 } from '../types';
+import { PluginPriority } from '../types';
 
 // ================================
 // 扩展点注册表
@@ -109,7 +110,7 @@ export class ExtensionRegistry {
     extensionPointId: string,
     pluginId: PluginId,
     extension: T,
-    priority = 50
+    priority: number = PluginPriority.Normal
   ): Disposable {
     const extensionPoint = this.extensionPoints.get(extensionPointId);
     if (!extensionPoint) {

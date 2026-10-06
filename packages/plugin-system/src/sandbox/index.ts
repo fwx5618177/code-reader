@@ -12,10 +12,9 @@ import type {
   EditorAPI,
   UIAPI,
   Disposable,
-  PluginState,
   PluginVersion,
 } from '../types';
-import { createDisposable, PluginPriority } from '../types';
+import { createDisposable, PluginState } from '../types';
 
 // ================================
 // 沙箱配置
@@ -379,7 +378,7 @@ export class PluginSandbox {
       ...DEFAULT_SANDBOX_CONFIG,
       ...config,
     };
-    this.state = 'unloaded' as PluginState;
+    this.state = PluginState.Unloaded;
     this.deps = deps;
   }
 
@@ -487,7 +486,7 @@ export class PluginSandbox {
     }
     this.subscriptions = [];
     this.context = null;
-    this.state = 'unloaded' as PluginState;
+    this.state = PluginState.Unloaded;
   }
 }
 

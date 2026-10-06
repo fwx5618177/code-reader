@@ -9,11 +9,8 @@ import type {
   PluginManifest,
   PluginContext,
   PluginInstance,
-  PluginState,
-  PluginSource,
   PluginLoadResult,
   PluginEvent,
-  PluginEventType,
   Disposable,
   Logger,
   StorageAPI,
@@ -21,7 +18,13 @@ import type {
   EditorAPI,
   UIAPI,
 } from '../types';
-import { createDisposable } from '../types';
+import {
+  createDisposable,
+  PluginEventType,
+  PluginPriority,
+  PluginSource,
+  PluginState,
+} from '../types';
 import { ExtensionRegistry } from '../registry';
 
 // ================================
@@ -111,7 +114,7 @@ export class PluginManager {
    * @param plugin 插件实例
    * @param source 加载源
    */
-  async loadPlugin(plugin: Plugin, source: PluginSource = 'user' as PluginSource): Promise<PluginLoadResult> {
+  async loadPlugin(plugin: Plugin, source: PluginSource = PluginSource.User): Promise<PluginLoadResult> {
     const startTime = Date.now();
     const { id } = plugin.manifest;
 
@@ -128,7 +131,7 @@ export class PluginManager {
       const instance: PluginInstance = {
         plugin,
         context: this.createPluginContext(plugin.manifest),
-        state: 'loaded' as PluginState,
+        state: PluginState.Loaded,
         source,
         loadedAt: Date.now(),
       };
@@ -137,7 +140,7 @@ export class PluginManager {
 
       // 触发加载事件
       this.emitEvent({
-        type: 'plugin:loaded' as PluginEventType,
+        type: PluginEventType.Loaded,
         pluginId: id,
         timestamp: Date.now(),
         manifest: plugin.manifest,
@@ -154,7 +157,7 @@ export class PluginManager {
       const err = error instanceof Error ? error : new Error(String(error));
 
       this.emitEvent({
-        type: 'plugin:error' as PluginEventType,
+        type: PluginEventType.Error,
         pluginId: id,
         timestamp: Date.now(),
         error: err,
@@ -176,13 +179,13 @@ export class PluginManager {
    */
   async loadPlugins(
     plugins: Plugin[],
-    source: PluginSource = 'user' as PluginSource
+    source: PluginSource = PluginSource.User
   ): Promise<PluginLoadResult[]> {
     const results: PluginLoadResult[] = [];
 
     // 按优先级排序
     const sorted = [...plugins].sort(
-      (a, b) => (b.manifest.priority ?? 50) - (a.manifest.priority ?? 50)
+      (a, b) => (b.manifest.priority ?? PluginPriority.Normal) - (a.manifest.priority ?? PluginPriority.Normal)
     );
 
     // 分批加载
@@ -215,12 +218,12 @@ export class PluginManager {
       throw new Error(`插件 "${pluginId}" 未加载`);
     }
 
-    if (instance.state === ('active' as PluginState)) {
+    if (instance.state === PluginState.Active) {
       return; // 已激活
     }
 
     // 更新状态
-    this.updatePluginState(pluginId, 'activating' as PluginState);
+    this.updatePluginState(pluginId, PluginState.Activating);
 
     try {
       // 检查依赖
@@ -242,21 +245,21 @@ export class PluginManager {
       instance.activatedAt = Date.now();
 
       // 更新状态
-      this.updatePluginState(pluginId, 'active' as PluginState);
+      this.updatePluginState(pluginId, PluginState.Active);
 
       this.emitEvent({
-        type: 'plugin:activated' as PluginEventType,
+        type: PluginEventType.Activated,
         pluginId,
         timestamp: Date.now(),
       });
 
       this.log(`插件 "${pluginId}" 激活成功`);
     } catch (error) {
-      this.updatePluginState(pluginId, 'error' as PluginState);
+      this.updatePluginState(pluginId, PluginState.Error);
 
       const err = error instanceof Error ? error : new Error(String(error));
       this.emitEvent({
-        type: 'plugin:error' as PluginEventType,
+        type: PluginEventType.Error,
         pluginId,
         timestamp: Date.now(),
         error: err,
@@ -277,7 +280,7 @@ export class PluginManager {
 
     for (const pluginId of sorted) {
       const instance = this.plugins.get(pluginId);
-      if (instance && instance.state !== ('active' as PluginState)) {
+      if (instance && instance.state !== PluginState.Active) {
         try {
           await this.activatePlugin(pluginId);
         } catch (error) {
@@ -301,12 +304,12 @@ export class PluginManager {
       throw new Error(`插件 "${pluginId}" 未加载`);
     }
 
-    if (instance.state !== ('active' as PluginState)) {
+    if (instance.state !== PluginState.Active) {
       return; // 未激活
     }
 
     // 更新状态
-    this.updatePluginState(pluginId, 'deactivating' as PluginState);
+    this.updatePluginState(pluginId, PluginState.Deactivating);
 
     try {
       // 执行停用
@@ -328,21 +331,21 @@ export class PluginManager {
       this.registry.unregisterAllByPlugin(pluginId);
 
       // 更新状态
-      this.updatePluginState(pluginId, 'inactive' as PluginState);
+      this.updatePluginState(pluginId, PluginState.Inactive);
 
       this.emitEvent({
-        type: 'plugin:deactivated' as PluginEventType,
+        type: PluginEventType.Deactivated,
         pluginId,
         timestamp: Date.now(),
       });
 
       this.log(`插件 "${pluginId}" 停用成功`);
     } catch (error) {
-      this.updatePluginState(pluginId, 'error' as PluginState);
+      this.updatePluginState(pluginId, PluginState.Error);
 
       const err = error instanceof Error ? error : new Error(String(error));
       this.emitEvent({
-        type: 'plugin:error' as PluginEventType,
+        type: PluginEventType.Error,
         pluginId,
         timestamp: Date.now(),
         error: err,
@@ -363,7 +366,7 @@ export class PluginManager {
 
     for (const pluginId of sorted) {
       const instance = this.plugins.get(pluginId);
-      if (instance && instance.state === ('active' as PluginState)) {
+      if (instance && instance.state === PluginState.Active) {
         try {
           await this.deactivatePlugin(pluginId);
         } catch (error) {
@@ -388,7 +391,7 @@ export class PluginManager {
     }
 
     // 先停用
-    if (instance.state === ('active' as PluginState)) {
+    if (instance.state === PluginState.Active) {
       await this.deactivatePlugin(pluginId);
     }
 
@@ -396,7 +399,7 @@ export class PluginManager {
     this.plugins.delete(pluginId);
 
     this.emitEvent({
-      type: 'plugin:unloaded' as PluginEventType,
+      type: PluginEventType.Unloaded,
       pluginId,
       timestamp: Date.now(),
     });
@@ -444,7 +447,7 @@ export class PluginManager {
    * 获取已激活的插件
    */
   getActivePlugins(): PluginInstance[] {
-    return this.getAllPlugins().filter((p) => p.state === ('active' as PluginState));
+    return this.getAllPlugins().filter((p) => p.state === PluginState.Active);
   }
 
   /**
@@ -461,7 +464,7 @@ export class PluginManager {
    */
   isActive(pluginId: PluginId): boolean {
     const instance = this.plugins.get(pluginId);
-    return instance?.state === ('active' as PluginState);
+    return instance?.state === PluginState.Active;
   }
 
   // ================================
@@ -536,7 +539,7 @@ export class PluginManager {
       }
 
       // 确保依赖已激活
-      if (instance.state !== ('active' as PluginState)) {
+      if (instance.state !== PluginState.Active) {
         await this.activatePlugin(dep.id);
       }
     }
@@ -591,7 +594,7 @@ export class PluginManager {
     instance.state = newState;
 
     this.emitEvent({
-      type: 'plugin:stateChanged' as PluginEventType,
+      type: PluginEventType.StateChanged,
       pluginId,
       timestamp: Date.now(),
       previousState,
@@ -609,7 +612,7 @@ export class PluginManager {
     return {
       pluginId,
       version: manifest.version,
-      state: 'loaded' as PluginState,
+      state: PluginState.Loaded,
       logger: this.createLogger(pluginId),
       storage: this.createStorageAPI(pluginId, false),
       globalStorage: this.createStorageAPI(pluginId, true),
