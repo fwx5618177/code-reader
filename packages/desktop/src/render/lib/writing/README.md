@@ -104,8 +104,7 @@ lib/writing/
 ├── enhanced-worker-pool.ts     # Worker 池
 ├── diff-worker-complete.ts     # 完整 diff 实现
 ├── worker-script-generator.ts  # Worker 脚本生成
-├── README.md                   # 本文档
-└── USAGE_EXAMPLES.md           # 详细使用示例
+└── README.md                   # 本文档
 ```
 
 ## API 参考
@@ -283,24 +282,69 @@ const storage = createIndexStorage({
 });
 ```
 
+## 搜索选项
+
+```typescript
+const results = await search('关键词', {
+  limit: 20,
+  highlight: true,       // 返回带高亮的 snippet
+  snippetLength: 150,    // 摘要长度（默认 150）
+  fuzzy: true,           // 模糊搜索
+  fuzzyThreshold: 0.7,   // 相似度阈值（默认 0.7）
+  fields: ['title'],     // 搜索字段：'title' | 'content' | 'tags'，默认 ['title', 'content']
+});
+```
+
+## 自定义 Worker 池与存储
+
+```typescript
+import {
+  createEnhancedWorkerPool,
+  createIndexStorage,
+  createMemoryIndexStorage,
+} from '../lib/writing';
+
+// 自定义 Worker 池（默认 minWorkers=1，maxWorkers=navigator.hardwareConcurrency）
+const pool = createEnhancedWorkerPool({
+  minWorkers: 2,
+  maxWorkers: 8,
+  taskTimeout: 60000,
+  idleTimeout: 120000,
+});
+await pool.initialize();
+const result = await pool.textDiff(source, target, { semanticCleanup: true });
+pool.terminate();
+
+// IndexedDB 存储 / 内存存储（内存存储不跨会话）
+const idbStorage = createIndexStorage({ dbName: 'my-custom-index-db' });
+const memoryStorage = createMemoryIndexStorage();
+await idbStorage.save('my-index', indexData);
+const loaded = await idbStorage.load('my-index');
+```
+
+## 版本对比
+
+`useContentDiff` 返回的 `lastDiff.diffs` 是 `[op, text]` 元组数组（`1` 插入、`-1` 删除、`0` 相等），`lastStats` 含 `insertions`、`deletions`、`changeRatio`。展示差异优先使用模块内的 `DiffViewer` 组件。
+
+```tsx
+const { compare, lastDiff, lastStats, isComputing } = useContentDiff();
+
+useEffect(() => {
+  compare(oldVersion, newVersion);
+}, [oldVersion, newVersion, compare]);
+```
+
 ## 性能
 
-### 基准测试
+真实数据请运行模块内基准（`benchmark.ts` 的 `runQuickBenchmark` / `runFullBenchmark`）或 `pnpm --filter @code-reader/desktop test:writing`，运行时指标由 `performance-monitor.ts` 收集。
 
-| 操作 | 数据大小 | 时间 |
-|------|----------|------|
-| 索引 1000 文档 | 平均 1KB | ~200ms |
-| 搜索 | 10000 文档 | ~10ms |
-| 差分 (主线程) | 10KB | ~5ms |
-| 差分 (Worker) | 100KB | ~50ms |
-| 哈希 (Worker) | 1MB | ~20ms |
+使用建议：
 
-### 优化建议
-
-1. **使用 Worker** - 超过 50KB 的文本
-2. **启用缓存** - 重复比较场景
-3. **批量索引** - 大量文档时
-4. **模糊搜索** - 仅在需要时启用
+1. **Worker**：文本超过 `workerThreshold`（默认 50KB）或批量差分时使用，避免阻塞 UI
+2. **差分缓存**：同一内容会被多次比较（频繁编辑、自动保存）时启用
+3. **索引持久化**：需要跨会话保留索引、文档数量较多或启动时间敏感时启用
+4. **批量索引**：大量文档使用 `indexDocuments`
+5. **模糊搜索**：仅在需要时开启
 
 ## 与现有模块集成
 
@@ -361,7 +405,3 @@ resetDefaultWritingService();
 closeDefaultEnhancedWorkerPool();
 closeDefaultIndexStorage();
 ```
-
-## 更多示例
-
-详细使用示例请参见 [USAGE_EXAMPLES.md](./USAGE_EXAMPLES.md)。

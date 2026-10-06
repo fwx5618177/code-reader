@@ -1,123 +1,58 @@
-# 📚 Code Reader 文档中心
+# 文档中心
 
-> 从代码阅读器到智能知识库的演进之路
+## 文档索引
 
----
-
-## 📁 文档结构
-
-| 文档 | 描述 |
+| 文档 | 内容 |
 |------|------|
-| [01-project-analysis.md](./01-project-analysis.md) | 当前项目分析报告，包括技术栈、模块状态和现有问题 |
-| [02-requirements-todo.md](./02-requirements-todo.md) | 新需求分析与 TODO 清单，智能知识库的完整规划 |
-| [03-ui-refactor-plan.md](./03-ui-refactor-plan.md) | UI 重构计划，参考 Obsidian 的设计规范 |
+| [PRODUCT.md](./PRODUCT.md) | 产品定位、核心理念、三大模式、不做什么、路线图、产品演进 |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构、存储与版本、UI 架构、LaTeX 渲染链路、关键问题与根因记录 |
 
----
+模块级说明就近放在代码旁：
 
-## 🎯 项目愿景
+- 子包说明：`packages/*/README.md`
+- 桌面端模块说明：`packages/desktop/src/render/lib/*/README.md`
+- 算法总览：`packages/desktop/src/render/lib/ALGORITHMS_README.md`
+- 样式规范：`packages/desktop/src/render/styles/DESIGN_SYSTEM.md`
 
-### 原始目标：代码阅读器
-- 分析代码依赖关系
-- 生成依赖图和流程图
-- 支持代码笔记
+## 产品定位
 
-### 新目标：智能知识库（Second Brain）
-- **无脑输入** - 直接往里塞信息，不需要整理
-- **AI 整理** - 自动打标签、分类、建文件夹
-- **智能检索** - 语义搜索、RAG 问答
-- **多端打通** - 桌面、移动、眼镜等设备
+个人知识库 + 写作编辑器，类似 Obsidian 与印象笔记结合的个人文档工具：
 
----
+- **知识库**：AI 数据湖。高频写入、低频读取，随手丢入录音、文章、网页、文件，由 AI 自动整理、打标签、按虚拟文件夹归类、转写与总结；原始文件永久保留，总结只作为索引。
+- **写作**：ProseMirror + CodeMirror 富文本编辑器，支持 Markdown，重点是在线编写并实时渲染 LaTeX。
+- **阅读**：文章、电子书的阅读管理。
 
-## 💡 核心理念
+应用模式只有三个：knowledge（⌘1）/ writing（⌘2）/ reading（⌘3）。不再做代码阅读器，详见 [PRODUCT.md](./PRODUCT.md)。
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Data Lake 模式                        │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│   📥 输入（高频）          🤖 AI 处理          📤 输出（低频）│
-│   ──────────────        ──────────        ──────────── │
-│   • 录音                 • 转写            • 搜索查询    │
-│   • 文章                 • 总结            • 智能问答    │
-│   • 笔记碎片             • 打标签          • 知识图谱    │
-│   • 网页剪藏             • 分类整理        • 关联推荐    │
-│                                                         │
-│   ✅ 保留原始数据          ✅ 总结只是索引                  │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
+## 仓库结构
 
----
+pnpm workspace monorepo，所有子包位于 `packages/`：
 
-## 🚀 开发路线图
-
-### Phase 1: 基础 ✅ 进行中
-- [x] 项目架构搭建 (monorepo)
-- [x] 基础 UI 框架 (Electron + React)
-- [x] 文件树浏览
-- [x] 代码查看器
-- [ ] **UI 样式重构** (Obsidian 风格) ← 当前
-
-### Phase 2: 知识库基础
-- [ ] 数据存储层设计
-- [ ] 快速输入入口
-- [ ] 虚拟文件系统
-- [ ] 全文搜索
-
-### Phase 3: AI Agent
-- [ ] Agent 框架
-- [ ] 语音转写 Agent
-- [ ] 自动标签 Agent
-- [ ] 内容总结 Agent
-
-### Phase 4: 高级功能
-- [ ] 语义搜索
-- [ ] RAG 问答
-- [ ] 知识图谱
-- [ ] 多端同步
-
----
-
-## 🛠️ 技术栈
-
-| 层级 | 技术 |
+| 子包 | 职责 |
 |------|------|
-| 框架 | Electron + React 18 |
-| 语言 | TypeScript |
-| 构建 | Vite |
-| 样式 | SCSS + Design System |
-| 包管理 | pnpm workspace (monorepo) |
-| 图标 | lucide-react |
-| 代码高亮 | Prism.js |
+| `desktop` | Electron + React + Vite 桌面应用，主进程（SQLite、AI、Agent、托盘）与渲染进程（UI、编辑器、LaTeX 渲染） |
+| `diff-algorithm` | 文本/二进制差分、编辑距离、模糊匹配，含流式哈希、差分缓存与 Worker 支持 |
+| `syntax-parser` | 增量语法解析：手写 Lezer 风格 LaTeX 解析器、LaTeX 块扫描器、语言注册表与高亮引擎、AST 缓存 |
+| `format-parser` | 内容格式解析：自研 CommonMark/GFM Markdown 解析器、LaTeX 解析器、增量编辑解析 |
+| `autocomplete-service` | 通用自动补全服务：补全提供者、编辑器适配器（CodeMirror / ProseMirror）、拼写检查 |
+| `fuzzy-match-algorithm` | 补全核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
+| `plugin-system` | 插件系统核心：注册表、生命周期管理、沙箱与权限控制 |
+| `search-service` | 全文搜索倒排索引、文件内容搜索、模糊匹配 |
+| `text-buffer` | 文本存储数据结构：Piece Table、Rope、Gap Buffer |
 
----
-
-## 📋 快速开始
+## 常用命令
 
 ```bash
-# 安装依赖
-pnpm install
+pnpm install                 # 安装依赖（desktop 的 postinstall 会为 Electron 重编译 better-sqlite3）
+pnpm dev:desktop             # 启动桌面端开发模式
+pnpm build:desktop           # 构建桌面端
+pnpm build:libs              # 构建除 desktop 外的全部子包
 
-# 开发模式
-pnpm dev:desktop
+pnpm typecheck               # 全部子包类型检查
+pnpm test                    # 运行所有带 test 脚本的子包测试
+pnpm test:<子包名>            # 单个子包测试，例如 pnpm test:text-buffer
+pnpm --filter @code-reader/desktop test:writing   # 写作服务模块测试
 
-# 构建
-pnpm build:desktop
+pnpm benchmark               # 运行所有带 benchmark 脚本的子包基准测试
+pnpm benchmark:diff-algorithm                     # 单独运行差分基准
 ```
-
----
-
-## 📝 贡献指南
-
-1. 阅读 [项目分析报告](./01-project-analysis.md) 了解现状
-2. 查看 [TODO 清单](./02-requirements-todo.md) 选择任务
-3. 参考 [UI 设计规范](./03-ui-refactor-plan.md) 保持风格统一
-
----
-
-## 🔗 相关资源
-
-- [Obsidian](https://obsidian.md/) - UI 设计参考
-- [Electron](https://www.electronjs.org/) - 桌面应用框架
-- [lucide](https://lucide.dev/) - 图标库
