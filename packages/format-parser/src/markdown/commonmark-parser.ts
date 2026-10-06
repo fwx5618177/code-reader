@@ -1344,9 +1344,14 @@ class BlockParser {
     return input.split(/\r?\n/);
   }
 
+  /** 按索引读取行内容，越界时返回空串 */
+  private lineAt(lineIndex: number): string {
+    return this.lines[lineIndex] ?? '';
+  }
+
   /** 获取行长度 */
   private getLineLength(lineIndex: number): number {
-    return lineIndex < this.lines.length ? this.lines[lineIndex].length : 0;
+    return this.lineAt(lineIndex).length;
   }
 
   /** 解析块级元素 */
@@ -1354,7 +1359,7 @@ class BlockParser {
     const blocks: BlockNode[] = [];
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       // 空行
       if (this.isBlankLine(line)) {
@@ -1378,7 +1383,7 @@ class BlockParser {
 
       // Setext 标题（需要向前看一行）
       if (this.lineIndex + 1 < this.lines.length) {
-        const setextHeading = this.parseSetextHeading(line, this.lines[this.lineIndex + 1]);
+        const setextHeading = this.parseSetextHeading(line, this.lineAt(this.lineIndex + 1));
         if (setextHeading) {
           blocks.push(setextHeading);
           this.lineIndex += 2;
@@ -1488,7 +1493,7 @@ class BlockParser {
     const match = line.match(/^(#{1,6})([ \t]+(.*))?$/);
     if (!match) return null;
 
-    const level = match[1].length;
+    const level = (match[1] ?? '').length;
     let content = (match[3] || '').trim();
 
     // 移除尾部的 #
@@ -1520,7 +1525,7 @@ class BlockParser {
     const setextMatch = underline.match(/^[ ]{0,3}(=+|-+)[ \t]*$/);
     if (!setextMatch) return null;
 
-    const level = setextMatch[1][0] === '=' ? 1 : 2;
+    const level = setextMatch[1]?.startsWith('=') ? 1 : 2;
     const content = contentLine.trim();
 
     const inlineParser = new InlineParser(this.options);
@@ -1550,12 +1555,12 @@ class BlockParser {
 
   /** 解析代码围栏 */
   private parseFencedCode(): BlockNode | null {
-    const startLine = this.lines[this.lineIndex];
+    const startLine = this.lineAt(this.lineIndex);
     const match = startLine.match(/^[ ]{0,3}(`{3,}|~{3,})(.*)?$/);
     if (!match) return null;
 
-    const fence = match[1];
-    const fenceChar = fence[0];
+    const fence = match[1] ?? '';
+    const fenceChar = fence.charAt(0);
     const fenceLength = fence.length;
     const info = (match[2] || '').trim();
 
@@ -1569,7 +1574,7 @@ class BlockParser {
     const codeLines: string[] = [];
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       // 检查结束围栏
       const endMatch = line.match(new RegExp(`^[ ]{0,3}${fenceChar}{${fenceLength},}[ ]*$`));
@@ -1600,7 +1605,7 @@ class BlockParser {
     const codeLines: string[] = [];
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       if (this.isBlankLine(line)) {
         // 保留空行（暂时）
@@ -1645,7 +1650,7 @@ class BlockParser {
     const contentLines: string[] = [];
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       // 检查是否是引用行
       const match = line.match(/^[ ]{0,3}>[ ]?(.*)?$/);
@@ -1654,7 +1659,7 @@ class BlockParser {
         this.lineIndex++;
       } else if (!this.isBlankLine(line) && contentLines.length > 0) {
         // 懒惰续行
-        const prevLine = contentLines[contentLines.length - 1];
+        const prevLine = contentLines[contentLines.length - 1] ?? '';
         if (!this.isBlankLine(prevLine)) {
           contentLines.push(line);
           this.lineIndex++;
@@ -1688,7 +1693,7 @@ class BlockParser {
 
   /** 解析列表 */
   private parseList(): BlockNode | null {
-    const startLine = this.lines[this.lineIndex];
+    const startLine = this.lineAt(this.lineIndex);
 
     // 检查是否是列表项
     const bulletMatch = startLine.match(/^[ ]{0,3}([-*+])[ \t]+/);
@@ -1696,14 +1701,14 @@ class BlockParser {
 
     if (!bulletMatch && !orderedMatch) return null;
 
-    const ordered = !!orderedMatch;
-    const marker = ordered ? orderedMatch![2] : bulletMatch![1];
-    const start = ordered ? parseInt(orderedMatch![1], 10) : undefined;
+    const ordered = orderedMatch !== null;
+    const marker = (orderedMatch ? orderedMatch[2] : bulletMatch?.[1]) ?? '';
+    const start = orderedMatch ? parseInt(orderedMatch[1] ?? '1', 10) : undefined;
     const startLineIndex = this.lineIndex;
     const items: BlockNode[] = [];
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       // 检查是否是同类型的列表项
       let itemMatch: RegExpMatchArray | null;
@@ -1725,7 +1730,7 @@ class BlockParser {
         const itemIndent = itemMatch[0].length;
 
         while (this.lineIndex < this.lines.length) {
-          const nextLine = this.lines[this.lineIndex];
+          const nextLine = this.lineAt(this.lineIndex);
 
           if (this.isBlankLine(nextLine)) {
             itemLines.push('');
@@ -1764,7 +1769,7 @@ class BlockParser {
           const taskMatch = itemContentStr.match(/^\[([ xX])\][ \t]+/);
           if (taskMatch) {
             isTaskItem = true;
-            checked = taskMatch[1].toLowerCase() === 'x';
+            checked = (taskMatch[1] ?? '').toLowerCase() === 'x';
             // 移除任务列表复选框标记
             itemContentStr = itemContentStr.slice(taskMatch[0].length);
           }
@@ -1824,7 +1829,7 @@ class BlockParser {
 
   /** 解析 HTML 块 */
   private parseHtmlBlock(): BlockNode | null {
-    const startLine = this.lines[this.lineIndex];
+    const startLine = this.lineAt(this.lineIndex);
     const trimmed = startLine.trimStart();
 
     // 检查是否是 HTML 块的开始
@@ -1833,7 +1838,7 @@ class BlockParser {
     const tagMatch = trimmed.match(/^<\/?([a-zA-Z][a-zA-Z0-9-]*)/);
     if (!tagMatch) return null;
 
-    const tagName = tagMatch[1].toLowerCase();
+    const tagName = (tagMatch[1] ?? '').toLowerCase();
 
     // 只处理块级 HTML 标签
     if (!HTML_BLOCK_TAGS.has(tagName)) return null;
@@ -1843,7 +1848,7 @@ class BlockParser {
 
     // 收集 HTML 块内容
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
       htmlLines.push(line);
       this.lineIndex++;
 
@@ -1981,7 +1986,7 @@ class BlockParser {
     const startLineIndex = this.lineIndex;
 
     // 第一行是表头
-    const headerLine = this.lines[this.lineIndex];
+    const headerLine = this.lineAt(this.lineIndex);
     if (!this.looksLikeTableRow(headerLine)) {
       return null;
     }
@@ -1991,7 +1996,7 @@ class BlockParser {
       return null;
     }
 
-    const delimiterLine = this.lines[this.lineIndex + 1];
+    const delimiterLine = this.lineAt(this.lineIndex + 1);
     const alignments = this.isTableDelimiterRow(delimiterLine);
 
     if (!alignments) {
@@ -2037,7 +2042,7 @@ class BlockParser {
     const dataRows: TableRowNode[] = [];
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       // 空行结束表格
       if (this.isBlankLine(line)) {
@@ -2099,7 +2104,7 @@ class BlockParser {
     const paragraphLines: string[] = [];
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       if (this.isBlankLine(line)) break;
 
@@ -2160,7 +2165,7 @@ class BlockParser {
 
   /** 解析脚注定义 [^id]: 内容 */
   private parseFootnoteDefinition(): BlockNode | null {
-    const startLine = this.lines[this.lineIndex];
+    const startLine = this.lineAt(this.lineIndex);
     const startLineIndex = this.lineIndex;
 
     // 匹配脚注定义 [^id]: 内容
@@ -2176,7 +2181,7 @@ class BlockParser {
     const baseIndent = 4; // 脚注后续行需要至少4个空格缩进
 
     while (this.lineIndex < this.lines.length) {
-      const line = this.lines[this.lineIndex];
+      const line = this.lineAt(this.lineIndex);
 
       // 空行可以是脚注内容的一部分
       if (this.isBlankLine(line)) {

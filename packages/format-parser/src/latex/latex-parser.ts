@@ -83,10 +83,10 @@ const SPECIAL_CHAR_MAP: Record<string, string> = {
   '\\@': '',
   '---': '—',
   '--': '–',
-  "``": '"',
-  "''": '"',
-  '`': ''',
-  "'": ''',
+  "``": '\u201C',
+  "''": '\u201D',
+  '`': '\u2018',
+  "'": '\u2019',
 };
 
 /** 章节命令及其级别 */
@@ -209,7 +209,7 @@ class LaTeXLexer {
       return this.createToken(TokenType.EOF, '');
     }
 
-    const char = this.input[this.pos];
+    const char = this.input.charAt(this.pos);
 
     // 注释
     if (char === '%') {
@@ -312,8 +312,8 @@ class LaTeXLexer {
     const startOffset = this.pos;
 
     let value = '';
-    while (this.pos < this.input.length && this.input[this.pos] !== '\n') {
-      value += this.input[this.pos];
+    while (this.pos < this.input.length && this.input.charAt(this.pos) !== '\n') {
+      value += this.input.charAt(this.pos);
       this.pos++;
       this.column++;
     }
@@ -338,7 +338,7 @@ class LaTeXLexer {
 
     // 检查是否是特殊单字符命令
     if (this.pos < this.input.length) {
-      const nextChar = this.input[this.pos];
+      const nextChar = this.input.charAt(this.pos);
       if (!this.isAlpha(nextChar)) {
         value += nextChar;
         this.pos++;
@@ -354,8 +354,8 @@ class LaTeXLexer {
     }
 
     // 读取字母命令
-    while (this.pos < this.input.length && this.isAlpha(this.input[this.pos])) {
-      value += this.input[this.pos];
+    while (this.pos < this.input.length && this.isAlpha(this.input.charAt(this.pos))) {
+      value += this.input.charAt(this.pos);
       this.pos++;
       this.column++;
     }
@@ -375,28 +375,28 @@ class LaTeXLexer {
     const startOffset = this.pos;
 
     // 检查是否是 $$ (display math)
-    if (this.pos + 1 < this.input.length && this.input[this.pos + 1] === '$') {
+    if (this.pos + 1 < this.input.length && this.input.charAt(this.pos + 1) === '$') {
       this.pos += 2;
       this.column += 2;
       let value = '';
 
       while (this.pos < this.input.length) {
         if (
-          this.input[this.pos] === '$' &&
+          this.input.charAt(this.pos) === '$' &&
           this.pos + 1 < this.input.length &&
-          this.input[this.pos + 1] === '$'
+          this.input.charAt(this.pos + 1) === '$'
         ) {
           this.pos += 2;
           this.column += 2;
           break;
         }
-        if (this.input[this.pos] === '\n') {
+        if (this.input.charAt(this.pos) === '\n') {
           this.line++;
           this.column = 1;
         } else {
           this.column++;
         }
-        value += this.input[this.pos];
+        value += this.input.charAt(this.pos);
         this.pos++;
       }
 
@@ -414,27 +414,27 @@ class LaTeXLexer {
     this.column++;
     let value = '';
 
-    while (this.pos < this.input.length && this.input[this.pos] !== '$') {
+    while (this.pos < this.input.length && this.input.charAt(this.pos) !== '$') {
       // 处理转义的 $
-      if (this.input[this.pos] === '\\' && this.pos + 1 < this.input.length) {
-        value += this.input[this.pos];
+      if (this.input.charAt(this.pos) === '\\' && this.pos + 1 < this.input.length) {
+        value += this.input.charAt(this.pos);
         this.pos++;
         this.column++;
         if (this.pos < this.input.length) {
-          value += this.input[this.pos];
+          value += this.input.charAt(this.pos);
           this.pos++;
           this.column++;
         }
         continue;
       }
 
-      if (this.input[this.pos] === '\n') {
+      if (this.input.charAt(this.pos) === '\n') {
         this.line++;
         this.column = 1;
       } else {
         this.column++;
       }
-      value += this.input[this.pos];
+      value += this.input.charAt(this.pos);
       this.pos++;
     }
 
@@ -467,8 +467,8 @@ class LaTeXLexer {
     const startOffset = this.pos;
 
     let value = '';
-    while (this.pos < this.input.length && this.isWhitespace(this.input[this.pos])) {
-      value += this.input[this.pos];
+    while (this.pos < this.input.length && this.isWhitespace(this.input.charAt(this.pos))) {
+      value += this.input.charAt(this.pos);
       this.pos++;
       this.column++;
     }
@@ -489,7 +489,7 @@ class LaTeXLexer {
 
     let value = '';
     while (this.pos < this.input.length) {
-      const char = this.input[this.pos];
+      const char = this.input.charAt(this.pos);
       // 遇到特殊字符停止
       if (
         char === '\\' ||
@@ -586,16 +586,20 @@ export class LaTeXParser {
     this.currentToken = this.lexer.nextToken();
   }
 
-  private expect(type: TokenType): Token {
+  /**
+   * 期望当前 Token 为指定类型：匹配则消费并返回 true；
+   * 不匹配则记录语法警告且不消费，返回 false，由调用方决定恢复策略
+   */
+  private expect(type: TokenType): boolean {
     if (this.currentToken.type !== type) {
       this.addWarning(
         `期望 ${type}，但得到 ${this.currentToken.type}`,
         'syntax'
       );
+      return false;
     }
-    const token = this.currentToken;
     this.advance();
-    return token;
+    return true;
   }
 
   private match(type: TokenType): boolean {
@@ -794,13 +798,16 @@ export class LaTeXParser {
   // ================================
 
   private parseBlock(): LaTeXBlockNode | null {
-    this.skipWhitespaceAndComments();
+    this.skipWhitespace();
 
     if (this.match(TokenType.EOF)) {
       return null;
     }
 
-    const startToken = this.currentToken;
+    // 块级注释：按 preserveComments 选项决定保留为注释节点或丢弃
+    if (this.match(TokenType.Comment)) {
+      return this.parseComment();
+    }
 
     // 处理命令
     if (this.currentToken.type === TokenType.Command) {
@@ -830,6 +837,23 @@ export class LaTeXParser {
 
     // 普通段落
     return this.parseParagraph();
+  }
+
+  private parseComment(): CommentNode | null {
+    const commentToken = this.currentToken;
+    this.advance();
+
+    if (!this.options.preserveComments) {
+      return null;
+    }
+
+    return {
+      type: LaTeXBlockType.Comment,
+      // 去掉行首的 % 标记
+      content: commentToken.value.substring(1),
+      position: this.createPosition(commentToken),
+      raw: commentToken.value,
+    };
   }
 
   private parseSection(): SectionNode {
@@ -930,8 +954,7 @@ export class LaTeXParser {
 
     // 读取环境名称
     let envName = '';
-    if (this.match(TokenType.BeginGroup)) {
-      this.advance();
+    if (this.expect(TokenType.BeginGroup)) {
       envName = this.readUntilEndGroup();
     }
 
@@ -981,6 +1004,7 @@ export class LaTeXParser {
     // 读取数学内容直到 \end{envName}
     let content = '';
     const endPattern = `\\end{${envName}}`;
+    let closed = false;
 
     while (!this.match(TokenType.EOF)) {
       // 检查标签
@@ -1002,6 +1026,7 @@ export class LaTeXParser {
           this.advance();
           const endEnv = this.readUntilEndGroup();
           if (endEnv === envName) {
+            closed = true;
             break;
           }
           content += `\\end{${endEnv}}`;
@@ -1011,6 +1036,10 @@ export class LaTeXParser {
 
       content += this.currentToken.value;
       this.advance();
+    }
+
+    if (!closed) {
+      this.addWarning(`数学环境未闭合，缺少 ${endPattern}`, 'syntax');
     }
 
     const raw = this.input.substring(

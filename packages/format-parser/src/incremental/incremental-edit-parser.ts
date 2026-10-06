@@ -151,17 +151,17 @@ const CHAR_PLUS = 43; // +
 // ================================
 
 /**
- * 判断是否为块级标记开始
+ * 判断字符码是否可能开启块级结构（标题、引用、列表、分隔线等）
+ * 用于 parseLine 快速路径：不满足时直接判定为段落，避免逐个规则尝试
  */
-function isBlockMarkerStart(char: string): boolean {
-  const code = char.charCodeAt(0);
+function isBlockMarkerStart(code: number): boolean {
   return (
     code === CHAR_HASH ||
-    code === CHAR_BACKTICK ||
     code === CHAR_GREATER_THAN ||
     code === CHAR_HYPHEN ||
     code === CHAR_PLUS ||
     code === CHAR_ASTERISK ||
+    code === CHAR_UNDERSCORE ||
     (code >= 48 && code <= 57) // 数字 0-9（有序列表）
   );
 }
@@ -198,6 +198,94 @@ function isCodeFenceLine(line: string): boolean {
     }
   }
   return count >= 3;
+}
+
+/**
+ * 代码围栏信息
+ */
+interface FenceInfo {
+  /** 围栏字符（` 或 ~） */
+  char: string;
+  /** 围栏字符连续个数 */
+  count: number;
+  /** 围栏行首缩进（空格数） */
+  indent: number;
+}
+
+/**
+ * 统计字符串开头连续出现指定字符的次数
+ */
+function countLeadingRun(text: string, char: string): number {
+  let count = 0;
+  while (count < text.length && text.charAt(count) === char) {
+    count++;
+  }
+  return count;
+}
+
+/**
+ * 解析开启围栏行，非围栏行返回 null
+ */
+function readOpeningFence(line: string): FenceInfo | null {
+  if (!isCodeFenceLine(line)) return null;
+  const trimmed = line.trimStart();
+  const char = trimmed.charAt(0);
+  return {
+    char,
+    count: countLeadingRun(trimmed, char),
+    indent: line.length - trimmed.length,
+  };
+}
+
+/**
+ * 判断是否为与开启围栏匹配的闭合围栏行
+ * 规则：同字符、个数不少于开启围栏、其后仅允许空白
+ */
+function isClosingFence(line: string, fence: FenceInfo): boolean {
+  const trimmed = line.trimStart();
+  const count = countLeadingRun(trimmed, fence.char);
+  return count >= fence.count && trimmed.slice(count).trim() === '';
+}
+
+/**
+ * 去除代码块内容行的围栏缩进（CommonMark：最多去除与开启围栏相同数量的前导空格）
+ */
+function stripFenceIndent(line: string, indent: number): string {
+  let removed = 0;
+  while (removed < indent && line.charCodeAt(removed) === CHAR_SPACE) {
+    removed++;
+  }
+  return line.slice(removed);
+}
+
+/**
+ * 行切片：行文本及其在原文中的起止偏移
+ */
+interface LineSpan {
+  /** 行文本（不含换行符） */
+  text: string;
+  /** 行起始偏移 */
+  start: number;
+  /** 行结束偏移（不含换行符） */
+  end: number;
+}
+
+/**
+ * 按行切分文本并记录真实偏移，同时正确处理 \n 与 \r\n 换行
+ * （与 split(/\r?\n/) 的切分结果一致，但不会因 \r\n 导致偏移漂移）
+ */
+function splitLineSpans(content: string): LineSpan[] {
+  const spans: LineSpan[] = [];
+  let lineStart = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content.charCodeAt(i) !== CHAR_NEWLINE) continue;
+    const lineEnd =
+      i > lineStart && content.charCodeAt(i - 1) === CHAR_CARRIAGE_RETURN ? i - 1 : i;
+    spans.push({ text: content.slice(lineStart, lineEnd), start: lineStart, end: lineEnd });
+    lineStart = i + 1;
+  }
+  spans.push({ text: content.slice(lineStart), start: lineStart, end: content.length });
+  return spans;
 }
 
 // ================================
@@ -314,13 +402,16 @@ export class IncrementalEditParser {
       affectedRange
     );
 
-    // 合并结果
+    // 合并结果：后续 Token 需按字符偏移差与行数差整体平移
+    const offsetDelta = (edit.insertText?.length ?? 0) - (edit.deleteCount ?? 0);
+    const lineDelta = this.countLines(content) - this.cache.lines.length;
     const tokens = this.mergeTokens(
       this.cache.tokens,
       newTokens,
       startIndex,
       endIndex,
-      edit
+      offsetDelta,
+      lineDelta
     );
 
     // 更新缓存
@@ -420,100 +511,67 @@ export class IncrementalEditParser {
    */
   private parseContent(content: string): Token[] {
     const tokens: Token[] = [];
-    const lines = content.split(/\r?\n/);
+    const spans = splitLineSpans(content);
 
-    let offset = 0;
-    let inCodeBlock = false;
+    let fence: FenceInfo | null = null;
     let codeBlockStart = 0;
     let codeBlockStartLine = 0;
-    let codeBlockFenceCount = 0;
-    let codeBlockFenceChar = '';
     let codeBlockLanguage = '';
     let codeBlockContent: string[] = [];
 
-    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-      const line = lines[lineIndex];
+    for (let lineIndex = 0; lineIndex < spans.length; lineIndex++) {
+      const span = spans[lineIndex];
+      if (!span) continue;
+      const { text: line, start: lineStart, end: lineEnd } = span;
       const lineNumber = lineIndex + 1;
-      const lineStart = offset;
-      const lineEnd = offset + line.length;
 
-      // 处理代码围栏
-      if (!inCodeBlock && isCodeFenceLine(line)) {
-        const trimmed = line.trimStart();
-        const indent = line.length - trimmed.length;
-        codeBlockFenceChar = trimmed[0];
-        codeBlockFenceCount = 0;
-
-        for (let i = 0; i < trimmed.length; i++) {
-          if (trimmed[i] === codeBlockFenceChar) {
-            codeBlockFenceCount++;
-          } else {
-            break;
-          }
+      if (fence === null) {
+        const opening = readOpeningFence(line);
+        if (opening) {
+          // 代码块开始
+          fence = opening;
+          codeBlockLanguage = line.trimStart().slice(opening.count).trim();
+          codeBlockStart = lineStart;
+          codeBlockStartLine = lineNumber;
+          codeBlockContent = [];
+          continue;
         }
 
-        codeBlockLanguage = trimmed.slice(codeBlockFenceCount).trim();
-        codeBlockStart = lineStart;
-        codeBlockStartLine = lineNumber;
-        codeBlockContent = [];
-        inCodeBlock = true;
-      } else if (inCodeBlock) {
-        const trimmed = line.trimStart();
-        let closingFence = false;
-
-        if (trimmed.length >= codeBlockFenceCount) {
-          if (trimmed[0] === codeBlockFenceChar) {
-            let count = 0;
-            for (let i = 0; i < trimmed.length; i++) {
-              if (trimmed[i] === codeBlockFenceChar) {
-                count++;
-              } else {
-                break;
-              }
-            }
-
-            if (count >= codeBlockFenceCount && trimmed.slice(count).trim() === '') {
-              closingFence = true;
-            }
-          }
-        }
-
-        if (closingFence) {
-          // 代码块结束
-          tokens.push({
-            type: TokenType.CodeBlock,
-            raw: content.slice(codeBlockStart, lineEnd),
-            content: codeBlockContent.join('\n'),
-            start: codeBlockStart,
-            end: lineEnd,
-            startLine: codeBlockStartLine,
-            startColumn: 1,
-            endLine: lineNumber,
-            endColumn: line.length + 1,
-            attributes: {
-              language: codeBlockLanguage,
-              fenceChar: codeBlockFenceChar,
-              fenceCount: codeBlockFenceCount,
-            },
-          });
-          inCodeBlock = false;
-        } else {
-          codeBlockContent.push(line);
-        }
-      } else {
         // 解析其他块级元素
         const token = this.parseLine(line, lineStart, lineNumber);
         if (token) {
           tokens.push(token);
         }
+        continue;
       }
 
-      // 更新偏移（包含换行符）
-      offset = lineEnd + 1; // +1 for newline
+      if (isClosingFence(line, fence)) {
+        // 代码块结束
+        tokens.push({
+          type: TokenType.CodeBlock,
+          raw: content.slice(codeBlockStart, lineEnd),
+          content: codeBlockContent.join('\n'),
+          start: codeBlockStart,
+          end: lineEnd,
+          startLine: codeBlockStartLine,
+          startColumn: 1,
+          endLine: lineNumber,
+          endColumn: line.length + 1,
+          attributes: {
+            language: codeBlockLanguage,
+            fenceChar: fence.char,
+            fenceCount: fence.count,
+          },
+        });
+        fence = null;
+      } else {
+        codeBlockContent.push(stripFenceIndent(line, fence.indent));
+      }
     }
 
     // 处理未闭合的代码块
-    if (inCodeBlock) {
+    if (fence !== null) {
+      const lastSpan = spans[spans.length - 1];
       tokens.push({
         type: TokenType.CodeBlock,
         raw: content.slice(codeBlockStart),
@@ -522,12 +580,12 @@ export class IncrementalEditParser {
         end: content.length,
         startLine: codeBlockStartLine,
         startColumn: 1,
-        endLine: lines.length,
-        endColumn: lines[lines.length - 1].length + 1,
+        endLine: spans.length,
+        endColumn: (lastSpan?.text.length ?? 0) + 1,
         attributes: {
           language: codeBlockLanguage,
-          fenceChar: codeBlockFenceChar,
-          fenceCount: codeBlockFenceCount,
+          fenceChar: fence.char,
+          fenceCount: fence.count,
           unclosed: true,
         },
       });
@@ -544,25 +602,11 @@ export class IncrementalEditParser {
     offset: number,
     lineNumber: number
   ): Token | null {
-    if (line.length === 0) {
-      return {
-        type: TokenType.Newline,
-        raw: '',
-        content: '',
-        start: offset,
-        end: offset,
-        startLine: lineNumber,
-        startColumn: 1,
-        endLine: lineNumber,
-        endColumn: 1,
-        attributes: {},
-      };
-    }
-
     const trimmed = line.trimStart();
     const indent = line.length - trimmed.length;
 
-    if (trimmed.length === 0) {
+    // 空行（仅由空格 / 制表符组成，含零长度行）
+    if (isBlankLine(line)) {
       return {
         type: TokenType.Newline,
         raw: line,
@@ -578,6 +622,11 @@ export class IncrementalEditParser {
     }
 
     const firstChar = trimmed.charCodeAt(0);
+
+    // 快速路径：首字符不可能开启块级结构时直接作为段落
+    if (!isBlockMarkerStart(firstChar)) {
+      return this.createParagraphToken(line, offset, lineNumber);
+    }
 
     // 标题
     if (firstChar === CHAR_HASH) {
@@ -722,6 +771,13 @@ export class IncrementalEditParser {
     }
 
     // 普通段落
+    return this.createParagraphToken(line, offset, lineNumber);
+  }
+
+  /**
+   * 创建段落 Token
+   */
+  private createParagraphToken(line: string, offset: number, lineNumber: number): Token {
     return {
       type: TokenType.Paragraph,
       raw: line,
@@ -740,26 +796,13 @@ export class IncrementalEditParser {
    * 构建行索引
    */
   private buildLineIndex(content: string): LineInfo[] {
-    const lines: LineInfo[] = [];
-    let offset = 0;
-    let lineNumber = 1;
-
-    const contentLines = content.split(/\r?\n/);
-
-    for (const line of contentLines) {
-      lines.push({
-        line: lineNumber,
-        start: offset,
-        end: offset + line.length,
-        length: line.length,
-        tokenIndices: [],
-      });
-
-      offset += line.length + 1; // +1 for newline
-      lineNumber++;
-    }
-
-    return lines;
+    return splitLineSpans(content).map((span, index) => ({
+      line: index + 1,
+      start: span.start,
+      end: span.end,
+      length: span.text.length,
+      tokenIndices: [],
+    }));
   }
 
   /**
@@ -780,62 +823,37 @@ export class IncrementalEditParser {
       };
     }
 
-    const { offset, deleteCount = 0 } = edit;
-    const insertLength = edit.insertText?.length || 0;
-    const delta = insertLength - deleteCount;
+    const spans = splitLineSpans(newContent);
+    const editEndOffset = edit.offset + (edit.insertText?.length ?? 0);
 
-    // 查找受影响的起始行
-    let startLine = edit.startLine;
-    let endLine = startLine;
+    // 起始行向前扩展上下文
+    let startLine = Math.max(1, edit.startLine - this.config.contextLines);
 
-    // 扩展上下文
-    startLine = Math.max(1, startLine - this.config.contextLines);
-
-    // 计算受影响的结束行
-    const newLines = newContent.split(/\r?\n/);
-    const editEndOffset = offset + insertLength;
-
-    // 找到编辑结束位置对应的行
-    let currentOffset = 0;
-    for (let i = 0; i < newLines.length; i++) {
-      currentOffset += newLines[i].length + 1;
-      if (currentOffset > editEndOffset) {
+    // 找到编辑结束位置所在行（行结束偏移不小于编辑结束偏移的第一行）
+    let endLine = edit.startLine;
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
+      if (span && span.end >= editEndOffset) {
         endLine = i + 1;
         break;
       }
     }
 
-    // 扩展上下文
-    endLine = Math.min(newLines.length, endLine + this.config.contextLines);
+    // 结束行向后扩展上下文
+    endLine = Math.min(spans.length, endLine + this.config.contextLines);
 
     // 检查是否在代码块内
     const { inCodeBlock, codeBlockStartLine, codeBlockEndLine } =
-      this.findCodeBlockContext(newContent, startLine, endLine);
+      this.findCodeBlockContext(spans, startLine, endLine);
 
     if (inCodeBlock) {
       startLine = Math.min(startLine, codeBlockStartLine);
-      endLine = Math.max(endLine, codeBlockEndLine || newLines.length);
+      endLine = Math.max(endLine, codeBlockEndLine ?? spans.length);
     }
 
-    // 计算字符偏移
-    let start = 0;
-    let end = 0;
-    currentOffset = 0;
-
-    for (let i = 0; i < newLines.length; i++) {
-      const lineNum = i + 1;
-
-      if (lineNum === startLine) {
-        start = currentOffset;
-      }
-
-      currentOffset += newLines[i].length + 1;
-
-      if (lineNum === endLine) {
-        end = currentOffset - 1; // 不含换行符
-        break;
-      }
-    }
+    // 计算字符偏移（结束偏移不含换行符）
+    const start = spans[startLine - 1]?.start ?? 0;
+    const end = spans[endLine - 1]?.end ?? newContent.length;
 
     // 查找受影响的 Token 索引
     const tokenStartIndex = this.findTokenIndexByLine(startLine);
@@ -855,7 +873,7 @@ export class IncrementalEditParser {
    * 查找代码块上下文
    */
   private findCodeBlockContext(
-    content: string,
+    spans: LineSpan[],
     startLine: number,
     endLine: number
   ): {
@@ -863,73 +881,33 @@ export class IncrementalEditParser {
     codeBlockStartLine: number;
     codeBlockEndLine: number | null;
   } {
-    const lines = content.split(/\r?\n/);
-    let inCodeBlock = false;
+    let fence: FenceInfo | null = null;
     let codeBlockStartLine = 0;
-    let codeBlockFenceCount = 0;
-    let codeBlockFenceChar = '';
 
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
+      if (!span) continue;
       const lineNum = i + 1;
-      const line = lines[i];
+      const inRange = lineNum >= startLine && lineNum <= endLine;
 
-      if (!inCodeBlock && isCodeFenceLine(line)) {
-        const trimmed = line.trimStart();
-        codeBlockFenceChar = trimmed[0];
-        codeBlockFenceCount = 0;
-
-        for (let j = 0; j < trimmed.length; j++) {
-          if (trimmed[j] === codeBlockFenceChar) {
-            codeBlockFenceCount++;
-          } else {
-            break;
-          }
+      if (fence === null) {
+        fence = readOpeningFence(span.text);
+        if (fence) {
+          codeBlockStartLine = lineNum;
         }
-
-        inCodeBlock = true;
-        codeBlockStartLine = lineNum;
-      } else if (inCodeBlock) {
-        const trimmed = line.trimStart();
-
-        if (trimmed.length >= codeBlockFenceCount) {
-          if (trimmed[0] === codeBlockFenceChar) {
-            let count = 0;
-            for (let j = 0; j < trimmed.length; j++) {
-              if (trimmed[j] === codeBlockFenceChar) {
-                count++;
-              } else {
-                break;
-              }
-            }
-
-            if (count >= codeBlockFenceCount && trimmed.slice(count).trim() === '') {
-              if (lineNum >= startLine && lineNum <= endLine) {
-                return {
-                  inCodeBlock: true,
-                  codeBlockStartLine,
-                  codeBlockEndLine: lineNum,
-                };
-              }
-              inCodeBlock = false;
-            }
-          }
+      } else if (isClosingFence(span.text, fence)) {
+        if (inRange) {
+          return { inCodeBlock: true, codeBlockStartLine, codeBlockEndLine: lineNum };
         }
+        fence = null;
       }
 
-      if (lineNum >= startLine && lineNum <= endLine && inCodeBlock) {
-        return {
-          inCodeBlock: true,
-          codeBlockStartLine,
-          codeBlockEndLine: null,
-        };
+      if (inRange && fence !== null) {
+        return { inCodeBlock: true, codeBlockStartLine, codeBlockEndLine: null };
       }
     }
 
-    return {
-      inCodeBlock: false,
-      codeBlockStartLine: 0,
-      codeBlockEndLine: null,
-    };
+    return { inCodeBlock: false, codeBlockStartLine: 0, codeBlockEndLine: null };
   }
 
   /**
@@ -940,6 +918,7 @@ export class IncrementalEditParser {
 
     for (let i = 0; i < this.cache.tokens.length; i++) {
       const token = this.cache.tokens[i];
+      if (!token) continue;
       if (token.startLine <= lineNumber && token.endLine >= lineNumber) {
         return i;
       }
@@ -962,16 +941,9 @@ export class IncrementalEditParser {
     startIndex: number;
     endIndex: number;
   } {
-    // 提取受影响区域的文本
-    const lines = content.split(/\r?\n/);
-    const affectedLines = lines.slice(range.startLine - 1, range.endLine);
-    const affectedContent = affectedLines.join('\n');
-
-    // 计算起始偏移
-    let startOffset = 0;
-    for (let i = 0; i < range.startLine - 1; i++) {
-      startOffset += lines[i].length + 1;
-    }
+    // 提取受影响区域的原文（保留原始换行符，保证偏移一致）
+    const startOffset = range.start;
+    const affectedContent = content.slice(range.start, range.end);
 
     // 解析受影响区域
     const tempParser = new IncrementalEditParser({
@@ -1005,17 +977,16 @@ export class IncrementalEditParser {
     newTokens: Token[],
     startIndex: number,
     endIndex: number,
-    edit: EditOperation
+    offsetDelta: number,
+    lineDelta: number
   ): Token[] {
-    const delta =
-      (edit.insertText?.length || 0) - (edit.deleteCount || 0);
-
-    // 调整后续 Token 的位置
+    // 调整后续 Token 的字符偏移与行号
     const adjustedLaterTokens = oldTokens.slice(endIndex + 1).map((token) => ({
       ...token,
-      start: token.start + delta,
-      end: token.end + delta,
-      // 行号需要根据实际变化调整
+      start: token.start + offsetDelta,
+      end: token.end + offsetDelta,
+      startLine: token.startLine + lineDelta,
+      endLine: token.endLine + lineDelta,
     }));
 
     return [
