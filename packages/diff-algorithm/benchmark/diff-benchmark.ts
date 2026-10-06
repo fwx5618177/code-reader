@@ -19,12 +19,28 @@ import {
 // 类型定义
 // ================================
 
+/**
+ * 采样策略（时间预算采样，与 tinybench / benchmark.js 一致）
+ *
+ * 每个用例先预热，再持续采样：样本数达到 minSamples 且累计耗时达到 timeBudgetMs 后停止，
+ * 或样本数达到 maxSamples 时停止。小数据用例因此获得大量样本，
+ * 大数据用例在合理时间内也能得到不少于 minSamples 的真实测量。
+ */
+export interface SamplingConfig {
+  /** 预热次数（不计入结果，用于触发 JIT 优化） */
+  warmupSamples: number;
+  /** 每个用例的最少样本数 */
+  minSamples: number;
+  /** 每个用例的最多样本数 */
+  maxSamples: number;
+  /** 每个用例的采样时间预算（毫秒） */
+  timeBudgetMs: number;
+}
+
 /** 基准测试配置 */
 export interface BenchmarkConfig {
-  /** 测试迭代次数 */
-  iterations: number;
-  /** 预热次数 */
-  warmupIterations: number;
+  /** 采样策略 */
+  sampling: SamplingConfig;
   /** 是否输出详细日志 */
   verbose: boolean;
   /** 测试数据大小配置 */
@@ -44,8 +60,8 @@ export interface BenchmarkResult {
   type: 'text-diff' | 'binary-diff' | 'levenshtein' | 'fuzzy-match' | 'unified';
   /** 数据大小（字节） */
   dataSize: number;
-  /** 迭代次数 */
-  iterations: number;
+  /** 实际采样次数 */
+  samples: number;
   /** 总耗时（毫秒） */
   totalDuration: number;
   /** 平均耗时（毫秒） */
@@ -85,17 +101,29 @@ export interface BenchmarkReport {
 // 默认配置
 // ================================
 
-const DEFAULT_CONFIG: BenchmarkConfig = {
-  iterations: 100,
-  warmupIterations: 10,
-  verbose: false,
+/** 完整档位：1KB ~ 1MB 数据，每用例 1 秒采样预算 */
+export const FULL_PROFILE: Omit<BenchmarkConfig, 'verbose'> = {
+  sampling: { warmupSamples: 3, minSamples: 5, maxSamples: 100, timeBudgetMs: 1000 },
   dataSizes: {
-    small: 1024,           // 1KB
-    medium: 10 * 1024,     // 10KB
-    large: 100 * 1024,     // 100KB
-    xlarge: 1024 * 1024,   // 1MB
+    small: 1024, // 1KB
+    medium: 10 * 1024, // 10KB
+    large: 100 * 1024, // 100KB
+    xlarge: 1024 * 1024, // 1MB
   },
 };
+
+/** 快速档位：512B ~ 32KB 数据，每用例 200 毫秒采样预算 */
+export const QUICK_PROFILE: Omit<BenchmarkConfig, 'verbose'> = {
+  sampling: { warmupSamples: 3, minSamples: 5, maxSamples: 50, timeBudgetMs: 200 },
+  dataSizes: {
+    small: 512,
+    medium: 2048,
+    large: 8192,
+    xlarge: 32768,
+  },
+};
+
+const DEFAULT_CONFIG: BenchmarkConfig = { ...FULL_PROFILE, verbose: false };
 
 // ================================
 // 辅助函数
@@ -174,15 +202,24 @@ function percentile(values: number[], p: number): number {
   return lowerVal + weight * (upperVal - lowerVal);
 }
 
-/** 运行计时测试 */
-function runTimedTest(fn: () => void, iterations: number): number[] {
-  const durations: number[] = [];
+/** 按采样策略运行计时测试：预热后在时间预算内采样 */
+function runTimedTest(fn: () => void, sampling: SamplingConfig): number[] {
+  for (let i = 0; i < sampling.warmupSamples; i++) {
+    fn();
+  }
 
-  for (let i = 0; i < iterations; i++) {
+  const durations: number[] = [];
+  let elapsed = 0;
+
+  while (
+    durations.length < sampling.maxSamples &&
+    (durations.length < sampling.minSamples || elapsed < sampling.timeBudgetMs)
+  ) {
     const start = performance.now();
     fn();
-    const end = performance.now();
-    durations.push(end - start);
+    const duration = performance.now() - start;
+    durations.push(duration);
+    elapsed += duration;
   }
 
   return durations;
@@ -193,8 +230,7 @@ function createResult(
   name: string,
   type: BenchmarkResult['type'],
   dataSize: number,
-  durations: number[],
-  iterations: number
+  durations: number[]
 ): BenchmarkResult {
   const sorted = [...durations].sort((a, b) => a - b);
   const total = durations.reduce((a, b) => a + b, 0);
@@ -204,7 +240,7 @@ function createResult(
     name,
     type,
     dataSize,
-    iterations,
+    samples: durations.length,
     totalDuration: total,
     avgDuration: avg,
     minDuration: sorted[0] ?? 0,
@@ -232,8 +268,8 @@ function createResult(
  *
  * 使用示例：
  * ```typescript
- * const benchmark = new DiffBenchmark({ iterations: 50 });
- * const report = await benchmark.runAll();
+ * const benchmark = new DiffBenchmark({ ...QUICK_PROFILE, verbose: true });
+ * const report = benchmark.runAll();
  * console.log(formatReport(report));
  * ```
  */
@@ -284,17 +320,11 @@ export class DiffBenchmark {
   ): BenchmarkResult {
     const modified = generateModifiedText(original, changeRatio);
 
-    // 预热
-    for (let i = 0; i < this.config.warmupIterations; i++) {
-      engine.diff(original, modified);
-    }
-
-    // 正式测试
     const durations = runTimedTest(() => {
       engine.diff(original, modified);
-    }, this.config.iterations);
+    }, this.config.sampling);
 
-    return createResult(name, 'text-diff', original.length + modified.length, durations, this.config.iterations);
+    return createResult(name, 'text-diff', original.length + modified.length, durations);
   }
 
   // ================================
@@ -330,17 +360,11 @@ export class DiffBenchmark {
   ): BenchmarkResult {
     const modified = generateModifiedBinaryData(original, changeRatio);
 
-    // 预热
-    for (let i = 0; i < this.config.warmupIterations; i++) {
-      engine.diff(original, modified);
-    }
-
-    // 正式测试
     const durations = runTimedTest(() => {
       engine.diff(original, modified);
-    }, this.config.iterations);
+    }, this.config.sampling);
 
-    return createResult(name, 'binary-diff', original.length + modified.length, durations, this.config.iterations);
+    return createResult(name, 'binary-diff', original.length + modified.length, durations);
   }
 
   // ================================
@@ -361,23 +385,14 @@ export class DiffBenchmark {
       const str1 = generateText(length);
       const str2 = generateModifiedText(str1, 0.2);
 
-      // 预热
-      for (let i = 0; i < this.config.warmupIterations; i++) {
-        engine.distance(str1, str2);
-      }
-
-      // 正式测试
       const durations = runTimedTest(() => {
         engine.distance(str1, str2);
-      }, this.config.iterations);
+      }, this.config.sampling);
 
       results.push(createResult(
         `levenshtein-${length}chars`,
         'levenshtein',
-        str1.length + str2.length,
-        durations,
-        this.config.iterations
-      ));
+        str1.length + str2.length, durations));
     }
 
     return results;
@@ -403,24 +418,15 @@ export class DiffBenchmark {
       );
       const query = 'item-500';
 
-      // 预热
-      for (let i = 0; i < this.config.warmupIterations; i++) {
-        engine.search(query, candidates, { limit: 10 });
-      }
-
-      // 正式测试
       const durations = runTimedTest(() => {
         engine.search(query, candidates, { limit: 10 });
-      }, this.config.iterations);
+      }, this.config.sampling);
 
       const totalSize = candidates.reduce((acc, c) => acc + c.length, 0);
       results.push(createResult(
         `fuzzy-match-${count}items`,
         'fuzzy-match',
-        totalSize,
-        durations,
-        this.config.iterations
-      ));
+        totalSize, durations));
     }
 
     return results;
@@ -443,23 +449,14 @@ export class DiffBenchmark {
       const original = generateText(size);
       const modified = generateModifiedText(original, 0.2);
 
-      // 预热
-      for (let i = 0; i < this.config.warmupIterations; i++) {
-        engine.diff(original, modified);
-      }
-
-      // 正式测试
       const durations = runTimedTest(() => {
         engine.diff(original, modified);
-      }, this.config.iterations);
+      }, this.config.sampling);
 
       results.push(createResult(
         `unified-engine-${sizeName}`,
         'unified',
-        original.length + modified.length,
-        durations,
-        this.config.iterations
-      ));
+        original.length + modified.length, durations));
     }
 
     return results;
@@ -482,15 +479,12 @@ export class DiffBenchmark {
 
     let durations = runTimedTest(() => {
       quickTextDiff(text1, text2);
-    }, this.config.iterations);
+    }, this.config.sampling);
 
     results.push(createResult(
       'quick-text-diff',
       'text-diff',
-      text1.length + text2.length,
-      durations,
-      this.config.iterations
-    ));
+      text1.length + text2.length, durations));
 
     // quickLevenshteinDistance
     const str1 = generateText(100);
@@ -498,15 +492,12 @@ export class DiffBenchmark {
 
     durations = runTimedTest(() => {
       quickLevenshteinDistance(str1, str2);
-    }, this.config.iterations);
+    }, this.config.sampling);
 
     results.push(createResult(
       'quick-levenshtein',
       'levenshtein',
-      str1.length + str2.length,
-      durations,
-      this.config.iterations
-    ));
+      str1.length + str2.length, durations));
 
     // quickFuzzySearch
     const candidates = Array.from({ length: 500 }, (_, i) => `file-${i}.ts`);
@@ -514,16 +505,13 @@ export class DiffBenchmark {
 
     durations = runTimedTest(() => {
       quickFuzzySearch(query, candidates, { limit: 10 });
-    }, this.config.iterations);
+    }, this.config.sampling);
 
     const totalSize = candidates.reduce((acc, c) => acc + c.length, 0);
     results.push(createResult(
       'quick-fuzzy-search',
       'fuzzy-match',
-      totalSize,
-      durations,
-      this.config.iterations
-    ));
+      totalSize, durations));
 
     return results;
   }
@@ -562,28 +550,6 @@ export class DiffBenchmark {
     };
   }
 
-  /** 运行快速测试（减少迭代次数和数据大小） */
-  runQuick(): BenchmarkReport {
-    const originalConfig = { ...this.config };
-
-    // 临时修改配置
-    this.config.iterations = 20;
-    this.config.warmupIterations = 5;
-    this.config.dataSizes = {
-      small: 512,
-      medium: 2048,
-      large: 8192,
-      xlarge: 32768,
-    };
-
-    const report = this.runAll();
-
-    // 恢复配置
-    Object.assign(this.config, originalConfig);
-
-    return report;
-  }
-
   // ================================
   // 辅助方法
   // ================================
@@ -616,7 +582,7 @@ export function formatReport(report: BenchmarkReport): string {
     `生成时间: ${report.generatedAt.toLocaleString()}`,
     `平台: ${report.systemInfo.platform}`,
     report.systemInfo.nodeVersion ? `Node 版本: ${report.systemInfo.nodeVersion}` : '',
-    `迭代次数: ${report.config.iterations}`,
+    `采样策略: 预热 ${report.config.sampling.warmupSamples} 次，每用例 ${report.config.sampling.minSamples}~${report.config.sampling.maxSamples} 次，时间预算 ${report.config.sampling.timeBudgetMs}ms`,
     '',
     '--------------------------------',
     ' 测试结果',
@@ -638,7 +604,7 @@ export function formatReport(report: BenchmarkReport): string {
 
     for (const result of results) {
       lines.push(`  ${result.name}:`);
-      lines.push(`    平均耗时: ${result.avgDuration.toFixed(3)}ms`);
+      lines.push(`    平均耗时: ${result.avgDuration.toFixed(3)}ms（${result.samples} 次采样）`);
       lines.push(`    P50/P95/P99: ${result.p50.toFixed(3)}/${result.p95.toFixed(3)}/${result.p99.toFixed(3)}ms`);
       lines.push(`    吞吐量: ${result.opsPerSecond.toFixed(1)} ops/s, ${formatBytes(result.bytesPerSecond)}/s`);
       lines.push('');
@@ -669,22 +635,12 @@ export function exportReportAsJSON(report: BenchmarkReport): string {
 
 /** 运行快速基准测试 */
 export function runQuickBenchmark(verbose = false): BenchmarkReport {
-  const benchmark = new DiffBenchmark({
-    iterations: 20,
-    warmupIterations: 5,
-    verbose,
-  });
-  return benchmark.runQuick();
+  return new DiffBenchmark({ ...QUICK_PROFILE, verbose }).runAll();
 }
 
 /** 运行完整基准测试 */
 export function runFullBenchmark(verbose = false): BenchmarkReport {
-  const benchmark = new DiffBenchmark({
-    iterations: 100,
-    warmupIterations: 10,
-    verbose,
-  });
-  return benchmark.runAll();
+  return new DiffBenchmark({ ...FULL_PROFILE, verbose }).runAll();
 }
 
 // ================================

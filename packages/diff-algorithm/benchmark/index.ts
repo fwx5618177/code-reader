@@ -8,6 +8,9 @@ export {
   exportReportAsJSON,
   runQuickBenchmark,
   runFullBenchmark,
+  QUICK_PROFILE,
+  FULL_PROFILE,
+  type SamplingConfig,
   type BenchmarkConfig,
   type BenchmarkResult,
   type BenchmarkReport,
@@ -34,18 +37,11 @@ async function main(): Promise<void> {
     console.log('运行模式: 完整测试\n');
   }
 
-  const { DiffBenchmark, formatReport, exportReportAsJSON } = await import('./diff-benchmark');
+  const { runQuickBenchmark, runFullBenchmark, formatReport, exportReportAsJSON } = await import(
+    './diff-benchmark'
+  );
 
-  const benchmark = new DiffBenchmark({
-    iterations: isQuick ? 20 : 100,
-    warmupIterations: isQuick ? 5 : 10,
-    verbose: isVerbose,
-    dataSizes: isQuick
-      ? { small: 512, medium: 2048, large: 8192, xlarge: 32768 }
-      : { small: 1024, medium: 10240, large: 102400, xlarge: 1048576 },
-  });
-
-  const report = benchmark.runAll();
+  const report = isQuick ? runQuickBenchmark(isVerbose) : runFullBenchmark(isVerbose);
 
   if (outputJson) {
     console.log(exportReportAsJSON(report));
