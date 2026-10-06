@@ -22,6 +22,7 @@ import React, {
   memo,
   forwardRef,
   useImperativeHandle,
+  useLayoutEffect,
 } from 'react';
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter } from '@codemirror/view';
 import { EditorState, type Extension } from '@codemirror/state';
@@ -46,7 +47,7 @@ import {
   type SourceMapEntry,
 } from '../../lib/latex/latex-document';
 import { getIncrementalEngine, getMathWorkerService } from '../../lib/latex';
-import { SourceMapGenerator, createSourceMapFromAST } from '../../lib/latex/source-map-generator';
+import { createSourceMapFromAST } from '../../lib/latex/source-map-generator';
 import { RenderPipeline } from '../../lib/latex/render-pipeline';
 import { HeightMap, createHeightMap } from '../../lib/latex/height-map';
 import {
@@ -414,8 +415,6 @@ interface RenderPreviewProps {
   useVirtualScroll?: boolean;
   /** 虚拟滚动项列表 */
   virtualItems?: readonly VirtualScrollItem[];
-  /** Source Map 生成器 */
-  sourceMap?: SourceMapGenerator | null;
 }
 
 /** RenderPreview 的公开句柄 */
@@ -441,7 +440,6 @@ const RenderPreview = memo(
         scrollToRatio,
         useVirtualScroll: enableVirtualScroll = false,
         virtualItems = [],
-        sourceMap: _sourceMap,
         isRenderingLocked = false,
       },
       ref
@@ -451,6 +449,11 @@ const RenderPreview = memo(
 
       // 缩放状态 (百分比，如 100 表示 100%)
       const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+
+      // 缩放比例通过 CSS 变量传给样式表，字号计算在 module.scss 中完成
+      useLayoutEffect(() => {
+        contentRef.current?.style.setProperty('--latex-preview-zoom', String(zoom / 100));
+      }, [zoom]);
 
       // 缩放控制函数
       const handleZoomIn = useCallback(() => {
@@ -642,7 +645,6 @@ const RenderPreview = memo(
           className={`${styles.latexPreview} ${isLoading ? styles.syncScrolling : ''}`}
           onScroll={handleScroll}
           onWheel={handleWheel}
-          style={{ position: 'relative' }}
         >
           {/* 缩放控制栏 */}
           <div className={styles.zoomControls}>
@@ -674,9 +676,6 @@ const RenderPreview = memo(
           <div
             ref={contentRef}
             className={styles.latexPreviewContent}
-            style={{
-              fontSize: `${zoom}%`,
-            }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
           {isLoading && (
@@ -865,7 +864,6 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   });
 
   // Source Map 和 HeightMap 状态
-  const [sourceMap, setSourceMap] = useState<SourceMapGenerator | null>(null);
   const renderPipelineRef = useRef<RenderPipeline | null>(null);
   const heightMapRef = useRef<HeightMap | null>(null);
   const previewRef = useRef<RenderPreviewHandle>(null);
@@ -1203,7 +1201,6 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
             // 生成 Source Map 和 RealHeightMap
             if (ast) {
               const newSourceMap = createSourceMapFromAST(ast, normalizedContent, render.html);
-              setSourceMap(newSourceMap);
 
               // 更新 LatexDocument 的 Source Map
               const entries = newSourceMap.getEntries().map((entry) => ({
@@ -1541,7 +1538,6 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
               error={parseError}
               useVirtualScroll={enableVirtualScroll}
               virtualItems={virtualItems}
-              sourceMap={sourceMap}
             />
           </div>
         )}
@@ -1570,7 +1566,6 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
                 scrollToRatio={previewScrollRatio}
                 useVirtualScroll={enableVirtualScroll}
                 virtualItems={virtualItems}
-                sourceMap={sourceMap}
                 isRenderingLocked={isRendering}
               />
             </div>
