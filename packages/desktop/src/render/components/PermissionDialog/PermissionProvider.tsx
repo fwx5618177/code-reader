@@ -7,8 +7,8 @@
 import React, {
   createContext,
   useContext,
-  useCallback,
   useEffect,
+  useMemo,
   useRef,
   ReactNode,
 } from 'react';
@@ -113,11 +113,14 @@ export const PermissionProvider: React.FC<PermissionProviderProps> = ({
     };
   }, [autoConnect, pluginLoader, showPermissionRequest]);
 
-  // 上下文值
-  const contextValue: PermissionContextValue = {
-    requestPermission: showPermissionRequest,
-    isPending: isOpen,
-  };
+  // 上下文值：记忆化，避免每次渲染都生成新对象导致所有消费者重复渲染
+  const contextValue = useMemo<PermissionContextValue>(
+    () => ({
+      requestPermission: showPermissionRequest,
+      isPending: isOpen,
+    }),
+    [showPermissionRequest, isOpen]
+  );
 
   return (
     <PermissionContext.Provider value={contextValue}>

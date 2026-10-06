@@ -28,7 +28,6 @@ import {
   PluginSandbox,
   createPluginSandbox,
   type SandboxConfig,
-  type PermissionPolicy,
   Permission,
 } from './sandbox';
 
@@ -959,34 +958,12 @@ export class PluginLoader {
       },
     };
 
-    // 如果启用沙箱，使用沙箱化的 API
-    if (this.sandbox && this.config.enableSandbox) {
-      // 获取沙箱化的上下文（包含安全代理的 editor、ui、storage API）
-      const sandboxedContext = this.sandbox.createSandboxedContext(pluginId);
-
-      return {
-        pluginId,
-        version,
-        state: PluginState.Loaded,
-        logger: createLogger(pluginId, this.config.debug),
-        storage: sandboxedContext.storage,
-        globalStorage: sandboxedContext.globalStorage,
-        commands: sandboxedContext.commands,
-        editor: sandboxedContext.editor,
-        ui: sandboxedContext.ui,
-        subscriptions,
-        getPlugin<T>(id: PluginId): T | undefined {
-          return self.getPluginAPI<T>(id);
-        },
-      };
-    }
-
-    // 无沙箱模式：直接连接到编辑器桥接
+    // 原始上下文：直接连接到编辑器桥接
     const bridge = getEditorBridge();
     const editorAPI: EditorAPI = bridge.createEditorAPI();
     const uiAPI: UIAPI = bridge.createUIAPI();
 
-    return {
+    const context: PluginContext = {
       pluginId,
       version,
       state: PluginState.Loaded,
@@ -1001,6 +978,13 @@ export class PluginLoader {
         return self.getPluginAPI<T>(id);
       },
     };
+
+    // 启用沙箱时，用带权限校验与资源监控的安全代理包装原始上下文
+    if (this.sandbox && this.config.enableSandbox) {
+      return this.sandbox.createSandboxedContext(pluginId, context);
+    }
+
+    return context;
   }
 
   /**

@@ -5,15 +5,12 @@
 
 import {
   PluginId,
-  Plugin,
   PluginContext,
-  PluginManifest,
   Disposable,
   EditorAPI,
   UIAPI,
   StorageAPI,
   CommandAPI,
-  Logger,
 } from './types';
 
 // ================================
@@ -965,12 +962,9 @@ export class PluginSandbox {
 
   /**
    * 创建沙箱化的插件上下文
+   * 以加载器构建的原始上下文为底，将 editor/ui/storage/commands 替换为带权限校验的安全代理
    */
-  createSandboxedContext(
-    pluginId: PluginId,
-    manifest: PluginManifest,
-    originalContext: PluginContext
-  ): PluginContext {
+  createSandboxedContext(pluginId: PluginId, originalContext: PluginContext): PluginContext {
     if (!this.config.enabled) {
       return originalContext;
     }
