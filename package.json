@@ -4,12 +4,6 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build:cli": "pnpm --filter @code-reader/cli build",
-    "watch:cli": "pnpm --filter @code-reader/cli watch",
-    "build:ui": "pnpm --filter @code-reader/ui build",
-    "watch:ui": "pnpm --filter @code-reader/ui watch",
-    "build:web": "pnpm --filter @code-reader/web build",
-    "watch:web": "pnpm --filter @code-reader/web watch",
     "build:desktop": "pnpm --filter @code-reader/desktop build",
     "watch:desktop": "pnpm --filter @code-reader/desktop watch",
     "start:desktop": "pnpm --filter @code-reader/desktop start",
