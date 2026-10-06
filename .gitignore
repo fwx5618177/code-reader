@@ -32,3 +32,9 @@ Thumbs.db
 prompt.md
 
 .spec-workflow/
+# TypeScript 增量构建产物
+*.tsbuildinfo
+
+# 测试报告产物
+test-results/
+coverage/
