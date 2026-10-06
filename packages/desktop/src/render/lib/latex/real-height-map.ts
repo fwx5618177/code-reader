@@ -149,10 +149,9 @@ const DEFAULT_CONFIG: RealHeightMapConfig = {
 
 /**
  * 二分查找
- * @internal 保留用于未来的优化
+ * 返回目标值所在下标（exact 为 true），或第一个大于目标值的插入位置
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function _binarySearch<T>(
+function binarySearch<T>(
   arr: T[],
   target: number,
   accessor: (item: T) => number
@@ -579,15 +578,20 @@ export class RealHeightMap {
       };
     }
 
-    // 找到最近的前后块
-    let prevBlock: RenderBlock | null = null;
-    let nextBlock: RenderBlock | null = null;
+    // 找到最近的前后块：块按源码位置排序，二分定位第一个起始行大于 line 的块
+    const { index, exact } = binarySearch(this.blocks, line, (block) => block.sourceStartLine);
+    let nextIndex = exact ? index + 1 : index;
+    while (nextIndex < this.blocks.length && this.blocks[nextIndex].sourceStartLine <= line) {
+      nextIndex++;
+    }
+    const nextBlock: RenderBlock | null =
+      nextIndex < this.blocks.length ? this.blocks[nextIndex] : null;
 
-    for (const block of this.blocks) {
-      if (block.sourceEndLine < line) {
-        prevBlock = block;
-      } else if (block.sourceStartLine > line && !nextBlock) {
-        nextBlock = block;
+    // 前一个块：起始行不大于 line 且结束行小于 line 的最近块
+    let prevBlock: RenderBlock | null = null;
+    for (let i = nextIndex - 1; i >= 0; i--) {
+      if (this.blocks[i].sourceEndLine < line) {
+        prevBlock = this.blocks[i];
         break;
       }
     }

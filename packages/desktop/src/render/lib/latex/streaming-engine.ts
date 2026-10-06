@@ -3,8 +3,8 @@
 // 使用帧预算、Web Worker 和增量处理解决大文件 OOM 问题
 // ================================
 
-import type { LatexNode, RootNode, DocumentNode, PreambleNode } from './types';
-import { getASTNodePool, getMemoryMonitor, MemoryPressure } from './chunk-pool';
+import type { LatexNode, RootNode, DocumentNode, PreambleNode, ParagraphNode } from './types';
+import { getMemoryMonitor, MemoryPressure } from './chunk-pool';
 
 // ================================
 // 类型定义
@@ -170,7 +170,6 @@ const DEFAULT_CONFIG: StreamingEngineConfig = {
 // 块边界检测正则（编译一次复用）
 const SECTION_REGEX = /\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\s*[{\[]/;
 const ENVIRONMENT_BEGIN_REGEX = /\\begin\{([^}]+)\}/;
-const ENVIRONMENT_END_REGEX = /\\end\{([^}]+)\}/;
 const MATH_BLOCK_START_REGEX = /(\$\$|\\[[])/;
 const DOCUMENT_BEGIN_REGEX = /\\begin\{document\}/;
 const DOCUMENT_END_REGEX = /\\end\{document\}/;
@@ -213,9 +212,9 @@ function fastHash(str: string): string {
 }
 
 /**
- * 计算行信息
+ * 计算每行起始偏移（行数即数组长度）
  */
-function computeLineOffsets(content: string): { offsets: number[]; lineCount: number } {
+function computeLineOffsets(content: string): number[] {
   const offsets: number[] = [0];
   const len = content.length;
   for (let i = 0; i < len; i++) {
@@ -223,7 +222,7 @@ function computeLineOffsets(content: string): { offsets: number[]; lineCount: nu
       offsets.push(i + 1);
     }
   }
-  return { offsets, lineCount: offsets.length };
+  return offsets;
 }
 
 /**
@@ -241,14 +240,6 @@ function getLineFromOffset(offset: number, lineOffsets: number[]): number {
     }
   }
   return low + 1; // 转为 1-based
-}
-
-/**
- * 从行号获取偏移
- */
-function getOffsetFromLine(line: number, lineOffsets: number[]): number {
-  const index = Math.max(0, Math.min(line - 1, lineOffsets.length - 1));
-  return lineOffsets[index];
 }
 
 /**
@@ -611,7 +602,6 @@ export class StreamingEngine {
   // 文档状态
   private content: string = '';
   private lineOffsets: number[] = [];
-  private lineCount: number = 0;
   private chunks: Map<string, ParseChunk> = new Map();
   private chunkOrder: string[] = [];
 
@@ -663,9 +653,7 @@ export class StreamingEngine {
     this.content = content;
 
     // 计算行信息
-    const lineInfo = computeLineOffsets(content);
-    this.lineOffsets = lineInfo.offsets;
-    this.lineCount = lineInfo.lineCount;
+    this.lineOffsets = computeLineOffsets(content);
 
     // 设置边界检测器
     this.boundaryDetector.setContent(content, this.lineOffsets);
@@ -738,9 +726,7 @@ export class StreamingEngine {
     this.content = newContent;
 
     // 重新计算行信息
-    const lineInfo = computeLineOffsets(newContent);
-    this.lineOffsets = lineInfo.offsets;
-    this.lineCount = lineInfo.lineCount;
+    this.lineOffsets = computeLineOffsets(newContent);
 
     // 更新边界检测器
     this.boundaryDetector.setContent(newContent, this.lineOffsets);
@@ -767,7 +753,6 @@ export class StreamingEngine {
     // 重新开始解析
     this.startIncrementalParsing();
 
-    const parseTime = performance.now() - startTime;
     this.version++;
 
     return this.getCurrentResult(startTime);
@@ -891,7 +876,6 @@ export class StreamingEngine {
     this.cancelParsing();
     this.content = '';
     this.lineOffsets = [];
-    this.lineCount = 0;
     this.chunks.clear();
     this.chunkOrder = [];
     this.cachedRoot = null;
@@ -962,7 +946,6 @@ export class StreamingEngine {
 
     for (const id of this.chunkOrder) {
       const chunk = this.chunks.get(id)!;
-      const size = chunk.endOffset - chunk.startOffset;
 
       if (current === null) {
         current = chunk;
@@ -1014,8 +997,6 @@ export class StreamingEngine {
    * 构建骨架 AST（仅结构，不解析内容）
    */
   private buildSkeletonAST(): RootNode {
-    const pool = getASTNodePool();
-
     // 找到前言块
     let preambleNode: PreambleNode | null = null;
     const documentChildren: LatexNode[] = [];
@@ -1037,7 +1018,7 @@ export class StreamingEngine {
         };
       } else {
         // 创建占位节点
-        documentChildren.push({
+        const placeholder: ParagraphNode = {
           type: 'paragraph',
           id: `placeholder_${chunk.id}`,
           start: chunk.startOffset,
@@ -1045,7 +1026,8 @@ export class StreamingEngine {
           raw: '',
           hash: chunk.hash,
           children: [],
-        } as unknown as LatexNode);
+        };
+        documentChildren.push(placeholder);
       }
     }
 

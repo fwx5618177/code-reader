@@ -377,6 +377,22 @@ function ropeInsert(node: RopeNode, pos: number, text: string): RopeNode {
 }
 
 /**
+ * 连接两个 Rope 子树
+ * 两侧均为叶子且任一侧小于最小叶子大小时合并为单个叶子，避免删除后产生大量碎片叶子
+ */
+function ropeJoin(left: RopeNode, right: RopeNode): RopeNode {
+  if (
+    left.type === 'leaf' &&
+    right.type === 'leaf' &&
+    (left.length < ROPE_LEAF_MIN_SIZE || right.length < ROPE_LEAF_MIN_SIZE) &&
+    left.length + right.length <= ROPE_LEAF_MAX_SIZE
+  ) {
+    return createLeaf((left as RopeLeaf).text + (right as RopeLeaf).text);
+  }
+  return balance(createBranch(left, right));
+}
+
+/**
  * 从 Rope 中删除文本
  */
 function ropeDelete(node: RopeNode, start: number, end: number): RopeNode {
@@ -395,14 +411,14 @@ function ropeDelete(node: RopeNode, start: number, end: number): RopeNode {
     // 完全在左子树
     const newLeft = ropeDelete(branch.left, start, end);
     if (newLeft.length === 0) return branch.right;
-    return balance(createBranch(newLeft, branch.right));
+    return ropeJoin(newLeft, branch.right);
   }
 
   if (start >= leftLen) {
     // 完全在右子树
     const newRight = ropeDelete(branch.right, start - leftLen, end - leftLen);
     if (newRight.length === 0) return branch.left;
-    return balance(createBranch(branch.left, newRight));
+    return ropeJoin(branch.left, newRight);
   }
 
   // 跨两个子树
@@ -412,7 +428,7 @@ function ropeDelete(node: RopeNode, start: number, end: number): RopeNode {
   if (newLeft.length === 0) return newRight;
   if (newRight.length === 0) return newLeft;
 
-  return balance(createBranch(newLeft, newRight));
+  return ropeJoin(newLeft, newRight);
 }
 
 /**
@@ -1078,6 +1094,28 @@ export class StreamingPipeline {
    */
   setRenderProgressCallback(callback: RenderProgressCallback): void {
     this.onRenderProgress = callback;
+  }
+
+  /**
+   * 提交块的渲染结果
+   * 写入按内容哈希索引的渲染缓存（重解析时命中可直接复用 HTML），并通知渲染进度
+   */
+  setBlockHtml(blockId: string, html: string): void {
+    const block = this.blocks.get(blockId);
+    if (!block) return;
+
+    block.html = html;
+    block.rendered = true;
+    this.renderCache.set(block.hash, html);
+
+    if (this.onRenderProgress) {
+      let renderedCount = 0;
+      for (const id of this.blockOrder) {
+        if (this.blocks.get(id)?.rendered) renderedCount++;
+      }
+      const total = this.blockOrder.length;
+      this.onRenderProgress(total > 0 ? renderedCount / total : 1, html);
+    }
   }
 
   /**

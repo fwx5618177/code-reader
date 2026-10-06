@@ -10,14 +10,21 @@
 // 5. 可见优先：优先解析可见区域
 // ================================
 
-import type { LatexNode, RootNode, DocumentNode, PreambleNode } from './types';
+import type {
+  LatexNode,
+  RootNode,
+  DocumentNode,
+  PreambleNode,
+  AnyLatexNode,
+  SectionNode,
+  ListNode,
+  TextNode,
+  MathBlockDelimiter,
+} from './types';
 
 // ================================
 // 常量配置
 // ================================
-
-/** 最大单次迭代次数，防止无限循环 */
-const MAX_ITERATIONS = 100000;
 
 /** 每帧最大处理时间（ms） */
 const FRAME_BUDGET_MS = 8;
@@ -74,7 +81,7 @@ export interface ParseChunk {
   /** 内容哈希 */
   hash: number;
   /** 解析后的 AST 节点 */
-  ast: LatexNode | null;
+  ast: AnyLatexNode | null;
   /** 解析错误 */
   error: string | null;
   /** 是否可见 */
@@ -530,7 +537,7 @@ function parseChunkToAST(
   startOffset: number,
   endOffset: number,
   type: ChunkType
-): LatexNode {
+): AnyLatexNode {
   const raw = content.slice(startOffset, endOffset);
   const id = `node_${startOffset}_${endOffset}`;
   const hash = fastHashRange(content, startOffset, endOffset).toString(36);
@@ -538,10 +545,19 @@ function parseChunkToAST(
   // 根据类型创建不同节点
   switch (type) {
     case 'section': {
-      // 提取章节信息
+      // 提取章节信息（正则只捕获合法章节级别）
       const sectionMatch = raw.match(/^\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\{([^}]*)\}/);
-      const level = sectionMatch?.[1] || 'section';
-      const title = sectionMatch?.[2] || '';
+      const level = (sectionMatch?.[1] ?? 'section') as SectionNode['level'];
+      const title = sectionMatch?.[2] ?? '';
+      const titleNode: TextNode = {
+        type: 'text',
+        id: `${id}_title`,
+        start: startOffset,
+        end: endOffset,
+        raw: title,
+        hash: hash + '_t',
+        content: title,
+      };
 
       return {
         type: 'section',
@@ -550,25 +566,16 @@ function parseChunkToAST(
         end: endOffset,
         raw,
         hash,
-        level: level as 'section' | 'chapter' | 'subsection' | 'subsubsection' | 'paragraph' | 'subparagraph',
-        title: {
-          type: 'text',
-          id: `${id}_title`,
-          start: startOffset,
-          end: endOffset,
-          raw: title,
-          hash: hash + '_t',
-          content: title,
-        },
-        numbered: !raw.includes('*'),
-        children: [],
-      } as unknown as LatexNode;
+        level,
+        title: [titleNode],
+        star: raw.includes('*'),
+      };
     }
 
     case 'math-block': {
       // 提取数学内容
       let mathContent = raw;
-      let delimiter = '$$';
+      let delimiter: MathBlockDelimiter = '$$';
 
       if (raw.startsWith('$$') && raw.endsWith('$$')) {
         mathContent = raw.slice(2, -2);
@@ -595,10 +602,17 @@ function parseChunkToAST(
         content: mathContent.trim(),
         delimiter,
         numbered: !raw.includes('*'),
-      } as unknown as LatexNode;
+      };
     }
 
     case 'list': {
+      let listType: ListNode['listType'] = 'itemize';
+      if (raw.includes('\\begin{enumerate}')) {
+        listType = 'enumerate';
+      } else if (raw.includes('\\begin{description}')) {
+        listType = 'description';
+      }
+
       return {
         type: 'list',
         id,
@@ -606,40 +620,22 @@ function parseChunkToAST(
         end: endOffset,
         raw,
         hash,
-        listType: raw.includes('enumerate') ? 'ordered' : 'unordered',
+        listType,
         children: [],
-      } as unknown as LatexNode;
+      };
     }
 
-    case 'table': {
-      return {
-        type: 'environment',
-        id,
-        start: startOffset,
-        end: endOffset,
-        raw,
-        hash,
-        name: 'tabular',
-        children: [],
-      } as unknown as LatexNode;
-    }
-
-    case 'code': {
-      return {
-        type: 'environment',
-        id,
-        start: startOffset,
-        end: endOffset,
-        raw,
-        hash,
-        name: 'verbatim',
-        children: [],
-      } as unknown as LatexNode;
-    }
-
+    case 'table':
+    case 'code':
     case 'environment': {
-      const envMatch = raw.match(/\\begin\{(\w+)\}/);
-      const name = envMatch?.[1] || 'unknown';
+      let name = 'unknown';
+      if (type === 'table') {
+        name = 'tabular';
+      } else if (type === 'code') {
+        name = 'verbatim';
+      } else {
+        name = raw.match(/\\begin\{(\w+)\}/)?.[1] ?? 'unknown';
+      }
 
       return {
         type: 'environment',
@@ -649,13 +645,14 @@ function parseChunkToAST(
         raw,
         hash,
         name,
+        options: [],
+        args: [],
         children: [],
-      } as unknown as LatexNode;
+      };
     }
 
     case 'command': {
-      const cmdMatch = raw.match(/^\\(\w+)/);
-      const name = cmdMatch?.[1] || '';
+      const name = raw.match(/^\\(\w+)/)?.[1] ?? '';
 
       return {
         type: 'command',
@@ -665,9 +662,10 @@ function parseChunkToAST(
         raw,
         hash,
         name,
-        star: raw.includes(name + '*'),
+        options: [],
         args: [],
-      } as unknown as LatexNode;
+        star: raw.includes(name + '*'),
+      };
     }
 
     case 'preamble': {
@@ -681,12 +679,22 @@ function parseChunkToAST(
         packages: [],
         commands: [],
         environments: [],
-      } as unknown as LatexNode;
+      };
     }
 
     case 'paragraph':
     case 'text':
     default: {
+      const textNode: TextNode = {
+        type: 'text',
+        id: `${id}_text`,
+        start: startOffset,
+        end: endOffset,
+        raw,
+        hash: hash + '_c',
+        content: raw,
+      };
+
       return {
         type: 'paragraph',
         id,
@@ -694,16 +702,8 @@ function parseChunkToAST(
         end: endOffset,
         raw,
         hash,
-        children: [{
-          type: 'text',
-          id: `${id}_text`,
-          start: startOffset,
-          end: endOffset,
-          raw,
-          hash: hash + '_c',
-          content: raw,
-        }],
-      } as unknown as LatexNode;
+        children: [textNode],
+      };
     }
   }
 }
@@ -1085,8 +1085,8 @@ export class StreamingParserV2 {
     for (const chunk of this.chunks) {
       if (!chunk.ast) continue;
 
-      if (chunk.type === 'preamble' && !preambleNode) {
-        preambleNode = chunk.ast as unknown as PreambleNode;
+      if (chunk.ast.type === 'preamble' && !preambleNode) {
+        preambleNode = chunk.ast;
       } else {
         children.push(chunk.ast);
       }

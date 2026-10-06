@@ -16,8 +16,7 @@
 // - 增量解析只处理变化部分
 // ================================
 
-import type { RootNode, LatexNode } from './types';
-import type { DocumentChunk, TextChange } from './streaming-parser';
+import type { LatexNode } from './types';
 
 // ================================
 // 类型定义
@@ -934,6 +933,14 @@ export class ParseScheduler {
   }
 
   /**
+   * 判断任务是否已被取消
+   * 以方法调用读取最新状态，避免 await 之后沿用赋值时收窄的类型
+   */
+  private isTaskCancelled(task: ParseTask): boolean {
+    return task.status === TaskStatus.CANCELLED;
+  }
+
+  /**
    * 执行任务
    */
   private async executeTask(task: ParseTask): Promise<void> {
@@ -951,8 +958,8 @@ export class ParseScheduler {
       // 执行任务
       const result = await Promise.race([Promise.resolve(task.execute()), timeoutPromise]);
 
-      // 检查是否被取消
-      if (task.status === TaskStatus.CANCELLED) {
+      // 检查是否被取消（await 期间 cancel 可能修改状态，需重新读取）
+      if (this.isTaskCancelled(task)) {
         return;
       }
 
@@ -973,8 +980,8 @@ export class ParseScheduler {
       // 通知回调
       this.notifyCallbacks(task.id, null, result);
     } catch (error) {
-      // 检查是否被取消
-      if (task.status === TaskStatus.CANCELLED) {
+      // 检查是否被取消（await 期间 cancel 可能修改状态，需重新读取）
+      if (this.isTaskCancelled(task)) {
         return;
       }
 

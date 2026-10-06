@@ -10,15 +10,9 @@ import {
   measureDOMBlocks,
   createBlockResizeObserver,
   createBlockVisibilityObserver,
-  type HeightBlock,
 } from './height-map';
-import {
-  FrameScheduler,
-  createFrameScheduler,
-  TaskPriority,
-  type ScheduledTask,
-} from './frame-scheduler';
-import type { RootNode, LatexNode } from './types';
+import { FrameScheduler, createFrameScheduler } from './frame-scheduler';
+import type { LatexNode } from './types';
 
 // ================================
 // 类型定义

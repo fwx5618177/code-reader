@@ -15,14 +15,7 @@
 // - VS Code 的 Piece Table 数据结构
 // ================================
 
-import type {
-  LatexNode,
-  RootNode,
-  DocumentNode,
-  PreambleNode,
-  SectionNode,
-  LatexNodeType,
-} from './types';
+import type { LatexNode } from './types';
 
 // ================================
 // 类型定义
@@ -307,14 +300,6 @@ function getLineFromOffset(lineOffsets: number[], offset: number): number {
   }
 
   return low + 1; // 返回 1-based 行号
-}
-
-/**
- * 从行号获取偏移量
- */
-function getOffsetFromLine(lineOffsets: number[], line: number): number {
-  const index = Math.max(0, Math.min(line - 1, lineOffsets.length - 1));
-  return lineOffsets[index] ?? 0;
 }
 
 // ================================
@@ -839,25 +824,46 @@ export class StreamingParser {
    * 获取下一个待解析的块
    */
   getNextParseTarget(): DocumentChunk | null {
+    // 已取消时不再派发新的解析任务
+    if (this.parseCancelled) {
+      this.isParsing = false;
+      return null;
+    }
+
     while (this.parseQueue.length > 0) {
       const chunkId = this.parseQueue.shift()!;
       const chunk = this.chunks.get(chunkId);
       if (chunk && chunk.dirty) {
+        this.isParsing = true;
         return chunk;
       }
     }
+    this.isParsing = false;
     return null;
   }
 
   /**
    * 标记块已解析
+   * 解析已取消时丢弃结果，保持块为脏状态以便重新解析
    */
   markChunkParsed(chunkId: string, ast: LatexNode | null): void {
+    this.isParsing = false;
+    if (this.parseCancelled) {
+      return;
+    }
+
     const chunk = this.chunks.get(chunkId);
     if (chunk) {
       chunk.ast = ast;
       chunk.dirty = false;
     }
+  }
+
+  /**
+   * 是否有块正在解析中
+   */
+  get parsing(): boolean {
+    return this.isParsing;
   }
 
   /**
@@ -1183,12 +1189,13 @@ export class StreamingParser {
    * 计算受影响范围
    */
   private computeAffectedRange(changes: TextChange[]): { from: number; to: number } {
+    // 范围使用变更前的文档坐标，与现有块的偏移保持一致（被删除区间内的块同样属于受影响块）
     let from = Infinity;
     let to = 0;
 
     for (const change of changes) {
       from = Math.min(from, change.from);
-      to = Math.max(to, change.to + change.insert.length - change.deleted.length);
+      to = Math.max(to, change.to);
     }
 
     return { from, to };
@@ -1273,26 +1280,45 @@ export class StreamingParser {
       totalDelta += change.insert.length - (change.to - change.from);
     }
 
-    // 更新受影响的块
-    for (const id of affectedIds) {
-      const chunk = this.chunks.get(id);
-      if (!chunk) continue;
+    // 受影响的块在文档中是连续的，按文档顺序处理
+    const affectedSet = new Set(affectedIds);
+    const affectedChunks = this.chunkOrder
+      .filter((id) => affectedSet.has(id))
+      .map((id) => this.chunks.get(id))
+      .filter((chunk): chunk is DocumentChunk => chunk !== undefined);
 
+    // 计算新起点：起点不晚于变更起点的块保持不变，之后开始的块整体平移（且不早于变更起点）
+    const newStarts = affectedChunks.map((chunk) =>
+      chunk.startOffset > range.from
+        ? Math.max(range.from, chunk.startOffset + totalDelta)
+        : chunk.startOffset
+    );
+    const lastChunk = affectedChunks[affectedChunks.length - 1];
+    const regionEnd = lastChunk
+      ? Math.max(newStarts[newStarts.length - 1], lastChunk.endOffset + totalDelta)
+      : 0;
+
+    // 更新受影响的块：相邻块首尾相接，保证块之间不重叠、不留空隙
+    for (let i = 0; i < affectedChunks.length; i++) {
+      const chunk = affectedChunks[i];
       const oldChunk = { ...chunk };
 
+      chunk.startOffset = newStarts[i];
+      chunk.endOffset = i + 1 < affectedChunks.length ? newStarts[i + 1] : regionEnd;
+
       // 重新计算块内容
-      const newContent = this.content.slice(chunk.startOffset, chunk.endOffset + totalDelta);
+      const newContent = this.content.slice(chunk.startOffset, chunk.endOffset);
       chunk.content = newContent;
-      chunk.endOffset += totalDelta;
       chunk.hash = hashString(newContent);
       chunk.dirty = true;
       chunk.ast = null;
       chunk.html = null;
-      chunk.endLine = getLineFromOffset(this.lineOffsets, chunk.endOffset - 1);
+      chunk.startLine = getLineFromOffset(this.lineOffsets, chunk.startOffset);
+      chunk.endLine = getLineFromOffset(this.lineOffsets, Math.max(chunk.startOffset, chunk.endOffset - 1));
 
       chunkChanges.push({
         type: 'modify',
-        chunkId: id,
+        chunkId: chunk.id,
         oldChunk,
         newChunk: chunk,
       });

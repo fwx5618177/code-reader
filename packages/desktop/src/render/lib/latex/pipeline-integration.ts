@@ -782,7 +782,7 @@ export class PipelineIntegration {
       }
     };
 
-    traverse(ast as unknown as LatexNode);
+    traverse(ast);
 
     // 计算渲染位置
     let currentTop = 0;

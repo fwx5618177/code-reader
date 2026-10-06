@@ -784,9 +784,8 @@ export class SourceMapGenerator {
       }
 
       // 递归处理子节点
-      const anyNode = node as unknown as { children?: LatexNode[] };
-      if (anyNode.children) {
-        for (const child of anyNode.children) {
+      if (node.children) {
+        for (const child of node.children) {
           traverse(child);
         }
       }
