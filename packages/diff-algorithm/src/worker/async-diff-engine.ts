@@ -261,27 +261,25 @@ export class AsyncDiffEngine {
     source: Uint8Array | ArrayBuffer,
     target: Uint8Array | ArrayBuffer
   ): Promise<AsyncBinaryDiffResult> {
-    const sourceBuffer = source instanceof ArrayBuffer ? source : source.buffer;
-    const targetBuffer = target instanceof ArrayBuffer ? target : target.buffer;
-    const dataSize = sourceBuffer.byteLength + targetBuffer.byteLength;
+    // 统一为字节视图：Uint8Array 可能只覆盖底层缓冲区的一部分，不能直接取 .buffer
+    const sourceBytes = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
+    const targetBytes = target instanceof ArrayBuffer ? new Uint8Array(target) : target;
+    const dataSize = sourceBytes.byteLength + targetBytes.byteLength;
 
     if (dataSize < this.config.workerThreshold || !this.canUseWorker()) {
-      return this.binaryDiffSync(sourceBuffer, targetBuffer);
+      return this.binaryDiffSync(sourceBytes, targetBytes);
     }
 
-    return this.binaryDiffInWorker(sourceBuffer, targetBuffer);
+    return this.binaryDiffInWorker(sourceBytes, targetBytes);
   }
 
   /**
    * 同步计算二进制差分
    */
-  binaryDiffSync(source: ArrayBuffer, target: ArrayBuffer): AsyncBinaryDiffResult {
+  binaryDiffSync(source: Uint8Array, target: Uint8Array): AsyncBinaryDiffResult {
     const startTime = performance.now();
 
-    // 简化的二进制差分
-    const sourceBytes = new Uint8Array(source);
-    const targetBytes = new Uint8Array(target);
-    const delta = this.computeSimpleBinaryDiff(sourceBytes, targetBytes);
+    const delta = this.computeSimpleBinaryDiff(source, target);
 
     const endTime = performance.now();
 
@@ -300,8 +298,8 @@ export class AsyncDiffEngine {
    * 在 Worker 中计算二进制差分
    */
   async binaryDiffInWorker(
-    source: ArrayBuffer,
-    target: ArrayBuffer
+    source: Uint8Array,
+    target: Uint8Array
   ): Promise<AsyncBinaryDiffResult> {
     await this.ensureInitialized();
 
@@ -312,9 +310,9 @@ export class AsyncDiffEngine {
     const startTime = performance.now();
 
     try {
-      // 复制数据以避免 Transferable 问题
-      const sourceCopy = source.slice(0);
-      const targetCopy = target.slice(0);
+      // 按视图区间复制出独立的 ArrayBuffer：既避免转移调用方缓冲区，也保证只传输有效字节
+      const sourceCopy = source.slice().buffer;
+      const targetCopy = target.slice().buffer;
 
       const result = await this.pool.binaryDiff(sourceCopy, targetCopy);
       const endTime = performance.now();

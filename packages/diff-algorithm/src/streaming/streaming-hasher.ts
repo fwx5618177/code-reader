@@ -517,8 +517,19 @@ export class StreamingHasher {
    * @param buffer ArrayBuffer
    */
   async hashArrayBuffer(buffer: ArrayBuffer): Promise<HashResult> {
+    return this.hashBytes(new Uint8Array(buffer));
+  }
+
+  /**
+   * 从字节视图计算哈希
+   *
+   * 仅处理视图覆盖的 [byteOffset, byteOffset + byteLength) 区间，
+   * 不会读取底层缓冲区的其余部分，也无需复制数据
+   *
+   * @param bytes 字节视图
+   */
+  async hashBytes(bytes: Uint8Array): Promise<HashResult> {
     this.startTime = performance.now();
-    const bytes = new Uint8Array(buffer);
 
     // 分块处理大数据
     const chunkSize = this.config.chunkSize;
@@ -543,8 +554,7 @@ export class StreamingHasher {
    */
   async hashString(text: string): Promise<HashResult> {
     const encoder = new TextEncoder();
-    const bytes = encoder.encode(text);
-    return this.hashArrayBuffer(bytes.buffer);
+    return this.hashBytes(encoder.encode(text));
   }
 
   // ================================
@@ -737,6 +747,8 @@ export async function calculateChecksum(
   if (typeof data === 'string') {
     return (await hasher.hashString(data)).hash;
   } else {
-    return (await hasher.hashArrayBuffer(data instanceof ArrayBuffer ? data : data.buffer)).hash;
+    const result =
+      data instanceof ArrayBuffer ? await hasher.hashArrayBuffer(data) : await hasher.hashBytes(data);
+    return result.hash;
   }
 }

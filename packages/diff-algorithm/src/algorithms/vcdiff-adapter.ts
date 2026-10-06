@@ -323,13 +323,20 @@ export interface IncrementalDecision {
  * 当有可用的 xdelta WASM 模块时，可以实现此类：
  *
  * ```typescript
+ * // WASM 模块导出的编解码函数契约
+ * interface XDeltaWasmModule {
+ *   encode(source: Uint8Array, target: Uint8Array): Uint8Array;
+ *   decode(source: Uint8Array, delta: Uint8Array): Uint8Array;
+ * }
+ *
  * class WasmXDeltaEncoder implements IVCDiffEncoder {
  *   readonly name = 'xdelta-wasm';
  *   readonly isNative = true;
- *   private wasm: any;
  *
- *   async init() {
- *     this.wasm = await loadXDeltaWasm();
+ *   private constructor(private readonly wasm: XDeltaWasmModule) {}
+ *
+ *   static async create(): Promise<WasmXDeltaEncoder> {
+ *     return new WasmXDeltaEncoder(await loadXDeltaWasm());
  *   }
  *
  *   encode(source: Uint8Array, target: Uint8Array): Uint8Array {
