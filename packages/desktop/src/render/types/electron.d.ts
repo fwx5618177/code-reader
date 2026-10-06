@@ -253,87 +253,6 @@ interface VersionListOptions {
 }
 
 // ================================
-// Git Types
-// ================================
-
-type FileStatus =
-  | 'modified'
-  | 'added'
-  | 'deleted'
-  | 'renamed'
-  | 'copied'
-  | 'untracked'
-  | 'ignored'
-  | 'unmodified'
-  | 'conflicted';
-
-interface GitFileStatus {
-  path: string;
-  status: FileStatus;
-  staged: boolean;
-  oldPath?: string;
-}
-
-interface GitCommit {
-  hash: string;
-  shortHash: string;
-  parentHash: string | null;
-  authorName: string;
-  authorEmail: string;
-  authorDate: Date;
-  committerName: string;
-  committerEmail: string;
-  commitDate: Date;
-  message: string;
-  messageBody: string;
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
-}
-
-interface GitBranch {
-  name: string;
-  isHead: boolean;
-  isRemote: boolean;
-  upstream?: string;
-  ahead?: number;
-  behind?: number;
-}
-
-interface GitRemote {
-  name: string;
-  fetchUrl: string;
-  pushUrl: string;
-}
-
-interface GitRepository {
-  id: string;
-  path: string;
-  name: string;
-  remoteUrl: string | null;
-  currentBranch: string | null;
-  lastCommitHash: string | null;
-  lastSyncedAt: string | null;
-  isActive: boolean;
-  settings: Record<string, unknown> | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface GitBlame {
-  lineNumber: number;
-  commitHash: string;
-  authorName: string;
-  authorDate: Date;
-  content: string;
-}
-
-interface GitStash {
-  index: number;
-  message: string;
-}
-
-// ================================
 // Electron API Interface
 // ================================
 
@@ -435,40 +354,6 @@ interface ElectronAPI {
     shouldAutoSave: (itemId: string, minIntervalMs?: number) => Promise<boolean>;
   };
 
-  git: {
-    isInRepository: (path: string) => Promise<boolean>;
-    getRepository: (path: string) => Promise<GitRepository | null>;
-    syncRepository: (path: string) => Promise<GitRepository | null>;
-    getCurrentBranch: (repoPath: string) => Promise<string | null>;
-    getBranches: (repoPath: string) => Promise<GitBranch[]>;
-    getRemoteUrl: (repoPath: string) => Promise<string | null>;
-    getRemotes: (repoPath: string) => Promise<GitRemote[]>;
-    getStatus: (repoPath: string) => Promise<GitFileStatus[]>;
-    getFileStatus: (repoPath: string, filePath: string) => Promise<FileStatus>;
-    hasUncommittedChanges: (repoPath: string) => Promise<boolean>;
-    getHeadCommit: (repoPath: string) => Promise<string | null>;
-    getCommitHistory: (
-      repoPath: string,
-      options?: { limit?: number; skip?: number; branch?: string; filePath?: string }
-    ) => Promise<GitCommit[]>;
-    getCommit: (repoPath: string, commitHash: string) => Promise<GitCommit | null>;
-    getFileHistory: (repoPath: string, filePath: string, limit?: number) => Promise<GitCommit[]>;
-    getWorkingDiff: (repoPath: string, filePath?: string) => Promise<string>;
-    getStagedDiff: (repoPath: string, filePath?: string) => Promise<string>;
-    getCommitDiff: (
-      repoPath: string,
-      fromCommit: string,
-      toCommit?: string,
-      filePath?: string
-    ) => Promise<string>;
-    getFileAtCommit: (
-      repoPath: string,
-      filePath: string,
-      commitHash: string
-    ) => Promise<string | null>;
-    getBlame: (repoPath: string, filePath: string) => Promise<GitBlame[]>;
-    listStashes: (repoPath: string) => Promise<GitStash[]>;
-  };
 }
 
 declare global {

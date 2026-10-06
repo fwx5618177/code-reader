@@ -83,27 +83,6 @@ const validChannels = [
   'version:auto-save',
   'version:should-auto-save',
 
-  // Git 操作
-  'git:is-in-repository',
-  'git:get-repository',
-  'git:sync-repository',
-  'git:get-current-branch',
-  'git:get-branches',
-  'git:get-remote-url',
-  'git:get-remotes',
-  'git:get-status',
-  'git:get-file-status',
-  'git:has-uncommitted-changes',
-  'git:get-head-commit',
-  'git:get-commit-history',
-  'git:get-commit',
-  'git:get-file-history',
-  'git:get-working-diff',
-  'git:get-staged-diff',
-  'git:get-commit-diff',
-  'git:get-file-at-commit',
-  'git:get-blame',
-  'git:list-stashes',
 ];
 
 // 用于接收事件的通道
@@ -247,40 +226,6 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('version:auto-save', itemId, content, options),
     shouldAutoSave: (itemId: string, minIntervalMs?: number) =>
       ipcRenderer.invoke('version:should-auto-save', itemId, minIntervalMs),
-  },
-
-  // Git 便捷方法
-  git: {
-    isInRepository: (path: string) => ipcRenderer.invoke('git:is-in-repository', path),
-    getRepository: (path: string) => ipcRenderer.invoke('git:get-repository', path),
-    syncRepository: (path: string) => ipcRenderer.invoke('git:sync-repository', path),
-    getCurrentBranch: (repoPath: string) => ipcRenderer.invoke('git:get-current-branch', repoPath),
-    getBranches: (repoPath: string) => ipcRenderer.invoke('git:get-branches', repoPath),
-    getRemoteUrl: (repoPath: string) => ipcRenderer.invoke('git:get-remote-url', repoPath),
-    getRemotes: (repoPath: string) => ipcRenderer.invoke('git:get-remotes', repoPath),
-    getStatus: (repoPath: string) => ipcRenderer.invoke('git:get-status', repoPath),
-    getFileStatus: (repoPath: string, filePath: string) =>
-      ipcRenderer.invoke('git:get-file-status', repoPath, filePath),
-    hasUncommittedChanges: (repoPath: string) =>
-      ipcRenderer.invoke('git:has-uncommitted-changes', repoPath),
-    getHeadCommit: (repoPath: string) => ipcRenderer.invoke('git:get-head-commit', repoPath),
-    getCommitHistory: (repoPath: string, options?: unknown) =>
-      ipcRenderer.invoke('git:get-commit-history', repoPath, options),
-    getCommit: (repoPath: string, commitHash: string) =>
-      ipcRenderer.invoke('git:get-commit', repoPath, commitHash),
-    getFileHistory: (repoPath: string, filePath: string, limit?: number) =>
-      ipcRenderer.invoke('git:get-file-history', repoPath, filePath, limit),
-    getWorkingDiff: (repoPath: string, filePath?: string) =>
-      ipcRenderer.invoke('git:get-working-diff', repoPath, filePath),
-    getStagedDiff: (repoPath: string, filePath?: string) =>
-      ipcRenderer.invoke('git:get-staged-diff', repoPath, filePath),
-    getCommitDiff: (repoPath: string, fromCommit: string, toCommit?: string, filePath?: string) =>
-      ipcRenderer.invoke('git:get-commit-diff', repoPath, fromCommit, toCommit, filePath),
-    getFileAtCommit: (repoPath: string, filePath: string, commitHash: string) =>
-      ipcRenderer.invoke('git:get-file-at-commit', repoPath, filePath, commitHash),
-    getBlame: (repoPath: string, filePath: string) =>
-      ipcRenderer.invoke('git:get-blame', repoPath, filePath),
-    listStashes: (repoPath: string) => ipcRenderer.invoke('git:list-stashes', repoPath),
   },
 });
 

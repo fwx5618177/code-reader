@@ -251,56 +251,6 @@ CREATE TABLE IF NOT EXISTS document_versions (
   UNIQUE (item_id, version_number)
 );
 
--- Git 仓库追踪（用于文档版本历史）
-CREATE TABLE IF NOT EXISTS git_repositories (
-  id TEXT PRIMARY KEY,
-  path TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  remote_url TEXT,
-  current_branch TEXT,
-  last_commit_hash TEXT,
-  last_synced_at TEXT,
-  is_active INTEGER NOT NULL DEFAULT 1,
-  settings TEXT, -- JSON for repo-specific settings
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Git commits cache (for displaying history)
-CREATE TABLE IF NOT EXISTS git_commits (
-  id TEXT PRIMARY KEY,
-  repo_id TEXT NOT NULL,
-  commit_hash TEXT NOT NULL,
-  parent_hash TEXT,
-  author_name TEXT,
-  author_email TEXT,
-  author_date TEXT,
-  committer_name TEXT,
-  committer_email TEXT,
-  commit_date TEXT,
-  message TEXT,
-  message_body TEXT,
-  files_changed INTEGER,
-  insertions INTEGER,
-  deletions INTEGER,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (repo_id) REFERENCES git_repositories(id) ON DELETE CASCADE,
-  UNIQUE (repo_id, commit_hash)
-);
-
--- Git file changes in commits
-CREATE TABLE IF NOT EXISTS git_file_changes (
-  id TEXT PRIMARY KEY,
-  commit_id TEXT NOT NULL,
-  file_path TEXT NOT NULL,
-  change_type TEXT NOT NULL CHECK (change_type IN ('add', 'modify', 'delete', 'rename', 'copy')),
-  old_path TEXT, -- For renames
-  additions INTEGER DEFAULT 0,
-  deletions INTEGER DEFAULT 0,
-  is_binary INTEGER DEFAULT 0,
-  FOREIGN KEY (commit_id) REFERENCES git_commits(id) ON DELETE CASCADE
-);
-
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER PRIMARY KEY,
@@ -353,12 +303,6 @@ CREATE INDEX IF NOT EXISTS idx_versions_created ON document_versions(created_at 
 CREATE INDEX IF NOT EXISTS idx_versions_change_type ON document_versions(change_type);
 
 -- Git indexes
-CREATE INDEX IF NOT EXISTS idx_git_repos_path ON git_repositories(path);
-CREATE INDEX IF NOT EXISTS idx_git_commits_repo ON git_commits(repo_id);
-CREATE INDEX IF NOT EXISTS idx_git_commits_hash ON git_commits(commit_hash);
-CREATE INDEX IF NOT EXISTS idx_git_commits_date ON git_commits(commit_date DESC);
-CREATE INDEX IF NOT EXISTS idx_git_file_changes_commit ON git_file_changes(commit_id);
-CREATE INDEX IF NOT EXISTS idx_git_file_changes_path ON git_file_changes(file_path);
 `;
 
 const CREATE_FTS_SQL = `
