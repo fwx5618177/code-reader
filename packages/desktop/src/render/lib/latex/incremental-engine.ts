@@ -22,6 +22,15 @@ import type {
   DocumentChange,
   PreambleNode,
   AnyLatexNode,
+  TextNode,
+  ParagraphNode,
+  ErrorNode,
+  SectionNode,
+  ListNode,
+  ListItemNode,
+  MathBlockDelimiter,
+  WorkerMessageType,
+  WorkerRequest,
 } from './types';
 import { LatexParser } from './parser';
 import { LatexRenderer, VisibilityPriorityRenderer } from './renderer';
@@ -405,12 +414,10 @@ function collectNodes(ast: RootNode): Map<string, LatexNode> {
 }
 
 /**
- * 根据位置偏移更新节点
- * 用于增量更新时调整受影响节点的位置
- * @internal 预留函数，用于未来的增量位置更新优化
+ * 根据位置偏移递归更新节点（含子节点、章节标题、命令/环境参数）
+ * 用于分块解析时把块内相对位置平移为文档绝对位置
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function _adjustNodePositions(node: LatexNode, offset: number, afterPosition: number): void {
+function adjustNodePositions(node: LatexNode, offset: number, afterPosition: number): void {
   if (node.start >= afterPosition) {
     node.start += offset;
   }
@@ -418,11 +425,39 @@ function _adjustNodePositions(node: LatexNode, offset: number, afterPosition: nu
     node.end += offset;
   }
 
-  if ('children' in node && Array.isArray(node.children)) {
-    for (const child of node.children as LatexNode[]) {
-      _adjustNodePositions(child, offset, afterPosition);
+  if (node.children) {
+    for (const child of node.children) {
+      adjustNodePositions(child, offset, afterPosition);
     }
   }
+
+  const typedNode = node as AnyLatexNode;
+  if (typedNode.type === 'section') {
+    for (const titleNode of typedNode.title) {
+      adjustNodePositions(titleNode, offset, afterPosition);
+    }
+  } else if (typedNode.type === 'command' || typedNode.type === 'environment') {
+    for (const argList of typedNode.args) {
+      for (const argNode of argList) {
+        adjustNodePositions(argNode, offset, afterPosition);
+      }
+    }
+  }
+}
+
+/**
+ * 创建文本节点
+ */
+function createTextNode(id: string, start: number, end: number, content: string): TextNode {
+  return {
+    type: 'text',
+    id,
+    start,
+    end,
+    raw: content,
+    hash: hashString(content),
+    content,
+  };
 }
 
 // ================================
@@ -609,18 +644,11 @@ export class IncrementalLatexEngine {
 
     const traverse = (node: LatexNode) => {
       if (node.type === 'section') {
-        const sectionNode = node as unknown as {
-          id: string;
-          level: string;
-          numbered?: boolean;
-          title?: LatexNode[];
-          start: number;
-          end: number;
-        };
+        const sectionNode = node as SectionNode;
 
-        // 只收集编号的 section
-        if (sectionNode.numbered !== false) {
-          const titleText = this.extractTextFromNodes(sectionNode.title || []);
+        // 只收集编号的 section（非星号版本）
+        if (!sectionNode.star) {
+          const titleText = this.extractTextFromNodes(sectionNode.title);
           this.sectionIndex.push({
             id: `section-${sectionNode.id}`,
             title: titleText,
@@ -668,7 +696,7 @@ export class IncrementalLatexEngine {
     let text = '';
     for (const node of nodes) {
       if (node.type === 'text') {
-        text += (node as unknown as { content?: string }).content || '';
+        text += (node as TextNode).content;
       } else if ('children' in node && Array.isArray(node.children)) {
         text += this.extractTextFromNodes(node.children as LatexNode[]);
       }
@@ -942,10 +970,7 @@ export class IncrementalLatexEngine {
       // 使用超时保护的完整解析
       const timeoutMs = this.getParseTimeout();
       try {
-        return await this.withParseTimeout(
-          Promise.resolve(this.fullParse(content, startTime)),
-          timeoutMs
-        );
+        return await this.withParseTimeout(this.runFullParse(content, startTime), timeoutMs);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error(`${logPrefix} 解析失败: ${message}`);
@@ -972,10 +997,7 @@ export class IncrementalLatexEngine {
       console.warn(`${logPrefix} 增量解析失败，尝试完整重解析: ${message}`);
       // 增量解析失败时回退到完整解析
       try {
-        return await this.withParseTimeout(
-          Promise.resolve(this.fullParse(content, startTime)),
-          timeoutMs
-        );
+        return await this.withParseTimeout(this.runFullParse(content, startTime), timeoutMs);
       } catch (fullParseError) {
         console.error(`${logPrefix} 完整解析也失败: ${fullParseError}`);
         return {
@@ -1179,10 +1201,14 @@ export class IncrementalLatexEngine {
     this.sectionIndex = [];
     this.sectionIndexValid = false;
 
+    // 同步清理 Worker 内的解析器与渲染器状态
+    this.postWorkerCommand('reset');
+
     // 强制垃圾回收提示（在支持的环境中）
-    if (typeof global !== 'undefined' && (global as unknown as { gc?: () => void }).gc) {
+    const gc = (globalThis as typeof globalThis & { gc?: () => void }).gc;
+    if (gc) {
       try {
-        (global as unknown as { gc: () => void }).gc();
+        gc();
       } catch {
         // 忽略 GC 错误
       }
@@ -1303,13 +1329,7 @@ export class IncrementalLatexEngine {
 
     // 解析前言（如果存在）
     if (preambleEnd > 0) {
-      const preambleContent = content.slice(0, preambleEnd);
-      rootNode.preamble = this.convertToPreambleNode(
-        { type: 'Preamble' } as unknown as import('./parser').LatexNode,
-        preambleContent,
-        0,
-        preambleEnd
-      );
+      rootNode.preamble = this.convertToPreambleNode({ from: 0, to: preambleEnd }, content);
     }
 
     // 逐块解析文档正文
@@ -1342,7 +1362,7 @@ export class IncrementalLatexEngine {
       } catch (error) {
         console.warn(`${logPrefix} 块 ${parsedChunks + 1} 解析失败:`, error);
         // 创建一个错误节点
-        documentChildren.push({
+        const errorNode: ErrorNode = {
           type: 'error',
           id: `error_chunk_${parsedChunks}`,
           start: effectiveStart,
@@ -1351,7 +1371,8 @@ export class IncrementalLatexEngine {
           hash: hashString(effectiveContent),
           message: error instanceof Error ? error.message : '解析失败',
           severity: 'warning',
-        } as unknown as LatexNode);
+        };
+        documentChildren.push(errorNode);
       }
 
       parsedChunks++;
@@ -1389,7 +1410,7 @@ export class IncrementalLatexEngine {
     return {
       ast: rootNode,
       diff: {
-        added: documentChildren.map((n) => n.id),
+        added: documentChildren,
         removed: [],
         modified: [],
         unchanged: [],
@@ -1408,71 +1429,48 @@ export class IncrementalLatexEngine {
       return null;
     }
 
-    // 使用当前解析器解析
+    const chunkId = `${startOffset}_${Date.now()}`;
+
     try {
+      // 使用当前解析器解析块，得到块内相对位置的 AST
+      let chunkAST: RootNode | null = null;
       if (this.currentParserType === 'tree-sitter' && this.tsTreeSitterParser) {
-        const result = this.tsTreeSitterParser.parse(content);
-        const node = this.convertTSToLatexNode(
-          result.ast as unknown as {
-            type: string;
-            text?: string;
-            startIndex?: number;
-            endIndex?: number;
-          },
-          content,
-          0,
-          content.length
+        chunkAST = this.convertTSTreeSitterASTToRootNode(
+          this.tsTreeSitterParser.parse(content),
+          content
         );
-        // 调整偏移
-        if (node) {
-          node.start += startOffset;
-          node.end += startOffset;
-        }
-        return node;
       } else if (this.lezerParser) {
-        const result = this.lezerParser.parse(content);
-        const rootNode = this.convertLezerASTToRootNode(result, content);
-        // 调整偏移并返回文档子节点
-        if (rootNode.document && rootNode.document.children) {
-          for (const child of rootNode.document.children) {
-            child.start += startOffset;
-            child.end += startOffset;
-          }
-          return {
-            type: 'paragraph',
-            id: `para_${startOffset}_${Date.now()}`,
-            start: startOffset,
-            end: startOffset + content.length,
-            raw: content.slice(0, 200),
-            hash: hashString(content),
-            children: rootNode.document.children,
-          } as unknown as LatexNode;
-        }
-        return null;
-      } else {
-        // 创建简单的段落节点
-        return {
-          type: 'paragraph',
-          id: `para_${startOffset}_${Date.now()}`,
-          start: startOffset,
-          end: startOffset + content.length,
-          raw: content.slice(0, 200),
-          hash: hashString(content),
-          content: content,
-        } as unknown as LatexNode;
+        chunkAST = this.convertLezerASTToRootNode(this.lezerParser.parse(content), content);
       }
-    } catch (error) {
-      console.warn('[IncrementalEngine] 块解析失败:', error);
-      // 返回简单的文本节点
-      return {
-        type: 'text',
-        id: `text_${startOffset}_${Date.now()}`,
+
+      // 无可用增量解析器时，整块作为段落文本
+      const children: LatexNode[] = chunkAST?.document
+        ? chunkAST.document.children
+        : [createTextNode(`text_${chunkId}`, 0, content.length, content)];
+
+      if (children.length === 0) {
+        return null;
+      }
+
+      // 把块内相对位置平移为文档绝对位置（递归处理全部子节点）
+      for (const child of children) {
+        adjustNodePositions(child, startOffset, 0);
+      }
+
+      const paragraph: ParagraphNode = {
+        type: 'paragraph',
+        id: `para_${chunkId}`,
         start: startOffset,
         end: startOffset + content.length,
         raw: content.slice(0, 200),
         hash: hashString(content),
-        content: content,
-      } as unknown as LatexNode;
+        children,
+      };
+      return paragraph;
+    } catch (error) {
+      console.warn('[IncrementalEngine] 块解析失败:', error);
+      // 解析失败时整块作为文本节点
+      return createTextNode(`text_${chunkId}`, startOffset, startOffset + content.length, content);
     }
   }
 
@@ -1485,11 +1483,12 @@ export class IncrementalLatexEngine {
       this.debounceTimer = null;
     }
 
-    // 取消 Worker 请求
+    // 取消 Worker 请求，并通知 Worker 丢弃正在处理的任务
     for (const [, pending] of this.pendingRequests) {
       pending.reject(new Error('请求已取消'));
     }
     this.pendingRequests.clear();
+    this.postWorkerCommand('cancel');
   }
 
   /**
@@ -1637,13 +1636,46 @@ export class IncrementalLatexEngine {
         try {
           const lezerResult = this.lezerParser.parse(content);
           result = { ast: this.convertLezerASTToRootNode(lezerResult, content) };
-        } catch (lezerError) {
+        } catch {
           throw error; // 回退也失败，抛出原始错误
         }
       } else {
         throw error;
       }
     }
+
+    return this.commitFullParse(result.ast, startTime);
+  }
+
+  /**
+   * 执行完整解析
+   * 传统解析器在 Worker 可用时于后台线程解析（Worker 内运行同一个 LatexParser），
+   * 避免阻塞主线程；Worker 失败或使用 Lezer/Tree-sitter 时回退到主线程完整解析
+   */
+  private async runFullParse(content: string, startTime: number): Promise<IncrementalResult> {
+    this.adjustParserForContent(content);
+
+    if (this.currentParserType === 'legacy' && this.worker && this.workerReady) {
+      try {
+        const data = await this.sendToWorker<{ ast: RootNode }>('parse', {
+          content,
+          options: this.config.parserOptions,
+        });
+        return this.commitFullParse(data.ast, startTime);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[IncrementalEngine] Worker 解析失败，回退到主线程: ${message}`);
+      }
+    }
+
+    return this.fullParse(content, startTime);
+  }
+
+  /**
+   * 提交完整解析结果：更新缓存、Preamble、Section 索引与节点缓存
+   */
+  private commitFullParse(ast: RootNode, startTime: number): IncrementalResult {
+    const result = { ast };
 
     // 更新统一缓存
     const contentHash = this.cacheManager.getSourceHash();
@@ -1723,7 +1755,7 @@ export class IncrementalLatexEngine {
     const previousAST = this.cacheManager.getAST(this.currentContentHash);
     if (!previousAST) {
       // 如果没有缓存，执行完整解析
-      return this.fullParse(content, changes);
+      return this.fullParse(content, startTime);
     }
 
     // 计算 AST 差异
@@ -1980,9 +2012,18 @@ export class IncrementalLatexEngine {
   }
 
   /**
-   * 发送请求到 Worker
+   * 向 Worker 发送无需响应的控制指令（取消 / 重置）
    */
-  private sendToWorker<T>(type: string, data: unknown): Promise<T> {
+  private postWorkerCommand(type: 'cancel' | 'reset'): void {
+    if (!this.worker || !this.workerReady) return;
+    const request: WorkerRequest = { id: `${type}_${Date.now()}`, type, data: null };
+    this.worker.postMessage(request);
+  }
+
+  /**
+   * 发送请求到 Worker 并等待响应
+   */
+  private sendToWorker<T>(type: WorkerMessageType, data: unknown): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.worker || !this.workerReady) {
         reject(new Error('Worker 不可用'));
@@ -2103,10 +2144,13 @@ export class IncrementalLatexEngine {
   }
 
   /**
-   * 转换为 PreambleNode
+   * 转换为 PreambleNode（Lezer 与 Tree-sitter 节点共用，仅依赖位置与哈希）
    * 从 Preamble 内容中提取标题、作者、日期等信息
    */
-  private convertToPreambleNode(node: LatexASTNode, content: string): PreambleNode {
+  private convertToPreambleNode(
+    node: Pick<LatexASTNode, 'from' | 'to' | 'hash'>,
+    content: string
+  ): PreambleNode {
     const raw = content.slice(node.from, node.to);
 
     // 提取标题信息
@@ -2220,7 +2264,7 @@ export class IncrementalLatexEngine {
       case 'math_block': {
         // 提取块级数学公式内容
         let mathContent = raw;
-        let delimiter: '$$' | '\\[' | 'equation' | 'align' | 'gather' = '$$';
+        let delimiter: MathBlockDelimiter = '$$';
         let numbered = false;
 
         if (raw.startsWith('$$') && raw.endsWith('$$')) {
@@ -2395,10 +2439,6 @@ export class IncrementalLatexEngine {
           listType = 'description';
         }
 
-        const children = node.children
-          ? this.convertChildren(node.children, content)
-          : this.parseListItems(raw, node.from);
-
         return {
           type: 'list',
           id: nodeId,
@@ -2407,7 +2447,11 @@ export class IncrementalLatexEngine {
           raw,
           hash: nodeHash,
           listType,
-          children: children as import('./types').ListItemNode[],
+          children: this.collectListItems(
+            node.children ? this.convertChildren(node.children, content) : [],
+            raw,
+            node.from
+          ),
         } as import('./types').ListNode;
       }
 
@@ -2540,7 +2584,7 @@ export class IncrementalLatexEngine {
           }
 
           // 确定 delimiter 类型
-          let delimiter: '$$' | '\\[' | 'equation' | 'align' | 'gather' = 'align';
+          let delimiter: MathBlockDelimiter = 'align';
           if (name.startsWith('equation')) {
             delimiter = 'equation';
           } else if (name.startsWith('gather') || name.startsWith('multline')) {
@@ -2662,8 +2706,8 @@ export class IncrementalLatexEngine {
       }
 
       default: {
-        // 默认作为文本节点处理
-        // 确保所有节点都有 content 属性，以便渲染器能正确处理
+        // root/preamble/document 等结构节点嵌套出现时保留原类型：
+        // 渲染器对未知结构节点会优先渲染子节点，无子节点时按 raw 文本渲染
         const baseNode: LatexNode = {
           type: nodeType,
           id: nodeId,
@@ -2671,8 +2715,6 @@ export class IncrementalLatexEngine {
           end: node.to,
           raw,
           hash: nodeHash,
-          // 添加 content 属性，确保 renderText 能正确渲染
-          content: raw,
         };
 
         if (node.children && node.children.length > 0) {
@@ -2685,7 +2727,16 @@ export class IncrementalLatexEngine {
   }
 
   /**
-   * 解析列表项（当 Lezer 没有正确解析列表子节点时使用）
+   * 收集列表项：列表只允许列表项作为子节点，
+   * 解析器没有产出列表项时从原始文本手动解析 \item
+   */
+  private collectListItems(children: LatexNode[], raw: string, baseOffset: number): ListItemNode[] {
+    const items = children.filter((child): child is ListItemNode => child.type === 'list_item');
+    return items.length > 0 ? items : this.parseListItems(raw, baseOffset);
+  }
+
+  /**
+   * 解析列表项（当解析器没有正确解析列表子节点时使用）
    */
   private parseListItems(raw: string, baseOffset: number): import('./types').ListItemNode[] {
     const items: import('./types').ListItemNode[] = [];
@@ -2790,7 +2841,7 @@ export class IncrementalLatexEngine {
         ) {
           // 如果还没有 preamble，创建一个
           if (!rootNode.preamble) {
-            rootNode.preamble = this.convertTSToPreambleNode(childNode, content, nodesMap);
+            rootNode.preamble = this.convertToPreambleNode(childNode, content);
           }
         } else if (childType === 'DocumentBody' || childType === 'Document') {
           rootNode.document = this.convertTSToDocumentNode(childNode, content, nodesMap);
@@ -2842,55 +2893,6 @@ export class IncrementalLatexEngine {
     );
 
     return rootNode;
-  }
-
-  /**
-   * 将 TS Tree-sitter 节点转换为 PreambleNode
-   */
-  private convertTSToPreambleNode(
-    node: import('@code-reader/syntax-parser').ASTNode,
-    content: string,
-    nodes: ReadonlyMap<string, import('@code-reader/syntax-parser').ASTNode>
-  ): PreambleNode {
-    const raw = content.slice(node.from, node.to);
-
-    // 提取标题信息
-    const titleMatch = raw.match(/\\title\{([^}]*)\}/);
-    const authorMatch = raw.match(/\\author\{([^}]*)\}/);
-    const dateMatch = raw.match(/\\date\{([^}]*)\}/);
-
-    // 提取宏包信息
-    const packages: import('./types').PackageInfo[] = [];
-    const packageRegex = /\\usepackage(?:\[([^\]]*)\])?\{([^}]+)\}/g;
-    let pkgMatch: RegExpExecArray | null;
-    while ((pkgMatch = packageRegex.exec(raw)) !== null) {
-      const options = pkgMatch[1] ? pkgMatch[1].split(',').map((o) => o.trim()) : [];
-      const names = pkgMatch[2].split(',').map((n) => n.trim());
-      for (const name of names) {
-        packages.push({ name, options });
-      }
-    }
-
-    // 处理日期，支持 \today
-    let dateValue = dateMatch ? dateMatch[1] : undefined;
-    if (dateValue === '\\today') {
-      dateValue = new Date().toLocaleDateString('zh-CN');
-    }
-
-    return {
-      type: 'preamble',
-      id: `preamble_${node.from}`,
-      start: node.from,
-      end: node.to,
-      raw,
-      hash: node.hash || hashString(raw),
-      packages,
-      commands: [],
-      environments: [],
-      title: titleMatch ? titleMatch[1] : undefined,
-      author: authorMatch ? authorMatch[1] : undefined,
-      date: dateValue,
-    };
   }
 
   /**
@@ -2960,7 +2962,7 @@ export class IncrementalLatexEngine {
     node: import('@code-reader/syntax-parser').ASTNode,
     content: string,
     nodes: ReadonlyMap<string, import('@code-reader/syntax-parser').ASTNode>
-  ): LatexNode | null {
+  ): AnyLatexNode | null {
     const raw = content.slice(node.from, node.to);
     const nodeType = this.mapTSNodeType(node.type);
     const nodeId = node.id;
@@ -2969,7 +2971,6 @@ export class IncrementalLatexEngine {
     switch (nodeType) {
       case 'text': {
         // 对于文本节点，使用原始内容
-        const textContent = raw;
         return {
           type: 'text',
           id: nodeId,
@@ -2977,7 +2978,7 @@ export class IncrementalLatexEngine {
           end: node.to,
           raw,
           hash: nodeHash,
-          content: textContent,
+          content: raw,
         };
       }
 
@@ -2990,11 +2991,12 @@ export class IncrementalLatexEngine {
           raw,
           hash: nodeHash,
           content: raw.replace(/^\$|\$$/g, '').replace(/^\\\(|\\\)$/g, ''),
+          delimiter: raw.startsWith('\\(') ? '\\(' : '$',
         };
 
       case 'math_block': {
         let mathContent = raw;
-        let delimiter = '$$';
+        let delimiter: MathBlockDelimiter = '$$';
         let numbered = false;
 
         // 提取数学内容
@@ -3038,9 +3040,10 @@ export class IncrementalLatexEngine {
         const sectionMatch = raw.match(
           /\\(chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\{([^}]*)\}/
         );
-        const level = sectionMatch ? sectionMatch[1] : 'section';
+        const level: SectionNode['level'] = sectionMatch
+          ? (sectionMatch[1] as SectionNode['level'])
+          : 'section';
         const titleText = sectionMatch ? sectionMatch[2] : '';
-        const star = raw.includes('*');
 
         return {
           type: 'section',
@@ -3049,25 +3052,9 @@ export class IncrementalLatexEngine {
           end: node.to,
           raw,
           hash: nodeHash,
-          level: level as
-            | 'chapter'
-            | 'section'
-            | 'subsection'
-            | 'subsubsection'
-            | 'paragraph'
-            | 'subparagraph',
-          title: [
-            {
-              type: 'text',
-              id: `${nodeId}_title`,
-              start: node.from,
-              end: node.to,
-              raw: titleText,
-              hash: hashString(titleText),
-              content: titleText,
-            },
-          ],
-          numbered: !star,
+          level,
+          title: [createTextNode(`${nodeId}_title`, node.from, node.to, titleText)],
+          star: raw.includes('*'),
         };
       }
 
@@ -3087,15 +3074,12 @@ export class IncrementalLatexEngine {
             const envContent = raw.slice(contentStart, contentEnd).trim();
             if (envContent.length > 0) {
               envChildren = [
-                {
-                  type: 'text',
-                  id: `${nodeId}_content`,
-                  start: node.from + contentStart,
-                  end: node.from + contentEnd,
-                  raw: envContent,
-                  hash: hashString(envContent),
-                  content: envContent,
-                },
+                createTextNode(
+                  `${nodeId}_content`,
+                  node.from + contentStart,
+                  node.from + contentEnd,
+                  envContent
+                ),
               ];
             }
           }
@@ -3109,6 +3093,8 @@ export class IncrementalLatexEngine {
           raw,
           hash: nodeHash,
           name,
+          options: [],
+          args: [],
           children: envChildren,
         };
       }
@@ -3125,8 +3111,9 @@ export class IncrementalLatexEngine {
           raw,
           hash: nodeHash,
           name,
-          star: raw.includes('*'),
+          options: [],
           args: [],
+          star: raw.includes('*'),
         };
       }
 
@@ -3136,15 +3123,7 @@ export class IncrementalLatexEngine {
         if (paragraphChildren.length === 0 && raw.trim().length > 0) {
           // 将段落原始内容作为文本子节点
           paragraphChildren = [
-            {
-              type: 'text',
-              id: `${nodeId}_text`,
-              start: node.from,
-              end: node.to,
-              raw,
-              hash: nodeHash,
-              content: raw,
-            },
+            { ...createTextNode(`${nodeId}_text`, node.from, node.to, raw), hash: nodeHash },
           ];
         }
         return {
@@ -3159,38 +3138,19 @@ export class IncrementalLatexEngine {
       }
 
       case 'list': {
-        // 如果列表没有子节点，尝试解析 \item
-        let listChildren = this.convertTSChildren(node.children || [], content, nodes);
-        if (listChildren.length === 0 && raw.includes('\\item')) {
-          // 手动提取列表项
-          const itemRegex = /\\item\s*([\s\S]*?)(?=\\item|\\end\{)/g;
-          let itemMatch: RegExpExecArray | null;
-          let itemIndex = 0;
-          while ((itemMatch = itemRegex.exec(raw)) !== null) {
-            const itemContent = itemMatch[1].trim();
-            if (itemContent.length > 0) {
-              listChildren.push({
-                type: 'list_item',
-                id: `${nodeId}_item_${itemIndex++}`,
-                start: node.from,
-                end: node.to,
-                raw: itemContent,
-                hash: hashString(itemContent),
-                children: [
-                  {
-                    type: 'text',
-                    id: `${nodeId}_item_${itemIndex}_text`,
-                    start: node.from,
-                    end: node.to,
-                    raw: itemContent,
-                    hash: hashString(itemContent),
-                    content: itemContent,
-                  },
-                ],
-              });
-            }
-          }
+        const listChildren = this.collectListItems(
+          this.convertTSChildren(node.children || [], content, nodes),
+          raw,
+          node.from
+        );
+
+        let listType: ListNode['listType'] = 'itemize';
+        if (raw.includes('\\begin{enumerate}')) {
+          listType = 'enumerate';
+        } else if (raw.includes('\\begin{description}')) {
+          listType = 'description';
         }
+
         return {
           type: 'list',
           id: nodeId,
@@ -3198,7 +3158,7 @@ export class IncrementalLatexEngine {
           end: node.to,
           raw,
           hash: nodeHash,
-          listType: raw.includes('enumerate') ? 'ordered' : 'unordered',
+          listType,
           children: listChildren,
         };
       }

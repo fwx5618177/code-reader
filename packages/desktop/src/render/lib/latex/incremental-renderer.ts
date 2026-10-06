@@ -16,7 +16,7 @@
 // - VS Code: 块级增量渲染
 // ================================
 
-import type { LatexNode, RootNode, AnyLatexNode } from './types';
+import type { LatexNode, RootNode, AnyLatexNode, LatexNodeType, SectionNode } from './types';
 
 // ================================
 // 类型定义
@@ -181,86 +181,115 @@ function computeNodeHash(node: LatexNode | AnyLatexNode): string {
 }
 
 /**
- * 收集 AST 中的所有节点
+ * 收集 AST 中的所有节点（含 Preamble/Document、子节点、章节标题与命令/环境参数）
  */
 function collectNodes(ast: RootNode | AnyLatexNode): Map<string, AnyLatexNode> {
   const nodes = new Map<string, AnyLatexNode>();
 
-  const traverse = (node: AnyLatexNode | undefined): void => {
-    if (!node) return;
-
+  const traverse = (node: AnyLatexNode): void => {
     nodes.set(node.id, node);
 
-    // 遍历子节点
-    const anyNode = node as Record<string, unknown>;
+    switch (node.type) {
+      case 'root':
+        if (node.preamble) traverse(node.preamble);
+        if (node.document) traverse(node.document);
+        break;
+      case 'section':
+        for (const titleNode of node.title) {
+          traverse(titleNode as AnyLatexNode);
+        }
+        break;
+      case 'command':
+      case 'environment':
+        for (const argList of node.args) {
+          for (const argNode of argList) {
+            traverse(argNode as AnyLatexNode);
+          }
+        }
+        break;
+      default:
+        break;
+    }
 
-    if (anyNode.children && Array.isArray(anyNode.children)) {
-      for (const child of anyNode.children as AnyLatexNode[]) {
-        traverse(child);
+    if (node.children) {
+      for (const child of node.children) {
+        traverse(child as AnyLatexNode);
       }
-    }
-
-    if (anyNode.preamble) {
-      traverse(anyNode.preamble as AnyLatexNode);
-    }
-
-    if (anyNode.document) {
-      traverse(anyNode.document as AnyLatexNode);
-    }
-
-    if (anyNode.title && typeof anyNode.title === 'object') {
-      traverse(anyNode.title as AnyLatexNode);
     }
   };
 
-  traverse(ast as AnyLatexNode);
+  traverse(ast);
   return nodes;
 }
+
+/** 节点类型到块级类型的映射 */
+const BLOCK_TYPES: Partial<Record<LatexNodeType, string>> = {
+  section: 'section',
+  paragraph: 'paragraph',
+  math_inline: 'math',
+  math_block: 'math',
+  list: 'list',
+  list_item: 'list-item',
+  environment: 'environment',
+  command: 'command',
+  text: 'text',
+  error: 'error',
+};
 
 /**
  * 获取节点的块级类型
  */
-function getBlockType(nodeType: string): string {
-  const blockTypes: Record<string, string> = {
-    section: 'section',
-    subsection: 'section',
-    subsubsection: 'section',
-    paragraph: 'paragraph',
-    'math-inline': 'math',
-    'math-block': 'math',
-    'display-math': 'math',
-    list: 'list',
-    'list-item': 'list-item',
-    table: 'table',
-    environment: 'environment',
-    command: 'command',
-    text: 'text',
-    error: 'error',
-  };
-
-  return blockTypes[nodeType] || 'block';
+function getBlockType(nodeType: LatexNodeType): string {
+  return BLOCK_TYPES[nodeType] ?? 'block';
 }
+
+/** 节点类型到渲染优先级的映射（数值越小越优先） */
+const RENDER_PRIORITIES: Partial<Record<LatexNodeType, number>> = {
+  section: 1,
+  paragraph: 4,
+  math_block: 5,
+  list: 6,
+  math_inline: 8,
+  environment: 9,
+  command: 10,
+  text: 11,
+  error: 12,
+};
 
 /**
  * 计算渲染优先级
  */
-function computePriority(nodeType: string): number {
-  const priorities: Record<string, number> = {
-    section: 1,
-    subsection: 2,
-    subsubsection: 3,
-    paragraph: 4,
-    'math-block': 5,
-    list: 6,
-    table: 7,
-    'math-inline': 8,
-    environment: 9,
-    command: 10,
-    text: 11,
-    error: 12,
-  };
+function computePriority(nodeType: LatexNodeType): number {
+  return RENDER_PRIORITIES[nodeType] ?? 10;
+}
 
-  return priorities[nodeType] ?? 10;
+/** 章节级别到标题标签级别的映射 */
+const SECTION_HEADING_LEVELS: Record<SectionNode['level'], number> = {
+  part: 1,
+  chapter: 1,
+  section: 1,
+  subsection: 2,
+  subsubsection: 3,
+  paragraph: 4,
+  subparagraph: 5,
+};
+
+/**
+ * 提取节点列表中的纯文本
+ */
+function extractNodesText(nodes: readonly LatexNode[]): string {
+  let text = '';
+  for (const child of nodes) {
+    const typed = child as AnyLatexNode;
+    if (typed.type === 'text') {
+      text += typed.content;
+    } else if (typed.children) {
+      text += extractNodesText(typed.children);
+    } else {
+      text += typed.raw;
+    }
+  }
+  return text;
 }
 
 // ================================
@@ -695,33 +724,27 @@ export class IncrementalRenderer {
    * 默认节点渲染
    */
   private defaultRenderNode(node: LatexNode): string {
-    const anyNode = node as Record<string, unknown>;
-    const content = typeof anyNode.content === 'string' ? anyNode.content : '';
-    const raw = typeof anyNode.raw === 'string' ? anyNode.raw : '';
+    const typed = node as AnyLatexNode;
 
-    switch (node.type) {
-      case 'section':
-      case 'subsection':
-      case 'subsubsection': {
-        const level = node.type === 'section' ? 1 : node.type === 'subsection' ? 2 : 3;
-        const title = typeof anyNode.title === 'object' && anyNode.title
-          ? (anyNode.title as Record<string, unknown>).content || ''
-          : '';
-        return `<h${level} class="latex-${node.type}">${title}</h${level}>`;
+    switch (typed.type) {
+      case 'section': {
+        const level = SECTION_HEADING_LEVELS[typed.level];
+        return `<h${level} class="latex-${typed.level}">${extractNodesText(typed.title)}</h${level}>`;
       }
       case 'paragraph':
-        return `<p class="latex-paragraph">${content || raw}</p>`;
-      case 'math-inline':
-        return `<span class="latex-math-inline">${content}</span>`;
-      case 'math-block':
-      case 'display-math':
-        return `<div class="latex-math-block">${content}</div>`;
+        return `<p class="latex-paragraph">${typed.raw}</p>`;
+      case 'math_inline':
+        return `<span class="latex-math-inline">${typed.content}</span>`;
+      case 'math_block':
+        return `<div class="latex-math-block">${typed.content}</div>`;
       case 'text':
-        return `<span class="latex-text">${content || raw}</span>`;
+        return `<span class="latex-text">${typed.content || typed.raw}</span>`;
       case 'error':
-        return `<span class="latex-error">${anyNode.message || '错误'}</span>`;
+        return `<span class="latex-error">${typed.message || '错误'}</span>`;
+      case 'comment':
+        return `<div class="latex-block latex-comment">${typed.content || typed.raw}</div>`;
       default:
-        return `<div class="latex-block latex-${node.type}">${content || raw}</div>`;
+        return `<div class="latex-block latex-${typed.type}">${typed.raw}</div>`;
     }
   }
 

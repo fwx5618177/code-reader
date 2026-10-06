@@ -14,6 +14,7 @@ import type {
   DocumentChange,
   RootNode,
   LatexNode,
+  AnyLatexNode,
 } from './types';
 import { LatexParser, IncrementalLatexParser } from './parser';
 import { LatexRenderer } from './renderer';
@@ -757,25 +758,22 @@ function collectNodesFromAST(ast: RootNode | null): LatexNode[] {
     nodes.push(node);
 
     // 遍历子节点
-    const anyNode = node as {
-      children?: LatexNode[];
-      document?: { children?: LatexNode[] };
-    };
-
-    if (anyNode.children) {
-      for (const child of anyNode.children) {
+    if (node.children) {
+      for (const child of node.children) {
         traverse(child);
       }
     }
 
-    if (anyNode.document?.children) {
-      for (const child of anyNode.document.children) {
+    // 根节点：直接遍历文档正文的子节点
+    const typed = node as AnyLatexNode;
+    if (typed.type === 'root' && typed.document) {
+      for (const child of typed.document.children) {
         traverse(child);
       }
     }
   }
 
-  traverse(ast as unknown as LatexNode);
+  traverse(ast);
 
   return nodes;
 }

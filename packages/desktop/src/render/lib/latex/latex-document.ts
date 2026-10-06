@@ -19,15 +19,11 @@
 // ================================
 
 import {
-  createAutoBuffer,
-  createPieceTable,
-  createRope,
+  createTextBuffer,
   selectBufferType,
   type ITextBuffer,
-  type TextChange,
   type TextChangeSet,
   type Position,
-  type Range,
   type TextBufferType,
 } from '@code-reader/text-buffer';
 
@@ -867,16 +863,10 @@ export class LatexDocument {
   // ================================
 
   /**
-   * 创建文本缓冲区
+   * 创建文本缓冲区（统一委托 text-buffer 工厂，支持 piece-table / rope / gap-buffer）
    */
   private createBuffer(content: string): ITextBuffer {
-    switch (this.bufferType) {
-      case 'rope':
-        return createRope(content, true);
-      case 'piece-table':
-      default:
-        return createPieceTable(content, true);
-    }
+    return createTextBuffer({ type: this.bufferType, initialContent: content, enableLineCache: true });
   }
 
   /**
