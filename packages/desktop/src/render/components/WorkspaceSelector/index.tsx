@@ -5,7 +5,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Code2,
   Brain,
   BookOpen,
   PenTool,
@@ -49,20 +48,12 @@ const WORKSPACE_ICON_SIZE = 18;
 
 const WORKSPACES: Workspace[] = [
   {
-    id: 'code-reader',
-    type: 'code-reader',
-    name: '代码阅读',
-    icon: <Code2 size={WORKSPACE_ICON_SIZE} />,
-    color: '#3b82f6', // 蓝色
-    shortcut: '⌘1',
-  },
-  {
     id: 'reading',
     type: 'reading',
     name: '阅读',
     icon: <BookOpen size={WORKSPACE_ICON_SIZE} />,
     color: '#f59e0b', // 琥珀色
-    shortcut: '⌘2',
+    shortcut: '⌘3',
   },
   {
     id: 'knowledge',
@@ -70,7 +61,7 @@ const WORKSPACES: Workspace[] = [
     name: '知识库',
     icon: <Brain size={WORKSPACE_ICON_SIZE} />,
     color: '#10b981', // 绿色
-    shortcut: '⌘3',
+    shortcut: '⌘1',
   },
   {
     id: 'writing',
@@ -78,7 +69,7 @@ const WORKSPACES: Workspace[] = [
     name: '写作',
     icon: <PenTool size={WORKSPACE_ICON_SIZE} />,
     color: '#8b5cf6', // 紫色
-    shortcut: '⌘4',
+    shortcut: '⌘2',
   },
 ];
 

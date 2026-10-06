@@ -10,7 +10,6 @@ const validChannels = [
   'window-create-child',
 
   // 文件系统操作
-  'open-local-folder',
   'read-file',
   'write-file',
   'write-binary-file',

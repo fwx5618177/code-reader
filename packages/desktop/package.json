@@ -32,7 +32,6 @@
     "@code-reader/diff-algorithm": "workspace:*",
     "@code-reader/syntax-parser": "workspace:*",
     "@code-reader/text-buffer": "workspace:*",
-    "@code-reader/ui": "workspace:*",
     "@codemirror/autocomplete": "^6.16.0",
     "@codemirror/commands": "^6.5.0",
     "@codemirror/lang-cpp": "^6.0.2",
@@ -56,7 +55,6 @@
     "@lezer/highlight": "^1.2.0",
     "better-sqlite3": "^11.3.0",
     "diff-match-patch": "^1.0.5",
-    "directory-tree": "^3.5.2",
     "fossil-delta": "^2.0.0",
     "fs-extra": "^11.3.0",
     "katex": "^0.16.27",
@@ -78,8 +76,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-window": "^2.2.3",
-    "uuid": "^10.0.0",
-    "web-tree-sitter": "^0.26.3"
+    "uuid": "^10.0.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",

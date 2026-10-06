@@ -7,13 +7,11 @@
 import React from 'react';
 import {
   Files,
-  GitBranch,
   Tag,
   Settings,
   PlusCircle,
   Mic,
   Calendar,
-  FolderOpen,
   Network,
   Search,
   Clock,
@@ -35,7 +33,6 @@ interface RibbonProps {
   onPanelChange: (panel: string) => void;
   onQuickNote?: () => void;
   onStartRecording?: () => void;
-  onOpenFolder?: () => void;
   currentMode?: AppMode;
   onOpenSettings?: () => void;
   onOpenSearch?: () => void;
@@ -98,14 +95,6 @@ interface NavButton {
 
 const getNavigationButtons = (mode: AppMode): NavButton[] => {
   switch (mode) {
-    case 'code-reader':
-      return [
-        { id: 'files', icon: <Files size={20} />, label: '文件' },
-        { id: 'search', icon: <Search size={20} />, label: '搜索', shortcut: '⌘⇧F' },
-        { id: 'git', icon: <GitBranch size={20} />, label: 'Git' },
-        { id: 'outline', icon: <List size={20} />, label: '大纲' },
-        { id: 'bookmarks', icon: <Bookmark size={20} />, label: '书签' },
-      ];
     case 'reading':
       return [
         { id: 'chapters', icon: <BookMarked size={20} />, label: '章节' },
@@ -132,8 +121,6 @@ const getNavigationButtons = (mode: AppMode): NavButton[] => {
         { id: 'tags', icon: <Tag size={20} />, label: '标签' },
         { id: 'recent', icon: <Clock size={20} />, label: '最近' },
       ];
-    default:
-      return [{ id: 'files', icon: <Files size={20} />, label: '文件' }];
   }
 };
 
@@ -146,8 +133,7 @@ const Ribbon: React.FC<RibbonProps> = ({
   onPanelChange,
   onQuickNote,
   onStartRecording,
-  onOpenFolder,
-  currentMode = 'code-reader',
+  currentMode = 'knowledge',
   onOpenSettings,
 }) => {
   const navigationButtons = getNavigationButtons(currentMode);
@@ -170,14 +156,6 @@ const Ribbon: React.FC<RibbonProps> = ({
               label="快速录音"
               shortcut="⌘⇧R"
               onClick={onStartRecording || (() => {})}
-            />
-          )}
-          {currentMode === 'code-reader' && onOpenFolder && (
-            <RibbonButton
-              icon={<FolderOpen size={20} />}
-              label="打开文件夹"
-              shortcut="⌘O"
-              onClick={onOpenFolder}
             />
           )}
         </div>

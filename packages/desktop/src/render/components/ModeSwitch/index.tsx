@@ -4,7 +4,7 @@
 // ================================
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Code2, Brain, BookOpen, PenTool, ChevronDown, Check, Keyboard } from 'lucide-react';
+import { Brain, BookOpen, PenTool, ChevronDown, Check, Keyboard } from 'lucide-react';
 import { AppMode, APP_MODE_CONFIGS } from '../../types/app-modes';
 import styles from './ModeSwitch.module.scss';
 
@@ -23,7 +23,6 @@ interface ModeSwitchProps {
 // ================================
 
 const MODE_ICONS: Record<AppMode, React.ReactNode> = {
-  'code-reader': <Code2 size={18} />,
   reading: <BookOpen size={18} />,
   knowledge: <Brain size={18} />,
   writing: <PenTool size={18} />,
@@ -148,7 +147,7 @@ const ModeSwitch: React.FC<ModeSwitchProps> = ({ currentMode, onModeChange, comp
 
           <div className={styles.dropdownFooter}>
             <span className={styles.footerHint}>
-              使用快捷键 <kbd>⌘1-4</kbd> 快速切换
+              使用快捷键 <kbd>⌘1-3</kbd> 快速切换
             </span>
           </div>
         </div>

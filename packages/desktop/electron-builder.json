@@ -87,7 +87,7 @@
     "category": "Development",
     "maintainer": "Code Reader Team",
     "synopsis": "A powerful code reading and knowledge management tool",
-    "description": "Code Reader is a desktop application for reading code, managing knowledge, and focused writing."
+    "description": "Code Reader is a personal knowledge base and writing app with Markdown and LaTeX support."
   },
   "publish": {
     "provider": "github",

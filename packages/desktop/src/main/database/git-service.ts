@@ -1,6 +1,6 @@
 // ================================
 // Git Integration Service
-// Provides Git status and history for code-reader mode
+// 为文档版本历史提供 Git 状态与提交记录
 // ================================
 
 import { exec, spawn } from 'child_process';

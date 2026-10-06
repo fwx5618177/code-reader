@@ -5,7 +5,7 @@
 // ================================
 
 import React, { useState, useCallback } from 'react';
-import { Code2, Brain, BookOpen, PenTool, Plus, ExternalLink } from 'lucide-react';
+import { Brain, BookOpen, PenTool, Plus, ExternalLink } from 'lucide-react';
 import { AppMode } from '../../types/app-modes';
 import styles from './ModeTabs.module.scss';
 
@@ -37,28 +37,22 @@ interface ModeTabsProps {
 
 const MODE_TABS: ModeTab[] = [
   {
-    mode: 'code-reader',
-    label: '代码阅读',
-    icon: <Code2 size={14} />,
-    shortcut: '⌘1',
-  },
-  {
     mode: 'reading',
     label: '阅读',
     icon: <BookOpen size={14} />,
-    shortcut: '⌘2',
+    shortcut: '⌘3',
   },
   {
     mode: 'knowledge',
     label: '知识库',
     icon: <Brain size={14} />,
-    shortcut: '⌘3',
+    shortcut: '⌘1',
   },
   {
     mode: 'writing',
     label: '写作',
     icon: <PenTool size={14} />,
-    shortcut: '⌘4',
+    shortcut: '⌘2',
   },
 ];
 

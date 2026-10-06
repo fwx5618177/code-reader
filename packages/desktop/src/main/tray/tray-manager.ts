@@ -316,26 +316,26 @@ export class TrayManager {
         label: '切换模式',
         submenu: [
           {
-            label: '代码阅读',
-            accelerator: 'CmdOrCtrl+1',
-            click: () => {
-              this.mainWindow?.webContents.send('tray:switch-mode', 'code-reader');
-              this.showAndFocusWindow();
-            },
-          },
-          {
             label: '知识库',
-            accelerator: 'CmdOrCtrl+2',
+            accelerator: 'CmdOrCtrl+1',
             click: () => {
               this.mainWindow?.webContents.send('tray:switch-mode', 'knowledge');
               this.showAndFocusWindow();
             },
           },
           {
-            label: '日记',
+            label: '写作',
+            accelerator: 'CmdOrCtrl+2',
+            click: () => {
+              this.mainWindow?.webContents.send('tray:switch-mode', 'writing');
+              this.showAndFocusWindow();
+            },
+          },
+          {
+            label: '阅读',
             accelerator: 'CmdOrCtrl+3',
             click: () => {
-              this.mainWindow?.webContents.send('tray:switch-mode', 'journal');
+              this.mainWindow?.webContents.send('tray:switch-mode', 'reading');
               this.showAndFocusWindow();
             },
           },

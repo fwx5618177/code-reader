@@ -251,7 +251,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
   UNIQUE (item_id, version_number)
 );
 
--- Git repository tracking (for code-reader mode)
+-- Git 仓库追踪（用于文档版本历史）
 CREATE TABLE IF NOT EXISTS git_repositories (
   id TEXT PRIMARY KEY,
   path TEXT NOT NULL UNIQUE,

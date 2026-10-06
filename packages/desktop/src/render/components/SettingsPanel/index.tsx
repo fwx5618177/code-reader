@@ -541,9 +541,9 @@ const ShortcutsSettingsTab: React.FC = () => {
     { action: '快速输入', shortcut: '⌘ N' },
     { action: '全局搜索', shortcut: '⌘ P' },
     { action: '切换侧边栏', shortcut: '⌘ B' },
-    { action: '代码阅读模式', shortcut: '⌘ 1' },
-    { action: '知识库模式', shortcut: '⌘ 2' },
-    { action: '日记模式', shortcut: '⌘ 3' },
+    { action: '知识库模式', shortcut: '⌘ 1' },
+    { action: '写作模式', shortcut: '⌘ 2' },
+    { action: '阅读模式', shortcut: '⌘ 3' },
     { action: '专注模式', shortcut: '⌘ ⇧ F' },
     { action: '设置', shortcut: '⌘ ,' },
   ];

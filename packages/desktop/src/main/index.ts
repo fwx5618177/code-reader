@@ -1,8 +1,7 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { existsSync } from 'fs';
-import dirTree from 'directory-tree';
 import { readFile, stat, writeFile, mkdir, access } from 'fs/promises';
 
 // Import services
@@ -280,16 +279,6 @@ function createChildWindow(mode: string): BrowserWindow {
   return child;
 }
 
-// 转换目录树结构
-function convertTreeFormat(node: dirTree.DirectoryTree): FileNode {
-  return {
-    name: node.name,
-    path: node.path,
-    type: node.type === 'directory' ? 'directory' : 'file',
-    ...(node?.children && { children: node?.children?.map(convertTreeFormat) }),
-  };
-}
-
 // 设置IPC通信
 function setupIPC() {
   // =====================================
@@ -329,27 +318,6 @@ function setupIPC() {
   // =====================================
   // 文件系统操作
   // =====================================
-
-  // 打开本地文件夹
-  ipcMain.handle('open-local-folder', async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openDirectory'],
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-      const folderPath = result.filePaths[0];
-      const tree = dirTree(folderPath, {
-        exclude: /node_modules|\.git|\.DS_Store/,
-        attributes: ['type'],
-      });
-
-      return {
-        path: folderPath,
-        files: tree?.children ? tree?.children?.map(convertTreeFormat) : [],
-      };
-    }
-    return null;
-  });
 
   // 读取文件内容
   ipcMain.handle('read-file', async (_event, filePath: string) => {
@@ -528,11 +496,3 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
   await cleanup();
 });
-
-// 类型定义
-interface FileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  children?: FileNode[];
-}

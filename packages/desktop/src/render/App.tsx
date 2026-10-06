@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useReducer, useRef, Suspense, lazy } from 'react';
-import FileTree from './components/FileTree';
 import Layout from './components/Layout';
 import QuickInput, { QuickInputData } from './components/QuickInput';
 import SearchPanel, { SearchResult } from './components/SearchPanel';
@@ -9,10 +8,8 @@ import WelcomeGuide, { wasWelcomeGuideDismissed } from './components/WelcomeGuid
 import WritingSidebar, { type CreateDocumentOptions } from './components/WritingSidebar';
 import VersionHistory from './components/VersionHistory';
 import TitleInput from './components/TitleInput';
-import { PermissionProvider } from './components/PermissionDialog/PermissionProvider';
 
 // Lazy load heavy editor components for better initial load performance
-const CodeViewer = lazy(() => import('./components/CodeViewer'));
 const RichEditor = lazy(() => import('./components/RichEditor'));
 
 // Loading fallback component
@@ -32,8 +29,6 @@ import {
   type DocumentTypeId,
 } from './lib/documents';
 import {
-  RefreshCw,
-  FolderPlus,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -48,21 +43,11 @@ import { aiConfigService } from './services/aiConfigService';
 import { knowledgeStorage } from './services/knowledgeStorage';
 import './App.scss';
 
-interface FileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  children?: FileNode[];
-}
-
 const App: React.FC = () => {
   // Use reducer for app state management
   const [appState, dispatch] = useReducer(appReducer, DEFAULT_APP_STATE);
 
   // Local UI state
-  const [files, setFiles] = useState<FileNode[]>([]);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [folderPath, setFolderPath] = useState<string | null>(null);
   // 侧边栏折叠状态（当前固定为展开）
   const sidebarCollapsed = false;
   const [explorerExpanded, setExplorerExpanded] = useState(true);
@@ -286,13 +271,6 @@ const App: React.FC = () => {
         return;
       }
 
-      // Cmd/Ctrl + O 打开文件夹
-      if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
-        e.preventDefault();
-        handleOpenLocal();
-        return;
-      }
-
       // Cmd/Ctrl + P 打开搜索
       if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
         e.preventDefault();
@@ -345,19 +323,15 @@ const App: React.FC = () => {
         switch (e.key) {
           case '1':
             e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'code-reader' });
+            dispatch({ type: 'SET_MODE', payload: 'knowledge' });
             break;
           case '2':
             e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'reading' });
+            dispatch({ type: 'SET_MODE', payload: 'writing' });
             break;
           case '3':
             e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'knowledge' });
-            break;
-          case '4':
-            e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'writing' });
+            dispatch({ type: 'SET_MODE', payload: 'reading' });
             break;
         }
       }
@@ -391,44 +365,6 @@ const App: React.FC = () => {
       document.body.classList.remove('distraction-free');
     }
   }, [appState.mode, appState.writingFeature, modeConfig, isInFocusMode]);
-
-  const handleOpenLocal = async () => {
-    try {
-      const result = (await window.electron.ipcRenderer.invoke('open-local-folder')) as {
-        path: string;
-        files: FileNode[];
-      } | null;
-      if (result) {
-        setFolderPath(result.path);
-        setFiles(result.files);
-        setSelectedFile(null);
-        dispatch({ type: 'SET_FOLDER_PATH', payload: result.path });
-      }
-    } catch (error) {
-      console.error('Error opening folder:', error);
-    }
-  };
-
-  const handleFileSelect = (filePath: string) => {
-    setSelectedFile(filePath);
-  };
-
-  const handleRefresh = async () => {
-    if (folderPath) {
-      try {
-        const result = (await window.electron.ipcRenderer.invoke('open-local-folder')) as {
-          path: string;
-          files: FileNode[];
-        } | null;
-        if (result) {
-          setFolderPath(result.path);
-          setFiles(result.files);
-        }
-      } catch (error) {
-        console.error('Error refreshing folder:', error);
-      }
-    }
-  };
 
   // 处理快速输入提交
   const handleQuickInputSubmit = useCallback(async (data: QuickInputData) => {
@@ -493,12 +429,8 @@ const App: React.FC = () => {
         // 切换到写作模式并选择文档
         dispatch({ type: 'SET_MODE', payload: 'writing' });
         selectDocument(result.id);
-      } else if (result.type === 'code') {
-        // 切换到代码阅读模式
-        dispatch({ type: 'SET_MODE', payload: 'code-reader' });
-        setSelectedFile(result.id);
       } else {
-        // 其他类型暂时切换到知识库模式
+        // 其他类型（录音、图片、代码片段、网页等）进入知识库模式
         dispatch({ type: 'SET_MODE', payload: 'knowledge' });
       }
       // 关闭搜索面板
@@ -619,16 +551,12 @@ const App: React.FC = () => {
   // Get sidebar title based on mode
   const getSidebarTitle = () => {
     switch (appState.mode) {
-      case 'code-reader':
-        return '资源管理器';
       case 'reading':
         return '书库';
       case 'knowledge':
         return '知识库';
       case 'writing':
         return '文档';
-      default:
-        return '资源管理器';
     }
   };
 
@@ -654,19 +582,14 @@ const App: React.FC = () => {
         <div className="reading-sidebar">
           <div className="empty-hint">
             <BookOpen size={32} strokeWidth={1} />
-            <p>打开书籍或导入电子书</p>
-            <button className="import-btn" onClick={handleOpenLocal}>
-              <Plus size={14} />
-              <span>导入书籍</span>
-            </button>
+            <p>阅读管理开发中</p>
           </div>
         </div>
       );
     }
 
-    if (appState.mode === 'writing') {
-      // Writing mode - use WritingSidebar component with unified tree structure
-      return (
+    // 写作模式：使用统一树结构的 WritingSidebar
+    return (
         <WritingSidebar
           documents={documentList}
           selectedDocId={selectedDocId}
@@ -680,19 +603,6 @@ const App: React.FC = () => {
           onMoveDocument={handleMoveDocument}
           onRenameDocument={handleRenameDocument}
         />
-      );
-    }
-
-    // Default: show file tree for code-reader mode
-    return (
-      <>
-        {folderPath && (
-          <div className="folder-name">
-            <span title={folderPath}>{folderPath.split('/').pop()}</span>
-          </div>
-        )}
-        <FileTree files={files} onFileSelect={handleFileSelect} selectedFile={selectedFile} />
-      </>
     );
   };
 
@@ -703,24 +613,13 @@ const App: React.FC = () => {
   // Render main content based on mode
   const renderMainContent = () => {
     switch (appState.mode) {
-      case 'code-reader':
-        return (
-          <Suspense fallback={<EditorLoadingFallback />}>
-            <CodeViewer filePath={selectedFile} />
-          </Suspense>
-        );
-
       case 'reading':
         return (
           <div className="reading-content">
             <div className="empty-state">
               <BookOpen size={48} strokeWidth={1} />
               <h2>阅读模式</h2>
-              <p>从左侧选择书籍开始阅读，或导入新的电子书</p>
-              <button className="start-btn" onClick={handleOpenLocal}>
-                <Plus size={16} />
-                <span>导入书籍</span>
-              </button>
+              <p>文章、电子书的阅读管理正在开发中</p>
             </div>
           </div>
         );
@@ -918,8 +817,6 @@ const App: React.FC = () => {
 
   return (
     <Layout
-      onOpenLocal={handleOpenLocal}
-      folderPath={folderPath}
       onQuickInput={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
       onStartRecording={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'voice' })}
       currentMode={appState.mode}
@@ -943,32 +840,6 @@ const App: React.FC = () => {
                   {explorerExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 </span>
                 <span className="section-title">{getSidebarTitle()}</span>
-                <div className="section-actions">
-                  {appState.mode === 'code-reader' && (
-                    <>
-                      <button
-                        className="section-action-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenLocal();
-                        }}
-                        title="打开文件夹"
-                      >
-                        <FolderPlus size={14} />
-                      </button>
-                      <button
-                        className="section-action-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRefresh();
-                        }}
-                        title="刷新"
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                    </>
-                  )}
-                </div>
               </div>
 
               {explorerExpanded && (
@@ -1027,8 +898,6 @@ const App: React.FC = () => {
         persistDismissal={isFirstTime}
       />
 
-      {/* Permission Dialog Provider - 用于插件权限确认 */}
-      <PermissionProvider autoConnect />
     </Layout>
   );
 };

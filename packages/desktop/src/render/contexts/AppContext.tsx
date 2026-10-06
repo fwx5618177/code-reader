@@ -59,7 +59,6 @@ interface AppContextValue {
 
   // Other
   setLoading: (loading: boolean) => void;
-  setFolderPath: (path: string | null) => void;
 
   // Helpers
   getModeConfig: () => (typeof APP_MODE_CONFIGS)[AppMode];
@@ -169,10 +168,6 @@ export function AppProvider({ children, initialState }: AppProviderProps) {
 
   const setLoading = useCallback((loading: boolean) => {
     dispatch({ type: 'SET_LOADING', payload: loading });
-  }, []);
-
-  const setFolderPath = useCallback((path: string | null) => {
-    dispatch({ type: 'SET_FOLDER_PATH', payload: path });
   }, []);
 
   // ================================
@@ -301,7 +296,6 @@ export function AppProvider({ children, initialState }: AppProviderProps) {
       toggleSettings,
       toggleSearch,
       setLoading,
-      setFolderPath,
       getModeConfig,
       isDistractionFree,
     }),
@@ -322,7 +316,6 @@ export function AppProvider({ children, initialState }: AppProviderProps) {
       toggleSettings,
       toggleSearch,
       setLoading,
-      setFolderPath,
       getModeConfig,
       isDistractionFree,
     ]

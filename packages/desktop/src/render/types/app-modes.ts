@@ -1,6 +1,6 @@
 // ================================
 // App Mode Types and Context
-// Reorganized modes: Code Reading, Novel Reading, Knowledge Base, Writing
+// 产品主线：知识库 + 写作，阅读管理为辅
 // ================================
 
 import type { QuickInputType } from './knowledge';
@@ -10,13 +10,12 @@ import type { QuickInputType } from './knowledge';
 // ================================
 
 /**
- * Available app modes - simplified and focused
- * - code-reader: 代码阅读模式 - 浏览和阅读代码
- * - reading: 阅读模式 - 小说、文章、电子书阅读
+ * 应用模式
  * - knowledge: 知识库模式 - 管理笔记、录音、文档、多媒体（高频写入，低频读取）
- * - writing: 写作模式 - 专注写作，包含 focus 功能
+ * - writing: 写作模式 - Markdown / LaTeX 写作，包含专注、打字机功能
+ * - reading: 阅读模式 - 文章、电子书阅读管理
  */
-export type AppMode = 'code-reader' | 'reading' | 'knowledge' | 'writing';
+export type AppMode = 'knowledge' | 'writing' | 'reading';
 
 /**
  * Writing mode features (sub-features of writing mode)
@@ -74,31 +73,13 @@ export interface AppModeUIConfig {
 // ================================
 
 export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
-  'code-reader': {
-    id: 'code-reader',
-    name: 'Code Reader',
-    nameCN: '代码阅读',
-    description: 'Browse and read code files with syntax highlighting',
-    icon: 'Code2',
-    shortcut: '⌘1',
-    ui: {
-      showRibbon: true,
-      showSidebar: true,
-      showTitleBar: true,
-      showStatusBar: true,
-      showTabs: true,
-      sidebarCollapsed: false,
-      defaultSidebarPanel: 'files',
-      distractionFree: false,
-    },
-  },
   reading: {
     id: 'reading',
     name: 'Reading',
     nameCN: '阅读',
     description: 'Read novels, articles, and ebooks comfortably',
     icon: 'BookOpen',
-    shortcut: '⌘2',
+    shortcut: '⌘3',
     ui: {
       showRibbon: true,
       showSidebar: true,
@@ -117,7 +98,7 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
     description:
       'Manage your notes, recordings, documents, and media. AI helps organize automatically.',
     icon: 'Brain',
-    shortcut: '⌘3',
+    shortcut: '⌘1',
     ui: {
       showRibbon: true,
       showSidebar: true,
@@ -135,7 +116,7 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
     nameCN: '写作',
     description: 'Focus on writing with distraction-free environment',
     icon: 'PenTool',
-    shortcut: '⌘4',
+    shortcut: '⌘2',
     ui: {
       showRibbon: true,
       showSidebar: true,
@@ -208,7 +189,6 @@ export const WRITING_FEATURES: Record<WritingFeature, WritingFeatureConfig> = {
  * View types for the main content area
  */
 export type ViewType =
-  | 'code-viewer' // Code file viewer
   | 'markdown-editor' // Markdown editor with preview
   | 'note-editor' // Rich text note editor (ProseMirror)
   | 'reader' // Reading view (novels, articles)
@@ -276,14 +256,14 @@ export const SIDEBAR_PANELS: SidebarPanelConfig[] = [
     name: 'Files',
     nameCN: '文件',
     icon: 'FolderTree',
-    availableInModes: ['code-reader', 'reading', 'knowledge', 'writing'],
+    availableInModes: ['reading', 'knowledge', 'writing'],
   },
   {
     id: 'search',
     name: 'Search',
     nameCN: '搜索',
     icon: 'Search',
-    availableInModes: ['code-reader', 'reading', 'knowledge', 'writing'],
+    availableInModes: ['reading', 'knowledge', 'writing'],
   },
   {
     id: 'tags',
@@ -297,14 +277,14 @@ export const SIDEBAR_PANELS: SidebarPanelConfig[] = [
     name: 'Recent',
     nameCN: '最近',
     icon: 'Clock',
-    availableInModes: ['code-reader', 'reading', 'knowledge', 'writing'],
+    availableInModes: ['reading', 'knowledge', 'writing'],
   },
   {
     id: 'bookmarks',
     name: 'Bookmarks',
     nameCN: '书签',
     icon: 'Bookmark',
-    availableInModes: ['code-reader', 'reading', 'knowledge'],
+    availableInModes: ['reading', 'knowledge'],
   },
   {
     id: 'calendar',
@@ -318,7 +298,7 @@ export const SIDEBAR_PANELS: SidebarPanelConfig[] = [
     name: 'Outline',
     nameCN: '大纲',
     icon: 'List',
-    availableInModes: ['code-reader', 'reading', 'knowledge', 'writing'],
+    availableInModes: ['reading', 'knowledge', 'writing'],
   },
   {
     id: 'chapters',
@@ -402,8 +382,6 @@ export interface AppState {
   activeViewIndex: number;
   /** Is loading */
   isLoading: boolean;
-  /** Current folder path (for code reader) */
-  currentFolderPath: string | null;
   /** Quick input modal open */
   quickInputOpen: boolean;
   /** Quick input initial mode */
@@ -418,16 +396,15 @@ export interface AppState {
  * Default app state
  */
 export const DEFAULT_APP_STATE: AppState = {
-  mode: 'code-reader',
+  mode: 'knowledge',
   writingFeature: 'normal',
   theme: DEFAULT_THEME_CONFIG,
-  activeSidebarPanel: 'files',
+  activeSidebarPanel: 'recent',
   sidebarVisible: true,
   sidebarWidth: 280,
   openViews: [],
   activeViewIndex: -1,
   isLoading: false,
-  currentFolderPath: null,
   quickInputOpen: false,
   quickInputMode: 'text',
   settingsOpen: false,
@@ -450,7 +427,6 @@ export type AppAction =
   | { type: 'SET_ACTIVE_VIEW'; payload: number }
   | { type: 'UPDATE_VIEW'; payload: { index: number; updates: Partial<ViewConfig> } }
   | { type: 'SET_LOADING'; payload: boolean }
-  | { type: 'SET_FOLDER_PATH'; payload: string | null }
   | { type: 'TOGGLE_QUICK_INPUT'; payload?: boolean }
   | { type: 'OPEN_QUICK_INPUT'; payload: QuickInputType }
   | { type: 'TOGGLE_SETTINGS'; payload?: boolean }
@@ -575,12 +551,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         isLoading: action.payload,
       };
 
-    case 'SET_FOLDER_PATH':
-      return {
-        ...state,
-        currentFolderPath: action.payload,
-      };
-
     case 'TOGGLE_QUICK_INPUT':
       return {
         ...state,
@@ -646,33 +616,25 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     key: '1',
     modifiers: ['meta'],
     action: 'SET_MODE',
-    payload: 'code-reader',
-    description: 'Switch to Code Reader mode',
-    descriptionCN: '切换到代码阅读模式',
-  },
-  {
-    key: '2',
-    modifiers: ['meta'],
-    action: 'SET_MODE',
-    payload: 'reading',
-    description: 'Switch to Reading mode',
-    descriptionCN: '切换到阅读模式',
-  },
-  {
-    key: '3',
-    modifiers: ['meta'],
-    action: 'SET_MODE',
     payload: 'knowledge',
     description: 'Switch to Knowledge Base mode',
     descriptionCN: '切换到知识库模式',
   },
   {
-    key: '4',
+    key: '2',
     modifiers: ['meta'],
     action: 'SET_MODE',
     payload: 'writing',
     description: 'Switch to Writing mode',
     descriptionCN: '切换到写作模式',
+  },
+  {
+    key: '3',
+    modifiers: ['meta'],
+    action: 'SET_MODE',
+    payload: 'reading',
+    description: 'Switch to Reading mode',
+    descriptionCN: '切换到阅读模式',
   },
   {
     key: 'f',

@@ -17,10 +17,6 @@ import styles from './Layout.module.scss';
 interface LayoutProps {
   /** 主内容 */
   children: React.ReactNode;
-  /** 打开本地文件夹回调 */
-  onOpenLocal: () => void;
-  /** 当前文件夹路径 */
-  folderPath: string | null;
   /** 打开快速输入回调 */
   onQuickInput?: () => void;
   /** 开始录音回调 */
@@ -41,7 +37,6 @@ interface LayoutProps {
 
 // 模式显示名称
 const MODE_DISPLAY_NAMES: Record<AppMode, string> = {
-  'code-reader': '代码阅读',
   reading: '阅读',
   knowledge: '知识库',
   writing: '写作',
@@ -53,11 +48,9 @@ const MODE_DISPLAY_NAMES: Record<AppMode, string> = {
 
 const Layout: React.FC<LayoutProps> = ({
   children,
-  onOpenLocal,
-  folderPath,
   onQuickInput,
   onStartRecording,
-  currentMode = 'code-reader',
+  currentMode = 'knowledge',
   onModeChange,
   onOpenSearch,
   onOpenSettings,
@@ -82,9 +75,6 @@ const Layout: React.FC<LayoutProps> = ({
     onModeChange?.(mode);
   };
 
-  // 获取当前文件夹名称作为副标题
-  const folderName = folderPath ? folderPath.split('/').pop() : undefined;
-
   // 获取模式显示名称
   const getModeDisplayName = (): string => {
     return MODE_DISPLAY_NAMES[currentMode] || '';
@@ -93,16 +83,12 @@ const Layout: React.FC<LayoutProps> = ({
   // 获取模式 Emoji
   const getModeEmoji = (): string => {
     switch (currentMode) {
-      case 'code-reader':
-        return '💻';
       case 'reading':
         return '📖';
       case 'knowledge':
         return '🧠';
       case 'writing':
         return '✍️';
-      default:
-        return '';
     }
   };
 
@@ -114,7 +100,6 @@ const Layout: React.FC<LayoutProps> = ({
       {/* 标题栏 */}
       <TitleBar
         title="Code Reader"
-        subtitle={folderName}
         onOpenSearch={onOpenSearch}
         currentMode={currentMode}
         onModeChange={handleModeChange}
@@ -130,7 +115,6 @@ const Layout: React.FC<LayoutProps> = ({
           onPanelChange={handlePanelChange}
           onQuickNote={onQuickInput}
           onStartRecording={onStartRecording}
-          onOpenFolder={onOpenLocal}
           currentMode={currentMode}
           onOpenSettings={onOpenSettings}
           onOpenSearch={onOpenSearch}
@@ -143,12 +127,9 @@ const Layout: React.FC<LayoutProps> = ({
       {/* 状态栏 */}
       <div className={styles.statusbar}>
         <div className={styles.statusbarLeft}>
-          {folderPath && <span className={styles.statusbarItem}>📁 {folderPath}</span>}
-          {currentMode !== 'code-reader' && (
-            <span className={`${styles.statusbarItem} ${styles.modeIndicator}`}>
-              {getModeEmoji()} {getModeDisplayName()}
-            </span>
-          )}
+          <span className={`${styles.statusbarItem} ${styles.modeIndicator}`}>
+            {getModeEmoji()} {getModeDisplayName()}
+          </span>
         </div>
         <div className={styles.statusbarRight}>
           <span className={styles.statusbarItem}>就绪</span>
