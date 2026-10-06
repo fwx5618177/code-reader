@@ -151,10 +151,43 @@ const CHAR_PLUS = 43; // +
 // ================================
 
 /**
- * 判断是否为块级标记开始
+ * 计算行终止符长度
+ * lineEnd 指向按 /\r?\n/ 切分后该行内容的结束位置：CRLF 为 2，LF 为 1
  */
-function isBlockMarkerStart(char: string): boolean {
-  const code = char.charCodeAt(0);
+function lineTerminatorLength(content: string, lineEnd: number): number {
+  return content.charCodeAt(lineEnd) === CHAR_CARRIAGE_RETURN ? 2 : 1;
+}
+
+/**
+ * 统计文本中的换行符数量
+ */
+function countNewlines(text: string): number {
+  let count = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === CHAR_NEWLINE) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * 去除最多 maxIndent 个前导空格
+ * 依据 CommonMark 4.5：围栏代码块内容行需去除与开围栏相同数量的缩进
+ */
+function stripIndent(line: string, maxIndent: number): string {
+  let i = 0;
+  while (i < maxIndent && i < line.length && line.charCodeAt(i) === CHAR_SPACE) {
+    i++;
+  }
+  return i === 0 ? line : line.slice(i);
+}
+
+/**
+ * 判断文本首字符是否可能开启块级结构（空串返回 false）
+ */
+function isBlockMarkerStart(text: string): boolean {
+  const code = text.charCodeAt(0);
   return (
     code === CHAR_HASH ||
     code === CHAR_BACKTICK ||
@@ -316,6 +349,7 @@ export class IncrementalEditParser {
 
     // 合并结果
     const tokens = this.mergeTokens(
+      this.cache.content,
       this.cache.tokens,
       newTokens,
       startIndex,
@@ -429,6 +463,7 @@ export class IncrementalEditParser {
     let codeBlockFenceCount = 0;
     let codeBlockFenceChar = '';
     let codeBlockLanguage = '';
+    let codeBlockIndent = 0;
     let codeBlockContent: string[] = [];
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -453,6 +488,7 @@ export class IncrementalEditParser {
         }
 
         codeBlockLanguage = trimmed.slice(codeBlockFenceCount).trim();
+        codeBlockIndent = indent;
         codeBlockStart = lineStart;
         codeBlockStartLine = lineNumber;
         codeBlockContent = [];
@@ -494,11 +530,12 @@ export class IncrementalEditParser {
               language: codeBlockLanguage,
               fenceChar: codeBlockFenceChar,
               fenceCount: codeBlockFenceCount,
+              indent: codeBlockIndent,
             },
           });
           inCodeBlock = false;
         } else {
-          codeBlockContent.push(line);
+          codeBlockContent.push(stripIndent(line, codeBlockIndent));
         }
       } else {
         // 解析其他块级元素
@@ -508,8 +545,8 @@ export class IncrementalEditParser {
         }
       }
 
-      // 更新偏移（包含换行符）
-      offset = lineEnd + 1; // +1 for newline
+      // 更新偏移（包含换行符，兼容 CRLF）
+      offset = lineEnd + lineTerminatorLength(content, lineEnd);
     }
 
     // 处理未闭合的代码块
@@ -528,6 +565,7 @@ export class IncrementalEditParser {
           language: codeBlockLanguage,
           fenceChar: codeBlockFenceChar,
           fenceCount: codeBlockFenceCount,
+          indent: codeBlockIndent,
           unclosed: true,
         },
       });
@@ -562,7 +600,8 @@ export class IncrementalEditParser {
     const trimmed = line.trimStart();
     const indent = line.length - trimmed.length;
 
-    if (trimmed.length === 0) {
+    // CommonMark 空白行：仅由空格与制表符组成
+    if (isBlankLine(line)) {
       return {
         type: TokenType.Newline,
         raw: line,
@@ -578,6 +617,11 @@ export class IncrementalEditParser {
     }
 
     const firstChar = trimmed.charCodeAt(0);
+
+    // 快速路径：首字符不可能开启任何块级结构时直接作为段落
+    if (!isBlockMarkerStart(trimmed) && firstChar !== CHAR_UNDERSCORE) {
+      return this.createParagraphToken(line, offset, lineNumber);
+    }
 
     // 标题
     if (firstChar === CHAR_HASH) {
@@ -722,6 +766,13 @@ export class IncrementalEditParser {
     }
 
     // 普通段落
+    return this.createParagraphToken(line, offset, lineNumber);
+  }
+
+  /**
+   * 创建段落 Token
+   */
+  private createParagraphToken(line: string, offset: number, lineNumber: number): Token {
     return {
       type: TokenType.Paragraph,
       raw: line,
@@ -747,15 +798,16 @@ export class IncrementalEditParser {
     const contentLines = content.split(/\r?\n/);
 
     for (const line of contentLines) {
+      const lineEnd = offset + line.length;
       lines.push({
         line: lineNumber,
         start: offset,
-        end: offset + line.length,
+        end: lineEnd,
         length: line.length,
         tokenIndices: [],
       });
 
-      offset += line.length + 1; // +1 for newline
+      offset = lineEnd + lineTerminatorLength(content, lineEnd);
       lineNumber++;
     }
 
@@ -780,9 +832,8 @@ export class IncrementalEditParser {
       };
     }
 
-    const { offset, deleteCount = 0 } = edit;
+    const { offset } = edit;
     const insertLength = edit.insertText?.length || 0;
-    const delta = insertLength - deleteCount;
 
     // 查找受影响的起始行
     let startLine = edit.startLine;
@@ -798,7 +849,8 @@ export class IncrementalEditParser {
     // 找到编辑结束位置对应的行
     let currentOffset = 0;
     for (let i = 0; i < newLines.length; i++) {
-      currentOffset += newLines[i].length + 1;
+      const lineEnd = currentOffset + newLines[i].length;
+      currentOffset = lineEnd + lineTerminatorLength(newContent, lineEnd);
       if (currentOffset > editEndOffset) {
         endLine = i + 1;
         break;
@@ -829,12 +881,14 @@ export class IncrementalEditParser {
         start = currentOffset;
       }
 
-      currentOffset += newLines[i].length + 1;
+      const lineEnd = currentOffset + newLines[i].length;
 
       if (lineNum === endLine) {
-        end = currentOffset - 1; // 不含换行符
+        end = lineEnd; // 不含换行符
         break;
       }
+
+      currentOffset = lineEnd + lineTerminatorLength(newContent, lineEnd);
     }
 
     // 查找受影响的 Token 索引
@@ -970,7 +1024,8 @@ export class IncrementalEditParser {
     // 计算起始偏移
     let startOffset = 0;
     for (let i = 0; i < range.startLine - 1; i++) {
-      startOffset += lines[i].length + 1;
+      const lineEnd = startOffset + lines[i].length;
+      startOffset = lineEnd + lineTerminatorLength(content, lineEnd);
     }
 
     // 解析受影响区域
@@ -1001,21 +1056,28 @@ export class IncrementalEditParser {
    * 合并 Token
    */
   private mergeTokens(
+    oldContent: string,
     oldTokens: Token[],
     newTokens: Token[],
     startIndex: number,
     endIndex: number,
     edit: EditOperation
   ): Token[] {
-    const delta =
-      (edit.insertText?.length || 0) - (edit.deleteCount || 0);
+    const insertText = edit.insertText || '';
+    const deleteCount = edit.deleteCount || 0;
+    const delta = insertText.length - deleteCount;
 
-    // 调整后续 Token 的位置
+    // 行号变化量 = 插入文本的换行数 - 被删除文本的换行数
+    const deletedText = oldContent.slice(edit.offset, edit.offset + deleteCount);
+    const lineDelta = countNewlines(insertText) - countNewlines(deletedText);
+
+    // 调整后续 Token 的字符偏移与行号
     const adjustedLaterTokens = oldTokens.slice(endIndex + 1).map((token) => ({
       ...token,
       start: token.start + delta,
       end: token.end + delta,
-      // 行号需要根据实际变化调整
+      startLine: token.startLine + lineDelta,
+      endLine: token.endLine + lineDelta,
     }));
 
     return [
@@ -1058,13 +1120,7 @@ export class IncrementalEditParser {
    * 统计行数
    */
   private countLines(content: string): number {
-    let count = 1;
-    for (let i = 0; i < content.length; i++) {
-      if (content.charCodeAt(i) === CHAR_NEWLINE) {
-        count++;
-      }
-    }
-    return count;
+    return countNewlines(content) + 1;
   }
 }
 
