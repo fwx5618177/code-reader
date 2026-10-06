@@ -137,13 +137,13 @@ describe('TextDiffEngine', () => {
     });
   });
 
-  describe('apply', () => {
+  describe('applyDiff', () => {
     it('应该正确应用差分', () => {
       const source = 'hello world';
       const target = 'hello universe';
 
       const result = engine.diff(source, target);
-      const applied = engine.apply(source, result.diffs);
+      const applied = engine.applyDiff(source, result.diffs);
 
       expect(applied).toBe(target);
     });
@@ -155,7 +155,7 @@ describe('TextDiffEngine', () => {
         'function foo() {\n  return 42;\n}\n\nfunction baz() {\n  return 3;\n}';
 
       const result = engine.diff(source, target);
-      const applied = engine.apply(source, result.diffs);
+      const applied = engine.applyDiff(source, result.diffs);
 
       expect(applied).toBe(target);
     });
@@ -163,22 +163,22 @@ describe('TextDiffEngine', () => {
     it('应该正确处理空差分', () => {
       const source = 'unchanged text';
       const result = engine.diff(source, source);
-      const applied = engine.apply(source, result.diffs);
+      const applied = engine.applyDiff(source, result.diffs);
 
       expect(applied).toBe(source);
     });
   });
 
-  describe('reverse', () => {
+  describe('reverseDiff', () => {
     it('应该正确反转差分', () => {
       const source = 'hello';
       const target = 'world';
 
       const result = engine.diff(source, target);
-      const reversed = engine.reverse(result.diffs);
+      const reversed = engine.reverseDiff(result.diffs);
 
       // 反转后应用到 target 应该得到 source
-      const applied = engine.apply(target, reversed);
+      const applied = engine.applyDiff(target, reversed);
       expect(applied).toBe(source);
     });
   });
@@ -191,12 +191,16 @@ describe('TextDiffEngine', () => {
       const result = engine.diff(source, target);
       const stats = engine.getStats(result.diffs);
 
-      expect(stats.inserted).toBeGreaterThan(0);
-      expect(stats.deleted).toBeGreaterThan(0);
+      expect(stats.insertions).toBeGreaterThan(0);
+      expect(stats.deletions).toBeGreaterThan(0);
       expect(stats.unchanged).toBeGreaterThan(0);
-      expect(stats.totalChanges).toBe(stats.inserted + stats.deleted);
+      expect(stats.totalChars).toBe(stats.insertions + stats.deletions + stats.unchanged);
+      // 插入 + 未变 = 目标长度，删除 + 未变 = 源长度
+      expect(stats.insertions + stats.unchanged).toBe(target.length);
+      expect(stats.deletions + stats.unchanged).toBe(source.length);
       expect(stats.changeRatio).toBeGreaterThan(0);
       expect(stats.changeRatio).toBeLessThan(1);
+      expect(stats.levenshtein).toBeGreaterThan(0);
     });
 
     it('应该正确处理无变化的情况', () => {
@@ -204,10 +208,11 @@ describe('TextDiffEngine', () => {
       const result = engine.diff(text, text);
       const stats = engine.getStats(result.diffs);
 
-      expect(stats.inserted).toBe(0);
-      expect(stats.deleted).toBe(0);
-      expect(stats.totalChanges).toBe(0);
+      expect(stats.insertions).toBe(0);
+      expect(stats.deletions).toBe(0);
+      expect(stats.unchanged).toBe(text.length);
       expect(stats.changeRatio).toBe(0);
+      expect(stats.levenshtein).toBe(0);
     });
   });
 });
@@ -253,11 +258,11 @@ describe('便捷函数', () => {
 
   describe('quickDiffStats', () => {
     it('应该正确计算统计信息', () => {
-      const stats = quickDiffStats('hello', 'world');
+      const stats = quickDiffStats(quickTextDiff('hello', 'world').diffs);
 
-      expect(stats.inserted).toBeGreaterThan(0);
-      expect(stats.deleted).toBeGreaterThan(0);
-      expect(stats.totalChanges).toBeGreaterThan(0);
+      expect(stats.insertions).toBeGreaterThan(0);
+      expect(stats.deletions).toBeGreaterThan(0);
+      expect(stats.changeRatio).toBeGreaterThan(0);
     });
   });
 });
@@ -274,7 +279,7 @@ describe('边界情况', () => {
     const modifiedText = longText.slice(0, 5000) + 'b' + longText.slice(5001);
 
     const result = engine.diff(longText, modifiedText);
-    const applied = engine.apply(longText, result.diffs);
+    const applied = engine.applyDiff(longText, result.diffs);
 
     expect(applied).toBe(modifiedText);
   });
@@ -284,7 +289,7 @@ describe('边界情况', () => {
     const target = 'hello\t\n\r universe';
 
     const result = engine.diff(source, target);
-    const applied = engine.apply(source, result.diffs);
+    const applied = engine.applyDiff(source, result.diffs);
 
     expect(applied).toBe(target);
   });
@@ -294,7 +299,7 @@ describe('边界情况', () => {
     const target = '你好 🌏 世界';
 
     const result = engine.diff(source, target);
-    const applied = engine.apply(source, result.diffs);
+    const applied = engine.applyDiff(source, result.diffs);
 
     expect(applied).toBe(target);
   });
@@ -304,7 +309,7 @@ describe('边界情况', () => {
     const target = 'ababcababab';
 
     const result = engine.diff(source, target);
-    const applied = engine.apply(source, result.diffs);
+    const applied = engine.applyDiff(source, result.diffs);
 
     expect(applied).toBe(target);
   });

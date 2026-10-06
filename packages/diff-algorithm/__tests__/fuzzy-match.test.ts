@@ -25,76 +25,75 @@ describe('FuzzyMatchEngine', () => {
     it('应该正确匹配完全相同的字符串', () => {
       const result = engine.match('hello', 'hello');
 
-      expect(result).not.toBeNull();
-      expect(result!.score).toBe(1);
-      expect(result!.matched).toBe(true);
+      expect(result.matched).toBe(true);
+      expect(result.score).toBe(1);
+      expect(result.length).toBe(5);
     });
 
     it('应该正确匹配包含模式的字符串', () => {
       const result = engine.match('hlo', 'hello');
-
-      expect(result).not.toBeNull();
-      expect(result!.matched).toBe(true);
-      expect(result!.score).toBeGreaterThan(0);
+      expect(result.matched).toBe(true);
+      expect(result.score).toBeGreaterThan(0);
     });
 
-    it('应该返回 null 当模式不匹配时', () => {
+    it('应该返回未匹配结果当模式不匹配时', () => {
       const result = engine.match('xyz', 'hello');
 
-      expect(result).toBeNull();
+      expect(result.matched).toBe(false);
+      expect(result.score).toBe(0);
+      expect(result.position).toBe(-1);
     });
 
     it('应该正确处理空模式', () => {
       const result = engine.match('', 'hello');
 
-      expect(result).not.toBeNull();
-      expect(result!.matched).toBe(true);
+      // 空模式匹配任意文本，与 search 空查询返回全部项的语义一致
+      expect(result.matched).toBe(true);
+      expect(result.score).toBe(1);
     });
 
     it('应该正确处理空目标', () => {
       const result = engine.match('hello', '');
 
-      expect(result).toBeNull();
+      expect(result.matched).toBe(false);
     });
 
     it('应该正确匹配大小写不敏感', () => {
       const result = engine.match('HELLO', 'hello');
-
-      expect(result).not.toBeNull();
-      expect(result!.matched).toBe(true);
+      expect(result.matched).toBe(true);
     });
 
     it('应该正确匹配中文', () => {
       const result = engine.match('你好', '你好世界');
-
-      expect(result).not.toBeNull();
-      expect(result!.matched).toBe(true);
+      expect(result.matched).toBe(true);
     });
 
     it('应该返回匹配位置', () => {
-      const result = engine.match('hlo', 'hello');
+      const fuzzy = engine.match('hlo', 'hello');
+      expect(fuzzy.position).toBe(0);
+      expect(fuzzy.length).toBe(3);
 
-      expect(result).not.toBeNull();
-      expect(result!.positions).toBeDefined();
-      expect(result!.positions.length).toBe(3);
+      const contains = engine.match('world', 'hello world');
+      expect(contains.position).toBe(6);
+      expect(contains.length).toBe(5);
     });
 
     it('应该为连续匹配给予更高分数', () => {
       const consecutive = engine.match('hel', 'hello');
       const scattered = engine.match('hlo', 'hello');
 
-      expect(consecutive).not.toBeNull();
-      expect(scattered).not.toBeNull();
-      expect(consecutive!.score).toBeGreaterThan(scattered!.score);
+      expect(consecutive.matched).toBe(true);
+      expect(scattered.matched).toBe(true);
+      expect(consecutive.score).toBeGreaterThan(scattered.score);
     });
 
     it('应该为开头匹配给予更高分数', () => {
       const startMatch = engine.match('hel', 'hello world');
       const middleMatch = engine.match('wor', 'hello world');
 
-      expect(startMatch).not.toBeNull();
-      expect(middleMatch).not.toBeNull();
-      expect(startMatch!.score).toBeGreaterThan(middleMatch!.score);
+      expect(startMatch.matched).toBe(true);
+      expect(middleMatch.matched).toBe(true);
+      expect(startMatch.score).toBeGreaterThan(middleMatch.score);
     });
   });
 
@@ -113,7 +112,13 @@ describe('FuzzyMatchEngine', () => {
       const results = engine.search('btn', items);
 
       expect(results.length).toBeGreaterThan(0);
-      expect(results.some((r) => r.item.includes('Button'))).toBe(true);
+      expect(results[0]!.item).toBe('src/components/Button.tsx');
+      // 高亮区间应精确指向 B、t、n 三个命中字符
+      expect(results[0]!.matches).toEqual([
+        { start: 15, end: 16 },
+        { start: 17, end: 18 },
+        { start: 20, end: 21 },
+      ]);
     });
 
     it('应该按分数排序结果', () => {
@@ -158,7 +163,9 @@ describe('FuzzyMatchEngine', () => {
         keys: ['name'],
       });
 
-      expect(results.length).toBeGreaterThan(0);
+      expect(results.length).toBe(1);
+      expect(results[0]!.item.name).toBe('Button');
+      expect(results[0]!.matchedField).toBe('name');
     });
   });
 
@@ -166,32 +173,33 @@ describe('FuzzyMatchEngine', () => {
     it('应该正确高亮匹配的字符', () => {
       const result = engine.highlight('hlo', 'hello');
 
-      expect(result).toBeDefined();
-      expect(result.highlights.length).toBe(3);
+      // 分散命中的三个字符各自形成一个区间
+      expect(result.highlights).toEqual([
+        { start: 0, end: 1 },
+        { start: 2, end: 3 },
+        { start: 4, end: 5 },
+      ]);
     });
 
     it('应该返回正确的高亮范围', () => {
       const result = engine.highlight('hel', 'hello');
 
-      expect(result.highlights.length).toBe(3);
-      // 检查连续的位置
-      expect(result.highlights[0].start).toBe(0);
-      expect(result.highlights[0].end).toBe(1);
+      // 连续命中合并为一个区间
+      expect(result.highlights).toEqual([{ start: 0, end: 3 }]);
     });
 
     it('应该处理无匹配的情况', () => {
       const result = engine.highlight('xyz', 'hello');
 
       expect(result.highlights.length).toBe(0);
+      expect(result.html).toBe('hello');
     });
 
     it('应该生成高亮 HTML', () => {
-      const result = engine.highlight('hel', 'hello', {
-        highlightTag: 'mark',
-      });
+      const result = engine.highlight('hel', 'hello', 'mark');
 
-      expect(result.html).toContain('<mark>');
-      expect(result.html).toContain('</mark>');
+      expect(result.html).toBe('<mark>hel</mark>lo');
+      expect(engine.highlight('a<', 'a<b', 'em').html).toBe('<em>a&lt;</em>b');
     });
   });
 });
@@ -205,16 +213,16 @@ describe('createFileSearchEngine', () => {
   it('应该优先匹配文件名', () => {
     const engine = createFileSearchEngine();
     const files = [
-      'src/utils/button.ts',
+      'src/utils/unbuttoned.ts',
       'src/components/Button.tsx',
-      'docs/button-guide.md',
+      'docs/rebutton.md',
     ];
 
     const results = engine.search('button', files);
 
-    expect(results.length).toBeGreaterThan(0);
-    // Button.tsx 应该排在前面因为文件名完全匹配
-    expect(results[0].item).toContain('Button');
+    expect(results.length).toBe(3);
+    // 只有 Button.tsx 的文件名以 button 开头（路径分隔符后的单词边界），应排在词中匹配之前
+    expect(results[0]!.item).toBe('src/components/Button.tsx');
   });
 
   it('应该正确处理路径分隔符', () => {
@@ -223,7 +231,7 @@ describe('createFileSearchEngine', () => {
 
     const results = engine.search('src/btn', files);
 
-    expect(results.length).toBeGreaterThan(0);
+    expect(results.map((r) => r.item).sort()).toEqual([...files].sort());
   });
 });
 
@@ -254,9 +262,7 @@ describe('便捷函数', () => {
   describe('quickFuzzyMatch', () => {
     it('应该正确执行模糊匹配', () => {
       const result = quickFuzzyMatch('hlo', 'hello');
-
-      expect(result).not.toBeNull();
-      expect(result!.matched).toBe(true);
+      expect(result.matched).toBe(true);
     });
   });
 
@@ -289,11 +295,9 @@ describe('便捷函数', () => {
   });
 
   describe('quickHighlight', () => {
-    it('应该返回高亮结果', () => {
-      const result = quickHighlight('hlo', 'hello');
-
-      expect(result.highlights.length).toBe(3);
-      expect(result.html).toBeDefined();
+    it('应该返回高亮 HTML', () => {
+      expect(quickHighlight('hlo', 'hello')).toBe('<mark>h</mark>e<mark>l</mark>l<mark>o</mark>');
+      expect(quickHighlight('xyz', 'hello')).toBe('hello');
     });
   });
 });
@@ -308,41 +312,35 @@ describe('边界情况', () => {
   it('应该处理超长字符串', () => {
     const longString = 'a'.repeat(10000);
     const result = engine.match('aaa', longString);
-
-    expect(result).not.toBeNull();
-    expect(result!.matched).toBe(true);
+    expect(result.matched).toBe(true);
   });
 
   it('应该处理特殊字符', () => {
     const result = engine.match('$.', 'file.$.txt');
 
-    expect(result).not.toBeNull();
+    expect(result.matched).toBe(true);
   });
 
   it('应该处理 Unicode 字符', () => {
     const result = engine.match('🎉', 'hello 🎉 world');
-
-    expect(result).not.toBeNull();
-    expect(result!.matched).toBe(true);
+    expect(result.matched).toBe(true);
   });
 
   it('应该处理空格', () => {
     const result = engine.match('hello world', 'hello beautiful world');
 
-    expect(result).not.toBeNull();
+    expect(result.matched).toBe(true);
   });
 
   it('应该处理数字', () => {
     const result = engine.match('123', 'abc123def');
-
-    expect(result).not.toBeNull();
-    expect(result!.matched).toBe(true);
+    expect(result.matched).toBe(true);
   });
 
   it('应该处理混合大小写查询', () => {
     const result = engine.match('HeLLo', 'hello');
 
-    expect(result).not.toBeNull();
+    expect(result.matched).toBe(true);
   });
 });
 

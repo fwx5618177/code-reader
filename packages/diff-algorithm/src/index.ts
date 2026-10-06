@@ -151,6 +151,8 @@ export {
   resetDefaultFuzzyMatchEngine,
 } from './fuzzy-match';
 
+export type { HighlightResult } from './fuzzy-match';
+
 // ================================
 // 统一差分引擎
 // ================================

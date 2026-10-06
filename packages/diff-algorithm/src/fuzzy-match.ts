@@ -37,23 +37,35 @@ const DEFAULT_SEARCH_CONFIG = {
 // ================================
 
 const SCORE_WEIGHTS = {
-  /** 连续匹配加分 */
+  /** 每个匹配字符的基础分（保证命中字符在扣除间隔惩罚后仍为正贡献） */
+  CHAR_MATCH: 16,
+  /** 连续匹配加分（按连续长度递增，最多累计 5 级） */
   CONSECUTIVE_BONUS: 15,
   /** 单词开头匹配加分 */
   WORD_START_BONUS: 30,
-  /** 驼峰/下划线后匹配加分 */
+  /** 驼峰/数字边界后匹配加分 */
   CAMEL_CASE_BONUS: 25,
   /** 字符串开头匹配加分 */
   STRING_START_BONUS: 50,
-  /** 完全匹配加分 */
-  EXACT_MATCH_BONUS: 100,
-  /** 未匹配字符惩罚 */
-  UNMATCHED_PENALTY: -1,
   /** 间隔惩罚 */
   GAP_PENALTY: -3,
-  /** 长间隔惩罚 */
+  /** 长间隔惩罚（间隔超过 4 个字符） */
   LONG_GAP_PENALTY: -5,
 };
+
+/** 包含匹配的分档：前缀 > 单词边界 > 后缀 > 词中 */
+const CONTAINS_SCORES = {
+  PREFIX: 0.95,
+  WORD_BOUNDARY: 0.9,
+  SUFFIX: 0.85,
+  INNER: 0.8,
+};
+
+/** 子序列模糊匹配的分数上限，保证其排在任何包含匹配之后 */
+const FUZZY_SCORE_CEILING = 0.8;
+
+/** 长度平局裁决系数：同等匹配质量下，目标越短分数越高（最大影响 0.02） */
+const LENGTH_TIEBREAK = 0.02;
 
 // ================================
 // FuzzyMatchEngine 类
@@ -62,35 +74,28 @@ const SCORE_WEIGHTS = {
 /**
  * 模糊匹配引擎
  *
- * 实现智能模糊匹配算法，特点：
- * - 子序列匹配（不要求连续）
- * - 连续匹配加分
- * - 单词边界识别
- * - 驼峰命名支持
- * - 高亮位置返回
+ * 匹配分为三个层级（分数依次降低）：
+ * 1. 完全匹配：分数 1
+ * 2. 包含匹配：按出现位置分档（前缀 / 单词边界 / 后缀 / 词中），取最佳出现位置
+ * 3. 子序列匹配：连续、单词边界、驼峰边界加分，间隔扣分，
+ *    以「理想对齐分」归一化后映射到 [0, FUZZY_SCORE_CEILING]
+ *
+ * 所有层级都返回真实的高亮区间，供 search 结果与 highlight 使用
  *
  * @example
  * ```typescript
  * const engine = new FuzzyMatchEngine();
  *
  * // 匹配单个字符串
- * const result = engine.match('abc', 'abracadabra');
+ * const result = engine.match('btn', 'Button.tsx');
  * console.log(result.matched); // true
- * console.log(result.score);   // 0.xxx
  *
  * // 搜索列表
- * const items = ['apple', 'application', 'apply', 'banana'];
- * const results = engine.search('app', items);
- * // 返回按分数排序的匹配结果
+ * const results = engine.search('app', ['apple', 'application', 'banana']);
  *
- * // 搜索对象列表
- * const files = [
- *   { name: 'index.ts', path: '/src/index.ts' },
- *   { name: 'app.tsx', path: '/src/app.tsx' },
- * ];
- * const fileResults = engine.search('idx', files, {
- *   keys: ['name', 'path']
- * });
+ * // 高亮
+ * const { html } = engine.highlight('btn', 'Button.tsx');
+ * // '<mark>B</mark>u<mark>t</mark>to<mark>n</mark>.tsx'
  * ```
  */
 export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
@@ -107,6 +112,8 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
   /**
    * 匹配模式和文本
    *
+   * 空模式视为匹配任意文本（与 search 的空查询语义一致）
+   *
    * @param pattern 搜索模式
    * @param text 要搜索的文本
    * @param config 配置选项
@@ -115,168 +122,159 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
   match(pattern: string, text: string, config?: FuzzyMatchConfig): MatchResult {
     const startTime = performance.now();
     const cfg = { ...this.defaultConfig, ...config };
+    const internal = this.computeMatch(pattern, text, cfg);
+    const computeTimeMs = performance.now() - startTime;
 
-    // 处理空模式
-    if (pattern.length === 0) {
-      return this.createNoMatchResult(startTime);
-    }
-
-    // 处理空文本
-    if (text.length === 0) {
-      return this.createNoMatchResult(startTime);
-    }
-
-    // 预处理
-    let p = pattern;
-    let t = text;
-    if (!cfg.caseSensitive) {
-      p = p.toLowerCase();
-      t = t.toLowerCase();
-    }
-
-    // 检查是否完全匹配
-    if (p === t) {
-      return this.createExactMatchResult(text, startTime, cfg);
-    }
-
-    // 检查是否包含匹配
-    const containsIndex = t.indexOf(p);
-    if (containsIndex !== -1) {
-      return this.createContainsMatchResult(text, containsIndex, p.length, startTime, cfg);
-    }
-
-    // 模糊匹配
-    return this.fuzzyMatch(p, t, text, startTime, cfg);
-  }
-
-  /**
-   * 核心模糊匹配算法
-   */
-  private fuzzyMatch(
-    pattern: string,
-    text: string,
-    originalText: string,
-    startTime: number,
-    cfg: Required<FuzzyMatchConfig>
-  ): MatchResult {
-    const patternLen = pattern.length;
-    const textLen = text.length;
-
-    // 快速检查：模式长度不能超过文本长度
-    if (patternLen > textLen) {
-      return this.createNoMatchResult(startTime);
-    }
-
-    // 使用动态规划找到最佳匹配
-    const result = this.findBestMatch(pattern, text, originalText, cfg);
-
-    if (!result.matched) {
-      return this.createNoMatchResult(startTime);
-    }
-
-    const endTime = performance.now();
-
-    // 计算归一化分数 (0-1)
-    const maxScore =
-      patternLen * (SCORE_WEIGHTS.STRING_START_BONUS + SCORE_WEIGHTS.CONSECUTIVE_BONUS);
-    const normalizedScore = Math.max(0, Math.min(1, result.score / maxScore));
-
-    // 检查是否达到阈值
-    if (normalizedScore < cfg.threshold) {
-      return this.createNoMatchResult(startTime);
+    if (!internal) {
+      return { matched: false, score: 0, position: -1, length: 0, computeTimeMs };
     }
 
     return {
       matched: true,
-      score: normalizedScore,
-      position: result.matches.length > 0 ? result.matches[0].start : 0,
-      length: patternLen,
-      computeTimeMs: endTime - startTime,
+      score: internal.score,
+      position: internal.position,
+      length: internal.length,
+      computeTimeMs,
     };
   }
 
   /**
-   * 使用贪心算法找到最佳匹配
+   * 计算匹配（含高亮区间），不满足阈值时返回 null
    */
-  private findBestMatch(
+  private computeMatch(
     pattern: string,
     text: string,
-    originalText: string,
     cfg: Required<FuzzyMatchConfig>
-  ): FuzzyMatchInternalResult {
-    const patternLen = pattern.length;
-    const textLen = text.length;
+  ): InternalMatch | null {
+    if (pattern.length === 0) {
+      return { score: 1, position: 0, length: 0, highlights: [] };
+    }
+    if (text.length === 0 || pattern.length > text.length) {
+      return null;
+    }
 
-    let patternIdx = 0;
-    let score = 0;
-    let lastMatchIdx = -1;
-    let consecutiveCount = 0;
-    const matches: MatchHighlight[] = [];
-    let currentMatchStart = -1;
+    const p = cfg.caseSensitive ? pattern : pattern.toLowerCase();
+    const t = cfg.caseSensitive ? text : text.toLowerCase();
 
-    for (let textIdx = 0; textIdx < textLen && patternIdx < patternLen; textIdx++) {
-      if (pattern[patternIdx] === text[textIdx]) {
-        // 匹配成功
-        let charScore = 1;
+    const internal =
+      p === t
+        ? { score: 1, position: 0, length: text.length, highlights: [{ start: 0, end: text.length }] }
+        : (this.containsMatch(p, t, text) ?? this.subsequenceMatch(p, t, text));
 
-        // 连续匹配加分
-        if (lastMatchIdx === textIdx - 1) {
-          consecutiveCount++;
-          charScore += SCORE_WEIGHTS.CONSECUTIVE_BONUS * Math.min(consecutiveCount, 5);
+    if (!internal || internal.score < cfg.threshold) {
+      return null;
+    }
+    return internal;
+  }
 
-          // 扩展当前匹配区域
-          if (currentMatchStart === -1) {
-            currentMatchStart = textIdx - 1;
-          }
-        } else {
-          // 新的匹配序列
-          if (currentMatchStart !== -1 && cfg.includeMatches) {
-            matches.push({ start: currentMatchStart, end: lastMatchIdx + 1 });
-          }
-          currentMatchStart = textIdx;
-          consecutiveCount = 0;
+  /**
+   * 包含匹配：遍历所有出现位置，取分档最高者
+   */
+  private containsMatch(pattern: string, text: string, originalText: string): InternalMatch | null {
+    let bestPosition = -1;
+    let bestTier = -1;
 
-          // 间隔惩罚
-          if (lastMatchIdx !== -1) {
-            const gap = textIdx - lastMatchIdx - 1;
-            if (gap > 4) {
-              charScore += SCORE_WEIGHTS.LONG_GAP_PENALTY;
-            } else if (gap > 0) {
-              charScore += SCORE_WEIGHTS.GAP_PENALTY;
-            }
-          }
-        }
-
-        // 位置加分
-        if (textIdx === 0) {
-          charScore += SCORE_WEIGHTS.STRING_START_BONUS;
-        } else if (this.isWordBoundary(originalText, textIdx)) {
-          charScore += SCORE_WEIGHTS.WORD_START_BONUS;
-        } else if (this.isCamelCaseBoundary(originalText, textIdx)) {
-          charScore += SCORE_WEIGHTS.CAMEL_CASE_BONUS;
-        }
-
-        score += charScore;
-        lastMatchIdx = textIdx;
-        patternIdx++;
+    for (let idx = text.indexOf(pattern); idx !== -1; idx = text.indexOf(pattern, idx + 1)) {
+      const tier = this.containsTier(originalText, idx, pattern.length);
+      if (tier > bestTier) {
+        bestTier = tier;
+        bestPosition = idx;
+        // 前缀已是最高档，无需继续查找
+        if (tier === CONTAINS_SCORES.PREFIX) break;
       }
     }
 
-    // 添加最后一个匹配区域
-    if (currentMatchStart !== -1 && cfg.includeMatches) {
-      matches.push({ start: currentMatchStart, end: lastMatchIdx + 1 });
+    if (bestPosition === -1) return null;
+
+    return {
+      score: bestTier - this.lengthPenalty(pattern.length, text.length),
+      position: bestPosition,
+      length: pattern.length,
+      highlights: [{ start: bestPosition, end: bestPosition + pattern.length }],
+    };
+  }
+
+  /**
+   * 计算包含匹配在指定位置的分档
+   */
+  private containsTier(text: string, position: number, length: number): number {
+    if (position === 0) return CONTAINS_SCORES.PREFIX;
+    if (this.isWordBoundary(text, position) || this.isCamelCaseBoundary(text, position)) {
+      return CONTAINS_SCORES.WORD_BOUNDARY;
+    }
+    if (position + length === text.length) return CONTAINS_SCORES.SUFFIX;
+    return CONTAINS_SCORES.INNER;
+  }
+
+  /**
+   * 子序列匹配（贪心前向扫描）
+   */
+  private subsequenceMatch(pattern: string, text: string, originalText: string): InternalMatch | null {
+    const patternLen = pattern.length;
+    const positions: number[] = [];
+    let rawScore = 0;
+    let lastMatchIdx = -1;
+    let consecutiveCount = 0;
+
+    for (let textIdx = 0; textIdx < text.length && positions.length < patternLen; textIdx++) {
+      if (pattern[positions.length] !== text[textIdx]) continue;
+
+      let charScore = SCORE_WEIGHTS.CHAR_MATCH;
+
+      if (lastMatchIdx !== -1 && lastMatchIdx === textIdx - 1) {
+        // 连续匹配加分
+        consecutiveCount++;
+        charScore += SCORE_WEIGHTS.CONSECUTIVE_BONUS * Math.min(consecutiveCount, 5);
+      } else {
+        consecutiveCount = 0;
+        // 间隔惩罚
+        if (lastMatchIdx !== -1) {
+          const gap = textIdx - lastMatchIdx - 1;
+          charScore += gap > 4 ? SCORE_WEIGHTS.LONG_GAP_PENALTY : SCORE_WEIGHTS.GAP_PENALTY;
+        }
+      }
+
+      // 位置加分
+      if (textIdx === 0) {
+        charScore += SCORE_WEIGHTS.STRING_START_BONUS;
+      } else if (this.isWordBoundary(originalText, textIdx)) {
+        charScore += SCORE_WEIGHTS.WORD_START_BONUS;
+      } else if (this.isCamelCaseBoundary(originalText, textIdx)) {
+        charScore += SCORE_WEIGHTS.CAMEL_CASE_BONUS;
+      }
+
+      rawScore += charScore;
+      positions.push(textIdx);
+      lastMatchIdx = textIdx;
     }
 
-    // 检查是否完全匹配模式
-    if (patternIdx !== patternLen) {
-      return { matched: false, score: 0, matches: [] };
+    if (positions.length !== patternLen) return null;
+
+    const ratio = Math.max(0, Math.min(1, rawScore / this.idealSubsequenceScore(patternLen)));
+    return {
+      score: ratio * FUZZY_SCORE_CEILING - this.lengthPenalty(patternLen, text.length),
+      position: positions[0] ?? 0,
+      length: patternLen,
+      highlights: mergePositions(positions),
+    };
+  }
+
+  /**
+   * 理想对齐分：首字符落在单词开头，其余字符全部连续
+   */
+  private idealSubsequenceScore(patternLen: number): number {
+    let ideal = SCORE_WEIGHTS.CHAR_MATCH + SCORE_WEIGHTS.WORD_START_BONUS;
+    for (let k = 1; k < patternLen; k++) {
+      ideal += SCORE_WEIGHTS.CHAR_MATCH + SCORE_WEIGHTS.CONSECUTIVE_BONUS * Math.min(k, 5);
     }
+    return ideal;
+  }
 
-    // 未匹配字符惩罚
-    const unmatchedChars = textLen - patternLen;
-    score += unmatchedChars * SCORE_WEIGHTS.UNMATCHED_PENALTY;
-
-    return { matched: true, score, matches };
+  /**
+   * 长度平局裁决：未被匹配覆盖的比例越高扣分越多
+   */
+  private lengthPenalty(patternLen: number, textLen: number): number {
+    return LENGTH_TIEBREAK * (1 - patternLen / textLen);
   }
 
   /**
@@ -284,8 +282,7 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
    */
   private isWordBoundary(text: string, index: number): boolean {
     if (index === 0) return true;
-    const prevChar = text[index - 1];
-    return /[\s\-_./\\]/.test(prevChar);
+    return /[\s\-_./\\]/.test(text.charAt(index - 1));
   }
 
   /**
@@ -293,8 +290,8 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
    */
   private isCamelCaseBoundary(text: string, index: number): boolean {
     if (index === 0) return false;
-    const prevChar = text[index - 1];
-    const currChar = text[index];
+    const prevChar = text.charAt(index - 1);
+    const currChar = text.charAt(index);
 
     // 小写到大写的转换 (如 myFunction 中的 F)
     if (/[a-z]/.test(prevChar) && /[A-Z]/.test(currChar)) {
@@ -302,11 +299,7 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
     }
 
     // 数字到字母的转换
-    if (/[0-9]/.test(prevChar) && /[a-zA-Z]/.test(currChar)) {
-      return true;
-    }
-
-    return false;
+    return /[0-9]/.test(prevChar) && /[a-zA-Z]/.test(currChar);
   }
 
   // ================================
@@ -364,45 +357,38 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
   ): SearchResultItem<T> | null {
     // 如果是字符串，直接匹配
     if (typeof item === 'string') {
-      const result = this.match(pattern, item, cfg);
-      if (result.matched) {
-        return {
-          item,
-          score: result.score,
-          matches: cfg.includeMatches ? this.getMatchHighlights(pattern, item, cfg) : undefined,
-        };
-      }
-      return null;
+      const internal = this.computeMatch(pattern, item, cfg);
+      if (!internal) return null;
+      return {
+        item,
+        score: internal.score,
+        matches: cfg.includeMatches ? internal.highlights : undefined,
+      };
     }
 
     // 如果是对象，搜索指定字段
     if (typeof item === 'object' && item !== null) {
-      let bestScore = 0;
+      let best: InternalMatch | null = null;
       let bestField: string | undefined;
-      let bestMatches: MatchHighlight[] | undefined;
 
       const keys = cfg.keys.length > 0 ? cfg.keys : Object.keys(item as object);
 
       for (const key of keys) {
         const value = this.getNestedValue(item, key as string);
-        if (typeof value === 'string') {
-          const result = this.match(pattern, value, cfg);
-          if (result.matched && result.score > bestScore) {
-            bestScore = result.score;
-            bestField = key as string;
-            if (cfg.includeMatches) {
-              bestMatches = this.getMatchHighlights(pattern, value, cfg);
-            }
-          }
+        if (typeof value !== 'string') continue;
+        const internal = this.computeMatch(pattern, value, cfg);
+        if (internal && (best === null || internal.score > best.score)) {
+          best = internal;
+          bestField = key as string;
         }
       }
 
-      if (bestScore > 0) {
+      if (best) {
         return {
           item,
-          score: bestScore,
+          score: best.score,
           matchedField: bestField,
-          matches: bestMatches,
+          matches: cfg.includeMatches ? best.highlights : undefined,
         };
       }
     }
@@ -426,108 +412,30 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
     return value;
   }
 
+  // ================================
+  // 高亮
+  // ================================
+
   /**
-   * 获取匹配高亮位置
+   * 计算模式在文本中的高亮区间并生成 HTML
+   *
+   * 不满足匹配条件时返回空区间与转义后的原文
+   *
+   * @param pattern 搜索模式
+   * @param text 要高亮的文本
+   * @param highlightTag 高亮标签
+   * @param config 配置选项
+   * @returns 高亮区间与 HTML
    */
-  private getMatchHighlights(
+  highlight(
     pattern: string,
     text: string,
-    cfg: Required<FuzzyMatchConfig>
-  ): MatchHighlight[] {
-    let p = pattern;
-    let t = text;
-    if (!cfg.caseSensitive) {
-      p = p.toLowerCase();
-      t = t.toLowerCase();
-    }
-
-    const highlights: MatchHighlight[] = [];
-    let patternIdx = 0;
-    let currentStart = -1;
-    let currentEnd = -1;
-
-    for (let i = 0; i < t.length && patternIdx < p.length; i++) {
-      if (t[i] === p[patternIdx]) {
-        if (currentStart === -1) {
-          currentStart = i;
-          currentEnd = i + 1;
-        } else if (i === currentEnd) {
-          currentEnd = i + 1;
-        } else {
-          highlights.push({ start: currentStart, end: currentEnd });
-          currentStart = i;
-          currentEnd = i + 1;
-        }
-        patternIdx++;
-      }
-    }
-
-    if (currentStart !== -1) {
-      highlights.push({ start: currentStart, end: currentEnd });
-    }
-
-    return highlights;
-  }
-
-  // ================================
-  // 辅助方法
-  // ================================
-
-  /**
-   * 创建无匹配结果
-   */
-  private createNoMatchResult(startTime: number): MatchResult {
-    return {
-      matched: false,
-      score: 0,
-      position: -1,
-      length: 0,
-      computeTimeMs: performance.now() - startTime,
-    };
-  }
-
-  /**
-   * 创建完全匹配结果
-   */
-  private createExactMatchResult(
-    text: string,
-    startTime: number,
-    _cfg: Required<FuzzyMatchConfig>
-  ): MatchResult {
-    return {
-      matched: true,
-      score: 1,
-      position: 0,
-      length: text.length,
-      computeTimeMs: performance.now() - startTime,
-    };
-  }
-
-  /**
-   * 创建包含匹配结果
-   */
-  private createContainsMatchResult(
-    text: string,
-    position: number,
-    length: number,
-    startTime: number,
-    _cfg: Required<FuzzyMatchConfig>
-  ): MatchResult {
-    // 包含匹配的分数，考虑位置
-    let score = 0.8;
-    if (position === 0) {
-      score = 0.95; // 前缀匹配更高分
-    } else if (position + length === text.length) {
-      score = 0.85; // 后缀匹配
-    }
-
-    return {
-      matched: true,
-      score,
-      position,
-      length,
-      computeTimeMs: performance.now() - startTime,
-    };
+    highlightTag: string = 'mark',
+    config?: FuzzyMatchConfig
+  ): HighlightResult {
+    const cfg = { ...this.defaultConfig, ...config };
+    const highlights = this.computeMatch(pattern, text, cfg)?.highlights ?? [];
+    return { highlights, html: this.highlightHtml(text, highlights, highlightTag) };
   }
 
   /**
@@ -579,29 +487,61 @@ export class FuzzyMatchEngine implements IFuzzyMatchAlgorithm {
     highlightTag: string = 'mark'
   ): string {
     return this.highlightText(text, highlights, (t, isHighlight) => {
-      const escaped = t.replace(/[&<>"']/g, (c) => {
-        const map: Record<string, string> = {
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-          "'": '&#39;',
-        };
-        return map[c] || c;
-      });
+      const escaped = t.replace(/[&<>"']/g, (c) => HTML_ESCAPE_MAP[c] ?? c);
       return isHighlight ? `<${highlightTag}>${escaped}</${highlightTag}>` : escaped;
     }).join('');
   }
 }
 
 // ================================
-// 内部类型
+// 内部类型与工具
 // ================================
 
-interface FuzzyMatchInternalResult {
-  matched: boolean;
+/** 内部匹配结果 */
+interface InternalMatch {
   score: number;
-  matches: MatchHighlight[];
+  position: number;
+  length: number;
+  highlights: MatchHighlight[];
+}
+
+/** 高亮结果 */
+export interface HighlightResult {
+  /** 高亮区间（已合并相邻位置） */
+  readonly highlights: readonly MatchHighlight[];
+  /** 高亮后的 HTML（已转义） */
+  readonly html: string;
+}
+
+/** HTML 转义表 */
+const HTML_ESCAPE_MAP: Readonly<Record<string, string>> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
+/**
+ * 将升序的命中位置合并为连续区间
+ */
+function mergePositions(positions: readonly number[]): MatchHighlight[] {
+  const highlights: MatchHighlight[] = [];
+  let start = -1;
+  let end = -1;
+
+  for (const pos of positions) {
+    if (pos === end) {
+      end = pos + 1;
+      continue;
+    }
+    if (start !== -1) highlights.push({ start, end });
+    start = pos;
+    end = pos + 1;
+  }
+
+  if (start !== -1) highlights.push({ start, end });
+  return highlights;
 }
 
 // ================================
@@ -712,39 +652,7 @@ export function quickSearchStrings(
  * @returns HTML 字符串
  */
 export function quickHighlight(pattern: string, text: string): string {
-  // 获取默认引擎（用于确保引擎已初始化）
-  getDefaultEngine();
-
-  let p = pattern.toLowerCase();
-  let t = text.toLowerCase();
-
-  const highlights: MatchHighlight[] = [];
-  let patternIdx = 0;
-  let currentStart = -1;
-  let currentEnd = -1;
-
-  for (let i = 0; i < t.length && patternIdx < p.length; i++) {
-    if (t[i] === p[patternIdx]) {
-      if (currentStart === -1) {
-        currentStart = i;
-        currentEnd = i + 1;
-      } else if (i === currentEnd) {
-        currentEnd = i + 1;
-      } else {
-        highlights.push({ start: currentStart, end: currentEnd });
-        currentStart = i;
-        currentEnd = i + 1;
-      }
-      patternIdx++;
-    }
-  }
-
-  if (currentStart !== -1) {
-    highlights.push({ start: currentStart, end: currentEnd });
-  }
-
-  const engine = getDefaultEngine();
-  return engine.highlightHtml(text, highlights);
+  return getDefaultEngine().highlight(pattern, text).html;
 }
 
 /**
