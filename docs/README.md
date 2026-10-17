@@ -4,8 +4,9 @@
 
 | 文档 | 内容 |
 |------|------|
+| [USER_GUIDE.md](./USER_GUIDE.md) | 使用指南：支持的文件格式与条目类型、Markdown 写作与公式、知识库与 AI 配置、双向链接与图谱、阅读模式、快捷键 |
 | [PRODUCT.md](./PRODUCT.md) | 产品定位、核心理念、三大模式、不做什么、路线图、产品演进 |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构、存储与版本、UI 架构、LaTeX 渲染链路、关键问题与根因记录 |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构、存储与版本、UI 架构、LaTeX 与 Markdown 链路、关键问题与根因记录 |
 
 模块级说明就近放在代码旁：
 

@@ -33,12 +33,12 @@
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | SQLite | `main/database/sqlite.ts` | better-sqlite3，WAL 模式；数据库位于 `app.getPath('userData')/data/knowledge.db` |
-| 全文搜索 | `sqlite.ts`、`search-ipc-handlers.ts` | FTS5 虚拟表 `items_fts`，分词器 `unicode61 remove_diacritics 2` |
-| 语义搜索 | `semantic-search.ts` | 调用 AI 服务生成查询向量，与 `embeddings` 表比对 |
+| 全文搜索 | `sqlite.ts`、`search-ipc-handlers.ts` | FTS5 虚拟表 `items_fts`（title / content / summary / transcript），分词器 `trigram`（支持中文子串）；少于 3 个字符的查询词退化为 LIKE 扫描 |
+| 语义搜索 | `semantic-search.ts`、`embedding-vector.ts` | 调用 AI 服务生成查询向量，与 `embeddings` 表比对；混合检索在语义不可用时退化为全文 |
 | 版本历史 | `version-history.ts`、`version-ipc-handlers.ts` | `document_versions` 表；IPC 通道 `version:*` |
-| AI 服务 | `main/ai/ai-service.ts` | 多 Provider（openai / anthropic / deepseek / moonshot / zhipu / ollama）：对话、向量、总结、提取标签、转写 |
-| Agent 执行器 | `main/agent/agent-executor.ts` | 后台任务：transcribe / summarize / extract-tags / generate-embedding / find-related，结果写回 `knowledge_items` 并推送进度 |
-| 窗口 | `main/index.ts` | 主窗口与按模式打开的子窗口（`createChildWindow`） |
+| AI 服务 | `main/ai/ai-service.ts`、`provider-config.ts` | 多 Provider（openai / anthropic / deepseek / moonshot / zhipu / ollama）：对话、向量、总结、提取标签、转写。配置只存主进程 `userData/config/ai-config.json`，渲染进程经 `ai:getConfig` 等 IPC 读写（拿不到明文 Key）；旧版渲染进程配置由 `legacy-config.ts` 启动时迁移 |
+| Agent 执行器 | `main/agent/agent-executor.ts` | 后台任务：transcribe / summarize / extract-tags / generate-embedding / find-related。同一条目的任务按优先级串行（转写先于摘要），不同条目并发；失败按 `next_attempt_at` 延迟重试；维护条目状态 processing → ready / error；推送 `agent:progress` / `agent:taskCompleted` / `agent:taskFailed` / `agent:itemStatusChanged` |
+| 窗口 | `main/index.ts` | 主窗口与按模式打开的子窗口（`createChildWindow`）；文件 IPC（含 `read-binary-file`、`rename-path`） |
 
 主要数据表：`knowledge_items`、`tags`、`item_tags`、`folders`、`projects`、`links`、`agent_tasks`、`app_settings`、`ai_providers`、`embeddings`、`document_versions`、`schema_version`。代码阅读时期的 Git 表与 `git-service.ts` 已删除；已有数据库中残留的 `git_*` 表不再被读写。
 
@@ -46,22 +46,33 @@
 
 | 模块 | 职责 |
 |------|------|
-| `components/RichEditor` | 唯一编辑器入口：ProseMirror 文档编辑 + CodeMirror 代码块（`CodeBlockView`）+ 数学节点（`MathNodeView`）；`.tex` 文件切换为 `LatexEditor`（源码 / 渲染 / 分栏） |
+| `components/RichEditor` | 唯一编辑器入口：ProseMirror 文档编辑 + CodeMirror 代码块（`CodeBlockView`）+ 数学节点（`MathNodeView`，展开源码与实时预览）+ 任务项（`ListItemView`）；`.tex` 文件切换为 `LatexEditor`（源码 / 渲染 / 分栏） |
+| `lib/markdown` | Markdown 文档模型（schema）、markdown-it 解析（含 `$` 公式、`[[ ]]`、任务列表、中文软换行扩展）、按顶层块缓存的序列化、Typora 式实时预览插件、斜杠命令与 `[[` 补全、表格键盘操作、HTML 渲染（预览 / 阅读共用） |
 | `lib/latex` | LaTeX 文档模型、增量引擎、渲染器、Worker、高度映射与滚动同步（见第 6 节） |
-| `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax） |
+| `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax）：TeX 原子间距、显示/行内样式、按内容高度伸缩的分隔符、严格模式校验 |
+| `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`）、快速收集与附件保存、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、`useKnowledgeBase` |
+| `lib/agent` | Agent 事件订阅与条目处理活动（`useAgentActivity`）、知识库问答（混合检索 + 引用） |
+| `lib/links` | 双向链接索引（按条目更新时间增量解析）、反向链接、未解析链接、图谱数据、Barnes–Hut 力导向布局、`links` 表同步 |
+| `lib/reading` | 阅读状态（书架、进度、高亮，存于条目 `metadata.reading`）、排版设置、摘录生成 |
 | `lib/documents` | 文档 CRUD、文件类型（markdown / latex / plain）、`useDocuments`；`versions/` 为版本历史（reducer + service + `useVersions`） |
 | `lib/core` | 版本化编辑基础：EditorModel（versionId + contentHash）、拉取式 SaveEngine、撤销重做、IndexedDB 离线存储、操作日志与同步接口（仅类型） |
 | `lib/writing` | 写作服务：全文索引、搜索建议、差分（Worker 池）、索引持久化（IndexedDB）、性能监控，以及 SearchBox / DiffViewer 组件 |
-| `lib/file-system`、`lib/folders` | 写作文件树模型、拖拽、虚拟文件夹 |
-| `lib/autocomplete`、`lib/editor` | 补全服务接入 CodeMirror / ProseMirror，语言注册表，ProseMirror 输入规则 |
-| `lib/plugins` | 插件系统再导出与编辑器桥接 |
+| `lib/file-system`、`lib/folders` | 写作文件树模型、拖拽、文件夹（知识库与写作共用 `folders` 表） |
+| `lib/autocomplete`、`lib/editor` | 补全服务接入 CodeMirror / ProseMirror（补全项可通过 `apply` 做结构化插入），语言注册表，ProseMirror 输入规则与块级回车转换，视口懒渲染（`lazy-visibility.ts`） |
+| `lib/plugins` | 插件系统再导出与编辑器桥接（桥接内容为 Markdown 文本） |
+| `services/` | `database.ts`（渲染侧 SQL 通道）、`settingsService.ts`（`settings.json`）、`aiConfigService.ts`（主进程 AI 配置的客户端） |
 | `theme/` | ThemeProvider：light / dark / system，强调色，字体，写入 CSS 变量 |
 
 ## 4. 存储与版本
 
 | 数据 | 存储方式 |
 |------|----------|
-| 知识条目、标签、文件夹、Agent 任务、设置 | 主进程 SQLite |
+| 知识条目（含写作文档，type=note）、标签、文件夹、链接、Agent 任务 | 主进程 SQLite，知识库 / 写作 / 阅读 / Agent 共用同一份数据。早期的 `knowledge-db.json` 在启动时迁移并改名为 `.legacy.json` |
+| 写作文档正文 | `.md` 存标准 Markdown，`.txt` 存原文，`.tex` 存 LaTeX 源码；旧版 HTML 内容读入时兼容、保存时转为 Markdown |
+| 双向链接 | 笔记正文中的 `[[ ]]` 是唯一事实来源；渲染进程内存索引计算反链（含未创建的目标），文档保存时把已解析的引用同步到 `links` 表（type=reference）；Agent 的语义关联写入 type=ai-suggested |
+| 附件（录音、图片、文件） | `userData/attachments/`，数据库只存路径与元数据；渲染进程经 `read-binary-file` 转 Blob URL 预览（CSP 不放开 file:） |
+| 应用设置 | `userData/settings.json`（`settingsService`） |
+| AI 服务商配置 | `userData/config/ai-config.json`（仅主进程读写） |
 | 文档版本快照 | SQLite `document_versions`；渲染侧 `useDocuments` 每 5 分钟（`VERSION_INTERVAL_MS = 300000`）自动创建一次版本，另可手动创建、预览、恢复、清理 |
 | 编辑中文档的离线状态、待同步操作 | 渲染侧 IndexedDB（`lib/core/storage`） |
 | 写作搜索索引 | IndexedDB（`lib/writing/index-storage.ts`），变更后自动持久化，启动时加载 |
@@ -80,9 +91,12 @@
 |------|------|
 | TitleBar | 窗口控制、模式标签（knowledge / writing / reading）、搜索入口、进入专注模式 |
 | Ribbon | 左侧图标栏：随当前模式变化的导航按钮、快速操作、设置入口 |
-| Sidebar | 当前模式的导航：知识库为虚拟文件夹，写作为 WritingSidebar 文件树（可选文件类型新建），阅读为阅读侧栏 |
-| MainContent | 编辑器 / 查看器 |
-| EditorFooter | 字数、保存状态、版本历史按钮 |
+| Sidebar | 当前模式的导航：知识库为智能文件夹 + 我的文件夹（`VirtualFolders`），写作为 WritingSidebar 文件树（可选文件类型新建），阅读为书架（`ReadingShelf`） |
+| MainContent | 知识库 `KnowledgeWorkspace`（条目 / 图谱 / 问答 + 详情面板）；写作 RichEditor + `BacklinksPanel`；阅读 `ReadingView` |
+| EditorFooter | 字数、保存状态、反向链接面板开关、版本历史按钮 |
+| AgentActivity | 右下角浮窗，任意模式下显示 Agent 处理进度 |
+
+App 层的跨模式导航：`openItem`（笔记进写作、其他进知识库）、`openWikiTarget`（解析 `[[ ]]`，目标不存在时新建文档）。编辑器已处理的按键（`defaultPrevented`）不再触发全局快捷键。
 
 快捷键（`App.tsx`）：⌘N 快速输入（文本）、⌘⇧R 快速输入（录音）、⌘P 搜索、⌘, 设置、⌘B 侧边栏、⌘S 保存、⌘1/2/3 切换模式、⌘⇧F 专注模式、Esc 退出专注或关闭弹窗。
 
@@ -134,7 +148,33 @@ LatexEditor 中的关键阈值（`LatexEditor.tsx`）：
 - **增量更新不用 VCDIFF**：VCDIFF（RFC 3284）面向字节级的存储 / 传输压缩，每次编辑都要算 diff；编辑器本身就知道变更位置。行业做法是分三层：文本存储（Piece Table / Rope）→ 增量解析（Lezer / Tree-sitter 类）→ AST 节点级 diff 与 DOM 局部更新。VS Code、CodeMirror 6、Lapce 都是这个思路。
 - **不用 KaTeX**：数学渲染完全自研（`lib/math`）。
 
-## 7. 关键问题与根因记录
+## 7. Markdown 写作链路
+
+```
+存储内容（Markdown / 纯文本 / 旧版 HTML）
+   │ parseContent：markdown-it（CommonMark + 表格 + 删除线 + $ 公式 + [[ ]] + 任务列表）
+   ▼
+ProseMirror 文档（lib/markdown/schema.ts，节点与语法一一对应）
+   │ 输入规则（行内标记、公式、双链、任务）、回车转换（``` / $$ / | a | b |）
+   │ 实时预览插件：只扫描光标所在文本块，在格式两侧放只读语法标记
+   ▼
+serializeContent：顶层块为不可变对象 → WeakMap 缓存每块的 Markdown，只重新序列化被改动的块
+   │
+   ▼
+onChange(markdown) → useDocuments 自动保存 → 保存后同步 [[ ]] 到 links 表
+```
+
+分块渲染的三层：
+
+| 层 | 做法 |
+|----|------|
+| 序列化 | 按顶层块缓存；相邻同类列表自动交替标记符，保证分块拼接与整体序列化等价 |
+| 布局 / 绘制 | 顶层块数 ≥ 150 时对每个顶层块启用 `content-visibility: auto` + `contain-intrinsic-size: auto`，视口外的块跳过布局与绘制并记住真实高度；小文档不启用，避免绘制包含裁剪描边 |
+| 重型节点 | 代码块先输出未高亮文本（高度一致），共享 IntersectionObserver 在接近视口（800px）时做 Prism 高亮；语言下拉框首次打开时才生成完整选项。公式渲染实测单个约 25µs，不需要懒加载 |
+
+实测（开发机 macOS，Node，`lib/markdown`）：300KB / 10,000 个顶层块的文档，解析 55ms，冷序列化 27ms，修改一个段落后的增量序列化中位数 0.76ms。数学渲染：1000 个中等复杂度公式 25ms。图谱布局：3000 节点 / 6000 边单步约 3.7ms（Barnes–Hut，θ=0.9）。
+
+## 8. 关键问题与根因记录
 
 提炼自已删除的过程性文档（latex 目录下的 FIX_SUMMARY / SCROLL_RENDER_FIX / PERFORMANCE_GUIDE / CHANGELOG / IMPLEMENTATION_SUMMARY，以及 RichEditor 目录下的 SCROLL_RENDER_FIX_V2）。
 
@@ -152,6 +192,11 @@ LatexEditor 中的关键阈值（`LatexEditor.tsx`）：
 | 保存 `.tex` 后变成 `.md` | 修改标题时可能丢掉扩展名，导致文件类型改变 | `handleTitleChange` 自动保留原扩展名 |
 | 源码视图挡住文件树点击 | 全文源码编辑器层级高于侧边栏 | 源码编辑器与 RichEditor 处于同一层级（`position: relative; z-index: 0`） |
 | Light 模式文字不可见 | 组件颜色使用 SCSS 变量，编译期固定为深色值 | 颜色统一改为 CSS 变量 |
+| 知识库条目永远不被 AI 处理 | 知识库 UI 写入渲染进程的 `knowledge-db.json`，Agent 只读 SQLite；AI 配置也分为渲染进程与主进程两份 | 知识库改为 SQLite 唯一数据源并迁移旧 JSON；AI 配置只存主进程并迁移旧文件 |
+| 全文搜索始终为空 | `items_fts` 声明了 `knowledge_items` 中不存在的 `tags` 列，读取列值报错被吞掉；`unicode61` 无法匹配中文子串 | schema v3 重建 FTS（trigram）与触发器，短查询退化为 LIKE，错误不再吞掉 |
+| 音频摘要偶发失败 | 同一条目的转写与摘要并发执行，摘要时还没有转写文字；重试无延迟 | 同条目任务按优先级串行，`next_attempt_at` 延迟重试 |
+| 在编辑器里按 ⌘B 加粗会同时收起侧边栏 | App 的全局快捷键不区分事件是否已被编辑器处理 | 全局处理器跳过 `defaultPrevented` 的事件 |
+| `x^12`、`\frac12` 渲染错误；公式中的 `]` 截断后续内容 | 自研解析器非花括号参数读取整串数字；顶层表达式遇到 `]` 即停止 | 解析器重写：统一的参数读取（单记号）、表达式终止条件与表格解析，符号表唯一来源 `extended-symbols.ts`，覆盖测试见 `lib/math/__tests__` |
 
 ### 性能数据
 
