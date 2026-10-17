@@ -32,7 +32,7 @@ export interface RunResult {
 // Schema Definitions
 // ================================
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /** 字符串常量列表 → SQL 的 IN 列表（取值均为代码内常量，不含引号） */
 const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
@@ -172,6 +172,37 @@ CREATE TABLE IF NOT EXISTS entity_relations (
 
 CREATE INDEX IF NOT EXISTS idx_entity_relations_source ON entity_relations(source_entity_id);
 CREATE INDEX IF NOT EXISTS idx_entity_relations_target ON entity_relations(target_entity_id);
+`;
+
+/**
+ * 多设备同步的本地状态（见 main/sync）。全新数据库与 v8 迁移共用
+ * - sync_records：每个实体（条目 / 文件夹 / 标签）上次同步（导出或应用）的内容哈希、同步时钟与产生该版本的设备，
+ *   用于发现本地变化与判断并发修改
+ * - sync_cursors：每台远端设备已应用到的变更集序号
+ * - sync_file_hashes：附件文件的 SHA-256 缓存（按路径、大小与修改时间失效）
+ */
+const SYNC_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS sync_records (
+  entity TEXT NOT NULL CHECK (entity IN ('item', 'folder', 'tag')),
+  id TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  clock INTEGER NOT NULL,
+  device_id TEXT NOT NULL,
+  PRIMARY KEY (entity, id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_cursors (
+  device_id TEXT PRIMARY KEY,
+  last_seq INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_file_hashes (
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime_ms INTEGER NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_file_hashes_hash ON sync_file_hashes(hash);
 `;
 
 /**
@@ -353,6 +384,9 @@ ${ENTITY_RELATIONS_TABLE_SQL}
 
 -- Categorization proposals awaiting review
 ${CATEGORIZATION_PROPOSALS_TABLE_SQL}
+
+-- Multi-device sync state
+${SYNC_TABLES_SQL}
 
 -- App Settings table
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -580,6 +614,13 @@ export const MIGRATIONS: Migration[] = [
     up: (db) => {
       db.exec(ENTITY_RELATIONS_TABLE_SQL);
       db.exec(CATEGORIZATION_PROPOSALS_TABLE_SQL);
+    },
+  },
+  {
+    version: 8,
+    description: '新增多设备同步状态表 sync_records / sync_cursors / sync_file_hashes',
+    up: (db) => {
+      db.exec(SYNC_TABLES_SQL);
     },
   },
 ];

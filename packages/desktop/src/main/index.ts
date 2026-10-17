@@ -27,6 +27,7 @@ import {
 } from './agent/ipc-handlers';
 import { getAgentExecutor } from './agent/agent-executor';
 import { cleanupBackupHandlers, registerBackupHandlers } from './transfer/backup';
+import { cleanupSyncHandlers, getSyncService, registerSyncHandlers } from './sync/sync-service';
 import { cleanupTransferHandlers, registerTransferHandlers } from './transfer/files';
 import { cleanupOrganizeHandlers, getOrganizeScheduler, registerOrganizeHandlers } from './agent/organize-schedule';
 import { initializeTray } from './tray/tray-manager';
@@ -510,6 +511,9 @@ function setupIPC() {
   registerBackupHandlers();
   registerTransferHandlers();
 
+  // 多设备同步（共享文件夹）
+  registerSyncHandlers();
+
   // 切换知识库、关闭窗口、退出前的落盘 ack
   registerFlushHandlers();
 }
@@ -529,6 +533,7 @@ async function initializeServices() {
     console.log('[Main] Agent executor started');
 
     getOrganizeScheduler().start();
+    getSyncService().start();
 
     console.log('[Main] All services initialized');
   } catch (error) {
@@ -555,6 +560,7 @@ async function cleanup() {
     cleanupWorkspaceHandlers();
     cleanupBackupHandlers();
     cleanupTransferHandlers();
+    cleanupSyncHandlers();
     cleanupFlushHandlers();
 
     console.log('[Main] Cleanup complete');

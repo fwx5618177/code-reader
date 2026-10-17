@@ -57,6 +57,7 @@ import { isWritingDocument } from './lib/documents/constants';
 import { isReadableItem, itemOpenTarget } from './lib/knowledge/open-target';
 import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
 import { onKnowledgeChanged } from './lib/knowledge/changes';
+import { refreshAfterSync } from './lib/sync/refresh';
 import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
 import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
@@ -216,6 +217,9 @@ const App: React.FC = () => {
 
   // 批量导入等整体变化后写作文档列表同样重新加载（知识库数据由 useKnowledgeBase 自行订阅）
   useEffect(() => onKnowledgeChanged(() => void refreshList()), [refreshList]);
+
+  // 多设备同步写入了远端修改：刷新列表与正在编辑的文档
+  useEffect(() => window.electron.sync?.onApplied((itemIds) => void refreshAfterSync(itemIds)), []);
 
   // ================================
   // 重命名：自动改写其他笔记中指向原标题的 [[链接]]，并提示改写数量

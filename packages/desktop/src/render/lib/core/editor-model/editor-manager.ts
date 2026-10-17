@@ -297,6 +297,32 @@ export class DocumentEditorManager {
   }
 
   /**
+   * 用存储中的最新内容替换托管实例（如多设备同步写入了远端修改）：内容视为已保存，不会触发保存写回。
+   * 有未保存修改的实例不替换（本机的编辑会在下次同步时参与裁决）
+   *
+   * @returns 是否替换了（没有实例或有未保存修改时为 false）
+   */
+  reloadFromStorage(documentId: string, title: string, content: string): boolean {
+    const instance = this.get(documentId);
+    if (!instance) return false;
+    const { model, saveEngine } = instance;
+    // 刚加载、未编辑过的模型也会报告“未保存”（从未保存过），因此以是否有待执行 / 进行中的保存，
+    // 或保存过之后又有修改来判断本机是否有未写入的编辑
+    const pending =
+      saveEngine.getState().isScheduled ||
+      saveEngine.isSaving() ||
+      (model.getLastSavedContentHash() !== null && model.hasUnsavedChanges());
+    if (pending) return false;
+    if (model.getTitle() === title && model.getContent() === content) return true;
+    saveEngine.cancelPendingSave();
+    model.reset({ documentId, initialTitle: title, initialContent: content, initialVersionId: model.getVersionId() + 1 });
+    model.markAsSaved(model.getVersionId(), model.getContentHash());
+    // 重置时的内容变化通知已请求了一次保存，内容与存储一致，取消它
+    saveEngine.cancelPendingSave();
+    return true;
+  }
+
+  /**
    * 强制立即销毁实例
    *
    * 当需要确保实例被清理时使用，不管引用计数。

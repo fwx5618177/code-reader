@@ -26,7 +26,7 @@ const compact = (sql: string) => sql.replace(/\s+/g, ' ');
 
 describe('schema', () => {
   it('版本号与最后一个迁移一致', () => {
-    expect(SCHEMA_VERSION).toBe(7);
+    expect(SCHEMA_VERSION).toBe(8);
     expect(MIGRATIONS[MIGRATIONS.length - 1].version).toBe(SCHEMA_VERSION);
   });
 
@@ -103,5 +103,15 @@ describe('schema', () => {
     expect(sql).toContain("CHECK (status IN ('pending', 'accepted', 'rejected'))");
     expect(sql).toContain("ON categorization_proposals(item_id) WHERE status = 'pending' AND kind = 'item'");
     expect(sql).toContain("ON categorization_proposals(source_tag_id) WHERE status = 'pending' AND kind = 'tag-merge'");
+  });
+
+  it('v8 迁移：同步状态表与全新建库使用同一份语句', () => {
+    const sql = compact(migrationSql(8));
+    const fresh = compact(CREATE_TABLES_SQL);
+    const statements = sql.split(';').map((statement) => statement.trim()).filter(Boolean);
+    expect(statements).toHaveLength(4);
+    for (const statement of statements) expect(fresh).toContain(`${statement};`);
+    expect(sql).toContain("CHECK (entity IN ('item', 'folder', 'tag'))");
+    expect(sql).toContain('PRIMARY KEY (entity, id)');
   });
 });

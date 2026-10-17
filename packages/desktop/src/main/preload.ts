@@ -171,6 +171,15 @@ const validChannels = [
   'transfer:copyExportFile',
   'transfer:finishExport',
 
+  // 多设备同步
+  'sync:getStatus',
+  'sync:chooseFolder',
+  'sync:connect',
+  'sync:providePassphrase',
+  'sync:disconnect',
+  'sync:update',
+  'sync:runNow',
+
 ];
 
 // 用于接收事件的通道
@@ -185,6 +194,7 @@ const eventChannels = [
   'tray:switch-mode',
   'tray:open-settings',
   'tray:open-document',
+  'sync:applied',
 ];
 
 /** 流式对话序号；事件只发往发起请求的窗口，窗口内唯一即可 */
@@ -472,6 +482,18 @@ contextBridge.exposeInMainWorld('electron', {
     copyExportFile: (exportId: string, path: string, source: string) =>
       ipcRenderer.invoke('transfer:copyExportFile', exportId, path, source),
     finishExport: (exportId: string) => ipcRenderer.invoke('transfer:finishExport', exportId),
+  },
+
+  // 多设备同步：经用户选择的共享文件夹交换变更集；应用了远端修改后推送 sync:applied（被修改的条目 ID）
+  sync: {
+    getStatus: () => ipcRenderer.invoke('sync:getStatus'),
+    chooseFolder: () => ipcRenderer.invoke('sync:chooseFolder'),
+    connect: (input: unknown) => ipcRenderer.invoke('sync:connect', input),
+    providePassphrase: (passphrase: string) => ipcRenderer.invoke('sync:providePassphrase', passphrase),
+    disconnect: () => ipcRenderer.invoke('sync:disconnect'),
+    update: (input: unknown) => ipcRenderer.invoke('sync:update', input),
+    runNow: () => ipcRenderer.invoke('sync:runNow'),
+    onApplied: (callback: (itemIds: string[]) => void) => subscribe('sync:applied', callback),
   },
 
   // 落盘：主进程在切换知识库、关闭窗口、退出前请求写回防抖中的数据，handler 完成后自动回 ack

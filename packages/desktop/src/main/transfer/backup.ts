@@ -14,6 +14,7 @@ import { getSQLiteService, SCHEMA_VERSION } from '../database/sqlite';
 import { getWorkspaceManager } from '../workspace/workspace-manager';
 import { flushWindows } from '../flush/window-flush';
 import { getOrganizeScheduler } from '../agent/organize-schedule';
+import { getSyncService } from '../sync/sync-service';
 
 /** 完整备份的清单文件 */
 const MANIFEST_FILE = 'manifest.json';
@@ -153,7 +154,12 @@ export async function createBackup(): Promise<BackupFileInfo> {
 /** 用数据库文件恢复当前知识库，完成后重新加载所有窗口 */
 async function restoreFromDatabase(sourcePath: string): Promise<void> {
   const safetyCopy = join(backupsDir(), `before-restore-${timestamp()}.db`);
-  await getWorkspaceManager().replaceDatabase(sourcePath, safetyCopy, () => flushWindows());
+  await getSyncService().halt();
+  try {
+    await getWorkspaceManager().replaceDatabase(sourcePath, safetyCopy, () => flushWindows());
+  } finally {
+    getSyncService().start();
+  }
   getOrganizeScheduler().restart();
   for (const window of BrowserWindow.getAllWindows()) window.webContents.reload();
 }

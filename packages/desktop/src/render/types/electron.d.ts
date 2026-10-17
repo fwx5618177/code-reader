@@ -654,6 +654,51 @@ export interface SavedAttachment {
 }
 
 // ================================
+// 多设备同步
+// ================================
+
+export interface SyncDevice {
+  deviceId: string;
+  name: string;
+  lastSeq: number;
+  updatedAt: string;
+}
+
+export interface SyncRunResult {
+  exported: number;
+  applied: number;
+  conflicts: number;
+  /** 附件尚未同步到本机而推迟的变更集数 */
+  deferred: number;
+  changedItemIds: string[];
+  devices: SyncDevice[];
+}
+
+export interface SyncStatus {
+  folder: string | null;
+  folderId: string | null;
+  enabled: boolean;
+  intervalMinutes: number;
+  encrypted: boolean;
+  lastSyncAt: string | null;
+  lastResult: Omit<SyncRunResult, 'devices' | 'changedItemIds'> | null;
+  lastError: string | null;
+  deviceId: string;
+  deviceName: string;
+  running: boolean;
+  needsPassphrase: boolean;
+  devices: SyncDevice[];
+}
+
+/** 选择的同步文件夹：是否已有同步数据、是否加密 */
+export interface SyncFolderInspection {
+  folder: string;
+  exists: boolean;
+  encrypted: boolean;
+  devices: number;
+}
+
+// ================================
 // Electron API Interface
 // ================================
 
@@ -783,6 +828,19 @@ interface ElectronAPI {
     /** 复制当前知识库附件目录中的文件到导出文件夹 */
     copyExportFile: (exportId: string, path: string, source: string) => Promise<void>;
     finishExport: (exportId: string) => Promise<void>;
+  };
+
+  sync: {
+    getStatus: () => Promise<SyncStatus>;
+    /** 选择文件夹并检查其中的同步数据；取消时为 null */
+    chooseFolder: () => Promise<SyncFolderInspection | null>;
+    /** 连接（加入已有或新建；新建时提供口令即启用加密）并立即同步一次 */
+    connect: (input: { folder: string; passphrase?: string }) => Promise<SyncRunResult>;
+    providePassphrase: (passphrase: string) => Promise<void>;
+    disconnect: () => Promise<void>;
+    update: (input: { enabled?: boolean; intervalMinutes?: number; deviceName?: string }) => Promise<void>;
+    runNow: () => Promise<SyncRunResult>;
+    onApplied: (callback: (itemIds: string[]) => void) => () => void;
   };
 
   organize: {
