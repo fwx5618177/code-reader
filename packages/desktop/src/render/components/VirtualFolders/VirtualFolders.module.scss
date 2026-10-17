@@ -45,11 +45,6 @@
   gap: var(--spacing-1);
 }
 
-.groupByWrapper {
-  position: relative;
-}
-
-.groupByBtn,
 .addFolderBtn {
   @include button-reset;
   @include flex-center;
@@ -62,82 +57,6 @@
   &:hover {
     background-color: var(--bg-hover);
     color: var(--text-primary);
-  }
-}
-
-// ================================
-// 分组下拉菜单
-// ================================
-
-.groupByDropdown {
-  position: absolute;
-  top: calc(100% + var(--spacing-1));
-  right: 0;
-  width: 160px;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  z-index: $z-dropdown;
-  overflow: hidden;
-  animation: dropdownFadeIn 0.15s ease;
-}
-
-.dropdownHeader {
-  padding: var(--spacing-2) var(--spacing-3);
-  font-size: var(--font-size-xs);
-  font-weight: $font-weight-semibold;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--border-subtle);
-  background-color: var(--bg-tertiary);
-  transition:
-    background-color 0.3s ease,
-    border-color 0.3s ease;
-}
-
-.dropdownItem {
-  @include button-reset;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  width: 100%;
-  height: 32px;
-  padding: 0 var(--spacing-3);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  text-align: left;
-  transition: $transition-colors;
-
-  svg {
-    color: var(--text-muted);
-    flex-shrink: 0;
-  }
-
-  &:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-  }
-}
-
-.dropdownItemActive {
-  background-color: var(--bg-selected);
-  color: var(--text-primary);
-
-  svg {
-    color: var(--accent-secondary);
-  }
-}
-
-@keyframes dropdownFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -803,14 +722,6 @@
 
   .createFolderModal {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  }
-
-  .groupByDropdown {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-
-    .dropdownHeader {
-      background-color: var(--bg-secondary);
-    }
   }
 
   .folderContextMenu {

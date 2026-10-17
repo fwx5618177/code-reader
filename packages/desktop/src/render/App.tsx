@@ -1,4 +1,13 @@
-import React, { useState, useEffect, useCallback, useReducer, useRef, Suspense, lazy } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useReducer,
+  useRef,
+  Suspense,
+  lazy,
+} from 'react';
 import Layout from './components/Layout';
 import QuickInput, { QuickInputData } from './components/QuickInput';
 import SearchPanel, { SearchResult } from './components/SearchPanel';
@@ -20,7 +29,16 @@ const EditorLoadingFallback: React.FC = () => (
   </div>
 );
 
-import VirtualFolders, { VirtualFolder, GroupByType } from './components/VirtualFolders';
+import VirtualFolders, { VirtualFolder } from './components/VirtualFolders';
+import KnowledgeWorkspace from './components/KnowledgeWorkspace';
+import AgentActivityPanel from './components/AgentActivity';
+import BacklinksPanel from './components/BacklinksPanel';
+import {
+  ReadingShelf,
+  ReadingView,
+  isOnShelf,
+  type CreateExcerptInput,
+} from './components/ReadingWorkspace';
 import {
   useDocuments,
   PLACEHOLDERS,
@@ -28,19 +46,21 @@ import {
   getFileTypeId,
   type DocumentTypeId,
 } from './lib/documents';
+import { ensureExtension } from './lib/documents/file-types';
+import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
+import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
+import { knowledgeRepository } from './lib/knowledge/repository';
+import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
 import {
-  ChevronDown,
-  ChevronRight,
-  Plus,
-  Brain,
-  BookOpen,
-  PenTool,
-  X,
-  History,
-} from 'lucide-react';
+  displayTitle,
+  linkRepository,
+  useLinkIndex,
+  useRelatedLinks,
+} from './lib/links';
+import { extractWikiLinks } from './lib/markdown';
+import { ChevronDown, ChevronRight, Plus, PenTool, X, History, Link2 } from 'lucide-react';
 import { AppMode, APP_MODE_CONFIGS, appReducer, DEFAULT_APP_STATE } from './types/app-modes';
 import { aiConfigService } from './services/aiConfigService';
-import { knowledgeStorage } from './services/knowledgeStorage';
 import './App.scss';
 
 const App: React.FC = () => {
@@ -52,11 +72,28 @@ const App: React.FC = () => {
   const sidebarCollapsed = false;
   const [explorerExpanded, setExplorerExpanded] = useState(true);
 
-  // 虚拟文件夹状态
-  const [virtualFolders, setVirtualFolders] = useState<VirtualFolder[]>([]);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>();
-  const [, setFoldersLoading] = useState(false);
-  const [groupBy, setGroupBy] = useState<GroupByType>('tags');
+  // 知识库：SQLite 是唯一数据源，知识库、写作、阅读、Agent 共用
+  const kb = useKnowledgeBase(true);
+  const linkIndex = useLinkIndex(kb.items);
+  const relatedLinks = useRelatedLinks(kb.items);
+
+  // 知识库侧边栏选中的范围（智能文件夹或用户文件夹）与选中的条目
+  const [selectedFolderId, setSelectedFolderId] = useState<string>('all');
+  const [selectedKnowledgeItemId, setSelectedKnowledgeItemId] = useState<string | undefined>();
+
+  // 阅读模式选中的条目
+  const [readingItemId, setReadingItemId] = useState<string | undefined>();
+
+  // 写作模式的反向链接面板
+  const [showBacklinks, setShowBacklinks] = useState(true);
+
+  // 轻提示（快速收集结果等）
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   // Writing mode state - using useDocuments hook for document management
   // Auto-save is now handled internally by the hook via AutoSaveManager
@@ -130,38 +167,6 @@ const App: React.FC = () => {
   useEffect(() => {
     aiConfigService.initialize().catch(console.error);
   }, []);
-
-  // 加载虚拟文件夹数据
-  useEffect(() => {
-    const loadVirtualFolders = async () => {
-      if (appState.mode !== 'knowledge') return;
-
-      setFoldersLoading(true);
-      try {
-        const folders = await knowledgeStorage.getAllFolders();
-        const items = await knowledgeStorage.getAllItems();
-
-        // 将 Folder 转换为 VirtualFolder 格式
-        const virtualFolderList: VirtualFolder[] = folders.map((folder) => ({
-          id: folder.id,
-          name: folder.name,
-          type: (folder.type === 'smart' ? 'smart' : 'manual') as 'manual' | 'smart' | 'auto',
-          icon: folder.icon,
-          color: folder.color,
-          itemCount: items.filter((item) => item.folderId === folder.id).length,
-          children: [],
-        }));
-
-        setVirtualFolders(virtualFolderList);
-      } catch (error) {
-        console.error('加载虚拟文件夹失败:', error);
-      } finally {
-        setFoldersLoading(false);
-      }
-    };
-
-    loadVirtualFolders();
-  }, [appState.mode]);
 
   // Initialize documents when entering writing mode
   useEffect(() => {
@@ -252,6 +257,9 @@ const App: React.FC = () => {
   // 全局快捷键监听
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 编辑器已处理的按键（如 ⌘B 加粗、⌘I 斜体）不再触发全局快捷键
+      if (e.defaultPrevented) return;
+
       // Skip if typing in input (except for some shortcuts)
       const target = e.target as HTMLElement;
       const isInputActive =
@@ -366,55 +374,28 @@ const App: React.FC = () => {
     }
   }, [appState.mode, appState.writingFeature, modeConfig, isInFocusMode]);
 
-  // 处理快速输入提交
-  const handleQuickInputSubmit = useCallback(async (data: QuickInputData) => {
-    try {
-      // 1. 根据输入类型确定知识条目类型
-      const typeMap: Record<string, 'note' | 'audio' | 'image' | 'file' | 'bookmark'> = {
-        text: 'note',
-        voice: 'audio',
-        image: 'image',
-        file: 'file',
-        url: 'bookmark',
-      };
-      const itemType = typeMap[data.type] || 'note';
-
-      // 2. 保存附件并获取路径
-      const attachmentPaths: string[] = [];
-      if (data.attachments && data.attachments.length > 0) {
-        for (const file of data.attachments) {
-          const filePath = await knowledgeStorage.saveAttachment(file);
-          attachmentPaths.push(filePath);
+  // 处理快速输入提交：写入知识库并提交 Agent 处理
+  const handleQuickInputSubmit = useCallback(
+    async (data: QuickInputData) => {
+      try {
+        const { item, processing } = await captureQuickInput(data);
+        dispatch({ type: 'TOGGLE_QUICK_INPUT', payload: false });
+        await kb.reload();
+        setSelectedKnowledgeItemId(item.id);
+        if (processing === 'no-provider') {
+          setNotice('已保存。尚未配置 AI 服务商，摘要与标签不会自动生成（设置 → AI 服务）');
+        } else if (processing === 'submitted') {
+          setNotice('已保存，AI 正在后台整理…');
+        } else {
+          setNotice('已保存');
         }
+      } catch (error) {
+        console.error('保存快速输入失败:', error);
+        setNotice(`保存失败：${error instanceof Error ? error.message : String(error)}`);
       }
-
-      // 3. 创建知识条目
-      const item = await knowledgeStorage.createItem({
-        title: data.title || '快速笔记',
-        type: itemType,
-        content: data.content,
-        sourceUrl: data.sourceUrl,
-        folderId: data.folderId,
-        filePath: attachmentPaths[0], // 主附件路径
-      });
-
-      // 4. 处理标签
-      if (data.tags && data.tags.length > 0) {
-        const tagIds: string[] = [];
-        for (const tagName of data.tags) {
-          const tag = await knowledgeStorage.findOrCreateTag(tagName);
-          tagIds.push(tag.id);
-        }
-        // 更新条目的标签
-        await knowledgeStorage.updateItem(item.id, { tagIds });
-      }
-
-      // 5. 关闭快速输入面板
-      dispatch({ type: 'TOGGLE_QUICK_INPUT' });
-    } catch (error) {
-      console.error('保存快速输入失败:', error);
-    }
-  }, []);
+    },
+    [kb.reload]
+  );
 
   // Mode switch handler
   const handleModeChange = useCallback((mode: AppMode) => {
@@ -430,8 +411,9 @@ const App: React.FC = () => {
         dispatch({ type: 'SET_MODE', payload: 'writing' });
         selectDocument(result.id);
       } else {
-        // 其他类型（录音、图片、代码片段、网页等）进入知识库模式
+        // 其他类型（录音、图片、代码片段、网页等）在知识库中打开
         dispatch({ type: 'SET_MODE', payload: 'knowledge' });
+        setSelectedKnowledgeItemId(result.id);
       }
       // 关闭搜索面板
       dispatch({ type: 'TOGGLE_SEARCH' });
@@ -439,45 +421,159 @@ const App: React.FC = () => {
     [selectDocument]
   );
 
-  // 文件夹选择处理 - 筛选知识库项目
-  const handleFolderSelect = useCallback(async (folderId: string) => {
-    setSelectedFolderId(folderId);
-
-    // 根据文件夹 ID 筛选知识库项目
-    try {
-      const allItems = await knowledgeStorage.getAllItems();
-      const filteredItems = folderId
-        ? allItems.filter((item) => item.folderId === folderId)
-        : allItems;
-
-      // 更新虚拟文件夹的项目计数（如果需要显示）
-      console.log(`已筛选 ${filteredItems.length} 个项目`);
-    } catch (error) {
-      console.error('筛选文件夹项目失败:', error);
+  // 侧边栏文件夹：用户文件夹 + 条目数
+  const virtualFolders = useMemo<VirtualFolder[]>(() => {
+    const counts = new Map<string, number>();
+    for (const item of kb.items) {
+      if (item.folderId) counts.set(item.folderId, (counts.get(item.folderId) ?? 0) + 1);
     }
+    return kb.folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      type: 'manual',
+      itemCount: counts.get(folder.id) ?? 0,
+      children: [],
+    }));
+  }, [kb.items, kb.folders]);
+
+  // 知识库工作区的范围
+  const knowledgeScope = useMemo(() => {
+    const preset = SMART_FOLDER_PRESETS.find((p) => p.id === selectedFolderId);
+    if (preset) return { label: preset.name, rules: preset.rules };
+    const folder = kb.folders.find((f) => f.id === selectedFolderId);
+    return folder ? { label: folder.name, folderId: folder.id } : { label: '全部', rules: [] };
+  }, [selectedFolderId, kb.folders]);
+
+  const handleFolderSelect = useCallback((folderId: string) => {
+    setSelectedFolderId(folderId);
   }, []);
 
-  // 创建虚拟文件夹
   const handleCreateFolder = useCallback(async () => {
     try {
-      const folderName = `新建文件夹 ${virtualFolders.length + 1}`;
-      const newFolder = await knowledgeStorage.createFolder(folderName);
-
-      // 添加到列表
-      const newVirtualFolder: VirtualFolder = {
-        id: newFolder.id,
-        name: newFolder.name,
-        type: 'manual',
-        icon: newFolder.icon,
-        color: newFolder.color,
-        itemCount: 0,
-        children: [],
-      };
-      setVirtualFolders((prev) => [...prev, newVirtualFolder]);
+      await kb.createFolder(`新建文件夹 ${kb.folders.length + 1}`);
     } catch (error) {
       console.error('创建文件夹失败:', error);
     }
-  }, [virtualFolders.length]);
+  }, [kb.createFolder, kb.folders.length]);
+
+  // ================================
+  // 跨模式导航：知识库 ⇄ 写作 ⇄ 阅读
+  // ================================
+
+  /** 在写作模式中打开笔记 */
+  const openInWriting = useCallback(
+    (itemId: string) => {
+      dispatch({ type: 'SET_MODE', payload: 'writing' });
+      void selectDocument(itemId);
+    },
+    [selectDocument]
+  );
+
+  /** 在知识库中打开条目 */
+  const openInKnowledge = useCallback((itemId: string) => {
+    dispatch({ type: 'SET_MODE', payload: 'knowledge' });
+    setSelectedKnowledgeItemId(itemId);
+  }, []);
+
+  /** 打开条目：笔记进入写作，其他类型在知识库中查看 */
+  const openItem = useCallback(
+    (itemId: string) => {
+      const item = kb.items.find((i) => i.id === itemId);
+      if (item?.type === 'note') openInWriting(itemId);
+      else openInKnowledge(itemId);
+    },
+    [kb.items, openInWriting, openInKnowledge]
+  );
+
+  /** 由 [[双向链接]] 创建尚不存在的笔记 */
+  const createNoteFromLink = useCallback(
+    async (title: string) => {
+      dispatch({ type: 'SET_MODE', payload: 'writing' });
+      const document = await createDocument({
+        title: ensureExtension(title.trim(), 'markdown'),
+        content: `# ${title.trim()}\n`,
+      });
+      if (document) await kb.refreshItem(document.id);
+    },
+    [createDocument, kb.refreshItem]
+  );
+
+  /** 点击 [[双向链接]]：目标存在则打开，否则创建 */
+  const openWikiTarget = useCallback(
+    (target: string) => {
+      const item = linkIndex.resolve(target);
+      if (item) openItem(item.id);
+      else void createNoteFromLink(target);
+    },
+    [linkIndex, openItem, createNoteFromLink]
+  );
+
+  /** 写作编辑器 [[ 补全的候选标题 */
+  const linkTargets = useMemo(
+    () => [...new Set(documentList.map((doc) => displayTitle(doc.title)))],
+    [documentList]
+  );
+
+  /** Agent 浮窗中的条目标题 */
+  const itemTitles = useMemo(
+    () => new Map(kb.items.map((item) => [item.id, displayTitle(item.title)])),
+    [kb.items]
+  );
+  const resolveItemTitle = useCallback((id: string) => itemTitles.get(id), [itemTitles]);
+
+  // 文档保存后：同步 [[链接]] 到 links 表，并刷新知识库中的该条目（反向链接随之更新）
+  // 只在保存完成时触发，最新的文档与索引通过 ref 读取
+  const linkSyncRef = useRef({ linkIndex, currentDocument, selectedDocId, refresh: kb.refreshItem });
+  linkSyncRef.current = { linkIndex, currentDocument, selectedDocId, refresh: kb.refreshItem };
+  useEffect(() => {
+    const { linkIndex: index, currentDocument: doc, selectedDocId: docId, refresh } =
+      linkSyncRef.current;
+    if (!lastSavedAt || !docId || !doc) return;
+    const targetIds = new Set<string>();
+    for (const link of extractWikiLinks(doc.content)) {
+      const target = index.resolve(link.target);
+      if (target && target.id !== docId) targetIds.add(target.id);
+    }
+    linkRepository
+      .syncReferences(docId, [...targetIds])
+      .then(() => refresh(docId))
+      .catch((error) => console.error('同步双向链接失败:', error));
+  }, [lastSavedAt]);
+
+  // 切换文档时确保知识库中有该条目（新建文档后反向链接面板可立即使用）
+  useEffect(() => {
+    if (selectedDocId && !kb.items.some((item) => item.id === selectedDocId)) {
+      void kb.refreshItem(selectedDocId);
+    }
+  }, [selectedDocId, kb.items, kb.refreshItem]);
+
+  // ================================
+  // 阅读模式
+  // ================================
+
+  const shelfItems = useMemo(() => kb.items.filter(isOnShelf), [kb.items]);
+  const readingItem = useMemo(
+    () => kb.items.find((item) => item.id === readingItemId) ?? null,
+    [kb.items, readingItemId]
+  );
+
+  /** 阅读摘录：创建笔记、打标签并提交 AI 整理 */
+  const handleCreateExcerpt = useCallback(
+    async (input: CreateExcerptInput): Promise<string> => {
+      const item = await knowledgeRepository.create({
+        title: input.title,
+        type: 'note',
+        content: input.content,
+        metadata: { excerptOf: input.sourceItemId },
+      });
+      if (input.tags.length > 0) await knowledgeRepository.setItemTags(item.id, input.tags);
+      await kb.refreshItem(item.id);
+      void requestProcessing(item);
+      setNotice('摘录已保存到知识库');
+      return item.id;
+    },
+    [kb.refreshItem]
+  );
 
   // ================================
   // Editor Change Handler
@@ -567,24 +663,17 @@ const App: React.FC = () => {
       return (
         <VirtualFolders
           folders={virtualFolders}
+          items={kb.items}
           selectedFolderId={selectedFolderId}
-          groupBy={groupBy}
           onFolderSelect={handleFolderSelect}
-          onGroupByChange={setGroupBy}
           onCreateFolder={handleCreateFolder}
         />
       );
     }
 
     if (appState.mode === 'reading') {
-      // Reading mode - book library
       return (
-        <div className="reading-sidebar">
-          <div className="empty-hint">
-            <BookOpen size={32} strokeWidth={1} />
-            <p>阅读管理开发中</p>
-          </div>
-        </div>
+        <ReadingShelf items={shelfItems} selectedId={readingItemId} onSelect={setReadingItemId} />
       );
     }
 
@@ -616,38 +705,43 @@ const App: React.FC = () => {
       case 'reading':
         return (
           <div className="reading-content">
-            <div className="empty-state">
-              <BookOpen size={48} strokeWidth={1} />
-              <h2>阅读模式</h2>
-              <p>文章、电子书的阅读管理正在开发中</p>
-            </div>
+            <ReadingView
+              key={readingItem?.id ?? 'empty'}
+              item={readingItem}
+              onUpdateItem={kb.updateItem}
+              onCreateExcerpt={handleCreateExcerpt}
+              onOpenInWriting={openInWriting}
+              onWikiLinkClick={openWikiTarget}
+            />
           </div>
         );
 
       case 'knowledge':
         return (
           <div className="knowledge-content">
-            <div className="empty-state">
-              <Brain size={48} strokeWidth={1} />
-              <h2>欢迎使用知识库</h2>
-              <p>按 ⌘N 快速添加笔记、录音或网页剪藏</p>
-              <button
-                className="start-btn"
-                onClick={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
-              >
-                <Plus size={16} />
-                <span>开始创建</span>
-              </button>
-            </div>
+            <KnowledgeWorkspace
+              kb={kb}
+              scope={knowledgeScope}
+              linkIndex={linkIndex}
+              related={relatedLinks}
+              selectedItemId={selectedKnowledgeItemId}
+              onSelectItem={setSelectedKnowledgeItemId}
+              onOpenInWriting={openInWriting}
+              onCreateNote={(title) => void createNoteFromLink(title)}
+              onQuickCapture={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
+              onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
+            />
           </div>
         );
 
       case 'writing':
         // Only render editor when document is loaded to prevent stale content
         const canRenderEditor = selectedDocId && currentDocument && !editorLoading;
+        const currentKnowledgeItem = kb.items.find((item) => item.id === selectedDocId);
 
         return (
           <div className="writing-content">
+            <div className="writing-body">
             <div className="writing-editor-wrapper">
               {editorLoading ? (
                 <div className="editor-loading">
@@ -661,6 +755,8 @@ const App: React.FC = () => {
                     onChange={handleEditorChange}
                     fileType={getFileTypeId(currentDocument.title)}
                     fileName={currentDocument.title}
+                    linkTargets={linkTargets}
+                    onWikiLinkClick={openWikiTarget}
                     options={{
                       placeholder: PLACEHOLDERS.CONTENT,
                       showWordCount: false,
@@ -682,6 +778,18 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
+            {showBacklinks && canRenderEditor && currentKnowledgeItem && (
+              <BacklinksPanel
+                item={currentKnowledgeItem}
+                items={kb.items}
+                linkIndex={linkIndex}
+                related={relatedLinks}
+                onOpenItem={openItem}
+                onCreateNote={(title) => void createNoteFromLink(title)}
+                onClose={() => setShowBacklinks(false)}
+              />
+            )}
+            </div>
             <EditorFooter
               charCount={focusCharCount}
               wordCount={focusWordCount}
@@ -692,6 +800,19 @@ const App: React.FC = () => {
               hints={[{ key: '⌘S', label: '保存' }]}
               className="writing-footer"
             >
+              {/* 反向链接面板开关 */}
+              {selectedDocId && (
+                <button
+                  className={`footer-action-btn ${showBacklinks ? 'active' : ''}`}
+                  onClick={() => setShowBacklinks(!showBacklinks)}
+                  title="反向链接与局部图谱"
+                >
+                  <Link2 size={14} />
+                  {currentKnowledgeItem && (
+                    <span>{linkIndex.backlinks(currentKnowledgeItem.id).length}</span>
+                  )}
+                </button>
+              )}
               {/* Version History Button */}
               {selectedDocId && (
                 <button
@@ -755,6 +876,8 @@ const App: React.FC = () => {
                   onChange={handleEditorChange}
                   fileType={getFileTypeId(currentDocument.title)}
                   fileName={currentDocument.title}
+                  linkTargets={linkTargets}
+                  onWikiLinkClick={openWikiTarget}
                   options={{
                     placeholder: PLACEHOLDERS.FOCUS_CONTENT,
                     showWordCount: false,
@@ -897,6 +1020,15 @@ const App: React.FC = () => {
         onClose={handleCloseWelcomeGuide}
         persistDismissal={isFirstTime}
       />
+
+      {/* AI 后台任务进度（任意模式可见） */}
+      <AgentActivityPanel resolveTitle={resolveItemTitle} onOpenItem={openInKnowledge} />
+
+      {notice && (
+        <div className="app-notice" role="status">
+          {notice}
+        </div>
+      )}
 
     </Layout>
   );

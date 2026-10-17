@@ -1,0 +1,100 @@
+// ================================
+// 任务进度列表样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.statusIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+
+  &[data-status='processing'] {
+    color: var(--accent-primary);
+    animation: spin 1s linear infinite;
+  }
+
+  &[data-status='completed'] {
+    color: var(--color-success);
+  }
+
+  &[data-status='failed'] {
+    color: var(--color-error);
+  }
+}
+
+.tasks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+// 高度与 TaskProgressList.tsx 中 TASK_ROW_HEIGHT 一致
+.task {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  height: 36px;
+  min-width: 0;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.label {
+  @include truncate;
+  flex: 1;
+  min-width: 0;
+}
+
+.state {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+
+  .task[data-status='failed'] & {
+    color: var(--color-error);
+  }
+}
+
+.track {
+  height: 4px;
+  margin-left: 20px;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  background-color: var(--accent-primary);
+  border-radius: var(--radius-full);
+  transition: width $transition-normal;
+
+  .task[data-status='completed'] & {
+    background-color: var(--color-success);
+  }
+}
+
+.detail {
+  @include truncate;
+  margin-left: 20px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+
+  .task[data-status='failed'] & {
+    color: var(--color-error);
+  }
+}

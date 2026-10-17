@@ -213,28 +213,6 @@ export interface FilterRule {
 }
 
 // ================================
-// Project (项目)
-// ================================
-
-/**
- * 项目 - 用于组织相关的知识条目
- */
-export interface Project extends BaseEntity {
-  /** 项目名称 */
-  name: string;
-  /** 项目描述 */
-  description?: string;
-  /** 封面图 */
-  coverImage?: string;
-  /** 颜色 */
-  color?: string;
-  /** 是否归档 */
-  isArchived: boolean;
-  /** 条目数量 */
-  itemCount: number;
-}
-
-// ================================
 // Link (知识关联)
 // ================================
 
@@ -301,20 +279,6 @@ export interface QuickInputRecord {
 // ================================
 
 /**
- * 搜索结果
- */
-export interface SearchResult {
-  /** 匹配的知识条目 */
-  item: KnowledgeItem;
-  /** 相关度得分 */
-  score: number;
-  /** 高亮片段 */
-  highlights?: SearchHighlight[];
-  /** 匹配类型 */
-  matchType: 'exact' | 'fuzzy' | 'semantic';
-}
-
-/**
  * 搜索高亮
  */
 export interface SearchHighlight {
@@ -324,86 +288,6 @@ export interface SearchHighlight {
   snippet: string;
   /** 匹配位置 */
   positions?: Array<{ start: number; end: number }>;
-}
-
-/**
- * 搜索选项
- */
-export interface SearchOptions {
-  /** 搜索关键词 */
-  query: string;
-  /** 类型过滤 */
-  types?: KnowledgeItemType[];
-  /** 标签过滤 */
-  tagIds?: string[];
-  /** 文件夹过滤 */
-  folderIds?: string[];
-  /** 项目过滤 */
-  projectIds?: string[];
-  /** 时间范围 */
-  dateRange?: { start: Date; end: Date };
-  /** 是否只搜索收藏 */
-  favoritesOnly?: boolean;
-  /** 排序方式 */
-  sortBy?: 'relevance' | 'createdAt' | 'updatedAt' | 'viewCount';
-  /** 排序顺序 */
-  sortOrder?: 'asc' | 'desc';
-  /** 分页 */
-  limit?: number;
-  offset?: number;
-  /** 是否使用语义搜索 */
-  useSemantic?: boolean;
-}
-
-// ================================
-// Agent Task (AI 任务)
-// ================================
-
-/**
- * AI 任务类型
- */
-export type AgentTaskType =
-  | 'transcribe' // 语音转写
-  | 'summarize' // 内容摘要
-  | 'extract-tags' // 提取标签
-  | 'categorize' // 分类
-  | 'extract-entities' // 实体提取
-  | 'generate-embedding' // 生成向量
-  | 'find-related'; // 寻找相关内容
-
-/**
- * AI 任务状态
- */
-export type AgentTaskStatus =
-  | 'pending' // 待处理
-  | 'processing' // 处理中
-  | 'completed' // 已完成
-  | 'failed'; // 失败
-
-/**
- * AI 任务
- */
-export interface AgentTask extends BaseEntity {
-  /** 任务类型 */
-  type: AgentTaskType;
-  /** 任务状态 */
-  status: AgentTaskStatus;
-  /** 目标知识条目 ID */
-  targetItemId: string;
-  /** 优先级 (1-10) */
-  priority: number;
-  /** 进度 (0-100) */
-  progress: number;
-  /** 错误信息 */
-  errorMessage?: string;
-  /** 重试次数 */
-  retryCount: number;
-  /** 开始时间 */
-  startedAt?: Date;
-  /** 完成时间 */
-  completedAt?: Date;
-  /** 结果数据 */
-  result?: unknown;
 }
 
 // ================================
@@ -451,32 +335,4 @@ export interface AppSettings {
   enableSync: boolean;
   /** 同步服务 */
   syncProvider?: 'icloud' | 'dropbox' | 'custom';
-}
-
-// ================================
-// Statistics (统计)
-// ================================
-
-/**
- * 知识库统计
- */
-export interface KnowledgeBaseStats {
-  /** 总条目数 */
-  totalItems: number;
-  /** 按类型统计 */
-  itemsByType: Record<KnowledgeItemType, number>;
-  /** 总标签数 */
-  totalTags: number;
-  /** 总文件夹数 */
-  totalFolders: number;
-  /** 总项目数 */
-  totalProjects: number;
-  /** 总存储大小（字节） */
-  totalStorageSize: number;
-  /** 本周新增 */
-  itemsThisWeek: number;
-  /** 本月新增 */
-  itemsThisMonth: number;
-  /** 待处理任务数 */
-  pendingTasks: number;
 }

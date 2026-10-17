@@ -3,7 +3,7 @@
 // 虚拟文件夹和智能分组视图
 // ================================
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   Folder,
   FolderOpen,
@@ -13,26 +13,24 @@ import {
   MoreHorizontal,
   Tag,
   Clock,
-  FileType,
   Star,
-  Calendar,
-  Filter,
   Sparkles,
   Edit3,
   Trash2,
   Copy,
-  Settings,
   X,
 } from 'lucide-react';
 import styles from './VirtualFolders.module.scss';
-import { knowledgeStorage } from '../../services/knowledgeStorage';
+import {
+  SMART_FOLDER_PRESETS,
+  matchesAllRules,
+  type FilterRule,
+} from '../../lib/knowledge/filter-rules';
 import type { KnowledgeItem } from '../../types/knowledge';
 
 // ================================
 // 类型定义
 // ================================
-
-export type GroupByType = 'tags' | 'date' | 'type' | 'project' | 'custom';
 
 export interface VirtualFolder {
   id: string;
@@ -47,28 +45,12 @@ export interface VirtualFolder {
   isExpanded?: boolean;
 }
 
-export interface FilterRule {
-  field: string;
-  operator:
-    | 'equals'
-    | 'contains'
-    | 'startsWith'
-    | 'endsWith'
-    | 'in'
-    | 'notIn'
-    | 'isEmpty'
-    | 'isNotEmpty'
-    | 'before'
-    | 'after';
-  value: unknown;
-}
-
 interface VirtualFoldersProps {
   folders: VirtualFolder[];
+  /** 全部知识条目（用于计算智能文件夹的条目数） */
+  items: KnowledgeItem[];
   selectedFolderId?: string;
-  groupBy: GroupByType;
   onFolderSelect: (folderId: string) => void;
-  onGroupByChange: (groupBy: GroupByType) => void;
   onCreateFolder?: () => void;
   onEditFolder?: (folder: VirtualFolder) => void;
   onDeleteFolder?: (folderId: string) => void;
@@ -140,194 +122,6 @@ const DATE_PRESETS = [
   { value: 'thisMonth', label: '本月' },
   { value: 'lastMonth', label: '上月' },
 ];
-
-// ================================
-// 分组选项
-// ================================
-
-const GROUP_BY_OPTIONS: Array<{ value: GroupByType; label: string; icon: React.ReactNode }> = [
-  { value: 'tags', label: '按标签', icon: <Tag size={14} /> },
-  { value: 'date', label: '按日期', icon: <Calendar size={14} /> },
-  { value: 'type', label: '按类型', icon: <FileType size={14} /> },
-  { value: 'project', label: '按项目', icon: <Folder size={14} /> },
-  { value: 'custom', label: '自定义', icon: <Settings size={14} /> },
-];
-
-// ================================
-// 智能文件夹预设
-// ================================
-
-const SMART_FOLDER_PRESETS: VirtualFolder[] = [
-  {
-    id: 'all',
-    name: '全部',
-    type: 'smart',
-    itemCount: 0,
-    icon: 'folder',
-  },
-  {
-    id: 'recent',
-    name: '最近',
-    type: 'smart',
-    itemCount: 0,
-    icon: 'clock',
-    filterRules: [{ field: 'updatedAt', operator: 'after', value: 'last7days' }],
-  },
-  {
-    id: 'favorites',
-    name: '收藏',
-    type: 'smart',
-    itemCount: 0,
-    icon: 'star',
-    filterRules: [{ field: 'isFavorite', operator: 'equals', value: true }],
-  },
-  {
-    id: 'untagged',
-    name: '未标签',
-    type: 'smart',
-    itemCount: 0,
-    icon: 'tag',
-    filterRules: [{ field: 'tagIds', operator: 'isEmpty', value: null }],
-  },
-];
-
-// ================================
-// 筛选规则执行引擎
-// ================================
-
-/**
- * 将日期预设值转换为实际日期
- */
-function getDateFromPreset(preset: string): Date {
-  const now = new Date();
-  switch (preset) {
-    case 'today':
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    case 'yesterday':
-      return new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-    case 'last7days':
-      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    case 'last30days':
-      return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    case 'thisMonth':
-      return new Date(now.getFullYear(), now.getMonth(), 1);
-    case 'lastMonth':
-      return new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    default:
-      return new Date(preset);
-  }
-}
-
-/**
- * 检查单个条目是否匹配单条规则
- */
-function matchesRule(item: KnowledgeItem, rule: FilterRule): boolean {
-  const { field, operator, value } = rule;
-
-  // 获取条目字段值
-  const fieldValue = (item as unknown as Record<string, unknown>)[field];
-
-  switch (operator) {
-    case 'equals':
-      return fieldValue === value;
-
-    case 'contains':
-      if (field === 'tagIds' && Array.isArray(fieldValue)) {
-        return fieldValue.includes(value as string);
-      }
-      if (typeof fieldValue === 'string' && typeof value === 'string') {
-        return fieldValue.toLowerCase().includes(value.toLowerCase());
-      }
-      return false;
-
-    case 'startsWith':
-      if (typeof fieldValue === 'string' && typeof value === 'string') {
-        return fieldValue.toLowerCase().startsWith(value.toLowerCase());
-      }
-      return false;
-
-    case 'endsWith':
-      if (typeof fieldValue === 'string' && typeof value === 'string') {
-        return fieldValue.toLowerCase().endsWith(value.toLowerCase());
-      }
-      return false;
-
-    case 'in':
-      if (Array.isArray(value)) {
-        return value.includes(fieldValue);
-      }
-      return false;
-
-    case 'notIn':
-      if (Array.isArray(value)) {
-        return !value.includes(fieldValue);
-      }
-      return true;
-
-    case 'isEmpty':
-      if (Array.isArray(fieldValue)) {
-        return fieldValue.length === 0;
-      }
-      return !fieldValue;
-
-    case 'isNotEmpty':
-      if (Array.isArray(fieldValue)) {
-        return fieldValue.length > 0;
-      }
-      return !!fieldValue;
-
-    case 'before': {
-      const itemDate = new Date(fieldValue as string | Date);
-      const compareDate = getDateFromPreset(value as string);
-      return itemDate < compareDate;
-    }
-
-    case 'after': {
-      const itemDate = new Date(fieldValue as string | Date);
-      const compareDate = getDateFromPreset(value as string);
-      return itemDate > compareDate;
-    }
-
-    default:
-      return false;
-  }
-}
-
-/**
- * 检查条目是否匹配所有规则（AND 逻辑）
- */
-function matchesAllRules(item: KnowledgeItem, rules: FilterRule[]): boolean {
-  if (!rules || rules.length === 0) {
-    return true;
-  }
-  return rules.every((rule) => matchesRule(item, rule));
-}
-
-/**
- * 根据筛选规则计算匹配的条目数量
- */
-async function calculateItemCount(folderId: string, filterRules?: FilterRule[]): Promise<number> {
-  try {
-    const allItems = await knowledgeStorage.getAllItems();
-
-    // 特殊处理：全部文件夹
-    if (folderId === 'all') {
-      return allItems.length;
-    }
-
-    // 如果没有筛选规则，返回 0
-    if (!filterRules || filterRules.length === 0) {
-      return 0;
-    }
-
-    // 根据规则筛选条目
-    const matchedItems = allItems.filter((item) => matchesAllRules(item, filterRules));
-    return matchedItems.length;
-  } catch (error) {
-    console.error('计算条目数量失败:', error);
-    return 0;
-  }
-}
 
 // ================================
 // 筛选规则编辑器组件
@@ -554,35 +348,15 @@ const FilterRuleEditor: React.FC<FilterRuleEditorProps> = ({ rules, onChange }) 
 
 const VirtualFolders: React.FC<VirtualFoldersProps> = ({
   folders,
+  items,
   selectedFolderId,
-  groupBy,
   onFolderSelect,
-  onGroupByChange,
   onCreateFolder,
   onEditFolder,
   onDeleteFolder,
 }) => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['smart']));
-  const [showGroupByDropdown, setShowGroupByDropdown] = useState(false);
   const [contextMenuFolder, setContextMenuFolder] = useState<string | null>(null);
-  const [smartFolderCounts, setSmartFolderCounts] = useState<Record<string, number>>({});
-
-  // 动态计算智能文件夹的 itemCount
-  useEffect(() => {
-    const loadSmartFolderCounts = async () => {
-      const counts: Record<string, number> = {};
-
-      for (const folder of SMART_FOLDER_PRESETS) {
-        const count = await calculateItemCount(folder.id, folder.filterRules);
-        counts[folder.id] = count;
-      }
-
-      setSmartFolderCounts(counts);
-    };
-
-    loadSmartFolderCounts();
-  }, []);
-
   // 切换文件夹展开状态
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders((prev) => {
@@ -605,11 +379,15 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
     return isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />;
   }, []);
 
-  // 合并智能文件夹和用户文件夹，并应用动态计算的 itemCount
+  // 合并智能文件夹和用户文件夹，智能文件夹的条目数按规则实时计算
   const allFolders = useMemo(() => {
-    const smartFoldersWithCounts = SMART_FOLDER_PRESETS.map((folder) => ({
-      ...folder,
-      itemCount: smartFolderCounts[folder.id] || 0,
+    const smartFoldersWithCounts: VirtualFolder[] = SMART_FOLDER_PRESETS.map((preset) => ({
+      id: preset.id,
+      name: preset.name,
+      type: 'smart',
+      icon: preset.icon,
+      filterRules: preset.rules.length > 0 ? preset.rules : undefined,
+      itemCount: items.filter((item) => matchesAllRules(item, preset.rules)).length,
     }));
 
     return [
@@ -628,7 +406,7 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
         children: folders,
       },
     ];
-  }, [folders, smartFolderCounts]);
+  }, [folders, items]);
 
   // 渲染文件夹项
   const renderFolder = useCallback(
@@ -779,36 +557,6 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
       <div className={styles.foldersHeader}>
         <h3 className={styles.foldersTitle}>文件夹</h3>
         <div className={styles.headerActions}>
-          {/* 分组方式下拉菜单 */}
-          <div className={styles.groupByWrapper}>
-            <button
-              className={styles.groupByBtn}
-              onClick={() => setShowGroupByDropdown(!showGroupByDropdown)}
-              title="分组方式"
-            >
-              <Filter size={14} />
-            </button>
-
-            {showGroupByDropdown && (
-              <div className={styles.groupByDropdown}>
-                <div className={styles.dropdownHeader}>分组方式</div>
-                {GROUP_BY_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    className={`${styles.dropdownItem} ${groupBy === option.value ? styles.dropdownItemActive : ''}`}
-                    onClick={() => {
-                      onGroupByChange(option.value);
-                      setShowGroupByDropdown(false);
-                    }}
-                  >
-                    {option.icon}
-                    <span>{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* 添加文件夹按钮 */}
           <button className={styles.addFolderBtn} onClick={onCreateFolder} title="新建文件夹">
             <Plus size={14} />

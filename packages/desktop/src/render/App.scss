@@ -422,75 +422,9 @@
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   overflow: hidden;
   background-color: var(--bg-primary);
-
-  .empty-state {
-    flex: 1;
-    @include flex-center;
-    flex-direction: column;
-    gap: var(--spacing-4);
-    padding: var(--spacing-8);
-    text-align: center;
-
-    .empty-icon {
-      @include flex-center;
-      width: 80px;
-      height: 80px;
-      background-color: var(--bg-tertiary);
-      border-radius: var(--radius-xl);
-      color: var(--accent-secondary);
-      opacity: 0.8;
-
-      svg {
-        width: 48px;
-        height: 48px;
-      }
-    }
-
-    h2 {
-      font-size: var(--font-size-2xl);
-      font-weight: $font-weight-semibold;
-      color: var(--text-primary);
-      margin: 0;
-    }
-
-    p {
-      font-size: var(--font-size-md);
-      color: var(--text-muted);
-      margin: 0;
-      max-width: 400px;
-    }
-
-    .start-btn {
-      @include button-reset;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--spacing-2);
-      height: 44px;
-      padding: 0 var(--spacing-5);
-      background-color: var(--accent-primary);
-      border-radius: var(--radius-lg);
-      font-size: var(--font-size-md);
-      font-weight: $font-weight-medium;
-      color: var(--text-on-accent);
-      transition: $transition-colors;
-      margin-top: var(--spacing-2);
-
-      &:hover {
-        background-color: var(--accent-primary-hover);
-      }
-
-      &:active {
-        background-color: var(--accent-primary-active);
-      }
-
-      svg {
-        width: 18px;
-        height: 18px;
-      }
-    }
-  }
 }
 
 // ================================
@@ -704,6 +638,14 @@ body.distraction-free {
   padding: var(--spacing-4);
 }
 
+// 编辑器与反向链接面板并排
+.writing-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  gap: var(--spacing-3);
+}
+
 // RichEditor wrapper should fill available space
 .writing-editor-wrapper {
   flex: 1;
@@ -767,6 +709,43 @@ body.distraction-free {
 .writing-footer {
   @include editor-footer;
   padding: var(--spacing-2) var(--spacing-6);
+}
+
+// 编辑器底栏的操作按钮（反向链接、版本历史）
+.footer-action-btn {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover,
+  &.active {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// 轻提示
+.app-notice {
+  position: fixed;
+  left: 50%;
+  bottom: var(--spacing-8);
+  transform: translateX(-50%);
+  max-width: 560px;
+  padding: var(--spacing-2) var(--spacing-4);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg-secondary);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  z-index: $z-modal;
 }
 
 .writing-sidebar {
@@ -934,115 +913,9 @@ body.distraction-free {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   overflow: hidden;
   background-color: var(--bg-primary);
-
-  .empty-state {
-    flex: 1;
-    @include flex-center;
-    flex-direction: column;
-    gap: var(--spacing-4);
-    padding: var(--spacing-8);
-    text-align: center;
-
-    svg {
-      color: var(--accent-secondary);
-      opacity: 0.6;
-    }
-
-    h2 {
-      font-size: var(--font-size-2xl);
-      font-weight: $font-weight-semibold;
-      color: var(--text-primary);
-      margin: 0;
-    }
-
-    p {
-      font-size: var(--font-size-md);
-      color: var(--text-muted);
-      margin: 0;
-      max-width: 400px;
-    }
-
-    .start-btn {
-      @include button-reset;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--spacing-2);
-      height: 44px;
-      padding: 0 var(--spacing-5);
-      background-color: var(--accent-primary);
-      border-radius: var(--radius-lg);
-      font-size: var(--font-size-md);
-      font-weight: $font-weight-medium;
-      color: var(--text-on-accent);
-      transition: $transition-colors;
-      margin-top: var(--spacing-2);
-
-      &:hover {
-        background-color: var(--accent-primary-hover);
-      }
-
-      &:active {
-        background-color: var(--accent-primary-active);
-      }
-
-      svg {
-        width: 18px;
-        height: 18px;
-      }
-    }
-  }
-}
-
-.reading-sidebar {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: var(--spacing-2);
-
-  .empty-hint {
-    flex: 1;
-    @include flex-center;
-    flex-direction: column;
-    gap: var(--spacing-3);
-    padding: var(--spacing-4);
-    text-align: center;
-    color: var(--text-muted);
-
-    svg {
-      opacity: 0.5;
-    }
-
-    p {
-      font-size: var(--font-size-sm);
-      margin: 0;
-    }
-
-    .import-btn {
-      @include button-reset;
-      display: inline-flex;
-      align-items: center;
-      gap: var(--spacing-1);
-      padding: var(--spacing-2) var(--spacing-3);
-      background-color: var(--accent-primary);
-      border-radius: var(--radius-md);
-      font-size: var(--font-size-sm);
-      font-weight: $font-weight-medium;
-      color: var(--text-on-accent);
-      transition: $transition-colors;
-
-      &:hover {
-        background-color: var(--accent-primary-hover);
-      }
-
-      svg {
-        width: 14px;
-        height: 14px;
-        opacity: 1;
-      }
-    }
-  }
 }
 
 // ================================

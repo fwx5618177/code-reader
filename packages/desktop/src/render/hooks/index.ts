@@ -48,9 +48,3 @@ export { useTheme } from './useTheme';
 // ================================
 
 export { usePageStyles } from './usePageStyles';
-
-// ================================
-// 素材 Hooks
-// ================================
-
-export { useMaterials } from './useMaterials';
