@@ -2,10 +2,18 @@
 // Hunspell .aff 解析
 // 支持 SET/FLAG(默认/long/num/UTF-8)/AF 别名/PFX/SFX(剥离、追加、条件、交叉组合、续接标记)
 // 以及 TRY/KEY/REP/ICONV/IGNORE/WORDCHARS 与常用的特殊标记（FORBIDDENWORD/NOSUGGEST/KEEPCASE/NEEDAFFIX/
-// ONLYINCOMPOUND/COMPOUNDFLAG/COMPOUNDBEGIN/COMPOUNDMIDDLE/COMPOUNDEND/COMPOUNDMIN）
+// ONLYINCOMPOUND/COMPOUNDFLAG/COMPOUNDBEGIN/COMPOUNDMIDDLE/COMPOUNDEND/COMPOUNDMIN/COMPOUNDRULE）
 // ================================
 
 export type FlagMode = 'char' | 'long' | 'num' | 'utf8';
+
+/** COMPOUNDRULE 的一个元素：标记及其量词（* 零或多次，? 零或一次） */
+export interface CompoundRuleElement {
+  flag: string;
+  quantifier: '' | '*' | '?';
+}
+
+export type CompoundRule = readonly CompoundRuleElement[];
 
 /** 一条前缀/后缀规则 */
 export interface AffixRule {
@@ -50,8 +58,10 @@ export interface AffixData {
   compoundBegin: string | null;
   compoundMiddle: string | null;
   compoundEnd: string | null;
-  /** 复合词每个组成部分的最小长度 */
+  /** 复合词每个组成部分的最小长度（字符数） */
   compoundMin: number;
+  /** COMPOUNDRULE 复合规则 */
+  compoundRules: CompoundRule[];
 }
 
 /** 未声明 KEY 时使用的 QWERTY 键盘布局 */
@@ -108,6 +118,52 @@ export function conditionToRegExp(condition: string, kind: AffixRule['kind']): R
   return new RegExp(kind === 'SFX' ? `(?:${source})$` : `^(?:${source})`, 'u');
 }
 
+/**
+ * 解析一条 COMPOUNDRULE 规则：标记序列，每个标记后可跟 * 或 ?。
+ * long / num 标记写在括号中，如 (aa)*(bb)? 或 (1001)*(1002)；char / UTF-8 标记可直接书写（如 n*1t），也可加括号。
+ * 与 Hunspell 一致，括号只用于界定标记：括号内解出多个标记时依次作为多个元素，量词只作用于最后一个。
+ * 语法错误（括号不闭合、量词前没有标记或重复量词、long / num 标记未加括号却使用量词）时抛出错误
+ */
+export function parseCompoundRule(pattern: string, flagMode: FlagMode): CompoundRule {
+  const elements: CompoundRuleElement[] = [];
+  const pushFlags = (raw: string) => {
+    for (const flag of parseFlags(raw, { flagMode, flagAliases: [] })) elements.push({ flag, quantifier: '' });
+  };
+  const singleCharFlags = flagMode === 'char' || flagMode === 'utf8';
+  /** long / num 模式下括号外连续书写的标记，遇到括号或结尾时整体解析 */
+  let bare = '';
+  const flushBare = () => {
+    if (bare) pushFlags(bare);
+    bare = '';
+  };
+
+  const chars = Array.from(pattern);
+  for (let i = 0; i < chars.length; i++) {
+    const char = chars[i];
+    if (char === '(') {
+      flushBare();
+      const close = chars.indexOf(')', i + 1);
+      if (close < 0) throw new Error(`COMPOUNDRULE 缺少 )：${pattern}`);
+      const inner = chars.slice(i + 1, close).join('');
+      if (!inner) throw new Error(`COMPOUNDRULE 括号内没有标记：${pattern}`);
+      pushFlags(inner);
+      i = close;
+    } else if (char === '*' || char === '?') {
+      if (bare) throw new Error(`COMPOUNDRULE 中的 ${flagMode} 标记需写在括号内才能使用量词：${pattern}`);
+      const last = elements[elements.length - 1];
+      if (!last || last.quantifier) throw new Error(`COMPOUNDRULE 量词位置不正确：${pattern}`);
+      last.quantifier = char;
+    } else if (singleCharFlags) {
+      elements.push({ flag: char, quantifier: '' });
+    } else {
+      bare += char;
+    }
+  }
+  flushBare();
+  if (elements.length === 0) throw new Error(`COMPOUNDRULE 为空：${pattern}`);
+  return elements;
+}
+
 function emptyAffixData(): AffixData {
   return {
     flagMode: 'char',
@@ -130,6 +186,7 @@ function emptyAffixData(): AffixData {
     compoundMiddle: null,
     compoundEnd: null,
     compoundMin: DEFAULT_COMPOUND_MIN,
+    compoundRules: [],
   };
 }
 
@@ -173,7 +230,7 @@ export function parseAffix(text: string): AffixData {
   const aff = emptyAffixData();
   /** 每个词缀标记尚未读取的规则行数，以及头部声明的交叉组合属性 */
   const pendingRules = new Map<string, { cross: boolean; remaining: number }>();
-  /** 带计数头的表（AF/REP/ICONV）剩余行数 */
+  /** 带计数头的表（AF/REP/ICONV/COMPOUNDRULE）剩余行数 */
   const pendingTables = new Map<string, number>();
 
   for (const rawLine of text.split(/\r?\n/)) {
@@ -190,7 +247,8 @@ export function parseAffix(text: string): AffixData {
       }
       case 'AF':
       case 'REP':
-      case 'ICONV': {
+      case 'ICONV':
+      case 'COMPOUNDRULE': {
         const remaining = pendingTables.get(directive) ?? 0;
         if (remaining === 0 && /^\d+$/.test(fields[1] ?? '') && fields.length === 2) {
           pendingTables.set(directive, Number(fields[1]));
@@ -199,6 +257,8 @@ export function parseAffix(text: string): AffixData {
         pendingTables.set(directive, Math.max(remaining - 1, 0));
         if (directive === 'AF') {
           aff.flagAliases.push(parseFlags(fields[1] ?? '', { flagMode: aff.flagMode, flagAliases: [] }));
+        } else if (directive === 'COMPOUNDRULE') {
+          if (fields[1]) aff.compoundRules.push(parseCompoundRule(fields[1], aff.flagMode));
         } else if (fields.length >= 3) {
           // REP 中的 _ 表示空格
           const pair: [string, string] =
@@ -248,9 +308,12 @@ export function parseAffix(text: string): AffixData {
       case 'WORDCHARS':
         aff.wordChars = fields[1] ?? '';
         break;
-      case 'COMPOUNDMIN':
-        aff.compoundMin = Math.max(1, Number(fields[1]) || DEFAULT_COMPOUND_MIN);
+      case 'COMPOUNDMIN': {
+        // 与 Hunspell 一致：小于 1 的值按 1 处理，无法解析时保持默认值
+        const min = Number(fields[1]);
+        aff.compoundMin = Number.isInteger(min) ? Math.max(1, min) : DEFAULT_COMPOUND_MIN;
         break;
+      }
       default: {
         const key = FLAG_DIRECTIVES[directive];
         if (key && fields[1]) {

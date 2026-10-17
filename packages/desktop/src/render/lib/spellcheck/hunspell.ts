@@ -1,10 +1,12 @@
 // ================================
 // Hunspell 拼写检查器（纯 TypeScript 实现）
 // 加载 .aff/.dic，按词缀规则还原词根进行检查，并支持大小写变体、
-// 双重后缀、前后缀交叉组合、基于 COMPOUNDFLAG 系列标记的复合词，以及由词根展开全部词形
+// 双重后缀、前后缀交叉组合、复合词（COMPOUNDFLAG 系列标记与 COMPOUNDRULE 规则共用同一切分流程），
+// 以及由词根展开全部词形
 // ================================
 
 import { parseAffix, parseFlags, stripIgnored, type AffixData, type AffixRule } from './affix';
+import { acceptsStates, advanceStates, startStates, type CompoundRuleStates } from './compound-rule';
 import { decodeDictionaryFile, detectEncoding } from './encoding';
 
 type Flags = readonly string[];
@@ -20,6 +22,16 @@ interface Analysis {
 
 type CaseKind = 'none' | 'lower' | 'init' | 'all' | 'mixed';
 type CompoundPosition = 'begin' | 'middle' | 'end';
+
+/**
+ * 复合词切分进行中的状态：两种复合机制各自是否仍可能成立。
+ * byFlag：已切出的各部分都带对应位置的 COMPOUNDFLAG / COMPOUNDBEGIN / COMPOUNDMIDDLE / COMPOUNDEND；
+ * byRule：每条 COMPOUNDRULE 的 NFA 状态集合（空集合表示该规则已不可能匹配）
+ */
+interface CompoundState {
+  byFlag: boolean;
+  byRule: readonly CompoundRuleStates[];
+}
 
 /** 单词的大小写形态 */
 export function caseKind(word: string): CaseKind {
@@ -83,7 +95,8 @@ export class Hunspell {
   private readonly prefixIndex = new Map<string, AffixRule[]>();
   private readonly suffixesByFlag = new Map<string, AffixRule[]>();
   private readonly prefixesByFlag = new Map<string, AffixRule[]>();
-  private readonly hasCompounding: boolean;
+  /** 复合词切分的初始状态；两种机制都未声明时为 null（不做复合词检查） */
+  private readonly compoundStart: CompoundState | null;
 
   /** 由原始字节构造，按 .aff 中的 SET 声明解码 */
   static fromBytes(affBytes: Uint8Array, dicBytes: Uint8Array): Hunspell {
@@ -101,8 +114,10 @@ export class Hunspell {
       addToIndex(this.prefixIndex, rule.add.slice(0, 1), rule);
       addToIndex(this.prefixesByFlag, rule.flag, rule);
     }
-    const { compoundFlag, compoundBegin, compoundEnd } = this.aff;
-    this.hasCompounding = compoundFlag !== null || (compoundBegin !== null && compoundEnd !== null);
+    const { compoundFlag, compoundBegin, compoundEnd, compoundRules } = this.aff;
+    const byFlag = compoundFlag !== null || (compoundBegin !== null && compoundEnd !== null);
+    this.compoundStart =
+      byFlag || compoundRules.length > 0 ? { byFlag, byRule: compoundRules.map(startStates) } : null;
     this.loadDic(dicText);
   }
 
@@ -242,7 +257,7 @@ export class Hunspell {
       if (forSuggestion && hasFlag(flags, noSuggest)) continue;
       return true;
     }
-    return this.hasCompounding && this.isCompound(word, 0, 'begin');
+    return this.compoundStart !== null && this.isCompound(Array.from(word), 0, 0, this.compoundStart);
   }
 
   /**
@@ -318,18 +333,46 @@ export class Hunspell {
     return !rule.condition || rule.condition.test(stem) ? stem : null;
   }
 
-  /** 从 start 开始能否切分为合法的复合词（至少两个部分） */
-  private isCompound(word: string, start: number, position: CompoundPosition): boolean {
+  /**
+   * 从 start 开始能否切分为合法的复合词（至少两个部分，每部分至少 COMPOUNDMIN 个字符）。
+   * 两种机制在同一次切分中同步推进，任一机制在最后一部分处成立即可；两者都不可能成立时剪枝
+   * @param chars 按码点拆分的单词
+   * @param count 已切出的部分数
+   */
+  private isCompound(chars: readonly string[], start: number, count: number, state: CompoundState): boolean {
     const min = this.aff.compoundMin;
-    for (let end = start + min; end <= word.length - min; end++) {
-      if (this.isCompoundPart(word.slice(start, end), position) && this.isCompound(word, end, 'middle')) {
+    for (let end = start + min; end <= chars.length; end++) {
+      const last = end === chars.length;
+      if (last ? count === 0 : chars.length - end < min) continue;
+      const position: CompoundPosition = count === 0 ? 'begin' : last ? 'end' : 'middle';
+      const next = this.advanceCompound(chars.slice(start, end).join(''), position, state);
+      if (!next) continue;
+      if (last) {
+        if (next.byFlag || next.byRule.some((states, i) => acceptsStates(this.aff.compoundRules[i], states))) {
+          return true;
+        }
+      } else if (this.isCompound(chars, end, count + 1, next)) {
         return true;
       }
     }
-    return position !== 'begin' && word.length - start >= min && this.isCompoundPart(word.slice(start), 'end');
+    return false;
   }
 
-  private isCompoundPart(part: string, position: CompoundPosition): boolean {
+  /** 读入一个组成部分后的切分状态；两种机制都不可能成立时返回 null */
+  private advanceCompound(part: string, position: CompoundPosition, state: CompoundState): CompoundState | null {
+    const byFlag = state.byFlag && this.isFlagCompoundPart(part, position);
+    let byRule = state.byRule;
+    if (byRule.some((states) => states.size > 0)) {
+      const flagSets = this.ruleCompoundFlagSets(part);
+      byRule = byRule.map((states, i) =>
+        states.size > 0 ? advanceStates(this.aff.compoundRules[i], states, flagSets) : states
+      );
+    }
+    return byFlag || byRule.some((states) => states.size > 0) ? { byFlag, byRule } : null;
+  }
+
+  /** COMPOUNDFLAG 系列：组成部分（可带词缀）须带通用复合标记或对应位置的标记 */
+  private isFlagCompoundPart(part: string, position: CompoundPosition): boolean {
     const { compoundFlag, compoundBegin, compoundMiddle, compoundEnd, forbiddenWord } = this.aff;
     const positional = position === 'begin' ? compoundBegin : position === 'middle' ? compoundMiddle : compoundEnd;
     for (const { flags } of this.analyses(part)) {
@@ -337,5 +380,16 @@ export class Hunspell {
       if (hasFlag(flags, compoundFlag) || hasFlag(flags, positional)) return true;
     }
     return false;
+  }
+
+  /**
+   * COMPOUNDRULE：与 Hunspell 一致，组成部分必须是词典中的词根（不带词缀），
+   * 返回各同形词条的标记；禁用词与必须带词缀的词根不参与。ONLYINCOMPOUND 词根可以参与
+   */
+  private ruleCompoundFlagSets(part: string): Flags[] {
+    const { forbiddenWord, needAffix } = this.aff;
+    return (this.words.get(part) ?? []).filter(
+      (flags) => !hasFlag(flags, forbiddenWord) && !hasFlag(flags, needAffix)
+    );
   }
 }
