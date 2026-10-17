@@ -8,7 +8,7 @@
 // ================================
 
 /** 节点类型枚举 */
-export type LatexNodeType =
+type LatexNodeType =
   | 'root'           // 根节点
   | 'preamble'       // 前言区域
   | 'document'       // 文档正文
@@ -19,7 +19,6 @@ export type LatexNodeType =
   | 'math_inline'    // 行内公式 $...$
   | 'math_block'     // 块级公式 $$...$$ 或 \[...\]
   | 'comment'        // 注释 %...
-  | 'newline'        // 换行
   | 'paragraph'      // 段落
   | 'section'        // 章节标题
   | 'list'           // 列表环境
@@ -161,7 +160,7 @@ export interface MathInlineNode extends LatexNode {
  * 取值为 $$、\[ 或数学环境名（equation、align、gather、pmatrix、cases 等），
  * 解析器遇到未知数学环境时会原样保留环境名，因此需要允许任意字符串
  */
-export type MathBlockDelimiter = '$$' | '\\[' | (string & {});
+type MathBlockDelimiter = '$$' | '\\[' | (string & {});
 
 /** 块级公式节点 */
 export interface MathBlockNode extends LatexNode {
@@ -183,12 +182,6 @@ export interface CommentNode extends LatexNode {
   content: string;
 }
 
-/** 换行节点 */
-export interface NewlineNode extends LatexNode {
-  type: 'newline';
-  /** 是否为段落分隔（双换行） */
-  isParagraphBreak: boolean;
-}
 
 /** 段落节点 */
 export interface ParagraphNode extends LatexNode {
@@ -206,8 +199,6 @@ export interface SectionNode extends LatexNode {
   title: LatexNode[];
   /** 是否为星号版本（无编号） */
   star: boolean;
-  /** 章节编号 */
-  number?: string;
   /** 标签 */
   label?: string;
 }
@@ -251,7 +242,6 @@ export type AnyLatexNode =
   | MathInlineNode
   | MathBlockNode
   | CommentNode
-  | NewlineNode
   | ParagraphNode
   | SectionNode
   | ListNode
@@ -264,10 +254,6 @@ export type AnyLatexNode =
 
 /** 解析器选项 */
 export interface LatexParserOptions {
-  /** 是否为严格模式 */
-  strict?: boolean;
-  /** 是否解析数学公式内部结构 */
-  parseMathContent?: boolean;
   /** 是否保留注释 */
   preserveComments?: boolean;
   /** 是否保留空白 */
@@ -280,42 +266,8 @@ export interface LatexParserOptions {
 export interface LatexParseResult {
   /** 解析后的 AST */
   ast: RootNode;
-  /** 是否成功 */
-  success: boolean;
-  /** 错误列表 */
-  errors: ParseError[];
-  /** 警告列表 */
-  warnings: ParseWarning[];
-  /** 解析耗时（毫秒） */
-  parseTime: number;
-}
-
-/** 解析错误 */
-export interface ParseError {
-  /** 错误消息 */
-  message: string;
-  /** 起始位置 */
-  start: number;
-  /** 结束位置 */
-  end: number;
-  /** 行号 */
-  line: number;
-  /** 列号 */
-  column: number;
-}
-
-/** 解析警告 */
-export interface ParseWarning {
-  /** 警告消息 */
-  message: string;
-  /** 起始位置 */
-  start: number;
-  /** 结束位置 */
-  end: number;
-  /** 行号 */
-  line: number;
-  /** 列号 */
-  column: number;
+  /** 错误消息列表 */
+  errors: string[];
 }
 
 // ================================
@@ -324,157 +276,60 @@ export interface ParseWarning {
 
 /** 渲染选项 */
 export interface LatexRenderOptions {
-  /** 基础字体大小 */
-  baseFontSize?: number;
   /** 是否显示错误 */
   showErrors?: boolean;
-  /** 是否渲染行号 */
-  showLineNumbers?: boolean;
   /** 自定义 CSS 类前缀 */
   classPrefix?: string;
 }
 
-/** 渲染结果 */
-export interface LatexRenderResult {
-  /** 渲染后的 HTML */
+
+// ================================
+// 增量渲染块与渲染 Worker 消息
+// ================================
+
+/** 全文 section 索引条目（\tableofcontents 渲染依据） */
+export interface TocEntry {
+  /** 锚点 ID（section-节点ID） */
+  id: string;
+  /** 标题纯文本 */
+  title: string;
+  /** 章节级别 */
+  level: string;
+  /** 缩进深度 */
+  depth: number;
+}
+
+/** 块类型：前言块只产出标题，正文块渲染其顶层节点 */
+export type LatexBlockKind = 'preamble' | 'body';
+
+/** 发送给渲染 Worker 的块 */
+export interface RenderJob {
+  id: string;
+  renderKey: string;
+  kind: LatexBlockKind;
+  nodes: readonly LatexNode[];
+}
+
+/** 块渲染结果 */
+export interface RenderedBlock {
+  id: string;
+  /** 渲染时使用的 renderKey，提交前用来判断结果是否仍然有效 */
+  renderKey: string;
   html: string;
-  /** 是否成功 */
-  success: boolean;
-  /** 错误信息 */
+}
+
+/** 渲染 Worker 请求：一批块 + 渲染所需的全局上下文 */
+export interface RenderWorkerRequest {
+  id: number;
+  options: LatexRenderOptions;
+  preamble: PreambleNode | null;
+  sectionIndex: TocEntry[];
+  jobs: RenderJob[];
+}
+
+/** 渲染 Worker 响应 */
+export interface RenderWorkerResponse {
+  id: number;
+  results?: RenderedBlock[];
   error?: string;
-  /** 渲染耗时（毫秒） */
-  renderTime: number;
 }
-
-/** 渲染块信息（用于可视区域优先渲染） */
-export interface RenderBlock {
-  /** 块 ID */
-  id: string;
-  /** 对应的 AST 节点 */
-  node: LatexNode;
-  /** 渲染后的 HTML（可能为 null 表示尚未渲染） */
-  html: string | null;
-  /** 估算高度（像素） */
-  estimatedHeight: number;
-  /** 是否在可视区域内 */
-  isVisible: boolean;
-  /** 优先级（越小越优先） */
-  priority: number;
-}
-
-// ================================
-// 增量更新相关类型
-// ================================
-
-/** 文档变更 */
-export interface DocumentChange {
-  /** 变更起始位置 */
-  from: number;
-  /** 变更结束位置 */
-  to: number;
-  /** 插入的文本 */
-  insert: string;
-  /** 删除的文本 */
-  deleted: string;
-}
-
-/** 增量解析结果 */
-export interface IncrementalParseResult {
-  /** 更新后的 AST */
-  ast: RootNode;
-  /** 受影响的节点 ID 列表 */
-  affectedNodeIds: string[];
-  /** 需要重新渲染的节点 ID 列表 */
-  dirtyNodeIds: string[];
-  /** 是否需要完全重新解析 */
-  fullReparse: boolean;
-  /** 解析耗时（毫秒） */
-  parseTime: number;
-}
-
-// ================================
-// 缓存相关类型
-// ================================
-
-/** AST 缓存项 */
-export interface ASTCacheEntry {
-  /** 文档内容的哈希值 */
-  contentHash: string;
-  /** 缓存的 AST */
-  ast: RootNode;
-  /** 创建时间戳 */
-  timestamp: number;
-  /** 访问次数 */
-  accessCount: number;
-  /** 最后访问时间 */
-  lastAccess: number;
-}
-
-/** 渲染缓存项 */
-export interface RenderCacheEntry {
-  /** 节点哈希值 */
-  nodeHash: string;
-  /** 渲染后的 HTML */
-  html: string;
-  /** 创建时间戳 */
-  timestamp: number;
-  /** 访问次数 */
-  accessCount: number;
-}
-
-/** 缓存配置 */
-export interface CacheConfig {
-  /** 最大缓存条目数 */
-  maxEntries: number;
-  /** 缓存过期时间（毫秒） */
-  ttl: number;
-  /** 是否启用 LRU 淘汰策略 */
-  useLRU: boolean;
-}
-
-// ================================
-// Web Worker 消息类型
-// ================================
-
-/** Worker 消息类型 */
-export type WorkerMessageType =
-  | 'parse'
-  | 'parse_incremental'
-  | 'render'
-  | 'render_block'
-  | 'cancel'
-  | 'reset';
-
-/** 发送给 Worker 的消息 */
-export interface WorkerRequest {
-  /** 请求 ID */
-  id: string;
-  /** 消息类型 */
-  type: WorkerMessageType;
-  /** 请求数据 */
-  data: unknown;
-}
-
-/** Worker 返回的消息 */
-export interface WorkerResponse {
-  /** 请求 ID */
-  id: string;
-  /** 是否成功 */
-  success: boolean;
-  /** 返回数据 */
-  data?: unknown;
-  /** 错误信息 */
-  error?: string;
-  /** 处理耗时 */
-  time: number;
-}
-
-// ================================
-// 导出所有类型
-// ================================
-
-export type {
-  LatexNodeType as NodeType,
-  LatexNode as Node,
-  AnyLatexNode as AnyNode,
-};

@@ -1,7 +1,7 @@
 // ================================
 // LaTeX 解析器
-// 支持增量编译的完整 LaTeX 解析器
 // 采用两阶段解析：1. Preamble 解析 2. 正文解析
+// 增量引擎按块调用：前言块与每个正文块分别独立解析（块内相对坐标）
 // ================================
 
 import type {
@@ -24,10 +24,6 @@ import type {
   MacroDefinition,
   LatexParserOptions,
   LatexParseResult,
-  ParseError,
-  ParseWarning,
-  DocumentChange,
-  IncrementalParseResult,
 } from './types';
 
 // ================================
@@ -67,8 +63,6 @@ const VERBATIM_ENVIRONMENTS = new Set(['verbatim', 'lstlisting', 'minted']);
 
 /** 默认解析选项 */
 const DEFAULT_OPTIONS: Required<LatexParserOptions> = {
-  strict: false,
-  parseMathContent: false,
   preserveComments: true,
   preserveWhitespace: false,
   maxDepth: 100,
@@ -84,11 +78,6 @@ function generateNodeId(): string {
   return `node_${++nodeIdCounter}_${Date.now().toString(36)}`;
 }
 
-/** 重置 ID 计数器 */
-export function resetNodeIdCounter(): void {
-  nodeIdCounter = 0;
-}
-
 /** 计算字符串哈希值（快速版本） */
 function hashString(str: string): string {
   let hash = 0;
@@ -100,20 +89,6 @@ function hashString(str: string): string {
   return hash.toString(36);
 }
 
-/** 计算位置对应的行列号 */
-function getLineColumn(content: string, position: number): { line: number; column: number } {
-  let line = 1;
-  let column = 1;
-  for (let i = 0; i < position && i < content.length; i++) {
-    if (content[i] === '\n') {
-      line++;
-      column = 1;
-    } else {
-      column++;
-    }
-  }
-  return { line, column };
-}
 
 // ================================
 // LaTeX 解析器类
@@ -128,10 +103,8 @@ export class LatexParser {
   private pos: number;
   private length: number;
   private options: Required<LatexParserOptions>;
-  private errors: ParseError[];
-  private warnings: ParseWarning[];
+  private errors: string[];
   private depth: number;
-  private startTime: number;
 
   constructor(input: string, options?: LatexParserOptions) {
     this.input = input;
@@ -139,46 +112,23 @@ export class LatexParser {
     this.length = input.length;
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.errors = [];
-    this.warnings = [];
     this.depth = 0;
-    this.startTime = 0;
   }
 
   /**
    * 解析整个文档
    */
   parse(): LatexParseResult {
-    this.startTime = performance.now();
     this.errors = [];
-    this.warnings = [];
     this.pos = 0;
     this.depth = 0;
 
     try {
-      const ast = this.parseRoot();
-      const parseTime = performance.now() - this.startTime;
-
-      return {
-        ast,
-        success: this.errors.length === 0,
-        errors: this.errors,
-        warnings: this.warnings,
-        parseTime,
-      };
+      return { ast: this.parseRoot(), errors: this.errors };
     } catch (error) {
-      const parseTime = performance.now() - this.startTime;
-      const message = error instanceof Error ? error.message : String(error);
-
-      this.addError(message, this.pos, this.pos + 1);
-
+      this.errors.push(error instanceof Error ? error.message : String(error));
       // 返回一个最小的有效 AST
-      return {
-        ast: this.createRootNode(null, null),
-        success: false,
-        errors: this.errors,
-        warnings: this.warnings,
-        parseTime,
-      };
+      return { ast: this.createRootNode(null, null), errors: this.errors };
     }
   }
 
@@ -543,7 +493,7 @@ export class LatexParser {
     // 解析环境名称
     this.skipWhitespace();
     if (this.peek() !== '{') {
-      this.addError('期望 { 开始环境名称', offset + this.pos, offset + this.pos + 1);
+      this.errors.push('期望 { 开始环境名称');
       return null;
     }
     this.pos++; // 跳过 {
@@ -573,7 +523,7 @@ export class LatexParser {
     const endIndex = this.input.indexOf(endPattern, this.pos);
 
     if (endIndex === -1) {
-      this.addError(`找不到 \\end{${envName}}`, offset + start, offset + this.pos);
+      this.errors.push(`找不到 \\end{${envName}}`);
       // 继续解析，假设环境延续到文档末尾
     }
 
@@ -799,7 +749,7 @@ export class LatexParser {
 
     this.depth++;
     if (this.depth > this.options.maxDepth) {
-      this.addError('嵌套深度超过限制', offset + start, offset + this.pos);
+      this.errors.push('嵌套深度超过限制');
       this.depth--;
       return {
         type: 'group',
@@ -825,7 +775,7 @@ export class LatexParser {
     if (this.peek() === '}') {
       this.pos++; // 跳过 }
     } else {
-      this.addError('未闭合的分组', offset + start, offset + this.pos);
+      this.errors.push('未闭合的分组');
     }
 
     this.depth--;
@@ -874,9 +824,6 @@ export class LatexParser {
       content += this.consume();
     }
 
-    if (this.pos >= this.length) {
-      this.addWarning(`行内公式缺少结束符 ${endDelimiter}`, offset + start, offset + this.pos);
-    }
     this.pos += endDelimiter.length;
 
     const raw = this.input.slice(start, this.pos);
@@ -910,9 +857,6 @@ export class LatexParser {
       content += this.consume();
     }
 
-    if (this.pos >= this.length) {
-      this.addWarning(`块级公式缺少结束符 ${endDelimiter}`, offset + start, offset + this.pos);
-    }
     this.pos += endDelimiter.length;
 
     const raw = this.input.slice(start, this.pos);
@@ -948,6 +892,11 @@ export class LatexParser {
       if (this.checkParagraphBreak()) {
         break;
       }
+      content += this.consume();
+    }
+
+    // 顶层的 } ~ ^ _ 没有专门的解析分支：至少消耗一个字符作为文本，否则调用方会原地死循环
+    if (this.pos === start && this.pos < this.length) {
       content += this.consume();
     }
 
@@ -1109,271 +1058,4 @@ export class LatexParser {
     return this.input[this.pos++] || '';
   }
 
-  /**
-   * 添加错误
-   */
-  private addError(message: string, start: number, end: number): void {
-    const { line, column } = getLineColumn(this.input, start);
-    this.errors.push({ message, start, end, line, column });
-  }
-
-  /**
-   * 添加警告
-   */
-  private addWarning(message: string, start: number, end: number): void {
-    const { line, column } = getLineColumn(this.input, start);
-    this.warnings.push({ message, start, end, line, column });
-  }
 }
-
-// ================================
-// 增量解析器
-// ================================
-
-/**
- * 增量解析器
- * 基于变更进行局部重新解析
- */
-export class IncrementalLatexParser {
-  private cachedAST: RootNode | null = null;
-  private cachedContent: string = '';
-
-  /**
-   * 增量解析
-   * @param newContent 新的文档内容
-   * @param changes 变更列表
-   * @param options 解析选项
-   */
-  parse(
-    newContent: string,
-    changes: DocumentChange[],
-    options?: LatexParserOptions
-  ): IncrementalParseResult {
-    const startTime = performance.now();
-
-    // 内容未变化时直接复用缓存的 AST，无需重新解析
-    if (this.cachedAST && newContent === this.cachedContent) {
-      return {
-        ast: this.cachedAST,
-        affectedNodeIds: [],
-        dirtyNodeIds: [],
-        fullReparse: false,
-        parseTime: performance.now() - startTime,
-      };
-    }
-
-    // 如果没有缓存或变更过大，进行完整解析
-    if (!this.cachedAST || this.shouldFullReparse(changes, newContent)) {
-      const parser = new LatexParser(newContent, options);
-      const result = parser.parse();
-
-      this.cachedAST = result.ast;
-      this.cachedContent = newContent;
-
-      return {
-        ast: result.ast,
-        affectedNodeIds: [],
-        dirtyNodeIds: this.getAllNodeIds(result.ast),
-        fullReparse: true,
-        parseTime: performance.now() - startTime,
-      };
-    }
-
-    // 计算受影响的区域
-    const affectedRange = this.calculateAffectedRange(changes);
-    const affectedNodes = this.findAffectedNodes(this.cachedAST, affectedRange);
-
-    // 重新解析受影响的部分
-    const parser = new LatexParser(newContent, options);
-    const newAST = parser.parse().ast;
-
-    // 合并新旧 AST：复用未受影响的旧节点，收集需要重新渲染的新节点
-    const { ast: mergedAST, dirtyNodeIds } = this.mergeAST(this.cachedAST, newAST, affectedNodes);
-
-    this.cachedAST = mergedAST;
-    this.cachedContent = newContent;
-
-    return {
-      ast: mergedAST,
-      affectedNodeIds: affectedNodes.map(n => n.id),
-      dirtyNodeIds,
-      fullReparse: false,
-      parseTime: performance.now() - startTime,
-    };
-  }
-
-  /**
-   * 判断是否需要完整重新解析
-   */
-  private shouldFullReparse(changes: DocumentChange[], newContent: string): boolean {
-    // 如果变更影响了 preamble，需要完整重新解析
-    for (const change of changes) {
-      if (change.from < this.getPreambleEnd()) {
-        return true;
-      }
-    }
-
-    // 如果变更太大（超过文档 20%），完整重新解析
-    const totalChangeSize = changes.reduce((sum, c) =>
-      sum + Math.abs(c.insert.length - c.deleted.length), 0);
-    if (totalChangeSize > newContent.length * 0.2) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * 获取 preamble 结束位置
-   */
-  private getPreambleEnd(): number {
-    if (!this.cachedAST || !this.cachedAST.preamble) {
-      return 0;
-    }
-    return this.cachedAST.preamble.end;
-  }
-
-  /**
-   * 计算受影响的范围
-   */
-  private calculateAffectedRange(changes: DocumentChange[]): { start: number; end: number } {
-    let start = Infinity;
-    let end = 0;
-
-    for (const change of changes) {
-      start = Math.min(start, change.from);
-      end = Math.max(end, change.to + change.insert.length);
-    }
-
-    return { start, end };
-  }
-
-  /**
-   * 查找受影响的节点
-   */
-  private findAffectedNodes(
-    ast: RootNode,
-    range: { start: number; end: number }
-  ): LatexNode[] {
-    const affected: LatexNode[] = [];
-
-    const traverse = (node: LatexNode) => {
-      // 检查节点是否与变更范围重叠
-      if (node.end >= range.start && node.start <= range.end) {
-        affected.push(node);
-      }
-
-      // 递归遍历子节点
-      if ('children' in node && Array.isArray(node.children)) {
-        for (const child of node.children) {
-          traverse(child);
-        }
-      }
-    };
-
-    if (ast.document) {
-      traverse(ast.document);
-    }
-
-    return affected;
-  }
-
-  /**
-   * 合并 AST
-   * 对文档顶层子节点做结构共享：旧节点未与变更范围重叠、且内容哈希与位置都和新节点一致时，
-   * 复用旧节点（保留节点 ID，使下游按 ID 的渲染缓存继续有效）；其余新节点标记为脏节点
-   */
-  private mergeAST(
-    oldAST: RootNode,
-    newAST: RootNode,
-    affectedNodes: LatexNode[]
-  ): { ast: RootNode; dirtyNodeIds: string[] } {
-    const version = oldAST.version + 1;
-    if (!oldAST.document || !newAST.document) {
-      return { ast: { ...newAST, version }, dirtyNodeIds: this.getAllNodeIds(newAST) };
-    }
-
-    const affectedIds = new Set(affectedNodes.map(n => n.id));
-    const reusable = new Map<string, LatexNode>();
-    for (const oldChild of oldAST.document.children) {
-      if (!affectedIds.has(oldChild.id)) {
-        reusable.set(`${oldChild.hash}:${oldChild.start}:${oldChild.end}`, oldChild);
-      }
-    }
-
-    const dirtyNodeIds: string[] = [];
-    const children = newAST.document.children.map((newChild) => {
-      const key = `${newChild.hash}:${newChild.start}:${newChild.end}`;
-      const oldChild = reusable.get(key);
-      if (oldChild) {
-        reusable.delete(key);
-        return oldChild;
-      }
-      dirtyNodeIds.push(newChild.id);
-      return newChild;
-    });
-
-    return {
-      ast: { ...newAST, document: { ...newAST.document, children }, version },
-      dirtyNodeIds,
-    };
-  }
-
-  /**
-   * 获取所有节点 ID
-   */
-  private getAllNodeIds(ast: RootNode): string[] {
-    const ids: string[] = [ast.id];
-
-    const traverse = (node: LatexNode) => {
-      ids.push(node.id);
-      if ('children' in node && Array.isArray(node.children)) {
-        for (const child of node.children) {
-          traverse(child);
-        }
-      }
-    };
-
-    if (ast.preamble) traverse(ast.preamble);
-    if (ast.document) traverse(ast.document);
-
-    return ids;
-  }
-
-  /**
-   * 清除缓存
-   */
-  clearCache(): void {
-    this.cachedAST = null;
-    this.cachedContent = '';
-  }
-}
-
-// ================================
-// 导出
-// ================================
-
-/**
- * 解析 LaTeX 文档
- * @param content LaTeX 源码
- * @param options 解析选项
- */
-export function parseLatex(content: string, options?: LatexParserOptions): LatexParseResult {
-  const parser = new LatexParser(content, options);
-  return parser.parse();
-}
-
-/**
- * 创建增量解析器实例
- */
-export function createIncrementalParser(): IncrementalLatexParser {
-  return new IncrementalLatexParser();
-}
-
-export default {
-  LatexParser,
-  IncrementalLatexParser,
-  parseLatex,
-  createIncrementalParser,
-  resetNodeIdCounter,
-};

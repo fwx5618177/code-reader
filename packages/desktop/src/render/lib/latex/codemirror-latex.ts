@@ -388,10 +388,10 @@ function tokenCommand(stream: StringStream, state: LatexState): string | null {
 // ================================
 
 /** LaTeX 语言定义 */
-export const latexLanguage = StreamLanguage.define(latexStreamParser);
+const latexLanguage = StreamLanguage.define(latexStreamParser);
 
-/** LaTeX 高亮样式（深色主题） */
-export const latexDarkHighlightStyle = HighlightStyle.define([
+/** LaTeX 高亮样式（颜色取自主题 CSS 变量，括号内为缺省值） */
+const latexHighlightStyle = HighlightStyle.define([
   { tag: t.keyword, color: 'var(--code-keyword, #569cd6)' },
   { tag: t.heading, color: 'var(--code-function, #dcdcaa)', fontWeight: 'bold' },
   { tag: t.meta, color: 'var(--code-tag, #4ec9b0)' },
@@ -405,40 +405,7 @@ export const latexDarkHighlightStyle = HighlightStyle.define([
   { tag: t.escape, color: 'var(--code-regex, #d16969)' },
 ]);
 
-/** LaTeX 高亮样式（浅色主题） */
-export const latexLightHighlightStyle = HighlightStyle.define([
-  { tag: t.keyword, color: 'var(--code-keyword, #0000ff)' },
-  { tag: t.heading, color: 'var(--code-function, #795e26)', fontWeight: 'bold' },
-  { tag: t.meta, color: 'var(--code-tag, #267f99)' },
-  { tag: t.comment, color: 'var(--code-comment, #008000)', fontStyle: 'italic' },
-  { tag: t.string, color: 'var(--code-string, #a31515)' },
-  { tag: t.number, color: 'var(--code-number, #098658)' },
-  { tag: t.variableName, color: 'var(--code-variable, #0451a5)' },
-  { tag: t.typeName, color: 'var(--code-class-name, #267f99)' },
-  { tag: t.operator, color: 'var(--code-operator, #393a34)' },
-  { tag: t.bracket, color: 'var(--code-punctuation, #393a34)' },
-  { tag: t.escape, color: 'var(--code-regex, #ee0000)' },
-]);
-
 /** 获取 LaTeX 语法高亮扩展 */
 export function latex() {
-  return [latexLanguage, syntaxHighlighting(latexDarkHighlightStyle)];
+  return [latexLanguage, syntaxHighlighting(latexHighlightStyle)];
 }
-
-/** 获取带自定义主题的 LaTeX 语法高亮扩展 */
-export function latexWithTheme(isDark: boolean = true) {
-  const highlightStyle = isDark ? latexDarkHighlightStyle : latexLightHighlightStyle;
-  return [latexLanguage, syntaxHighlighting(highlightStyle)];
-}
-
-// ================================
-// 默认导出
-// ================================
-
-export default {
-  latexLanguage,
-  latexDarkHighlightStyle,
-  latexLightHighlightStyle,
-  latex,
-  latexWithTheme,
-};

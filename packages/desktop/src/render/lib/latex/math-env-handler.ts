@@ -6,7 +6,7 @@
 /**
  * 数学环境类型
  */
-export type MathEnvType =
+type MathEnvType =
   | 'align'        // 对齐环境 (align, flalign, alignat, eqnarray)
   | 'gather'       // 居中多行环境 (gather, multline)
   | 'equation'     // 单行公式环境
@@ -20,7 +20,7 @@ export type MathEnvType =
 /**
  * 数学环境信息
  */
-export interface MathEnvInfo {
+interface MathEnvInfo {
   /** 环境类型 */
   type: MathEnvType;
   /** 基础环境名（去除星号） */
@@ -29,18 +29,14 @@ export interface MathEnvInfo {
   originalName: string;
   /** 是否带编号 */
   numbered: boolean;
-  /** 是否为顶层环境（需要包装） */
-  isTopLevel: boolean;
   /** 是否为嵌套环境（不需要包装） */
   isNested: boolean;
-  /** 是否为自包含环境（已有完整结构） */
-  isSelfContained: boolean;
 }
 
 /**
  * 数学内容分析结果
  */
-export interface MathContentAnalysis {
+interface MathContentAnalysis {
   /** 是否包含对齐符号 & */
   hasAlignment: boolean;
   /** 是否包含换行符 \\ */
@@ -53,16 +49,12 @@ export interface MathContentAnalysis {
   wrapperEnvName: string | null;
   /** 是否为完整环境结构 */
   isCompleteEnvironment: boolean;
-  /** 内容起始匹配（如果是完整环境） */
-  envStartMatch: RegExpMatchArray | null;
-  /** 内容结束匹配（如果是完整环境） */
-  envEndMatch: RegExpMatchArray | null;
 }
 
 /**
  * 包装建议
  */
-export interface WrapSuggestion {
+interface WrapSuggestion {
   /** 是否需要包装 */
   shouldWrap: boolean;
   /** 建议的包装环境名 */
@@ -162,35 +154,27 @@ const ENV_NAME_REGEX = /\\begin\{([^}]+)\}/;
  * 获取环境信息
  * @param envName 环境名称（可能带星号）
  */
-export function getEnvInfo(envName: string): MathEnvInfo {
+function getEnvInfo(envName: string): MathEnvInfo {
   const baseName = envName.replace(/\*$/, '');
   const numbered = !envName.endsWith('*');
 
   let type: MathEnvType = 'unknown';
-  let isTopLevel = false;
   let isNested = false;
-  let isSelfContained = false;
 
   // 判断环境类型
   if (TOP_LEVEL_ALIGN_ENVS.has(envName) || TOP_LEVEL_ALIGN_ENVS.has(baseName)) {
     type = 'align';
-    isTopLevel = true;
   } else if (TOP_LEVEL_GATHER_ENVS.has(envName) || TOP_LEVEL_GATHER_ENVS.has(baseName)) {
     type = 'gather';
-    isTopLevel = true;
   } else if (EQUATION_ENVS.has(envName) || EQUATION_ENVS.has(baseName)) {
     type = 'equation';
-    isTopLevel = true;
   } else if (MATRIX_ENVS.has(baseName)) {
     type = 'matrix';
-    isSelfContained = true;
   } else if (CASES_ENVS.has(baseName)) {
     type = 'cases';
-    isSelfContained = true;
   } else if (NESTED_ENVS.has(baseName)) {
     type = 'nested';
     isNested = true;
-    isSelfContained = true;
   }
 
   return {
@@ -198,9 +182,7 @@ export function getEnvInfo(envName: string): MathEnvInfo {
     baseName,
     originalName: envName,
     numbered,
-    isTopLevel,
     isNested,
-    isSelfContained,
   };
 }
 
@@ -208,7 +190,7 @@ export function getEnvInfo(envName: string): MathEnvInfo {
  * 分析数学内容
  * @param content 数学内容（不含外层环境标记）
  */
-export function analyzeMathContent(content: string): MathContentAnalysis {
+function analyzeMathContent(content: string): MathContentAnalysis {
   const trimmed = content.trim();
 
   // 检测对齐符号
@@ -247,8 +229,6 @@ export function analyzeMathContent(content: string): MathContentAnalysis {
     hasWrapper,
     wrapperEnvName,
     isCompleteEnvironment,
-    envStartMatch,
-    envEndMatch,
   };
 }
 
@@ -257,7 +237,7 @@ export function analyzeMathContent(content: string): MathContentAnalysis {
  * @param envInfo 环境信息
  * @param analysis 内容分析结果
  */
-export function getWrapSuggestion(
+function getWrapSuggestion(
   envInfo: MathEnvInfo,
   analysis: MathContentAnalysis
 ): WrapSuggestion {
@@ -392,7 +372,6 @@ export function processMathContent(
 ): {
   processedContent: string;
   envInfo: MathEnvInfo;
-  analysis: MathContentAnalysis;
   suggestion: WrapSuggestion;
 } {
   // 清理内容
@@ -409,7 +388,6 @@ export function processMathContent(
     return {
       processedContent: trimmedContent,
       envInfo,
-      analysis,
       suggestion: {
         shouldWrap: false,
         wrapperEnv: null,
@@ -430,7 +408,6 @@ export function processMathContent(
   return {
     processedContent,
     envInfo,
-    analysis,
     suggestion,
   };
 }
@@ -479,54 +456,6 @@ export function isMathEnv(envName: string): boolean {
   return ALL_MATH_ENVS.has(envName) || ALL_MATH_ENVS.has(baseName);
 }
 
-/**
- * 判断是否为矩阵环境
- *
- * @param envName 环境名称
- */
-export function isMatrixEnv(envName: string): boolean {
-  const baseName = envName.replace(/\*$/, '');
-  return MATRIX_ENVS.has(baseName);
-}
-
-/**
- * 判断是否为分段函数环境
- *
- * @param envName 环境名称
- */
-export function isCasesEnv(envName: string): boolean {
-  const baseName = envName.replace(/\*$/, '');
-  return CASES_ENVS.has(baseName);
-}
-
-/**
- * 判断是否为对齐环境
- *
- * @param envName 环境名称
- */
-export function isAlignEnv(envName: string): boolean {
-  const baseName = envName.replace(/\*$/, '');
-  return (
-    TOP_LEVEL_ALIGN_ENVS.has(envName) ||
-    TOP_LEVEL_ALIGN_ENVS.has(baseName) ||
-    baseName === 'aligned' ||
-    baseName === 'alignedat'
-  );
-}
-
-/**
- * 判断是否为居中多行环境
- *
- * @param envName 环境名称
- */
-export function isGatherEnv(envName: string): boolean {
-  const baseName = envName.replace(/\*$/, '');
-  return (
-    TOP_LEVEL_GATHER_ENVS.has(envName) ||
-    TOP_LEVEL_GATHER_ENVS.has(baseName) ||
-    baseName === 'gathered'
-  );
-}
 
 /**
  * 获取环境对应的 CSS 类名
@@ -607,18 +536,3 @@ function escapeHtml(str: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-
-// ================================
-// 导出环境集合（供外部使用）
-// ================================
-
-export const ENV_SETS = {
-  TOP_LEVEL_ALIGN: TOP_LEVEL_ALIGN_ENVS,
-  TOP_LEVEL_GATHER: TOP_LEVEL_GATHER_ENVS,
-  EQUATION: EQUATION_ENVS,
-  NESTED: NESTED_ENVS,
-  MATRIX: MATRIX_ENVS,
-  CASES: CASES_ENVS,
-  SELF_CONTAINED: SELF_CONTAINED_ENVS,
-  ALL_MATH: ALL_MATH_ENVS,
-} as const;
