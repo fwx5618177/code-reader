@@ -330,6 +330,12 @@ export interface AppSettings {
   /** 默认输入类型 */
   defaultInputType: QuickInputType;
 
+  // ======= 编辑器 =======
+  /** 启用拼写检查（自研 Hunspell 检查器） */
+  spellCheck: boolean;
+  /** 当前词典 ID（builtin:en_US / user:xx） */
+  spellCheckDictionary: string;
+
   // ======= 同步 =======
   /** 启用同步 */
   enableSync: boolean;

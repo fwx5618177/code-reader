@@ -280,6 +280,20 @@ export interface FetchedHtml {
   html: string;
 }
 
+/** 拼写检查词典；id 形如 builtin:en_US（内置）或 user:de_DE（导入） */
+export interface SpellcheckDictionaryInfo {
+  id: string;
+  /** 词典文件名，通常是语言代码 */
+  name: string;
+  source: 'builtin' | 'user';
+}
+
+/** Hunspell 词典文件的原始字节 */
+export interface SpellcheckDictionaryFiles {
+  aff: Uint8Array;
+  dic: Uint8Array;
+}
+
 interface HybridSearchOptions extends SemanticSearchOptions {
   semanticWeight?: number;
 }
@@ -434,6 +448,16 @@ interface ElectronAPI {
   /** 网页剪藏：经主进程抓取 http/https 网页的 HTML（超时或过大时拒绝） */
   web: {
     fetchHtml: (url: string) => Promise<FetchedHtml>;
+  };
+
+  /** 拼写检查：列出/读取/导入（弹出文件选择框，取消时返回空数组）/删除词典，读写用户词表 */
+  spellcheck: {
+    listDictionaries: () => Promise<SpellcheckDictionaryInfo[]>;
+    readDictionary: (id: string) => Promise<SpellcheckDictionaryFiles>;
+    importDictionary: () => Promise<SpellcheckDictionaryInfo[]>;
+    removeDictionary: (id: string) => Promise<void>;
+    getUserWords: () => Promise<string[]>;
+    addUserWord: (word: string) => Promise<void>;
   };
 
   /** 托盘菜单：on* 订阅菜单动作并返回取消订阅函数；setRecentDocuments 更新“最近打开”子菜单 */

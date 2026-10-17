@@ -90,6 +90,14 @@ const validChannels = [
   // 网页剪藏
   'web:fetchHtml',
 
+  // 拼写检查
+  'spellcheck:listDictionaries',
+  'spellcheck:readDictionary',
+  'spellcheck:importDictionary',
+  'spellcheck:removeDictionary',
+  'spellcheck:getUserWords',
+  'spellcheck:addUserWord',
+
 ];
 
 // 用于接收事件的通道
@@ -276,6 +284,16 @@ contextBridge.exposeInMainWorld('electron', {
   // 网页剪藏：由主进程抓取 HTML
   web: {
     fetchHtml: (url: string) => ipcRenderer.invoke('web:fetchHtml', url),
+  },
+
+  // 拼写检查：词典文件与用户词表由主进程管理
+  spellcheck: {
+    listDictionaries: () => ipcRenderer.invoke('spellcheck:listDictionaries'),
+    readDictionary: (id: string) => ipcRenderer.invoke('spellcheck:readDictionary', id),
+    importDictionary: () => ipcRenderer.invoke('spellcheck:importDictionary'),
+    removeDictionary: (id: string) => ipcRenderer.invoke('spellcheck:removeDictionary', id),
+    getUserWords: () => ipcRenderer.invoke('spellcheck:getUserWords'),
+    addUserWord: (word: string) => ipcRenderer.invoke('spellcheck:addUserWord', word),
   },
 
   // 托盘菜单：动作由主进程推送；最近文档列表由渲染进程提供

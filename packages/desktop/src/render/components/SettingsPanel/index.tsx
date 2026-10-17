@@ -23,6 +23,7 @@ import {
   Save,
   Palette,
   Keyboard,
+  SpellCheck,
 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
 import { AIProviderType, LLM_PROVIDER_PRESETS } from '../../types/ai-providers';
@@ -36,13 +37,15 @@ import {
 } from '../../services/aiConfigService';
 import { settingsService } from '../../services/settingsService';
 import { ThemeSettings } from '../ThemeSettings';
+import { SettingSelect, SettingToggle } from './SettingControls';
+import { SpellCheckSettings } from './SpellCheckSettings';
 import styles from './SettingsPanel.module.scss';
 
 // ================================
 // 类型定义
 // ================================
 
-type SettingsTab = 'general' | 'ai' | 'transcription' | 'appearance' | 'shortcuts';
+type SettingsTab = 'general' | 'ai' | 'transcription' | 'appearance' | 'editor' | 'shortcuts';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -145,6 +148,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
     { id: 'ai', icon: <Brain size={18} />, label: 'AI 服务' },
     { id: 'transcription', icon: <Mic size={18} />, label: '语音转写' },
     { id: 'appearance', icon: <Palette size={18} />, label: '外观' },
+    { id: 'editor', icon: <SpellCheck size={18} />, label: '编辑器' },
     { id: 'shortcuts', icon: <Keyboard size={18} />, label: '快捷键' },
   ];
 
@@ -224,6 +228,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
             {!isLoading && activeTab === 'general' && <GeneralSettingsTab />}
 
             {!isLoading && activeTab === 'appearance' && <AppearanceSettingsTab />}
+
+            {!isLoading && activeTab === 'editor' && <SpellCheckSettings />}
 
             {!isLoading && activeTab === 'shortcuts' && <ShortcutsSettingsTab />}
           </div>
@@ -1017,65 +1023,6 @@ const FormField: React.FC<FormFieldProps> = ({ id, label, value, placeholder, on
 // ================================
 // 设置组件
 // ================================
-
-interface SettingToggleProps {
-  label: string;
-  description?: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}
-
-const SettingToggle: React.FC<SettingToggleProps> = ({ label, description, checked, onChange }) => (
-  <div className={styles.settingItem}>
-    <div className={styles.settingInfo}>
-      <span className={styles.settingLabel}>{label}</span>
-      {description && <span className={styles.settingDescription}>{description}</span>}
-    </div>
-    <label className={styles.toggle}>
-      <input
-        type="checkbox"
-        className={styles.toggleInput}
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span className={styles.toggleSlider} />
-    </label>
-  </div>
-);
-
-interface SettingSelectProps {
-  label: string;
-  description?: string;
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-}
-
-const SettingSelect: React.FC<SettingSelectProps> = ({
-  label,
-  description,
-  value,
-  options,
-  onChange,
-}) => (
-  <div className={styles.settingItem}>
-    <div className={styles.settingInfo}>
-      <span className={styles.settingLabel}>{label}</span>
-      {description && <span className={styles.settingDescription}>{description}</span>}
-    </div>
-    <select
-      className={styles.settingSelect}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  </div>
-);
 
 interface SettingInputProps {
   label: string;

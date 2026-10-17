@@ -70,6 +70,12 @@ import { createListItemView } from './ListItemView';
 import { DocumentPreview } from './DocumentPreview';
 import { LatexEditor } from './LatexEditor';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
+import { createBlockKeymap } from '../../lib/editor/block-commands';
+import { createBlockHandlePlugin } from '../../lib/editor/block-handle';
+import type { PopupMenuClasses } from '../../lib/editor/popup-menu';
+import { createSpellcheckPlugin } from '../../lib/spellcheck/prosemirror-plugin';
+import { spellcheckService } from '../../services/spellcheckService';
+import popupStyles from './EditorPopups.module.scss';
 import styles from './RichEditor.module.scss';
 
 // ================================
@@ -80,6 +86,7 @@ export type EditorMode = 'edit' | 'preview' | 'split';
 export type ViewMode = 'normal' | 'focus' | 'typewriter';
 
 export interface EditorOptions {
+  /** 是否参与自研拼写检查（实际启用与否由设置中的「拼写检查」开关决定） */
   spellCheck?: boolean;
   placeholder?: string;
   showWordCount?: boolean;
@@ -186,8 +193,19 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
  */
 const CHUNKED_RENDERING_MIN_BLOCKS = 150;
 
+/** 块菜单与拼写建议菜单共用的样式 */
+const POPUP_MENU_CLASSES: PopupMenuClasses = {
+  menu: popupStyles.menu,
+  item: popupStyles.menuItem,
+  itemActive: popupStyles.menuItemActive,
+  itemCurrent: popupStyles.menuItemCurrent,
+  heading: popupStyles.menuHeading,
+  separator: popupStyles.menuSeparator,
+  hint: popupStyles.menuHint,
+};
+
 const DEFAULT_OPTIONS: EditorOptions = {
-  spellCheck: false,
+  spellCheck: true,
   placeholder: '开始写作...',
   showWordCount: true,
   showLineNumbers: true,
@@ -747,7 +765,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     // 插件顺序：输入规则与块级回车 → 表格/列表/格式快捷键 → 基础快捷键 → 历史与光标
     const plugins: Plugin[] = [
       ...(isMarkdown ? createEditorPlugins(schema) : []),
-      ...(isMarkdown ? [createTableKeymap(schema)] : []),
+      ...(isMarkdown ? [createTableKeymap(schema), createBlockKeymap()] : []),
       createKeymap(schema),
       keymap(baseKeymap),
       history(),
@@ -757,7 +775,25 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       autocompletePlugin,
       wikiLinkClickPlugin,
     ];
-    if (isMarkdown) plugins.push(createLivePreviewPlugin(schema));
+    if (isMarkdown) {
+      plugins.push(
+        createLivePreviewPlugin(schema),
+        createBlockHandlePlugin({
+          handleClass: popupStyles.blockHandle,
+          handleVisibleClass: popupStyles.blockHandleVisible,
+          menuClasses: POPUP_MENU_CLASSES,
+        })
+      );
+    }
+    if (options.spellCheck) {
+      plugins.push(
+        createSpellcheckPlugin({
+          checker: spellcheckService,
+          errorClass: popupStyles.spellError,
+          menuClasses: POPUP_MENU_CLASSES,
+        })
+      );
+    }
 
     const state = EditorState.create({ doc, plugins });
 
@@ -796,7 +832,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       },
       attributes: {
         class: styles.prosemirror,
-        spellcheck: options.spellCheck ? 'true' : 'false',
+        // 拼写检查由自研插件负责，关闭浏览器自带检查
+        spellcheck: 'false',
       },
     });
 

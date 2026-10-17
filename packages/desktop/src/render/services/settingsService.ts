@@ -7,6 +7,8 @@ import type { AppSettings } from '../types/knowledge';
 
 const SETTINGS_FILENAME = 'settings.json';
 const ATTACHMENTS_DIR = 'attachments';
+/** 内置英语词典 */
+export const DEFAULT_SPELLCHECK_DICTIONARY = 'builtin:en_US';
 
 function createDefaultSettings(dataPath: string): AppSettings {
   return {
@@ -20,6 +22,8 @@ function createDefaultSettings(dataPath: string): AppSettings {
     autoTag: true,
     quickInputHotkey: 'CommandOrControl+Shift+N',
     defaultInputType: 'text',
+    spellCheck: true,
+    spellCheckDictionary: DEFAULT_SPELLCHECK_DICTIONARY,
     enableSync: false,
   };
 }

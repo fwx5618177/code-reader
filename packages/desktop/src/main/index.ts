@@ -10,6 +10,7 @@ import { registerDatabaseHandlers, cleanupDatabaseHandlers } from './database/ip
 import { registerSearchHandlers, cleanupSearchHandlers } from './database/search-ipc-handlers';
 import { registerVersionHistoryHandlers } from './database/version-ipc-handlers';
 import { registerWebHandlers } from './web/ipc-handlers';
+import { registerSpellcheckHandlers } from './spellcheck/ipc-handlers';
 import { registerAIHandlers, cleanupAIHandlers } from './ai/ipc-handlers';
 import {
   registerAgentHandlers,
@@ -161,6 +162,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: join(__dirname, 'preload.cjs'),
+      // 关闭 Chromium 拼写检查：编辑器使用自研 Hunspell 检查器（词典可导入、热切换），避免两套波浪线重叠
       spellcheck: false,
     },
     backgroundColor: '#1e1e1e',
@@ -251,6 +253,7 @@ function createChildWindow(mode: string): BrowserWindow {
       nodeIntegration: false,
       contextIsolation: true,
       preload: join(__dirname, 'preload.cjs'),
+      // 同主窗口：拼写检查由自研 Hunspell 检查器负责
       spellcheck: false,
     },
     backgroundColor: '#1e1e1e',
@@ -455,6 +458,8 @@ function setupIPC() {
   // 网页剪藏的 HTML 抓取
   registerWebHandlers();
 
+  // 拼写检查词典与用户词表
+  registerSpellcheckHandlers(getPackageRoot());
 }
 
 // 初始化数据库和服务
