@@ -26,6 +26,7 @@ import {
   SpellCheck,
   Library,
   Puzzle,
+  History,
 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
 import { AIProviderType, LLM_PROVIDER_PRESETS } from '../../types/ai-providers';
@@ -43,6 +44,7 @@ import { SettingSelect, SettingToggle } from './SettingControls';
 import { SpellCheckSettings } from './SpellCheckSettings';
 import { PluginSettings } from './PluginSettings';
 import { WorkspaceSettings } from './WorkspaceSettings';
+import { VersionRetentionSettings } from './VersionRetentionSettings';
 import styles from './SettingsPanel.module.scss';
 
 // ================================
@@ -56,6 +58,7 @@ type SettingsTab =
   | 'transcription'
   | 'appearance'
   | 'editor'
+  | 'versions'
   | 'plugins'
   | 'shortcuts';
 
@@ -162,6 +165,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
     { id: 'transcription', icon: <Mic size={18} />, label: '语音转写' },
     { id: 'appearance', icon: <Palette size={18} />, label: '外观' },
     { id: 'editor', icon: <SpellCheck size={18} />, label: '编辑器' },
+    { id: 'versions', icon: <History size={18} />, label: '版本保留' },
     { id: 'plugins', icon: <Puzzle size={18} />, label: '插件' },
     { id: 'shortcuts', icon: <Keyboard size={18} />, label: '快捷键' },
   ];
@@ -246,6 +250,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
             {!isLoading && activeTab === 'appearance' && <AppearanceSettingsTab />}
 
             {!isLoading && activeTab === 'editor' && <SpellCheckSettings />}
+
+            {!isLoading && activeTab === 'versions' && <VersionRetentionSettings />}
 
             {!isLoading && activeTab === 'plugins' && <PluginSettings />}
 

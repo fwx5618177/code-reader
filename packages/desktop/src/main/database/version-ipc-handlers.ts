@@ -9,6 +9,7 @@ import {
   type CreateVersionInput,
   type VersionListOptions,
 } from './version-history';
+import type { VersionRetentionPolicy } from './version-retention';
 
 // ================================
 // Version History IPC Handlers
@@ -87,15 +88,32 @@ export function registerVersionHistoryHandlers(): void {
     }
   });
 
-  // Prune old versions
-  ipcMain.handle('version:prune', async (_event, itemId: string, keepCount?: number) => {
+  // 按保留策略清理一篇文档的旧版本
+  ipcMain.handle('version:prune', async (_event, itemId: string) => {
     try {
-      return await versionService.pruneVersions(itemId, keepCount);
+      return await versionService.pruneVersions(itemId);
     } catch (error) {
       console.error('[IPC] version:prune error:', error);
       throw error;
     }
   });
+
+  // 按保留策略清理全部文档
+  ipcMain.handle('version:prune-all', async () => {
+    try {
+      return await versionService.pruneAllVersions();
+    } catch (error) {
+      console.error('[IPC] version:prune-all error:', error);
+      throw error;
+    }
+  });
+
+  // 保留策略读写与版本统计
+  ipcMain.handle('version:get-retention', () => versionService.getRetentionPolicy());
+  ipcMain.handle('version:set-retention', (_event, policy: Partial<VersionRetentionPolicy>) =>
+    versionService.setRetentionPolicy(policy)
+  );
+  ipcMain.handle('version:get-stats', () => versionService.getVersionStats());
 
   // Auto-save
   ipcMain.handle(

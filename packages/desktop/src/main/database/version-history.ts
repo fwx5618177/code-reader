@@ -5,6 +5,18 @@
 
 import { getSQLiteService } from './sqlite';
 import { randomUUID } from 'crypto';
+import {
+  normalizeRetentionPolicy,
+  selectVersionsToPrune,
+  type RetentionCandidate,
+  type VersionRetentionPolicy,
+} from './version-retention';
+
+/** 保留策略在 app_settings 中的键 */
+const RETENTION_SETTING_KEY = 'version_retention';
+
+/** 单条 DELETE 语句的最大参数数 */
+const DELETE_CHUNK_SIZE = 500;
 
 // ================================
 // Types
@@ -44,6 +56,21 @@ export interface VersionListOptions {
   limit?: number;
   offset?: number;
   changeTypes?: ChangeType[];
+  /** 只返回版本号小于该值的版本（查找某版本之前仍保留的版本） */
+  beforeVersionNumber?: number;
+}
+
+/** 版本总量统计 */
+export interface VersionStats {
+  versionCount: number;
+  itemCount: number;
+}
+
+/** 全库清理结果 */
+export interface VersionPruneResult {
+  deletedCount: number;
+  /** 有版本被删除的文档数 */
+  itemCount: number;
 }
 
 export interface VersionDiff {
@@ -154,12 +181,12 @@ class VersionHistoryService {
 
     const versionNumber = (latestVersion?.version_number || 0) + 1;
 
-    // Get previous version for diff calculation
+    // 与当前最新版本比较（保留策略可能已删除中间版本，版本号不一定连续）
     let diffFromPrevious: string | null = null;
     if (versionNumber > 1) {
       const previousVersion = db.get<{ content: string | null }>(
-        'SELECT content FROM document_versions WHERE item_id = ? AND version_number = ?',
-        [input.itemId, versionNumber - 1]
+        'SELECT content FROM document_versions WHERE item_id = ? ORDER BY version_number DESC LIMIT 1',
+        [input.itemId]
       );
       if (previousVersion) {
         diffFromPrevious = createSimpleDiff(previousVersion.content, input.content || null);
@@ -222,7 +249,7 @@ class VersionHistoryService {
    */
   async getVersionHistory(options: VersionListOptions): Promise<DocumentVersion[]> {
     const db = getSQLiteService();
-    const { itemId, limit = 50, offset = 0, changeTypes } = options;
+    const { itemId, limit = 50, offset = 0, changeTypes, beforeVersionNumber } = options;
 
     let sql = `
       SELECT
@@ -237,6 +264,11 @@ class VersionHistoryService {
     if (changeTypes && changeTypes.length > 0) {
       sql += ` AND change_type IN (${changeTypes.map(() => '?').join(', ')})`;
       params.push(...changeTypes);
+    }
+
+    if (beforeVersionNumber !== undefined) {
+      sql += ` AND version_number < ?`;
+      params.push(beforeVersionNumber);
     }
 
     sql += ` ORDER BY version_number DESC LIMIT ? OFFSET ?`;
@@ -472,31 +504,94 @@ class VersionHistoryService {
   // Cleanup
   // ================================
 
-  /**
-   * Delete old versions, keeping only the most recent N versions
-   */
-  async pruneVersions(itemId: string, keepCount: number = 50): Promise<number> {
-    const db = getSQLiteService();
+  /** 读取保留策略（未设置或无法解析时为默认值） */
+  getRetentionPolicy(): VersionRetentionPolicy {
+    const row = getSQLiteService().get<{ value: string }>('SELECT value FROM app_settings WHERE key = ?', [
+      RETENTION_SETTING_KEY,
+    ]);
+    if (!row) return normalizeRetentionPolicy(null);
+    try {
+      return normalizeRetentionPolicy(JSON.parse(row.value) as Partial<VersionRetentionPolicy>);
+    } catch (error) {
+      console.warn('[VersionHistory] 保留策略无法解析，使用默认值:', error);
+      return normalizeRetentionPolicy(null);
+    }
+  }
 
-    // Get version IDs to delete (all except the most recent keepCount)
-    const versionsToDelete = db.all<{ id: string }>(
-      `SELECT id FROM document_versions
-       WHERE item_id = ?
-       ORDER BY version_number DESC
-       LIMIT -1 OFFSET ?`,
-      [itemId, keepCount]
+  /** 保存保留策略，返回规范化后实际生效的策略 */
+  setRetentionPolicy(input: Partial<VersionRetentionPolicy>): VersionRetentionPolicy {
+    const policy = normalizeRetentionPolicy(input);
+    getSQLiteService().run(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      [RETENTION_SETTING_KEY, JSON.stringify(policy)]
     );
+    return policy;
+  }
 
-    if (versionsToDelete.length === 0) return 0;
+  /** 全库版本数与有版本的文档数 */
+  getVersionStats(): VersionStats {
+    const row = getSQLiteService().get<VersionStats>(
+      'SELECT COUNT(*) AS versionCount, COUNT(DISTINCT item_id) AS itemCount FROM document_versions'
+    );
+    return { versionCount: row?.versionCount ?? 0, itemCount: row?.itemCount ?? 0 };
+  }
 
-    const ids = versionsToDelete.map((v) => v.id);
-    const placeholders = ids.map(() => '?').join(', ');
+  /** 按保留策略删除一篇文档的旧版本，返回删除数量 */
+  private pruneItem(itemId: string, policy: VersionRetentionPolicy, now: Date): number {
+    const db = getSQLiteService();
+    const candidates = db.all<RetentionCandidate>(
+      `SELECT id, version_number AS versionNumber, created_at AS createdAt
+       FROM document_versions WHERE item_id = ?`,
+      [itemId]
+    );
+    const ids = selectVersionsToPrune(candidates, policy, now);
+    if (ids.length === 0) return 0;
+    return db.transaction(() => {
+      let changes = 0;
+      for (let start = 0; start < ids.length; start += DELETE_CHUNK_SIZE) {
+        const chunk = ids.slice(start, start + DELETE_CHUNK_SIZE);
+        changes += db.run(
+          `DELETE FROM document_versions WHERE id IN (${chunk.map(() => '?').join(', ')})`,
+          chunk
+        ).changes;
+      }
+      return changes;
+    });
+  }
 
-    const result = db.run(`DELETE FROM document_versions WHERE id IN (${placeholders})`, ids);
+  /**
+   * 按保留策略清理一篇文档的旧版本（新增版本后调用）
+   */
+  async pruneVersions(itemId: string): Promise<number> {
+    const deleted = this.pruneItem(itemId, this.getRetentionPolicy(), new Date());
+    if (deleted > 0) console.log(`[VersionHistory] Pruned ${deleted} old versions for item ${itemId}`);
+    return deleted;
+  }
 
-    console.log(`[VersionHistory] Pruned ${result.changes} old versions for item ${itemId}`);
-
-    return result.changes;
+  /**
+   * 按保留策略清理全部文档（设置中的“立即清理”）
+   * 只有不止一个版本、且最早的版本已超出全保留窗口的文档才可能有版本被删除
+   */
+  async pruneAllVersions(): Promise<VersionPruneResult> {
+    const policy = this.getRetentionPolicy();
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - policy.keepAllHours * 60 * 60 * 1000).toISOString();
+    const items = getSQLiteService().all<{ item_id: string }>(
+      `SELECT item_id FROM document_versions
+       GROUP BY item_id
+       HAVING COUNT(*) > 1 AND MIN(julianday(created_at)) < julianday(?)`,
+      [cutoff]
+    );
+    const result: VersionPruneResult = { deletedCount: 0, itemCount: 0 };
+    for (const { item_id: itemId } of items) {
+      const deleted = this.pruneItem(itemId, policy, now);
+      if (deleted === 0) continue;
+      result.deletedCount += deleted;
+      result.itemCount++;
+    }
+    console.log(`[VersionHistory] Pruned ${result.deletedCount} versions in ${result.itemCount} items`);
+    return result;
   }
 
   /**

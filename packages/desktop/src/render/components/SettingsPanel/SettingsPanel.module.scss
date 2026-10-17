@@ -732,6 +732,27 @@
   }
 }
 
+// 版本保留：数字输入、单位与操作行
+.settingNumberInput {
+  width: 88px;
+  text-align: right;
+}
+
+.settingUnit {
+  min-width: 2.5em;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.retentionActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+}
+
+
 // ================================
 // 滑块
 // ================================

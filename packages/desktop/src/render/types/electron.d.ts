@@ -452,6 +452,27 @@ interface VersionListOptions {
   limit?: number;
   offset?: number;
   changeTypes?: ChangeType[];
+  /** 只返回版本号小于该值的版本 */
+  beforeVersionNumber?: number;
+}
+
+/** 版本保留策略：最近 keepAllHours 小时全部保留，之后到 dailyDays 天每天一个，到 weeklyWeeks 周每周一个，更早每月一个 */
+export interface VersionRetentionPolicy {
+  keepAllHours: number;
+  dailyDays: number;
+  weeklyWeeks: number;
+}
+
+/** 全库版本统计 */
+export interface VersionStats {
+  versionCount: number;
+  itemCount: number;
+}
+
+/** 全库清理结果（itemCount 为有版本被删除的文档数） */
+export interface VersionPruneResult {
+  deletedCount: number;
+  itemCount: number;
 }
 
 // ================================
@@ -564,7 +585,14 @@ interface ElectronAPI {
     getByNumber: (itemId: string, versionNumber: number) => Promise<DocumentVersion | null>;
     restore: (itemId: string, versionId: string) => Promise<DocumentVersion>;
     getCount: (itemId: string) => Promise<number>;
-    prune: (itemId: string, keepCount?: number) => Promise<number>;
+    /** 按已保存的保留策略清理一篇文档的旧版本，返回删除数量 */
+    prune: (itemId: string) => Promise<number>;
+    /** 按保留策略清理全部文档 */
+    pruneAll: () => Promise<VersionPruneResult>;
+    getRetention: () => Promise<VersionRetentionPolicy>;
+    /** 保存策略，返回规范化后实际生效的值 */
+    setRetention: (policy: VersionRetentionPolicy) => Promise<VersionRetentionPolicy>;
+    getStats: () => Promise<VersionStats>;
     autoSave: (
       itemId: string,
       content: string,

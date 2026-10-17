@@ -68,7 +68,11 @@ export interface VersionListOptions {
   limit?: number;
   offset?: number;
   changeTypes?: ChangeType[];
+  /** 只返回版本号小于该值的版本 */
+  beforeVersionNumber?: number;
 }
+
+export type { VersionRetentionPolicy, VersionStats, VersionPruneResult } from '../../../types/electron';
 
 /**
  * Version comparison result

@@ -5,18 +5,19 @@
 // ================================
 
 import { versionRepository } from './repository';
-import { DocumentVersion, CreateVersionInput, VersionComparison, ChangeType } from './types';
+import {
+  DocumentVersion,
+  CreateVersionInput,
+  VersionComparison,
+  ChangeType,
+  type VersionPruneResult,
+  type VersionRetentionPolicy,
+  type VersionStats,
+} from './types';
 
 // ================================
 // Constants
 // ================================
-
-/**
- * 版本保留策略：每篇文档只保留最近 50 个版本，每次新增版本（保存、自动保存、恢复）后自动清理更旧的版本。
- * 自动保存至少间隔 5 分钟，50 个版本足以覆盖数小时的连续写作；
- * 每个版本都是完整快照，删除旧版本不影响其余版本的预览与恢复。
- */
-const DEFAULT_PRUNE_KEEP_COUNT = 50;
 
 /** Default limit for version history queries */
 const DEFAULT_HISTORY_LIMIT = 20;
@@ -164,13 +165,17 @@ class VersionService {
   }
 
   /**
-   * 获取紧邻在指定版本之前的版本（不依赖历史列表是否已分页加载到该版本）。
-   * 版本号在同一文档内连续：新版本取当前最大号 +1，清理只删除最旧的版本且不支持单独删除，
-   * 因此上一版就是版本号减 1；已被清理或本身就是第一版时返回 null
+   * 获取在指定版本之前仍保留的最近一个版本（不依赖历史列表是否已分页加载到该版本）。
+   * 分层保留策略会删除中间版本，版本号不一定连续；本身已是最早保留的版本时返回 null
    */
   async getVersionBefore(version: DocumentVersion): Promise<DocumentVersion | null> {
     if (version.versionNumber <= 1) return null;
-    return versionRepository.getByNumber(version.itemId, version.versionNumber - 1);
+    const [previous] = await versionRepository.getHistory({
+      itemId: version.itemId,
+      beforeVersionNumber: version.versionNumber,
+      limit: 1,
+    });
+    return previous ?? null;
   }
 
   /**
@@ -214,19 +219,34 @@ class VersionService {
   }
 
   /**
-   * Prune old versions, keeping only the most recent N
+   * 按已保存的保留策略（最近全部保留，之后按日/周/月抽样）清理一篇文档的旧版本
    */
-  async pruneVersions(
-    itemId: string,
-    keepCount: number = DEFAULT_PRUNE_KEEP_COUNT
-  ): Promise<number> {
-    const deletedCount = await versionRepository.prune(itemId, keepCount);
+  async pruneVersions(itemId: string): Promise<number> {
+    const deletedCount = await versionRepository.prune(itemId);
 
     if (deletedCount > 0) {
       console.log('[VersionService] Pruned', deletedCount, 'old versions for', itemId);
     }
 
     return deletedCount;
+  }
+
+  /** 按保留策略立即清理全部文档 */
+  async pruneAllVersions(): Promise<VersionPruneResult> {
+    return versionRepository.pruneAll();
+  }
+
+  async getRetentionPolicy(): Promise<VersionRetentionPolicy> {
+    return versionRepository.getRetention();
+  }
+
+  /** 保存保留策略，返回实际生效的值（主进程会规范化不合理的参数） */
+  async setRetentionPolicy(policy: VersionRetentionPolicy): Promise<VersionRetentionPolicy> {
+    return versionRepository.setRetention(policy);
+  }
+
+  async getStats(): Promise<VersionStats> {
+    return versionRepository.getStats();
   }
 
   /**

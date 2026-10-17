@@ -91,6 +91,10 @@ const validChannels = [
   'version:restore',
   'version:get-count',
   'version:prune',
+  'version:prune-all',
+  'version:get-retention',
+  'version:set-retention',
+  'version:get-stats',
   'version:auto-save',
   'version:should-auto-save',
 
@@ -316,8 +320,11 @@ contextBridge.exposeInMainWorld('electron', {
     restore: (itemId: string, versionId: string) =>
       ipcRenderer.invoke('version:restore', itemId, versionId),
     getCount: (itemId: string) => ipcRenderer.invoke('version:get-count', itemId),
-    prune: (itemId: string, keepCount?: number) =>
-      ipcRenderer.invoke('version:prune', itemId, keepCount),
+    prune: (itemId: string) => ipcRenderer.invoke('version:prune', itemId),
+    pruneAll: () => ipcRenderer.invoke('version:prune-all'),
+    getRetention: () => ipcRenderer.invoke('version:get-retention'),
+    setRetention: (policy: unknown) => ipcRenderer.invoke('version:set-retention', policy),
+    getStats: () => ipcRenderer.invoke('version:get-stats'),
     autoSave: (itemId: string, content: string, options?: unknown) =>
       ipcRenderer.invoke('version:auto-save', itemId, content, options),
     shouldAutoSave: (itemId: string, minIntervalMs?: number) =>
