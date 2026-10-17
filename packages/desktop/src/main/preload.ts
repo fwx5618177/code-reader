@@ -11,11 +11,13 @@ const validChannels = [
 
   // 文件系统操作
   'read-file',
+  'read-binary-file',
   'write-file',
   'write-binary-file',
   'get-file-info',
   'create-directory',
   'path-exists',
+  'rename-path',
 
   // 知识库数据操作
   'get-data-path',
@@ -40,13 +42,13 @@ const validChannels = [
   'db:clearAllData',
 
   // AI 操作
-  'ai:getProviders',
-  'ai:getProvider',
+  'ai:getConfig',
   'ai:addProvider',
   'ai:updateProvider',
   'ai:removeProvider',
   'ai:setDefaultProvider',
   'ai:setDefaultEmbeddingProvider',
+  'ai:setDefaultTranscriptionProvider',
   'ai:testConnection',
   'ai:chatCompletion',
   'ai:createEmbeddings',
@@ -86,7 +88,23 @@ const validChannels = [
 ];
 
 // 用于接收事件的通道
-const eventChannels = ['agent:progress', 'agent:taskCompleted', 'agent:taskFailed'];
+const eventChannels = [
+  'agent:progress',
+  'agent:taskCompleted',
+  'agent:taskFailed',
+  'agent:itemStatusChanged',
+];
+
+/**
+ * 订阅主进程推送的事件，返回取消订阅函数
+ */
+function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
+  const subscription = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
+  ipcRenderer.on(channel, subscription);
+  return () => {
+    ipcRenderer.removeListener(channel, subscription);
+  };
+}
 
 // 暴露安全的 API 到渲染进程
 contextBridge.exposeInMainWorld('electron', {
@@ -158,15 +176,16 @@ contextBridge.exposeInMainWorld('electron', {
 
   // AI 便捷方法
   ai: {
-    getProviders: () => ipcRenderer.invoke('ai:getProviders'),
-    getProvider: (id: string) => ipcRenderer.invoke('ai:getProvider', id),
-    addProvider: (provider: unknown) => ipcRenderer.invoke('ai:addProvider', provider),
+    getConfig: () => ipcRenderer.invoke('ai:getConfig'),
+    addProvider: (input: unknown) => ipcRenderer.invoke('ai:addProvider', input),
     updateProvider: (id: string, updates: unknown) =>
       ipcRenderer.invoke('ai:updateProvider', id, updates),
     removeProvider: (id: string) => ipcRenderer.invoke('ai:removeProvider', id),
     setDefaultProvider: (id: string) => ipcRenderer.invoke('ai:setDefaultProvider', id),
     setDefaultEmbeddingProvider: (id: string) =>
       ipcRenderer.invoke('ai:setDefaultEmbeddingProvider', id),
+    setDefaultTranscriptionProvider: (id: string) =>
+      ipcRenderer.invoke('ai:setDefaultTranscriptionProvider', id),
     testConnection: (providerId: string) => ipcRenderer.invoke('ai:testConnection', providerId),
     chatCompletion: (request: unknown) => ipcRenderer.invoke('ai:chatCompletion', request),
     createEmbeddings: (request: unknown) => ipcRenderer.invoke('ai:createEmbeddings', request),
@@ -188,14 +207,12 @@ contextBridge.exposeInMainWorld('electron', {
     getTasksForItem: (itemId: string) => ipcRenderer.invoke('agent:getTasksForItem', itemId),
     processItem: (targetItemId: string, options?: unknown) =>
       ipcRenderer.invoke('agent:processItem', targetItemId, options),
-    onProgress: (callback: (progress: unknown) => void) => {
-      const subscription = (_event: Electron.IpcRendererEvent, progress: unknown) =>
-        callback(progress);
-      ipcRenderer.on('agent:progress', subscription);
-      return () => {
-        ipcRenderer.removeListener('agent:progress', subscription);
-      };
-    },
+    onProgress: (callback: (progress: unknown) => void) => subscribe('agent:progress', callback),
+    onTaskCompleted: (callback: (event: unknown) => void) =>
+      subscribe('agent:taskCompleted', callback),
+    onTaskFailed: (callback: (event: unknown) => void) => subscribe('agent:taskFailed', callback),
+    onItemStatusChanged: (callback: (event: unknown) => void) =>
+      subscribe('agent:itemStatusChanged', callback),
   },
 
   // 语义搜索便捷方法

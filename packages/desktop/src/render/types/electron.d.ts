@@ -31,6 +31,7 @@ interface RunResult {
 // AI Types
 // ================================
 
+/** 与主进程 main/ai/provider-config.ts 保持一致；type 由主进程校验是否受支持 */
 interface AIProviderConfig {
   id: string;
   type: string;
@@ -38,12 +39,33 @@ interface AIProviderConfig {
   baseUrl?: string;
   apiKey?: string;
   isEnabled: boolean;
+  /** 对话模型 */
   defaultModel?: string;
+  /** 向量模型；为空表示不参与向量生成 */
   embeddingModel?: string;
+  /** 语音转写模型；为空表示不参与转写 */
+  transcriptionModel?: string;
   settings?: Record<string, unknown>;
 }
 
-interface ChatMessage {
+/** 新增服务商输入，id 由主进程生成 */
+type AIProviderInput = Omit<AIProviderConfig, 'id'>;
+
+/** 字段缺省表示不变；apiKey 为空保留原密钥；baseUrl/模型为空字符串表示清除 */
+type AIProviderUpdate = Partial<Omit<AIProviderConfig, 'id' | 'type'>>;
+
+/** 渲染进程可见的服务商视图，不含密钥 */
+type AIProviderView = Omit<AIProviderConfig, 'apiKey'> & { hasApiKey: boolean };
+
+/** 配置快照，默认服务商为主进程实际生效的值 */
+interface AIConfigSnapshot {
+  providers: AIProviderView[];
+  defaultProviderId?: string;
+  defaultEmbeddingProviderId?: string;
+  defaultTranscriptionProviderId?: string;
+}
+
+export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
@@ -138,16 +160,17 @@ interface TestConnectionResult {
 // Agent Types
 // ================================
 
-type TaskType =
+export type TaskType =
   | 'transcribe'
   | 'summarize'
   | 'extract-tags'
-  | 'categorize'
-  | 'extract-entities'
   | 'generate-embedding'
   | 'find-related';
 
-type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+/** 由 Agent 任务生命周期维护的条目状态 */
+export type ItemProcessingStatus = 'processing' | 'ready' | 'error';
 
 interface AgentTask {
   id: string;
@@ -168,12 +191,36 @@ interface AgentTask {
 
 interface TaskProgress {
   taskId: string;
+  targetItemId: string;
+  type: TaskType;
   progress: number;
   status: TaskStatus;
   message?: string;
 }
 
-interface ProcessItemOptions {
+interface TaskCompletedEvent {
+  taskId: string;
+  targetItemId: string;
+  type: TaskType;
+  /** 任务执行结果，结构随任务类型而定 */
+  result?: unknown;
+}
+
+interface TaskFailedEvent {
+  taskId: string;
+  targetItemId: string;
+  type: TaskType;
+  error: string;
+  /** 为 true 时任务已重新排队，稍后自动重试；false 表示永久失败 */
+  willRetry: boolean;
+}
+
+interface ItemStatusChangedEvent {
+  itemId: string;
+  status: ItemProcessingStatus;
+}
+
+export interface ProcessItemOptions {
   transcribe?: boolean;
   summarize?: boolean;
   extractTags?: boolean;
@@ -292,16 +339,13 @@ interface ElectronAPI {
   };
 
   ai: {
-    getProviders: () => Promise<AIProviderConfig[]>;
-    getProvider: (id: string) => Promise<AIProviderConfig | undefined>;
-    addProvider: (provider: AIProviderConfig) => Promise<{ success: boolean }>;
-    updateProvider: (
-      id: string,
-      updates: Partial<AIProviderConfig>
-    ) => Promise<{ success: boolean }>;
+    getConfig: () => Promise<AIConfigSnapshot>;
+    addProvider: (input: AIProviderInput) => Promise<AIProviderView>;
+    updateProvider: (id: string, updates: AIProviderUpdate) => Promise<AIProviderView>;
     removeProvider: (id: string) => Promise<{ success: boolean }>;
     setDefaultProvider: (id: string) => Promise<{ success: boolean }>;
     setDefaultEmbeddingProvider: (id: string) => Promise<{ success: boolean }>;
+    setDefaultTranscriptionProvider: (id: string) => Promise<{ success: boolean }>;
     testConnection: (providerId: string) => Promise<TestConnectionResult>;
     chatCompletion: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
     createEmbeddings: (request: EmbeddingRequest) => Promise<EmbeddingResponse>;
@@ -325,6 +369,9 @@ interface ElectronAPI {
     getTasksForItem: (itemId: string) => Promise<AgentTask[]>;
     processItem: (targetItemId: string, options?: ProcessItemOptions) => Promise<string[]>;
     onProgress: (callback: (progress: TaskProgress) => void) => () => void;
+    onTaskCompleted: (callback: (event: TaskCompletedEvent) => void) => () => void;
+    onTaskFailed: (callback: (event: TaskFailedEvent) => void) => () => void;
+    onItemStatusChanged: (callback: (event: ItemStatusChangedEvent) => void) => () => void;
   };
 
   search: {

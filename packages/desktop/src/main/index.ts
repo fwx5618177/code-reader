@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { existsSync } from 'fs';
-import { readFile, stat, writeFile, mkdir, access } from 'fs/promises';
+import { readFile, stat, writeFile, mkdir, access, rename } from 'fs/promises';
 
 // Import services
 import { getSQLiteService } from './database/sqlite';
@@ -328,6 +328,16 @@ function setupIPC() {
     }
   });
 
+  // 读取二进制文件（渲染进程转为 Blob URL 预览图片/音视频附件，不需要放开 file: 协议）
+  ipcMain.handle('read-binary-file', async (_event, filePath: string) => {
+    try {
+      return new Uint8Array(await readFile(filePath));
+    } catch (error) {
+      console.error('Error reading binary file:', error);
+      throw error;
+    }
+  });
+
   // 获取文件信息
   ipcMain.handle('get-file-info', async (_event, filePath: string) => {
     try {
@@ -387,6 +397,17 @@ function setupIPC() {
       return true;
     } catch {
       return false;
+    }
+  });
+
+  // 重命名/移动文件
+  ipcMain.handle('rename-path', async (_event, fromPath: string, toPath: string) => {
+    try {
+      await rename(fromPath, toPath);
+      return true;
+    } catch (error) {
+      console.error('Error renaming path:', error);
+      throw error;
     }
   });
 

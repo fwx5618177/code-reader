@@ -36,7 +36,7 @@ export interface RunResult {
 // Schema Definitions
 // ================================
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const CREATE_TABLES_SQL = `
 -- Knowledge Items table
@@ -177,6 +177,10 @@ CREATE TABLE IF NOT EXISTS agent_tasks (
   retry_count INTEGER NOT NULL DEFAULT 0,
   max_retries INTEGER NOT NULL DEFAULT 3,
   result TEXT,
+  -- 同一次处理请求（processItem）创建的任务共享 batch_id，用于判定条目最终状态
+  batch_id TEXT,
+  -- 失败重试时的最早可执行时间（ISO 字符串），为空表示可立即执行
+  next_attempt_at TEXT,
   started_at TEXT,
   completed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -305,44 +309,147 @@ CREATE INDEX IF NOT EXISTS idx_versions_change_type ON document_versions(change_
 -- Git indexes
 `;
 
+// 全文检索：外部内容表映射 knowledge_items，trigram 分词以支持中文等无空格语言的子串匹配
 const CREATE_FTS_SQL = `
--- Full-text search virtual table
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
   id UNINDEXED,
   title,
   content,
   summary,
   transcript,
-  tags,
   content='knowledge_items',
   content_rowid='rowid',
-  tokenize='unicode61 remove_diacritics 2'
+  tokenize='trigram'
 );
 
--- Triggers to keep FTS in sync
 CREATE TRIGGER IF NOT EXISTS items_fts_insert AFTER INSERT ON knowledge_items BEGIN
-  INSERT INTO items_fts(rowid, id, title, content, summary, transcript, tags)
-  SELECT NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript,
-    (SELECT GROUP_CONCAT(t.name, ' ') FROM tags t
-     INNER JOIN item_tags it ON t.id = it.tag_id
-     WHERE it.item_id = NEW.id);
+  INSERT INTO items_fts(rowid, id, title, content, summary, transcript)
+  VALUES (NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript);
 END;
 
 CREATE TRIGGER IF NOT EXISTS items_fts_delete AFTER DELETE ON knowledge_items BEGIN
-  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript, tags)
-  VALUES('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript, NULL);
+  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript)
+  VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript);
 END;
 
-CREATE TRIGGER IF NOT EXISTS items_fts_update AFTER UPDATE ON knowledge_items BEGIN
-  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript, tags)
-  VALUES('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript, NULL);
-  INSERT INTO items_fts(rowid, id, title, content, summary, transcript, tags)
-  SELECT NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript,
-    (SELECT GROUP_CONCAT(t.name, ' ') FROM tags t
-     INNER JOIN item_tags it ON t.id = it.tag_id
-     WHERE it.item_id = NEW.id);
+-- 仅在被索引的列变化时重建该行索引，避免 status/view_count 等更新带来无谓开销
+CREATE TRIGGER IF NOT EXISTS items_fts_update
+AFTER UPDATE OF title, content, summary, transcript ON knowledge_items BEGIN
+  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript)
+  VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript);
+  INSERT INTO items_fts(rowid, id, title, content, summary, transcript)
+  VALUES (NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript);
 END;
 `;
+
+const REBUILD_FTS_SQL = "INSERT INTO items_fts(items_fts) VALUES('rebuild')";
+
+// trigram 分词器只能匹配长度 >= 3 个字符的检索词
+const TRIGRAM_MIN_TERM_LENGTH = 3;
+
+// LIKE 回退检索时，片段中命中词前后保留的字符数
+const LIKE_SNIPPET_CONTEXT_CHARS = 32;
+
+// ================================
+// Migrations
+// ================================
+
+interface Migration {
+  version: number;
+  description: string;
+  up: (db: Database.Database) => void;
+}
+
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string
+): void {
+  const columns = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`);
+  }
+}
+
+/**
+ * 增量迁移，按 version 升序执行。全新数据库直接按 CREATE_TABLES_SQL / CREATE_FTS_SQL 建出最新结构，不执行迁移。
+ */
+const MIGRATIONS: Migration[] = [
+  {
+    version: 3,
+    description: 'agent_tasks 新增 batch_id/next_attempt_at；items_fts 去掉不存在的 tags 列并改用 trigram 分词',
+    up: (db) => {
+      addColumnIfMissing(db, 'agent_tasks', 'batch_id', 'TEXT');
+      addColumnIfMissing(db, 'agent_tasks', 'next_attempt_at', 'TEXT');
+
+      db.exec(`
+        DROP TRIGGER IF EXISTS items_fts_insert;
+        DROP TRIGGER IF EXISTS items_fts_delete;
+        DROP TRIGGER IF EXISTS items_fts_update;
+        DROP TABLE IF EXISTS items_fts;
+      `);
+      db.exec(CREATE_FTS_SQL);
+      db.exec(REBUILD_FTS_SQL);
+    },
+  },
+];
+
+// ================================
+// Search Helpers
+// ================================
+
+/**
+ * 将用户输入拆分为检索词（按空白分隔）
+ */
+function splitSearchTerms(query: string): string[] {
+  return query.trim().split(/\s+/).filter((term) => term.length > 0);
+}
+
+/**
+ * 构造 FTS5 MATCH 表达式：每个词作为短语用双引号包裹（内部双引号转义为两个），词之间为隐式 AND
+ */
+function buildFtsMatchExpression(terms: string[]): string {
+  return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' ');
+}
+
+/**
+ * 转义 LIKE 通配符（% _ 以及转义符自身），配合 SQL 中的 ESCAPE '\' 使用
+ */
+function toLikePattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 为 LIKE 回退检索生成与 FTS snippet 风格一致的片段：取首个命中字段中第一个命中位置附近的文本并高亮所有检索词
+ */
+function buildLikeSnippet(fields: Array<string | null>, terms: string[]): string {
+  const pattern = terms.map(escapeRegExp).join('|');
+
+  for (const field of fields) {
+    if (!field) continue;
+
+    const firstHit = new RegExp(pattern, 'iu').exec(field);
+    if (!firstHit) continue;
+
+    const start = Math.max(0, firstHit.index - LIKE_SNIPPET_CONTEXT_CHARS);
+    const end = Math.min(
+      field.length,
+      firstHit.index + firstHit[0].length + LIKE_SNIPPET_CONTEXT_CHARS
+    );
+    const highlighted = field
+      .slice(start, end)
+      .replace(new RegExp(pattern, 'giu'), (match) => `<mark>${match}</mark>`);
+
+    return `${start > 0 ? '...' : ''}${highlighted}${end < field.length ? '...' : ''}`;
+  }
+
+  return '';
+}
 
 // ================================
 // SQLite Service Class
@@ -409,28 +516,50 @@ export class SQLiteService {
   }
 
   /**
-   * Create database tables
+   * Create database tables and apply pending migrations
    */
   private createTables(): void {
-    if (!this.db) throw new Error('Database not connected');
+    const db = this.db;
+    if (!db) throw new Error('Database not connected');
 
     try {
-      // Create main tables
-      this.db.exec(CREATE_TABLES_SQL);
+      // 必须在建表之前判断：已存在的数据库需要从其记录的版本开始迁移，全新数据库直接就是最新结构
+      const isExistingDatabase = db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'knowledge_items'`)
+        .get() !== undefined;
+      const hasVersionTable = db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'`)
+        .get() !== undefined;
+      const currentVersion = !isExistingDatabase
+        ? SCHEMA_VERSION
+        : hasVersionTable
+          ? ((db.prepare('SELECT MAX(version) as version FROM schema_version').get() as {
+              version: number | null;
+            }).version ?? 0)
+          : 0;
 
-      // Create FTS tables and triggers
-      this.db.exec(CREATE_FTS_SQL);
+      db.transaction(() => {
+        db.exec(CREATE_TABLES_SQL);
 
-      // Record schema version
-      const versionStmt = this.db.prepare(`
-        INSERT OR REPLACE INTO schema_version (version, applied_at)
-        VALUES (?, datetime('now'))
-      `);
-      versionStmt.run(SCHEMA_VERSION);
+        const recordVersion = db.prepare(`
+          INSERT OR REPLACE INTO schema_version (version, applied_at)
+          VALUES (?, datetime('now'))
+        `);
 
-      console.log('[SQLite] Tables created successfully');
+        for (const migration of MIGRATIONS) {
+          if (migration.version <= currentVersion) continue;
+          console.log(`[SQLite] Applying migration v${migration.version}: ${migration.description}`);
+          migration.up(db);
+          recordVersion.run(migration.version);
+        }
+
+        db.exec(CREATE_FTS_SQL);
+        recordVersion.run(SCHEMA_VERSION);
+      })();
+
+      console.log(`[SQLite] Schema ready (v${currentVersion} -> v${SCHEMA_VERSION})`);
     } catch (error) {
-      console.error('[SQLite] Failed to create tables:', error);
+      console.error('[SQLite] Failed to create tables or migrate schema:', error);
       throw error;
     }
   }
@@ -516,7 +645,10 @@ export class SQLiteService {
   }
 
   /**
-   * Full-text search
+   * 全文检索。
+   * - 所有检索词长度 >= 3：走 trigram FTS5，按 bm25 排序（rank 越小越相关）
+   * - 存在更短的词（如两字中文词）：trigram 无法匹配，回退为 LIKE 扫描，标题命中优先、其次按更新时间排序，rank 固定为 0
+   * 多个词之间为 AND 关系。
    */
   search(
     query: string,
@@ -528,43 +660,93 @@ export class SQLiteService {
   ): FTSResult[] {
     this.ensureInitialized();
 
-    const limit = options?.limit || 50;
-    const offset = options?.offset || 0;
-    const types = options?.types;
+    const terms = splitSearchTerms(query);
+    if (terms.length === 0) return [];
+
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
+    const types = options?.types ?? [];
+    const useFts = terms.every((term) => [...term].length >= TRIGRAM_MIN_TERM_LENGTH);
 
     try {
-      // Escape special FTS5 characters
-      const escapedQuery = query.replace(/['"]/g, '');
-
-      let sql = `
-        SELECT
-          items_fts.id,
-          bm25(items_fts) as rank,
-          snippet(items_fts, 2, '<mark>', '</mark>', '...', 64) as snippet,
-          ki.title,
-          ki.type
-        FROM items_fts
-        LEFT JOIN knowledge_items ki ON items_fts.id = ki.id
-        WHERE items_fts MATCH ?
-      `;
-
-      const params: unknown[] = [escapedQuery];
-
-      if (types && types.length > 0) {
-        sql += ` AND ki.type IN (${types.map(() => '?').join(', ')})`;
-        params.push(...types);
-      }
-
-      sql += ` AND ki.is_deleted = 0`;
-      sql += ` ORDER BY rank`;
-      sql += ` LIMIT ? OFFSET ?`;
-      params.push(limit, offset);
-
-      return this.all<FTSResult>(sql, params);
+      return useFts
+        ? this.searchFts(terms, types, limit, offset)
+        : this.searchLike(terms, types, limit, offset);
     } catch (error) {
-      console.error('[SQLite] Search error:', error);
-      return [];
+      console.error(
+        `[SQLite] Search error (mode=${useFts ? 'fts' : 'like'}, query=${JSON.stringify(query)}, types=${JSON.stringify(types)}, limit=${limit}, offset=${offset}):`,
+        error
+      );
+      throw error;
     }
+  }
+
+  private searchFts(terms: string[], types: string[], limit: number, offset: number): FTSResult[] {
+    let sql = `
+      SELECT
+        ki.id,
+        bm25(items_fts) AS rank,
+        snippet(items_fts, -1, '<mark>', '</mark>', '...', 32) AS snippet,
+        ki.title,
+        ki.type
+      FROM items_fts
+      INNER JOIN knowledge_items ki ON ki.rowid = items_fts.rowid
+      WHERE items_fts MATCH ? AND ki.is_deleted = 0
+    `;
+    const params: unknown[] = [buildFtsMatchExpression(terms)];
+
+    if (types.length > 0) {
+      sql += ` AND ki.type IN (${types.map(() => '?').join(', ')})`;
+      params.push(...types);
+    }
+
+    sql += ` ORDER BY rank LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    return this.all<FTSResult>(sql, params);
+  }
+
+  private searchLike(terms: string[], types: string[], limit: number, offset: number): FTSResult[] {
+    const patterns = terms.map(toLikePattern);
+    let sql = `
+      SELECT ki.id, ki.title, ki.type, ki.content, ki.summary, ki.transcript
+      FROM knowledge_items ki
+      WHERE ki.is_deleted = 0
+    `;
+    const params: unknown[] = [];
+
+    for (const pattern of patterns) {
+      sql += ` AND (ki.title LIKE ? ESCAPE '\\' OR ki.content LIKE ? ESCAPE '\\'
+                OR ki.summary LIKE ? ESCAPE '\\' OR ki.transcript LIKE ? ESCAPE '\\')`;
+      params.push(pattern, pattern, pattern, pattern);
+    }
+
+    if (types.length > 0) {
+      sql += ` AND ki.type IN (${types.map(() => '?').join(', ')})`;
+      params.push(...types);
+    }
+
+    sql += ` ORDER BY (${patterns.map(() => `ki.title LIKE ? ESCAPE '\\'`).join(' OR ')}) DESC, ki.updated_at DESC`;
+    params.push(...patterns);
+    sql += ` LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = this.all<{
+      id: string;
+      title: string;
+      type: string;
+      content: string | null;
+      summary: string | null;
+      transcript: string | null;
+    }>(sql, params);
+
+    return rows.map((row) => ({
+      id: row.id,
+      rank: 0,
+      snippet: buildLikeSnippet([row.content, row.summary, row.transcript, row.title], terms),
+      title: row.title,
+      type: row.type,
+    }));
   }
 
   /**
@@ -573,7 +755,7 @@ export class SQLiteService {
   rebuildFTSIndex(): void {
     this.ensureInitialized();
     try {
-      this.db!.exec("INSERT INTO items_fts(items_fts) VALUES('rebuild')");
+      this.db!.exec(REBUILD_FTS_SQL);
       console.log('[SQLite] FTS index rebuilt');
     } catch (error) {
       console.error('[SQLite] FTS rebuild error:', error);
@@ -646,11 +828,7 @@ export class SQLiteService {
       this.db!.pragma('foreign_keys = ON');
 
       // Rebuild FTS index
-      try {
-        this.db!.exec("INSERT INTO items_fts(items_fts) VALUES('rebuild')");
-      } catch {
-        // FTS might not exist or be empty, ignore
-      }
+      this.rebuildFTSIndex();
 
       // Vacuum to reclaim space
       this.db!.exec('VACUUM');

@@ -1,583 +1,160 @@
 // ================================
-// AI Configuration Service
-// Manages API keys and provider configurations
-// Stored as JSON for user-provided credentials
+// AI 配置客户端
+// 主进程（main/ai）是 AI 服务商配置的唯一数据源；本服务只通过 window.electron.ai IPC 读写，
+// 不做文件读写、不直连服务商接口、不接触密钥明文，仅缓存最近一次的配置快照供同步读取与订阅。
 // ================================
 
 import {
-  AIConfig,
-  LLMProviderConfig,
-  TranscriptionProviderConfig,
-  AIFeatureSettings,
-  ProviderHealthCheck,
-  DEFAULT_AI_CONFIG,
-  DEFAULT_AI_FEATURE_SETTINGS,
   LLM_PROVIDER_PRESETS,
   TRANSCRIPTION_PROVIDER_PRESETS,
-  AIProviderType,
-  TranscriptionProviderType,
+  type AIProviderType,
+  type TranscriptionProviderType,
 } from '../types/ai-providers';
 
 // ================================
-// Constants
+// 类型（由 preload 暴露的 IPC 接口推导，避免重复声明）
 // ================================
 
-const AI_CONFIG_FILE = 'ai-config.json';
-const CONFIG_VERSION = 1;
+type AIBridge = Window['electron']['ai'];
+
+export type AIConfigSnapshot = Awaited<ReturnType<AIBridge['getConfig']>>;
+export type AIProviderView = AIConfigSnapshot['providers'][number];
+export type AIProviderInput = Parameters<AIBridge['addProvider']>[0];
+export type AIProviderUpdate = Parameters<AIBridge['updateProvider']>[1];
+export type AIConnectionTestResult = Awaited<ReturnType<AIBridge['testConnection']>>;
+
+/** 新增服务商时按类型预填的字段 */
+export type AIProviderDefaults = Pick<
+  AIProviderInput,
+  'name' | 'baseUrl' | 'defaultModel' | 'embeddingModel' | 'transcriptionModel'
+>;
 
 // ================================
-// Utility Functions
+// 常量
 // ================================
 
-/**
- * Generate a unique ID
- */
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-}
+/** 提供 OpenAI 兼容转写接口的服务商类型 → 对应的转写预设 */
+const TRANSCRIPTION_PRESET_BY_PROVIDER: Partial<Record<AIProviderType, TranscriptionProviderType>> =
+  {
+    openai: 'openai-whisper',
+  };
 
-/**
- * Simple encryption for API keys (base64 + reverse)
- * Note: This is NOT secure encryption, just obfuscation
- * For production, use proper encryption with electron-store or keytar
- */
-function obfuscateKey(key: string): string {
-  if (!key) return '';
-  const base64 = btoa(key);
-  return base64.split('').reverse().join('');
-}
-
-/**
- * Deobfuscate API key
- */
-function deobfuscateKey(obfuscated: string): string {
-  if (!obfuscated) return '';
-  try {
-    const base64 = obfuscated.split('').reverse().join('');
-    return atob(base64);
-  } catch {
-    return obfuscated; // Return as-is if not obfuscated
-  }
-}
+const EMPTY_SNAPSHOT: AIConfigSnapshot = { providers: [] };
 
 // ================================
-// AI Configuration Service
+// AI 配置客户端
 // ================================
 
 class AIConfigService {
-  private config: AIConfig = DEFAULT_AI_CONFIG;
-  private configPath: string = '';
-  private healthChecks: Map<string, ProviderHealthCheck> = new Map();
-
-  // ================================
-  // Initialization
-  // ================================
+  private snapshot: AIConfigSnapshot = EMPTY_SNAPSHOT;
+  private listeners = new Set<() => void>();
 
   /**
-   * Initialize the service and load configuration
+   * 启动时加载配置快照
    */
   async initialize(): Promise<void> {
-    try {
-      const dataPath = await window.electron.ipcRenderer.invoke('get-data-path');
-      this.configPath = `${dataPath}/${AI_CONFIG_FILE}`;
-
-      // Check if config file exists
-      const exists = await window.electron.ipcRenderer.invoke('path-exists', this.configPath);
-
-      if (exists) {
-        await this.loadConfig();
-      } else {
-        // Create default config
-        this.config = {
-          ...DEFAULT_AI_CONFIG,
-          updatedAt: new Date().toISOString(),
-        };
-        await this.saveConfig();
-      }
-
-      console.log('[AIConfigService] Initialized successfully');
-    } catch (error) {
-      console.error('[AIConfigService] Initialization failed:', error);
-      this.config = DEFAULT_AI_CONFIG;
-    }
+    await this.refresh();
   }
 
   /**
-   * Load configuration from file
+   * 从主进程重新读取配置并通知订阅者
    */
-  private async loadConfig(): Promise<void> {
-    try {
-      const content = await window.electron.ipcRenderer.invoke('read-file', this.configPath);
-      const parsed = JSON.parse(content as string);
-
-      // Migration if needed
-      if (parsed.version !== CONFIG_VERSION) {
-        this.config = this.migrateConfig(parsed);
-        await this.saveConfig();
-      } else {
-        this.config = parsed;
-      }
-    } catch (error) {
-      console.error('[AIConfigService] Failed to load config:', error);
-      this.config = DEFAULT_AI_CONFIG;
-    }
+  async refresh(): Promise<AIConfigSnapshot> {
+    this.snapshot = await window.electron.ai.getConfig();
+    this.listeners.forEach((listener) => listener());
+    return this.snapshot;
   }
 
   /**
-   * Save configuration to file
+   * 最近一次读取的配置快照；引用在刷新前保持稳定，可直接用于 useSyncExternalStore
    */
-  private async saveConfig(): Promise<void> {
-    try {
-      this.config.updatedAt = new Date().toISOString();
-      const content = JSON.stringify(this.config, null, 2);
-      await window.electron.ipcRenderer.invoke('write-file', this.configPath, content);
-    } catch (error) {
-      console.error('[AIConfigService] Failed to save config:', error);
-      throw error;
-    }
-  }
+  getSnapshot = (): AIConfigSnapshot => this.snapshot;
 
   /**
-   * Migrate old config to new version
+   * 订阅配置变化，返回取消订阅函数
    */
-  private migrateConfig(oldConfig: Partial<AIConfig>): AIConfig {
-    // Handle version migrations here
-    return {
-      ...DEFAULT_AI_CONFIG,
-      ...oldConfig,
-      version: CONFIG_VERSION,
-      features: {
-        ...DEFAULT_AI_FEATURE_SETTINGS,
-        ...oldConfig.features,
-      },
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
     };
-  }
+  };
 
   // ================================
-  // LLM Provider Management
+  // 服务商管理
   // ================================
 
-  /**
-   * Get all LLM providers
-   */
-  getLLMProviders(): LLMProviderConfig[] {
-    return this.config.llmProviders.map((p) => ({
-      ...p,
-      apiKey: deobfuscateKey(p.apiKey),
-    }));
+  async addProvider(input: AIProviderInput): Promise<AIProviderView> {
+    return this.mutate(() => window.electron.ai.addProvider(input));
   }
 
   /**
-   * Get active LLM provider
+   * 更新服务商；apiKey 缺省或为空时主进程保留已存储的密钥
    */
-  getActiveLLMProvider(): LLMProviderConfig | null {
-    if (!this.config.activeLLMProviderId) return null;
-    const provider = this.config.llmProviders.find((p) => p.id === this.config.activeLLMProviderId);
-    if (!provider) return null;
-    return {
-      ...provider,
-      apiKey: deobfuscateKey(provider.apiKey),
-    };
+  async updateProvider(id: string, updates: AIProviderUpdate): Promise<AIProviderView> {
+    return this.mutate(() => window.electron.ai.updateProvider(id, updates));
+  }
+
+  async removeProvider(id: string): Promise<void> {
+    await this.mutate(() => window.electron.ai.removeProvider(id));
+  }
+
+  async setDefaultProvider(id: string): Promise<void> {
+    await this.mutate(() => window.electron.ai.setDefaultProvider(id));
+  }
+
+  async setDefaultEmbeddingProvider(id: string): Promise<void> {
+    await this.mutate(() => window.electron.ai.setDefaultEmbeddingProvider(id));
+  }
+
+  async setDefaultTranscriptionProvider(id: string): Promise<void> {
+    await this.mutate(() => window.electron.ai.setDefaultTranscriptionProvider(id));
   }
 
   /**
-   * Add a new LLM provider
+   * 由主进程使用已保存的配置发起一次对话请求以验证连通性
    */
-  async addLLMProvider(
-    type: AIProviderType,
-    config: Omit<LLMProviderConfig, 'id' | 'type' | 'createdAt' | 'updatedAt'>
-  ): Promise<LLMProviderConfig> {
+  testConnection(id: string): Promise<AIConnectionTestResult> {
+    return window.electron.ai.testConnection(id);
+  }
+
+  /**
+   * 是否存在可用的对话服务商（已启用的默认服务商且已配置密钥）
+   */
+  async hasUsableProvider(): Promise<boolean> {
+    const { providers, defaultProviderId } = await this.refresh();
+    return providers.some((p) => p.id === defaultProviderId && p.hasApiKey);
+  }
+
+  /**
+   * 按服务商预设推导新增表单的默认值：对话模型取预设默认模型，
+   * 向量模型取预设中首个向量模型，转写模型取对应转写预设的首个模型
+   */
+  getProviderDefaults(type: AIProviderType): AIProviderDefaults {
     const preset = LLM_PROVIDER_PRESETS.find((p) => p.type === type);
-    const now = new Date().toISOString();
-
-    const provider: LLMProviderConfig = {
-      ...config,
-      id: generateId(),
-      type,
-      apiKey: obfuscateKey(config.apiKey),
-      baseUrl: config.baseUrl || preset?.defaultBaseUrl,
-      models: config.models.length > 0 ? config.models : preset?.availableModels ?? [],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.config.llmProviders.push(provider);
-
-    // Set as active if it's the first one
-    if (!this.config.activeLLMProviderId) {
-      this.config.activeLLMProviderId = provider.id;
-    }
-
-    await this.saveConfig();
-    return {
-      ...provider,
-      apiKey: deobfuscateKey(provider.apiKey),
-    };
-  }
-
-  /**
-   * Update an LLM provider
-   */
-  async updateLLMProvider(
-    id: string,
-    updates: Partial<Omit<LLMProviderConfig, 'id' | 'type' | 'createdAt'>>
-  ): Promise<LLMProviderConfig | null> {
-    const index = this.config.llmProviders.findIndex((p) => p.id === id);
-    if (index === -1) return null;
-
-    const updatedProvider: LLMProviderConfig = {
-      ...this.config.llmProviders[index],
-      ...updates,
-      apiKey: updates.apiKey
-        ? obfuscateKey(updates.apiKey)
-        : this.config.llmProviders[index].apiKey,
-      updatedAt: new Date().toISOString(),
-    };
-
-    this.config.llmProviders[index] = updatedProvider;
-    await this.saveConfig();
+    const models = preset?.availableModels ?? [];
+    const chatModels = models.filter((m) => m.capabilities.chat);
+    const transcriptionType = TRANSCRIPTION_PRESET_BY_PROVIDER[type];
+    const transcriptionPreset = transcriptionType
+      ? TRANSCRIPTION_PROVIDER_PRESETS.find((p) => p.type === transcriptionType)
+      : undefined;
 
     return {
-      ...updatedProvider,
-      apiKey: deobfuscateKey(updatedProvider.apiKey),
+      name: preset?.name ?? type,
+      baseUrl: preset?.defaultBaseUrl,
+      defaultModel: (chatModels.find((m) => m.isDefault) ?? chatModels[0])?.id,
+      embeddingModel: models.find((m) => m.capabilities.embeddings)?.id,
+      transcriptionModel: transcriptionPreset?.availableModels[0]?.id,
     };
   }
 
   /**
-   * Delete an LLM provider
+   * 执行写操作后刷新快照，保证订阅者看到主进程的最新状态
    */
-  async deleteLLMProvider(id: string): Promise<boolean> {
-    const index = this.config.llmProviders.findIndex((p) => p.id === id);
-    if (index === -1) return false;
-
-    this.config.llmProviders.splice(index, 1);
-
-    // Clear active if deleted
-    if (this.config.activeLLMProviderId === id) {
-      this.config.activeLLMProviderId = this.config.llmProviders[0]?.id;
-    }
-
-    await this.saveConfig();
-    return true;
-  }
-
-  /**
-   * Set active LLM provider
-   */
-  async setActiveLLMProvider(id: string): Promise<boolean> {
-    const provider = this.config.llmProviders.find((p) => p.id === id);
-    if (!provider) return false;
-
-    this.config.activeLLMProviderId = id;
-    await this.saveConfig();
-    return true;
-  }
-
-  // ================================
-  // Transcription Provider Management
-  // ================================
-
-  /**
-   * Get all transcription providers
-   */
-  getTranscriptionProviders(): TranscriptionProviderConfig[] {
-    return this.config.transcriptionProviders.map((p) => ({
-      ...p,
-      apiKey: deobfuscateKey(p.apiKey),
-      appSecret: p.appSecret ? deobfuscateKey(p.appSecret) : undefined,
-    }));
-  }
-
-  /**
-   * Get active transcription provider
-   */
-  getActiveTranscriptionProvider(): TranscriptionProviderConfig | null {
-    if (!this.config.activeTranscriptionProviderId) return null;
-    const provider = this.config.transcriptionProviders.find(
-      (p) => p.id === this.config.activeTranscriptionProviderId
-    );
-    if (!provider) return null;
-    return {
-      ...provider,
-      apiKey: deobfuscateKey(provider.apiKey),
-      appSecret: provider.appSecret ? deobfuscateKey(provider.appSecret) : undefined,
-    };
-  }
-
-  /**
-   * Add a new transcription provider
-   */
-  async addTranscriptionProvider(
-    type: TranscriptionProviderType,
-    config: Omit<TranscriptionProviderConfig, 'id' | 'type' | 'createdAt' | 'updatedAt'>
-  ): Promise<TranscriptionProviderConfig> {
-    const preset = TRANSCRIPTION_PROVIDER_PRESETS.find((p) => p.type === type);
-    const now = new Date().toISOString();
-
-    const provider: TranscriptionProviderConfig = {
-      ...config,
-      id: generateId(),
-      type,
-      apiKey: obfuscateKey(config.apiKey),
-      appSecret: config.appSecret ? obfuscateKey(config.appSecret) : undefined,
-      baseUrl: config.baseUrl || preset?.defaultBaseUrl,
-      models: config.models.length > 0 ? config.models : preset?.availableModels ?? [],
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    this.config.transcriptionProviders.push(provider);
-
-    // Set as active if it's the first one
-    if (!this.config.activeTranscriptionProviderId) {
-      this.config.activeTranscriptionProviderId = provider.id;
-    }
-
-    await this.saveConfig();
-    return {
-      ...provider,
-      apiKey: deobfuscateKey(provider.apiKey),
-      appSecret: provider.appSecret ? deobfuscateKey(provider.appSecret) : undefined,
-    };
-  }
-
-  /**
-   * Update a transcription provider
-   */
-  async updateTranscriptionProvider(
-    id: string,
-    updates: Partial<Omit<TranscriptionProviderConfig, 'id' | 'type' | 'createdAt'>>
-  ): Promise<TranscriptionProviderConfig | null> {
-    const index = this.config.transcriptionProviders.findIndex((p) => p.id === id);
-    if (index === -1) return null;
-
-    const existingProvider = this.config.transcriptionProviders[index];
-    const updatedProvider: TranscriptionProviderConfig = {
-      ...existingProvider,
-      ...updates,
-      apiKey: updates.apiKey ? obfuscateKey(updates.apiKey) : existingProvider.apiKey,
-      appSecret: updates.appSecret ? obfuscateKey(updates.appSecret) : existingProvider.appSecret,
-      updatedAt: new Date().toISOString(),
-    };
-
-    this.config.transcriptionProviders[index] = updatedProvider;
-    await this.saveConfig();
-
-    return {
-      ...updatedProvider,
-      apiKey: deobfuscateKey(updatedProvider.apiKey),
-      appSecret: updatedProvider.appSecret ? deobfuscateKey(updatedProvider.appSecret) : undefined,
-    };
-  }
-
-  /**
-   * Delete a transcription provider
-   */
-  async deleteTranscriptionProvider(id: string): Promise<boolean> {
-    const index = this.config.transcriptionProviders.findIndex((p) => p.id === id);
-    if (index === -1) return false;
-
-    this.config.transcriptionProviders.splice(index, 1);
-
-    // Clear active if deleted
-    if (this.config.activeTranscriptionProviderId === id) {
-      this.config.activeTranscriptionProviderId = this.config.transcriptionProviders[0]?.id;
-    }
-
-    await this.saveConfig();
-    return true;
-  }
-
-  /**
-   * Set active transcription provider
-   */
-  async setActiveTranscriptionProvider(id: string): Promise<boolean> {
-    const provider = this.config.transcriptionProviders.find((p) => p.id === id);
-    if (!provider) return false;
-
-    this.config.activeTranscriptionProviderId = id;
-    await this.saveConfig();
-    return true;
-  }
-
-  // ================================
-  // Feature Settings
-  // ================================
-
-  /**
-   * Get feature settings
-   */
-  getFeatureSettings(): AIFeatureSettings {
-    return { ...this.config.features };
-  }
-
-  /**
-   * Update feature settings
-   */
-  async updateFeatureSettings(updates: Partial<AIFeatureSettings>): Promise<AIFeatureSettings> {
-    this.config.features = {
-      ...this.config.features,
-      ...updates,
-    };
-    await this.saveConfig();
-    return this.config.features;
-  }
-
-  // ================================
-  // Health Checks
-  // ================================
-
-  /**
-   * Test LLM provider connection
-   */
-  async testLLMProvider(providerId: string): Promise<ProviderHealthCheck> {
-    const provider = this.getLLMProviders().find((p) => p.id === providerId);
-    if (!provider) {
-      return {
-        providerId,
-        status: 'error',
-        errorMessage: 'Provider not found',
-        lastChecked: new Date().toISOString(),
-      };
-    }
-
-    const startTime = Date.now();
-
-    try {
-      // Make a simple API call to test the connection
-      const response = await this.makeTestRequest(provider);
-      const responseTime = Date.now() - startTime;
-
-      const healthCheck: ProviderHealthCheck = {
-        providerId,
-        status: response.ok ? 'healthy' : 'error',
-        responseTime,
-        errorMessage: response.ok ? undefined : `HTTP ${response.status}`,
-        lastChecked: new Date().toISOString(),
-      };
-
-      this.healthChecks.set(providerId, healthCheck);
-      return healthCheck;
-    } catch (error) {
-      const healthCheck: ProviderHealthCheck = {
-        providerId,
-        status: 'error',
-        responseTime: Date.now() - startTime,
-        errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        lastChecked: new Date().toISOString(),
-      };
-
-      this.healthChecks.set(providerId, healthCheck);
-      return healthCheck;
-    }
-  }
-
-  /**
-   * Make a test request to the provider
-   */
-  private async makeTestRequest(provider: LLMProviderConfig): Promise<Response> {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...provider.customHeaders,
-    };
-
-    switch (provider.type) {
-      case 'openai':
-      case 'deepseek':
-      case 'moonshot':
-        headers['Authorization'] = `Bearer ${provider.apiKey}`;
-        break;
-      case 'anthropic':
-        headers['x-api-key'] = provider.apiKey;
-        headers['anthropic-version'] = '2023-06-01';
-        break;
-      case 'zhipu':
-        headers['Authorization'] = `Bearer ${provider.apiKey}`;
-        break;
-    }
-
-    // Just check models endpoint for validation
-    const baseUrl = provider.baseUrl || '';
-    const modelsUrl =
-      provider.type === 'anthropic'
-        ? `${baseUrl}/messages` // Anthropic doesn't have /models
-        : `${baseUrl}/models`;
-
-    return fetch(modelsUrl, {
-      method: provider.type === 'anthropic' ? 'POST' : 'GET',
-      headers,
-      body:
-        provider.type === 'anthropic'
-          ? JSON.stringify({
-              model: 'claude-3-haiku-20240307',
-              max_tokens: 1,
-              messages: [{ role: 'user', content: 'test' }],
-            })
-          : undefined,
-      signal: AbortSignal.timeout(provider.timeout || 10000),
-    });
-  }
-
-  /**
-   * Get cached health check
-   */
-  getHealthCheck(providerId: string): ProviderHealthCheck | null {
-    return this.healthChecks.get(providerId) || null;
-  }
-
-  // ================================
-  // Utility Methods
-  // ================================
-
-  /**
-   * Get available provider presets
-   */
-  getLLMProviderPresets() {
-    return LLM_PROVIDER_PRESETS;
-  }
-
-  /**
-   * Get available transcription provider presets
-   */
-  getTranscriptionProviderPresets() {
-    return TRANSCRIPTION_PROVIDER_PRESETS;
-  }
-
-  /**
-   * Check if any provider is configured
-   */
-  hasConfiguredProviders(): boolean {
-    return (
-      this.config.llmProviders.some((p) => p.enabled) ||
-      this.config.transcriptionProviders.some((p) => p.enabled)
-    );
-  }
-
-  /**
-   * Export configuration (without sensitive data)
-   */
-  exportConfig(): Omit<AIConfig, 'llmProviders' | 'transcriptionProviders'> & {
-    llmProviders: Array<Omit<LLMProviderConfig, 'apiKey'>>;
-    transcriptionProviders: Array<Omit<TranscriptionProviderConfig, 'apiKey' | 'appSecret'>>;
-  } {
-    return {
-      ...this.config,
-      llmProviders: this.config.llmProviders.map(({ apiKey, ...rest }) => rest),
-      transcriptionProviders: this.config.transcriptionProviders.map(
-        ({ apiKey, appSecret, ...rest }) => rest
-      ),
-    };
-  }
-
-  /**
-   * Get full config (for internal use)
-   */
-  getConfig(): AIConfig {
-    return {
-      ...this.config,
-      llmProviders: this.getLLMProviders(),
-      transcriptionProviders: this.getTranscriptionProviders(),
-    };
+  private async mutate<T>(action: () => Promise<T>): Promise<T> {
+    const result = await action();
+    await this.refresh();
+    return result;
   }
 }
 
@@ -586,10 +163,5 @@ class AIConfigService {
 // ================================
 
 export const aiConfigService = new AIConfigService();
-
-// Auto-initialize when imported
-if (typeof window !== 'undefined' && window.electron) {
-  aiConfigService.initialize().catch(console.error);
-}
 
 export default aiConfigService;

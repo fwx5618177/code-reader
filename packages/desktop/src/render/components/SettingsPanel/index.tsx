@@ -1,9 +1,10 @@
 // ================================
 // SettingsPanel 组件
 // AI 服务和应用设置配置
+// AI 服务商配置的唯一数据源在主进程，经 aiConfigService 读写
 // ================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import {
   X,
   Settings,
@@ -24,17 +25,16 @@ import {
   Keyboard,
 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
+import { AIProviderType, LLM_PROVIDER_PRESETS } from '../../types/ai-providers';
+import type { AppSettings } from '../../types/knowledge';
 import {
-  AIProviderType,
-  TranscriptionProviderType,
-  LLMProviderConfig,
-  TranscriptionProviderConfig,
-  LLM_PROVIDER_PRESETS,
-  TRANSCRIPTION_PROVIDER_PRESETS,
-  AIFeatureSettings,
-  ProviderHealthCheck,
-} from '../../types/ai-providers';
-import { aiConfigService } from '../../services/aiConfigService';
+  aiConfigService,
+  type AIConfigSnapshot,
+  type AIConnectionTestResult,
+  type AIProviderUpdate,
+  type AIProviderView,
+} from '../../services/aiConfigService';
+import { settingsService } from '../../services/settingsService';
 import { ThemeSettings } from '../ThemeSettings';
 import styles from './SettingsPanel.module.scss';
 
@@ -49,21 +49,26 @@ interface SettingsPanelProps {
   onClose: () => void;
 }
 
+/** 自动处理开关，归属应用设置（AppSettings），由知识库在新增条目时据此创建处理任务 */
+type AutoProcessingKey = 'autoSummarize' | 'autoTag' | 'autoTranscribe';
+
+/** IPC 抛出的错误信息 */
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // ================================
 // SettingsPanel 组件
 // ================================
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('ai');
-  const [llmProviders, setLlmProviders] = useState<LLMProviderConfig[]>([]);
-  const [transcriptionProviders, setTranscriptionProviders] = useState<
-    TranscriptionProviderConfig[]
-  >([]);
-  const [featureSettings, setFeatureSettings] = useState<AIFeatureSettings | null>(null);
-  const [healthChecks, setHealthChecks] = useState<Map<string, ProviderHealthCheck>>(new Map());
+  const aiConfig = useSyncExternalStore(aiConfigService.subscribe, aiConfigService.getSnapshot);
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [testResults, setTestResults] = useState<Map<string, AIConnectionTestResult>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
-  const [showAddProvider, setShowAddProvider] = useState<'llm' | 'transcription' | null>(null);
-  const [showApiKey, setShowApiKey] = useState<Set<string>>(new Set());
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showAddProvider, setShowAddProvider] = useState(false);
 
   // 删除操作的确认对话框状态
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -82,26 +87,25 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
     setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  // 挂载时加载设置
+  // 打开时从主进程与应用设置重新加载
   useEffect(() => {
-    if (isOpen) {
-      loadSettings();
-    }
+    if (!isOpen) return;
+
+    setIsLoading(true);
+    setErrorMessage(null);
+    Promise.all([aiConfigService.refresh(), settingsService.get()])
+      .then(([, settings]) => setAppSettings(settings))
+      .catch((error: unknown) => setErrorMessage(toErrorMessage(error)))
+      .finally(() => setIsLoading(false));
   }, [isOpen]);
 
-  const loadSettings = useCallback(async () => {
+  /** 执行写操作并把失败原因展示给用户 */
+  const runAction = useCallback(async (action: () => Promise<unknown>) => {
+    setErrorMessage(null);
     try {
-      setIsLoading(true);
-      const llm = aiConfigService.getLLMProviders();
-      const transcription = aiConfigService.getTranscriptionProviders();
-      const features = aiConfigService.getFeatureSettings();
-      setLlmProviders(llm);
-      setTranscriptionProviders(transcription);
-      setFeatureSettings(features);
+      await action();
     } catch (error) {
-      console.error('加载设置失败:', error);
-    } finally {
-      setIsLoading(false);
+      setErrorMessage(toErrorMessage(error));
     }
   }, []);
 
@@ -109,48 +113,28 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
   // Provider 管理
   // ================================
 
-  const handleTestProvider = async (providerId: string, _type: 'llm' | 'transcription') => {
-    try {
-      const result = await aiConfigService.testLLMProvider(providerId);
-      setHealthChecks((prev) => new Map(prev).set(providerId, result));
-    } catch (error) {
-      console.error('测试失败:', error);
-    }
-  };
+  const handleTestProvider = useCallback(async (providerId: string) => {
+    const result = await aiConfigService.testConnection(providerId);
+    setTestResults((prev) => new Map(prev).set(providerId, result));
+  }, []);
 
-  const handleDeleteProvider = async (providerId: string, type: 'llm' | 'transcription') => {
+  const handleDeleteProvider = (provider: AIProviderView) => {
     setConfirmDialog({
       isOpen: true,
       title: '删除 Provider',
-      message: '确定要删除这个 Provider 吗？',
+      message: `确定要删除「${provider.name}」吗？`,
       onConfirm: async () => {
-        try {
-          if (type === 'llm') {
-            await aiConfigService.deleteLLMProvider(providerId);
-            setLlmProviders((prev) => prev.filter((p) => p.id !== providerId));
-          } else {
-            await aiConfigService.deleteTranscriptionProvider(providerId);
-            setTranscriptionProviders((prev) => prev.filter((p) => p.id !== providerId));
-          }
-        } catch (error) {
-          console.error('删除失败:', error);
-        }
         closeConfirmDialog();
+        await runAction(() => aiConfigService.removeProvider(provider.id));
       },
     });
   };
 
-  const toggleShowApiKey = (providerId: string) => {
-    setShowApiKey((prev) => {
-      const next = new Set(prev);
-      if (next.has(providerId)) {
-        next.delete(providerId);
-      } else {
-        next.add(providerId);
-      }
-      return next;
-    });
-  };
+  const handleSaveProvider = (providerId: string, updates: AIProviderUpdate) =>
+    runAction(() => aiConfigService.updateProvider(providerId, updates));
+
+  const handleAutoProcessingChange = (key: AutoProcessingKey, checked: boolean) =>
+    runAction(async () => setAppSettings(await settingsService.update({ [key]: checked })));
 
   // ================================
   // 渲染标签页
@@ -194,6 +178,13 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
 
           {/* 主内容区 */}
           <div className={styles.settingsMain}>
+            {errorMessage && (
+              <div className={styles.errorBanner}>
+                <AlertCircle size={14} />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
             {isLoading && (
               <div className={styles.settingsLoading}>
                 <div className={styles.loadingSpinner} />
@@ -203,26 +194,30 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
 
             {!isLoading && activeTab === 'ai' && (
               <AISettingsTab
-                providers={llmProviders}
-                healthChecks={healthChecks}
-                featureSettings={featureSettings}
-                showApiKey={showApiKey}
+                config={aiConfig}
+                testResults={testResults}
+                appSettings={appSettings}
                 onTest={handleTestProvider}
+                onSave={handleSaveProvider}
                 onDelete={handleDeleteProvider}
-                onToggleApiKey={toggleShowApiKey}
-                onAddProvider={() => setShowAddProvider('llm')}
+                onSetDefault={(id) => runAction(() => aiConfigService.setDefaultProvider(id))}
+                onSetDefaultEmbedding={(id) =>
+                  runAction(() => aiConfigService.setDefaultEmbeddingProvider(id))
+                }
+                onAddProvider={() => setShowAddProvider(true)}
+                onAutoProcessingChange={handleAutoProcessingChange}
               />
             )}
 
             {!isLoading && activeTab === 'transcription' && (
               <TranscriptionSettingsTab
-                providers={transcriptionProviders}
-                healthChecks={healthChecks}
-                showApiKey={showApiKey}
-                onTest={(id) => handleTestProvider(id, 'transcription')}
-                onDelete={(id) => handleDeleteProvider(id, 'transcription')}
-                onToggleApiKey={toggleShowApiKey}
-                onAddProvider={() => setShowAddProvider('transcription')}
+                config={aiConfig}
+                appSettings={appSettings}
+                onSetDefault={(id) =>
+                  runAction(() => aiConfigService.setDefaultTranscriptionProvider(id))
+                }
+                onGoToProviders={() => setActiveTab('ai')}
+                onAutoProcessingChange={handleAutoProcessingChange}
               />
             )}
 
@@ -237,12 +232,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
         {/* 添加 Provider 模态框 */}
         {showAddProvider && (
           <AddProviderModal
-            type={showAddProvider}
-            onClose={() => setShowAddProvider(null)}
-            onSuccess={() => {
-              loadSettings();
-              setShowAddProvider(null);
-            }}
+            onClose={() => setShowAddProvider(false)}
+            onSuccess={() => setShowAddProvider(false)}
           />
         )}
 
@@ -265,25 +256,29 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
 // ================================
 
 interface AISettingsTabProps {
-  providers: LLMProviderConfig[];
-  healthChecks: Map<string, ProviderHealthCheck>;
-  featureSettings: AIFeatureSettings | null;
-  showApiKey: Set<string>;
-  onTest: (id: string, type: 'llm') => void;
-  onDelete: (id: string, type: 'llm') => void;
-  onToggleApiKey: (id: string) => void;
+  config: AIConfigSnapshot;
+  testResults: Map<string, AIConnectionTestResult>;
+  appSettings: AppSettings | null;
+  onTest: (id: string) => Promise<void>;
+  onSave: (id: string, updates: AIProviderUpdate) => Promise<void>;
+  onDelete: (provider: AIProviderView) => void;
+  onSetDefault: (id: string) => void;
+  onSetDefaultEmbedding: (id: string) => void;
   onAddProvider: () => void;
+  onAutoProcessingChange: (key: AutoProcessingKey, checked: boolean) => void;
 }
 
 const AISettingsTab: React.FC<AISettingsTabProps> = ({
-  providers,
-  healthChecks,
-  featureSettings,
-  showApiKey,
+  config,
+  testResults,
+  appSettings,
   onTest,
+  onSave,
   onDelete,
-  onToggleApiKey,
+  onSetDefault,
+  onSetDefaultEmbedding,
   onAddProvider,
+  onAutoProcessingChange,
 }) => {
   return (
     <div className={styles.settingsTab}>
@@ -297,10 +292,10 @@ const AISettingsTab: React.FC<AISettingsTabProps> = ({
         </div>
 
         <p className={styles.sectionDescription}>
-          配置 AI 模型服务，用于自动摘要、标签提取、智能问答等功能
+          配置 AI 模型服务，用于自动摘要、标签提取、向量检索、语音转写和智能问答
         </p>
 
-        {providers.length === 0 ? (
+        {config.providers.length === 0 ? (
           <div className={styles.emptyState}>
             <Brain size={32} />
             <p>尚未配置 AI 服务</p>
@@ -311,50 +306,42 @@ const AISettingsTab: React.FC<AISettingsTabProps> = ({
           </div>
         ) : (
           <div className={styles.providerList}>
-            {providers.map((provider) => (
+            {config.providers.map((provider) => (
               <ProviderCard
                 key={provider.id}
                 provider={provider}
-                healthCheck={healthChecks.get(provider.id)}
-                showApiKey={showApiKey.has(provider.id)}
-                onTest={() => onTest(provider.id, 'llm')}
-                onDelete={() => onDelete(provider.id, 'llm')}
-                onToggleApiKey={() => onToggleApiKey(provider.id)}
+                isDefault={provider.id === config.defaultProviderId}
+                isDefaultEmbedding={provider.id === config.defaultEmbeddingProviderId}
+                isDefaultTranscription={provider.id === config.defaultTranscriptionProviderId}
+                testResult={testResults.get(provider.id)}
+                onTest={() => onTest(provider.id)}
+                onSave={(updates) => onSave(provider.id, updates)}
+                onDelete={() => onDelete(provider)}
+                onSetDefault={() => onSetDefault(provider.id)}
+                onSetDefaultEmbedding={() => onSetDefaultEmbedding(provider.id)}
               />
             ))}
           </div>
         )}
       </div>
 
-      {featureSettings && (
+      {appSettings && (
         <div className={styles.section}>
           <h3 className={styles.sectionTitle}>自动处理</h3>
-          <p className={styles.sectionDescription}>配置 AI 自动处理功能</p>
+          <p className={styles.sectionDescription}>新增内容时自动交给 AI 处理</p>
 
           <div className={styles.settingsList}>
             <SettingToggle
               label="自动生成摘要"
               description="为新添加的内容自动生成摘要"
-              checked={featureSettings.autoSummarize}
-              onChange={() => {}}
+              checked={appSettings.autoSummarize}
+              onChange={(checked) => onAutoProcessingChange('autoSummarize', checked)}
             />
             <SettingToggle
               label="自动打标签"
               description="自动为内容提取和建议标签"
-              checked={featureSettings.autoTag}
-              onChange={() => {}}
-            />
-            <SettingToggle
-              label="语义搜索"
-              description="启用基于向量的语义搜索"
-              checked={featureSettings.semanticSearch}
-              onChange={() => {}}
-            />
-            <SettingToggle
-              label="相关内容推荐"
-              description="自动发现和推荐相关内容"
-              checked={featureSettings.relatedSuggestions}
-              onChange={() => {}}
+              checked={appSettings.autoTag}
+              onChange={(checked) => onAutoProcessingChange('autoTag', checked)}
             />
           </div>
         </div>
@@ -368,95 +355,73 @@ const AISettingsTab: React.FC<AISettingsTabProps> = ({
 // ================================
 
 interface TranscriptionSettingsTabProps {
-  providers: TranscriptionProviderConfig[];
-  healthChecks: Map<string, ProviderHealthCheck>;
-  showApiKey: Set<string>;
-  onTest: (id: string) => void;
-  onDelete: (id: string) => void;
-  onToggleApiKey: (id: string) => void;
-  onAddProvider: () => void;
+  config: AIConfigSnapshot;
+  appSettings: AppSettings | null;
+  onSetDefault: (id: string) => void;
+  onGoToProviders: () => void;
+  onAutoProcessingChange: (key: AutoProcessingKey, checked: boolean) => void;
 }
 
 const TranscriptionSettingsTab: React.FC<TranscriptionSettingsTabProps> = ({
-  providers,
-  healthChecks,
-  showApiKey,
-  onTest,
-  onDelete,
-  onToggleApiKey,
-  onAddProvider,
+  config,
+  appSettings,
+  onSetDefault,
+  onGoToProviders,
+  onAutoProcessingChange,
 }) => {
+  const candidates = config.providers.filter((p) => p.transcriptionModel);
+
   return (
     <div className={styles.settingsTab}>
       <div className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <h3 className={styles.sectionTitle}>语音转写服务</h3>
-          <button className={styles.addBtn} onClick={onAddProvider}>
-            <Plus size={14} />
-            <span>添加</span>
-          </button>
-        </div>
-
+        <h3 className={styles.sectionTitle}>语音转写服务</h3>
         <p className={styles.sectionDescription}>
-          配置语音转写服务，支持 OpenAI Whisper、讯飞、Azure 等多种 Provider
+          转写通过 OpenAI 兼容的 audio/transcriptions 接口完成；在「AI 服务」中为服务商填写转写模型（如
+          whisper-1）后即可在此选用
         </p>
 
-        {providers.length === 0 ? (
+        {candidates.length === 0 ? (
           <div className={styles.emptyState}>
             <Mic size={32} />
-            <p>尚未配置语音转写服务</p>
-            <button className={styles.addFirstBtn} onClick={onAddProvider}>
-              <Plus size={14} />
-              <span>添加第一个 Provider</span>
+            <p>尚无配置了转写模型的服务商</p>
+            <button className={styles.addFirstBtn} onClick={onGoToProviders}>
+              <Brain size={14} />
+              <span>前往 AI 服务</span>
             </button>
           </div>
         ) : (
-          <div className={styles.providerList}>
-            {providers.map((provider) => (
-              <ProviderCard
-                key={provider.id}
-                provider={provider}
-                healthCheck={healthChecks.get(provider.id)}
-                showApiKey={showApiKey.has(provider.id)}
-                onTest={() => onTest(provider.id)}
-                onDelete={() => onDelete(provider.id)}
-                onToggleApiKey={() => onToggleApiKey(provider.id)}
-              />
-            ))}
+          <div className={styles.settingsList}>
+            <SettingSelect
+              label="默认转写服务"
+              description="语音条目转写时使用的服务商"
+              value={config.defaultTranscriptionProviderId ?? ''}
+              options={[
+                ...(config.defaultTranscriptionProviderId ? [] : [{ value: '', label: '未选择' }]),
+                ...candidates.map((p) => ({
+                  value: p.id,
+                  label: `${p.name} · ${p.transcriptionModel}${p.isEnabled ? '' : '（已停用）'}`,
+                })),
+              ]}
+              onChange={(id) => id && onSetDefault(id)}
+            />
           </div>
         )}
       </div>
 
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>转写设置</h3>
+      {appSettings && (
+        <div className={styles.section}>
+          <h3 className={styles.sectionTitle}>转写设置</h3>
 
-        <div className={styles.settingsList}>
-          <SettingToggle
-            label="自动转写"
-            description="自动转写新添加的音频文件"
-            checked={true}
-            onChange={() => {}}
-          />
-          <SettingToggle
-            label="包含时间戳"
-            description="在转写结果中包含时间戳"
-            checked={true}
-            onChange={() => {}}
-          />
-          <SettingSelect
-            label="默认语言"
-            description="转写时使用的默认语言"
-            value="auto"
-            options={[
-              { value: 'auto', label: '自动检测' },
-              { value: 'zh', label: '中文' },
-              { value: 'en', label: '英文' },
-              { value: 'ja', label: '日文' },
-            ]}
-            onChange={() => {}}
-          />
+          <div className={styles.settingsList}>
+            <SettingToggle
+              label="自动转写"
+              description="自动转写新添加的音频文件"
+              checked={appSettings.autoTranscribe}
+              onChange={(checked) => onAutoProcessingChange('autoTranscribe', checked)}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
@@ -571,55 +536,121 @@ const ShortcutsSettingsTab: React.FC = () => {
 // Provider 卡片组件
 // ================================
 
+/** 卡片内可编辑的字段；apiKey 为空表示保留已保存的密钥，其余字段为空表示清除 */
+interface ProviderDraft {
+  apiKey: string;
+  baseUrl: string;
+  defaultModel: string;
+  embeddingModel: string;
+  transcriptionModel: string;
+  isEnabled: boolean;
+}
+
+const toDraft = (provider: AIProviderView): ProviderDraft => ({
+  apiKey: '',
+  baseUrl: provider.baseUrl ?? '',
+  defaultModel: provider.defaultModel ?? '',
+  embeddingModel: provider.embeddingModel ?? '',
+  transcriptionModel: provider.transcriptionModel ?? '',
+  isEnabled: provider.isEnabled,
+});
+
+const isDraftDirty = (draft: ProviderDraft, saved: ProviderDraft): boolean =>
+  (Object.keys(draft) as Array<keyof ProviderDraft>).some((key) => draft[key] !== saved[key]);
+
 interface ProviderCardProps {
-  provider: LLMProviderConfig | TranscriptionProviderConfig;
-  healthCheck?: ProviderHealthCheck;
-  showApiKey: boolean;
-  onTest: () => void;
+  provider: AIProviderView;
+  isDefault: boolean;
+  isDefaultEmbedding: boolean;
+  isDefaultTranscription: boolean;
+  testResult?: AIConnectionTestResult;
+  onTest: () => Promise<void>;
+  onSave: (updates: AIProviderUpdate) => Promise<void>;
   onDelete: () => void;
-  onToggleApiKey: () => void;
+  onSetDefault: () => void;
+  onSetDefaultEmbedding: () => void;
 }
 
 const ProviderCard: React.FC<ProviderCardProps> = ({
   provider,
-  healthCheck,
-  showApiKey,
+  isDefault,
+  isDefaultEmbedding,
+  isDefaultTranscription,
+  testResult,
   onTest,
+  onSave,
   onDelete,
-  onToggleApiKey,
+  onSetDefault,
+  onSetDefaultEmbedding,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [draft, setDraft] = useState<ProviderDraft>(() => toDraft(provider));
+  const savedDraft = toDraft(provider);
+  const savedDraftKey = JSON.stringify(savedDraft);
+
+  // 主进程中的已保存值变化后重置草稿；仅快照引用变化时保留未保存的编辑
+  useEffect(() => {
+    setDraft(JSON.parse(savedDraftKey) as ProviderDraft);
+  }, [savedDraftKey]);
+
+  const isDirty = isDraftDirty(draft, savedDraft);
+
+  const updateDraft = <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) => {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  };
 
   const handleTest = async () => {
     setIsTesting(true);
-    await onTest();
-    setIsTesting(false);
+    try {
+      await onTest();
+    } finally {
+      setIsTesting(false);
+    }
   };
 
-  const maskedKey = provider.apiKey
-    ? `${provider.apiKey.slice(0, 4)}${'•'.repeat(20)}${provider.apiKey.slice(-4)}`
-    : '未设置';
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onSave(draft);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const badges = [
+    isDefault && '对话默认',
+    isDefaultEmbedding && '向量默认',
+    isDefaultTranscription && '转写默认',
+  ].filter((badge): badge is string => Boolean(badge));
 
   return (
     <div
-      className={`${styles.providerCard} ${provider.enabled ? '' : styles.providerCardDisabled}`}
+      className={`${styles.providerCard} ${provider.isEnabled ? '' : styles.providerCardDisabled}`}
     >
       <div className={styles.providerHeader} onClick={() => setIsExpanded(!isExpanded)}>
         <div className={styles.providerInfo}>
-          <span className={styles.providerName}>{provider.name}</span>
-          <span className={styles.providerType}>{provider.type}</span>
+          <div className={styles.providerName}>{provider.name}</div>
+          <div className={styles.providerType}>
+            <span>{provider.type}</span>
+            {badges.map((badge) => (
+              <span key={badge} className={styles.defaultBadge}>
+                {badge}
+              </span>
+            ))}
+          </div>
         </div>
 
         <div className={styles.providerStatus}>
-          {healthCheck && (
+          {testResult && (
             <span
-              className={`${styles.statusBadge} ${styles[healthCheck.status]}`}
-              title={healthCheck.errorMessage || `${healthCheck.responseTime}ms`}
+              className={`${styles.statusBadge} ${testResult.success ? styles.statusBadgeHealthy : styles.statusBadgeError}`}
+              title={testResult.error ?? `${testResult.latencyMs}ms`}
             >
-              {healthCheck.status === 'healthy' && <Check size={12} />}
-              {healthCheck.status === 'error' && <AlertCircle size={12} />}
-              {healthCheck.status === 'healthy' ? '正常' : '错误'}
+              {testResult.success ? <Check size={12} /> : <AlertCircle size={12} />}
+              {testResult.success ? '正常' : '错误'}
             </span>
           )}
           <ChevronRight
@@ -632,32 +663,101 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
       {isExpanded && (
         <div className={styles.providerDetails}>
           <div className={styles.detailRow}>
-            <label>API Key</label>
+            <label className={styles.detailLabel}>启用</label>
+            <label className={styles.toggle}>
+              <input
+                type="checkbox"
+                className={styles.toggleInput}
+                checked={draft.isEnabled}
+                onChange={(e) => updateDraft('isEnabled', e.target.checked)}
+              />
+              <span className={styles.toggleSlider} />
+            </label>
+          </div>
+
+          <div className={styles.detailRow}>
+            <label className={styles.detailLabel}>API Key</label>
             <div className={styles.apiKeyField}>
               <input
                 type={showApiKey ? 'text' : 'password'}
-                value={showApiKey ? provider.apiKey : maskedKey}
-                readOnly
+                className={`${styles.detailInput} ${styles.apiKeyInput}`}
+                value={draft.apiKey}
+                onChange={(e) => updateDraft('apiKey', e.target.value)}
+                placeholder={provider.hasApiKey ? '已保存，留空保持不变' : '未设置'}
+                autoComplete="off"
               />
-              <button onClick={onToggleApiKey}>
+              <button
+                type="button"
+                className={styles.apiKeyToggle}
+                onClick={() => setShowApiKey(!showApiKey)}
+              >
                 {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
           </div>
 
-          {provider.baseUrl && (
-            <div className={styles.detailRow}>
-              <label>Base URL</label>
-              <input type="text" value={provider.baseUrl} readOnly />
-            </div>
-          )}
+          <ProviderDetailInput
+            label="Base URL"
+            value={draft.baseUrl}
+            placeholder="使用服务商默认地址"
+            onChange={(value) => updateDraft('baseUrl', value)}
+          />
+          <ProviderDetailInput
+            label="对话模型"
+            value={draft.defaultModel}
+            placeholder="用于摘要、标签与问答"
+            onChange={(value) => updateDraft('defaultModel', value)}
+          />
+          <ProviderDetailInput
+            label="向量模型"
+            value={draft.embeddingModel}
+            placeholder="留空则不用于向量检索"
+            onChange={(value) => updateDraft('embeddingModel', value)}
+          />
+          <ProviderDetailInput
+            label="转写模型"
+            value={draft.transcriptionModel}
+            placeholder="留空则不用于语音转写"
+            onChange={(value) => updateDraft('transcriptionModel', value)}
+          />
 
           <div className={styles.detailActions}>
-            <button className={styles.testBtn} onClick={handleTest} disabled={isTesting}>
-              <RefreshCw size={14} className={isTesting ? styles.spinning : ''} />
+            <button
+              className={`${styles.actionButton} ${styles.saveBtn}`}
+              onClick={handleSave}
+              disabled={!isDirty || isSaving}
+            >
+              <Save size={14} />
+              <span>{isSaving ? '保存中...' : '保存'}</span>
+            </button>
+            <button
+              className={`${styles.actionButton} ${styles.testBtn}`}
+              onClick={handleTest}
+              disabled={isTesting || isDirty}
+              title={isDirty ? '请先保存修改' : undefined}
+            >
+              <RefreshCw size={14} className={isTesting ? styles.testBtnSpinning : ''} />
               <span>{isTesting ? '测试中...' : '测试连接'}</span>
             </button>
-            <button className={styles.deleteBtn} onClick={onDelete}>
+            {!isDefault && (
+              <button
+                className={`${styles.actionButton} ${styles.testBtn}`}
+                onClick={onSetDefault}
+                disabled={!provider.isEnabled}
+              >
+                设为对话默认
+              </button>
+            )}
+            {!isDefaultEmbedding && provider.embeddingModel && (
+              <button
+                className={`${styles.actionButton} ${styles.testBtn}`}
+                onClick={onSetDefaultEmbedding}
+                disabled={!provider.isEnabled}
+              >
+                设为向量默认
+              </button>
+            )}
+            <button className={`${styles.actionButton} ${styles.deleteBtn}`} onClick={onDelete}>
               <Trash2 size={14} />
               <span>删除</span>
             </button>
@@ -668,63 +768,83 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
   );
 };
 
+interface ProviderDetailInputProps {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}
+
+const ProviderDetailInput: React.FC<ProviderDetailInputProps> = ({
+  label,
+  value,
+  placeholder,
+  onChange,
+}) => (
+  <div className={styles.detailRow}>
+    <label className={styles.detailLabel}>{label}</label>
+    <input
+      type="text"
+      className={styles.detailInput}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  </div>
+);
+
 // ================================
 // 添加 Provider 模态框
 // ================================
 
 interface AddProviderModalProps {
-  type: 'llm' | 'transcription';
   onClose: () => void;
   onSuccess: () => void;
 }
 
-const AddProviderModal: React.FC<AddProviderModalProps> = ({ type, onClose, onSuccess }) => {
-  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+const AddProviderModal: React.FC<AddProviderModalProps> = ({ onClose, onSuccess }) => {
+  const [selectedPreset, setSelectedPreset] = useState<AIProviderType | null>(null);
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [defaultModel, setDefaultModel] = useState('');
+  const [embeddingModel, setEmbeddingModel] = useState('');
+  const [transcriptionModel, setTranscriptionModel] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const presets = type === 'llm' ? LLM_PROVIDER_PRESETS : TRANSCRIPTION_PROVIDER_PRESETS;
+  const selectedPresetData = LLM_PROVIDER_PRESETS.find((p) => p.type === selectedPreset);
 
-  const selectedPresetData = presets.find((p) => p.type === selectedPreset);
-
-  useEffect(() => {
-    if (selectedPresetData) {
-      setName(selectedPresetData.name);
-      setBaseUrl(selectedPresetData.defaultBaseUrl);
-    }
-  }, [selectedPresetData]);
+  const handleSelectPreset = (type: AIProviderType) => {
+    const defaults = aiConfigService.getProviderDefaults(type);
+    setSelectedPreset(type);
+    setName(defaults.name);
+    setBaseUrl(defaults.baseUrl ?? '');
+    setDefaultModel(defaults.defaultModel ?? '');
+    setEmbeddingModel(defaults.embeddingModel ?? '');
+    setTranscriptionModel(defaults.transcriptionModel ?? '');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedPreset || !apiKey) return;
 
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
-      if (type === 'llm') {
-        await aiConfigService.addLLMProvider(selectedPreset as AIProviderType, {
-          name,
-          enabled: true,
-          apiKey,
-          baseUrl,
-          models: [],
-        });
-      } else {
-        await aiConfigService.addTranscriptionProvider(
-          selectedPreset as TranscriptionProviderType,
-          {
-            name,
-            enabled: true,
-            apiKey,
-            baseUrl,
-            models: [],
-          }
-        );
-      }
+      await aiConfigService.addProvider({
+        type: selectedPreset,
+        name,
+        apiKey,
+        baseUrl,
+        isEnabled: true,
+        defaultModel,
+        embeddingModel,
+        transcriptionModel,
+      });
       onSuccess();
     } catch (error) {
-      console.error('添加 Provider 失败:', error);
+      setSubmitError(toErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -737,24 +857,31 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ type, onClose, onSu
         onClick={(e) => e.stopPropagation()}
       >
         <div className={styles.modalHeader}>
-          <h3>添加 {type === 'llm' ? 'AI 服务' : '语音转写服务'}</h3>
-          <button className={styles.closeBtn} onClick={onClose}>
+          <h3>添加 AI 服务</h3>
+          <button className={styles.modalCloseBtn} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
 
         <form onSubmit={handleSubmit}>
           <div className={styles.modalBody}>
+            {submitError && (
+              <div className={styles.errorBanner}>
+                <AlertCircle size={14} />
+                <span>{submitError}</span>
+              </div>
+            )}
+
             {/* Provider 选择 */}
             <div className={styles.formGroup}>
-              <label>选择服务商</label>
+              <label className={styles.formLabel}>选择服务商</label>
               <div className={styles.presetGrid}>
-                {presets.map((preset) => (
+                {LLM_PROVIDER_PRESETS.map((preset) => (
                   <button
                     key={preset.type}
                     type="button"
                     className={`${styles.presetCard} ${selectedPreset === preset.type ? styles.presetCardSelected : ''}`}
-                    onClick={() => setSelectedPreset(preset.type)}
+                    onClick={() => handleSelectPreset(preset.type)}
                   >
                     <Globe size={20} />
                     <span className={styles.presetName}>{preset.name}</span>
@@ -766,27 +893,26 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ type, onClose, onSu
 
             {selectedPreset && (
               <>
-                <div className={styles.formGroup}>
-                  <label htmlFor="provider-name">名称</label>
-                  <input
-                    id="provider-name"
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="为这个配置起个名字"
-                  />
-                </div>
+                <FormField
+                  id="provider-name"
+                  label="名称"
+                  value={name}
+                  placeholder="为这个配置起个名字"
+                  onChange={setName}
+                />
 
                 <div className={styles.formGroup}>
-                  <label htmlFor="api-key">
-                    API Key <span className={styles.required}>*</span>
+                  <label htmlFor="api-key" className={styles.formLabel}>
+                    API Key <span className={styles.formRequired}>*</span>
                   </label>
                   <input
                     id="api-key"
                     type="password"
+                    className={styles.formInput}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                     placeholder="输入 API Key"
+                    autoComplete="off"
                     required
                   />
                   {selectedPresetData?.docsUrl && (
@@ -801,16 +927,34 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ type, onClose, onSu
                   )}
                 </div>
 
-                <div className={styles.formGroup}>
-                  <label htmlFor="base-url">Base URL (可选)</label>
-                  <input
-                    id="base-url"
-                    type="text"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    placeholder={selectedPresetData?.defaultBaseUrl || ''}
-                  />
-                </div>
+                <FormField
+                  id="base-url"
+                  label="Base URL (可选)"
+                  value={baseUrl}
+                  placeholder={selectedPresetData?.defaultBaseUrl ?? ''}
+                  onChange={setBaseUrl}
+                />
+                <FormField
+                  id="chat-model"
+                  label="对话模型"
+                  value={defaultModel}
+                  placeholder="用于摘要、标签与问答"
+                  onChange={setDefaultModel}
+                />
+                <FormField
+                  id="embedding-model"
+                  label="向量模型 (可选)"
+                  value={embeddingModel}
+                  placeholder="留空则不用于向量检索"
+                  onChange={setEmbeddingModel}
+                />
+                <FormField
+                  id="transcription-model"
+                  label="转写模型 (可选)"
+                  value={transcriptionModel}
+                  placeholder="留空则不用于语音转写"
+                  onChange={setTranscriptionModel}
+                />
               </>
             )}
           </div>
@@ -834,6 +978,30 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ type, onClose, onSu
   );
 };
 
+interface FormFieldProps {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}
+
+const FormField: React.FC<FormFieldProps> = ({ id, label, value, placeholder, onChange }) => (
+  <div className={styles.formGroup}>
+    <label htmlFor={id} className={styles.formLabel}>
+      {label}
+    </label>
+    <input
+      id={id}
+      type="text"
+      className={styles.formInput}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+    />
+  </div>
+);
+
 // ================================
 // 设置组件
 // ================================
@@ -852,7 +1020,12 @@ const SettingToggle: React.FC<SettingToggleProps> = ({ label, description, check
       {description && <span className={styles.settingDescription}>{description}</span>}
     </div>
     <label className={styles.toggle}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <input
+        type="checkbox"
+        className={styles.toggleInput}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
       <span className={styles.toggleSlider} />
     </label>
   </div>
@@ -878,7 +1051,11 @@ const SettingSelect: React.FC<SettingSelectProps> = ({
       <span className={styles.settingLabel}>{label}</span>
       {description && <span className={styles.settingDescription}>{description}</span>}
     </div>
-    <select value={value} onChange={(e) => onChange(e.target.value)}>
+    <select
+      className={styles.settingSelect}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
       {options.map((opt) => (
         <option key={opt.value} value={opt.value}>
           {opt.label}
@@ -913,6 +1090,7 @@ const SettingInput: React.FC<SettingInputProps> = ({
     <div className={styles.settingInputWrapper}>
       <input
         type="text"
+        className={styles.settingInput}
         value={value}
         readOnly={readOnly}
         onChange={(e) => onChange?.(e.target.value)}

@@ -8,25 +8,21 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { app } from 'electron';
 import { join } from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { randomUUID } from 'crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
+import { readLegacyAIConfig } from './legacy-config';
+import {
+  isAIProviderType,
+  type AIConfigSnapshot,
+  type AIProviderConfig,
+  type AIProviderInput,
+  type AIProviderUpdate,
+  type AIProviderView,
+} from './provider-config';
 
 // ================================
 // Types
 // ================================
-
-export type AIProviderType = 'openai' | 'anthropic' | 'deepseek' | 'moonshot' | 'zhipu' | 'ollama';
-
-export interface AIProviderConfig {
-  id: string;
-  type: AIProviderType;
-  name: string;
-  baseUrl?: string;
-  apiKey?: string;
-  isEnabled: boolean;
-  defaultModel?: string;
-  embeddingModel?: string;
-  settings?: Record<string, unknown>;
-}
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -122,7 +118,22 @@ interface AIConfigFile {
   providers: AIProviderConfig[];
   defaultProviderId?: string;
   defaultEmbeddingProviderId?: string;
+  defaultTranscriptionProviderId?: string;
   updatedAt: string;
+}
+
+/** 去除首尾空白，空字符串视为未设置 */
+function normalizeOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function requireName(name: string | undefined): string {
+  const normalized = normalizeOptional(name);
+  if (!normalized) {
+    throw new Error('Provider name is required');
+  }
+  return normalized;
 }
 
 class AIConfigManager {
@@ -139,6 +150,34 @@ class AIConfigManager {
 
     this.configPath = join(configDir, 'ai-config.json');
     this.config = this.loadConfig();
+    this.importLegacyConfig(userDataPath);
+  }
+
+  /**
+   * 一次性迁移：主配置尚无服务商时导入旧版渲染进程配置 <userData>/ai-config.json，
+   * 导入并保存成功后将旧文件重命名为 ai-config.legacy.json，之后不再触发。
+   */
+  private importLegacyConfig(userDataPath: string): void {
+    if (this.config.providers.length > 0) return;
+
+    const legacyPath = join(userDataPath, 'ai-config.json');
+    if (!existsSync(legacyPath)) return;
+
+    try {
+      const imported = readLegacyAIConfig(readFileSync(legacyPath, 'utf-8'));
+      this.config.providers = imported.providers;
+      this.config.defaultProviderId = imported.defaultProviderId;
+      this.config.defaultTranscriptionProviderId = imported.defaultTranscriptionProviderId;
+      this.saveConfig();
+      renameSync(legacyPath, join(userDataPath, 'ai-config.legacy.json'));
+      console.log(`[AIConfig] Imported ${imported.providers.length} provider(s) from legacy config`);
+      if (imported.skipped.length > 0) {
+        console.warn('[AIConfig] Skipped unsupported legacy providers:', imported.skipped);
+      }
+    } catch (error) {
+      // 保留旧文件，下次启动重试，避免丢失用户配置
+      console.error('[AIConfig] Failed to import legacy config:', error);
+    }
   }
 
   private loadConfig(): AIConfigFile {
@@ -194,26 +233,63 @@ class AIConfigManager {
     return this.config.providers.find((p) => p.isEnabled && p.embeddingModel);
   }
 
-  getEnabledProviders(): AIProviderConfig[] {
-    return this.config.providers.filter((p) => p.isEnabled);
+  getDefaultTranscriptionProvider(): AIProviderConfig | undefined {
+    if (this.config.defaultTranscriptionProviderId) {
+      const provider = this.getProvider(this.config.defaultTranscriptionProviderId);
+      if (provider?.isEnabled && provider.transcriptionModel) return provider;
+    }
+    // 回退到任一启用且配置了转写模型的服务商
+    return this.config.providers.find((p) => p.isEnabled && p.transcriptionModel);
   }
 
-  addProvider(provider: AIProviderConfig): void {
-    const existing = this.config.providers.findIndex((p) => p.id === provider.id);
-    if (existing >= 0) {
-      this.config.providers[existing] = provider;
-    } else {
-      this.config.providers.push(provider);
+  addProvider(input: AIProviderInput): AIProviderConfig {
+    if (!isAIProviderType(input.type)) {
+      throw new Error(`Unsupported provider type: ${String(input.type)}`);
     }
+
+    const provider: AIProviderConfig = {
+      id: randomUUID(),
+      type: input.type,
+      name: requireName(input.name),
+      baseUrl: normalizeOptional(input.baseUrl),
+      apiKey: normalizeOptional(input.apiKey),
+      isEnabled: input.isEnabled,
+      defaultModel: normalizeOptional(input.defaultModel),
+      embeddingModel: normalizeOptional(input.embeddingModel),
+      transcriptionModel: normalizeOptional(input.transcriptionModel),
+      settings: input.settings,
+    };
+
+    this.config.providers.push(provider);
     this.saveConfig();
+    return provider;
   }
 
-  updateProvider(id: string, updates: Partial<AIProviderConfig>): void {
+  updateProvider(id: string, updates: AIProviderUpdate): AIProviderConfig {
     const index = this.config.providers.findIndex((p) => p.id === id);
-    if (index >= 0) {
-      this.config.providers[index] = { ...this.config.providers[index], ...updates };
-      this.saveConfig();
+    if (index < 0) {
+      throw new Error(`Provider not found: ${id}`);
     }
+
+    const current = this.config.providers[index];
+    const optional = (key: 'baseUrl' | 'defaultModel' | 'embeddingModel' | 'transcriptionModel') =>
+      updates[key] === undefined ? current[key] : normalizeOptional(updates[key]);
+
+    const updated: AIProviderConfig = {
+      ...current,
+      name: updates.name === undefined ? current.name : requireName(updates.name),
+      apiKey: normalizeOptional(updates.apiKey) ?? current.apiKey,
+      isEnabled: updates.isEnabled ?? current.isEnabled,
+      baseUrl: optional('baseUrl'),
+      defaultModel: optional('defaultModel'),
+      embeddingModel: optional('embeddingModel'),
+      transcriptionModel: optional('transcriptionModel'),
+      settings: updates.settings ?? current.settings,
+    };
+
+    this.config.providers[index] = updated;
+    this.saveConfig();
+    return updated;
   }
 
   removeProvider(id: string): void {
@@ -224,18 +300,45 @@ class AIConfigManager {
     if (this.config.defaultEmbeddingProviderId === id) {
       this.config.defaultEmbeddingProviderId = undefined;
     }
+    if (this.config.defaultTranscriptionProviderId === id) {
+      this.config.defaultTranscriptionProviderId = undefined;
+    }
     this.saveConfig();
   }
 
   setDefaultProvider(id: string): void {
+    this.requireProvider(id);
     this.config.defaultProviderId = id;
     this.saveConfig();
   }
 
   setDefaultEmbeddingProvider(id: string): void {
+    if (!this.requireProvider(id).embeddingModel) {
+      throw new Error('Provider has no embedding model configured');
+    }
     this.config.defaultEmbeddingProviderId = id;
     this.saveConfig();
   }
+
+  setDefaultTranscriptionProvider(id: string): void {
+    if (!this.requireProvider(id).transcriptionModel) {
+      throw new Error('Provider has no transcription model configured');
+    }
+    this.config.defaultTranscriptionProviderId = id;
+    this.saveConfig();
+  }
+
+  private requireProvider(id: string): AIProviderConfig {
+    const provider = this.getProvider(id);
+    if (!provider) {
+      throw new Error(`Provider not found: ${id}`);
+    }
+    return provider;
+  }
+}
+
+function toProviderView({ apiKey, ...rest }: AIProviderConfig): AIProviderView {
+  return { ...rest, hasApiKey: Boolean(apiKey) };
 }
 
 // ================================
@@ -255,26 +358,25 @@ export class AIService {
   // Provider Management
   // ================================
 
-  getProviders(): AIProviderConfig[] {
-    return this.configManager.getProviders();
+  getConfigSnapshot(): AIConfigSnapshot {
+    return {
+      providers: this.configManager.getProviders().map(toProviderView),
+      defaultProviderId: this.configManager.getDefaultProvider()?.id,
+      defaultEmbeddingProviderId: this.configManager.getDefaultEmbeddingProvider()?.id,
+      defaultTranscriptionProviderId: this.configManager.getDefaultTranscriptionProvider()?.id,
+    };
   }
 
-  getProvider(id: string): AIProviderConfig | undefined {
-    return this.configManager.getProvider(id);
+  addProvider(input: AIProviderInput): AIProviderView {
+    return toProviderView(this.configManager.addProvider(input));
   }
 
-  addProvider(provider: AIProviderConfig): void {
-    this.configManager.addProvider(provider);
-    // Clear cached client
-    this.openaiClients.delete(provider.id);
-    this.anthropicClients.delete(provider.id);
-  }
-
-  updateProvider(id: string, updates: Partial<AIProviderConfig>): void {
-    this.configManager.updateProvider(id, updates);
-    // Clear cached client
+  updateProvider(id: string, updates: AIProviderUpdate): AIProviderView {
+    const provider = this.configManager.updateProvider(id, updates);
+    // 密钥或地址可能变化，丢弃缓存的客户端
     this.openaiClients.delete(id);
     this.anthropicClients.delete(id);
+    return toProviderView(provider);
   }
 
   removeProvider(id: string): void {
@@ -289,6 +391,10 @@ export class AIService {
 
   setDefaultEmbeddingProvider(id: string): void {
     this.configManager.setDefaultEmbeddingProvider(id);
+  }
+
+  setDefaultTranscriptionProvider(id: string): void {
+    this.configManager.setDefaultTranscriptionProvider(id);
   }
 
   // ================================
@@ -560,29 +666,32 @@ export class AIService {
   }
 
   // ================================
-  // Transcription (OpenAI Whisper)
+  // Transcription (OpenAI-compatible audio/transcriptions)
   // ================================
 
   async transcribe(request: TranscribeRequest): Promise<TranscribeResponse> {
     const provider = request.providerId
       ? this.configManager.getProvider(request.providerId)
-      : this.configManager.getDefaultProvider();
+      : this.configManager.getDefaultTranscriptionProvider();
 
     if (!provider) {
-      throw new Error('No AI provider configured');
+      throw new Error('No transcription provider configured');
     }
 
     if (!provider.apiKey) {
       throw new Error(`No API key configured for provider: ${provider.name}`);
     }
 
-    // Currently only OpenAI API supports transcription
+    if (!provider.transcriptionModel) {
+      throw new Error(`No transcription model configured for provider: ${provider.name}`);
+    }
+
     const client = this.getOpenAIClient(provider);
     const { createReadStream } = await import('fs');
 
     const response = await client.audio.transcriptions.create({
       file: createReadStream(request.audioPath),
-      model: 'whisper-1',
+      model: provider.transcriptionModel,
       language: request.language,
       response_format: 'verbose_json',
       timestamp_granularities: ['segment'],

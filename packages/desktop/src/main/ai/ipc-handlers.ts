@@ -6,13 +6,13 @@
 import { ipcMain } from 'electron';
 import {
   getAIService,
-  type AIProviderConfig,
   type ChatCompletionRequest,
   type EmbeddingRequest,
   type SummarizeRequest,
   type ExtractTagsRequest,
   type TranscribeRequest,
 } from './ai-service';
+import type { AIProviderInput, AIProviderUpdate } from './provider-config';
 
 /**
  * Register all AI-related IPC handlers
@@ -25,48 +25,23 @@ export function registerAIHandlers(): void {
   // ================================
 
   /**
-   * Get all configured providers
+   * 获取配置快照：服务商列表（不含密钥）与生效的默认服务商
    */
-  ipcMain.handle('ai:getProviders', async () => {
+  ipcMain.handle('ai:getConfig', async () => {
     try {
-      const providers = aiService.getProviders();
-      // Remove API keys from response for security
-      return providers.map((p) => ({
-        ...p,
-        apiKey: p.apiKey ? '••••••••' : undefined,
-      }));
+      return aiService.getConfigSnapshot();
     } catch (error) {
-      console.error('[AI:IPC] Get providers error:', error);
+      console.error('[AI:IPC] Get config error:', error);
       throw error;
     }
   });
 
   /**
-   * Get a specific provider
+   * 新增服务商，返回不含密钥的视图
    */
-  ipcMain.handle('ai:getProvider', async (_event, id: string) => {
+  ipcMain.handle('ai:addProvider', async (_event, input: AIProviderInput) => {
     try {
-      const provider = aiService.getProvider(id);
-      if (provider) {
-        return {
-          ...provider,
-          apiKey: provider.apiKey ? '••••••••' : undefined,
-        };
-      }
-      return undefined;
-    } catch (error) {
-      console.error('[AI:IPC] Get provider error:', error);
-      throw error;
-    }
-  });
-
-  /**
-   * Add or update a provider
-   */
-  ipcMain.handle('ai:addProvider', async (_event, provider: AIProviderConfig) => {
-    try {
-      aiService.addProvider(provider);
-      return { success: true };
+      return aiService.addProvider(input);
     } catch (error) {
       console.error('[AI:IPC] Add provider error:', error);
       throw error;
@@ -74,14 +49,13 @@ export function registerAIHandlers(): void {
   });
 
   /**
-   * Update a provider
+   * 更新服务商；apiKey 缺省或为空时保留已存储的密钥
    */
   ipcMain.handle(
     'ai:updateProvider',
-    async (_event, id: string, updates: Partial<AIProviderConfig>) => {
+    async (_event, id: string, updates: AIProviderUpdate) => {
       try {
-        aiService.updateProvider(id, updates);
-        return { success: true };
+        return aiService.updateProvider(id, updates);
       } catch (error) {
         console.error('[AI:IPC] Update provider error:', error);
         throw error;
@@ -124,6 +98,19 @@ export function registerAIHandlers(): void {
       return { success: true };
     } catch (error) {
       console.error('[AI:IPC] Set default embedding provider error:', error);
+      throw error;
+    }
+  });
+
+  /**
+   * 设置默认转写服务商（须已配置转写模型）
+   */
+  ipcMain.handle('ai:setDefaultTranscriptionProvider', async (_event, id: string) => {
+    try {
+      aiService.setDefaultTranscriptionProvider(id);
+      return { success: true };
+    } catch (error) {
+      console.error('[AI:IPC] Set default transcription provider error:', error);
       throw error;
     }
   });
@@ -215,13 +202,13 @@ export function registerAIHandlers(): void {
  */
 export function cleanupAIHandlers(): void {
   const handlers = [
-    'ai:getProviders',
-    'ai:getProvider',
+    'ai:getConfig',
     'ai:addProvider',
     'ai:updateProvider',
     'ai:removeProvider',
     'ai:setDefaultProvider',
     'ai:setDefaultEmbeddingProvider',
+    'ai:setDefaultTranscriptionProvider',
     'ai:testConnection',
     'ai:chatCompletion',
     'ai:createEmbeddings',

@@ -5,6 +5,7 @@
 
 import { getSQLiteService } from './sqlite';
 import { getAIService } from '../ai/ai-service';
+import { cosineSimilarity, decodeEmbedding } from './embedding-vector';
 
 // ================================
 // Types
@@ -121,8 +122,7 @@ export class SemanticSearchService {
       const results: SemanticSearchResult[] = [];
 
       for (const row of rows) {
-        const itemVector = new Float32Array(row.vector.buffer);
-        const similarity = this.cosineSimilarity(queryVector, itemVector);
+        const similarity = cosineSimilarity(queryVector, decodeEmbedding(row.vector));
 
         if (similarity >= threshold) {
           results.push({
@@ -168,7 +168,7 @@ export class SemanticSearchService {
         return [];
       }
 
-      const sourceVector = new Float32Array(sourceEmbedding.vector.buffer);
+      const sourceVector = decodeEmbedding(sourceEmbedding.vector);
 
       // Get all other embeddings
       let sql = `
@@ -210,8 +210,7 @@ export class SemanticSearchService {
       const results: SemanticSearchResult[] = [];
 
       for (const row of rows) {
-        const itemVector = new Float32Array(row.vector.buffer);
-        const similarity = this.cosineSimilarity(sourceVector, itemVector);
+        const similarity = cosineSimilarity(sourceVector, decodeEmbedding(row.vector));
 
         if (similarity >= threshold) {
           results.push({
@@ -333,26 +332,6 @@ export class SemanticSearchService {
   // ================================
   // Utilities
   // ================================
-
-  /**
-   * Calculate cosine similarity between two vectors
-   */
-  private cosineSimilarity(a: Float32Array, b: Float32Array): number {
-    if (a.length !== b.length) return 0;
-
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-
-    for (let i = 0; i < a.length; i++) {
-      dotProduct += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-
-    if (normA === 0 || normB === 0) return 0;
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
 
   /**
    * Generate a snippet from content containing the query
