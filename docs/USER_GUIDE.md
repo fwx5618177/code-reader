@@ -294,6 +294,22 @@ Markdown 文档没有“编辑 / 预览”的割裂：你输入的语法会立�
 - 大文件（几百 KB）采用增量解析与后台渲染，编辑不卡顿。
 - 写作侧边栏的“加载 LaTeX 示例”可以快速体验。
 
+**语法与引用检查**：停止输入约 0.4 秒后在后台检查整篇文档，问题处显示波浪线（红色错误、黄色警告、蓝色提示），行号旁有圆点，鼠标悬停可看说明。编辑器头部显示各类问题的数量，点击（或 **⌘⇧M**）打开诊断面板，**F8** 跳到下一处。
+
+| 会报告的问题 | 级别 |
+|----------------|------|
+| 缺少 `\end{…}`、`\begin{a}` 与 `\end{b}` 不匹配、多余的 `\end`、`}`、`\)`、`\]` | 错误 |
+| 未闭合的 `{`、`[`、`$`、`$$`、`\(`、`\[`（公式不能跨空行）、`\verb` 未在同一行闭合 | 错误 |
+| `\ref` / `\eqref` / `\cref` 引用了不存在的 `\label`；`\label` 重复定义 | 警告 |
+| `\cite` 的键在文档的 `\bibitem` 中找不到；`\bibitem` 重复 | 警告 |
+| 从未被引用的 `\label`、`\bibitem` | 提示 |
+
+原样输出环境（`verbatim`、`lstlisting` 等）、`\verb`、`\url` 的内容和宏定义体不参与检查。文档用 `\input` / `\include` 引入了其他文件时，标签可能定义在别处，不报告“未定义 / 未引用”；使用 `\bibliography{…}` / `\addbibresource{…}` 外部文献库时不检查文献键。
+
+**折叠**：行号右侧的 ⌄ 可折叠多行环境（保留 `\begin` 与 `\end` 两行）和章节（折叠到下一个同级或更高级章节之前）；⌘⌥[ / ⌘⌥] 折叠 / 展开光标所在处。
+
+**大纲**：写作侧栏「大纲」对 `.tex` 文档显示 `\title` / `\author` 与 `\part`…`\subparagraph` 章节层级，点击章节定位到源码（仅预览时滚动预览）。
+
 ### 纯文本（`.txt`）
 
 - 一行就是一行，不做任何格式识别；输入 `# ` 不会变成标题。
@@ -589,7 +605,7 @@ Markdown 文档没有“编辑 / 预览”的割裂：你输入的语法会立�
 | ⌘⇧P | 命令面板（插件命令，见第 13 节） |
 | Esc | 关闭弹窗 / 退出专注模式 |
 
-编辑器内的快捷键见 3.5 节，标签页与分栏的快捷键见 3.7 节。
+编辑器内的快捷键见 3.5 节，标签页与分栏的快捷键见 3.7 节。LaTeX 源码中：⌘⇧M 诊断面板、F8 下一处诊断、⌘⌥[ / ⌘⌥] 折叠 / 展开（见第 5 节）。插件提供的快捷键列在 设置 → 快捷键。
 
 ---
 
@@ -617,24 +633,39 @@ Markdown 文档没有“编辑 / 预览”的割裂：你输入的语法会立�
 
 ## 13. 插件
 
-插件可以为编辑器增加命令、在状态栏显示信息。每个插件运行在独立的后台线程里，不能访问网络、文件和你的知识库，只能在你授权的范围内操作**当前文档**。
+插件可以为编辑器增加命令、快捷键、斜杠菜单项、标签栏按钮、侧栏视图，在状态栏显示信息，并提供可在设置中调整的配置项。每个插件运行在独立的后台线程里，不能访问网络、文件和你的知识库，只能在你授权的范围内操作**当前文档**（Markdown、纯文本与 LaTeX 源码）。
 
 ### 13.1 使用插件
 
-- **管理**：设置 → **插件**。列出已安装的插件（名称、版本、说明、需要的权限、提供的命令与状态），可以启用 / 停用、重新加载、卸载。
+- **管理**：设置 → **插件**。列出已安装的插件（名称、版本、说明、需要的权限、命令、快捷键、界面入口、依赖与激活时机、状态），可以启用 / 停用、重新加载、卸载。
 - **授权**：首次启用时会弹窗列出插件要的权限，同意后才会运行；插件升级后新增了权限会再次询问。
+- **状态**：“运行中”；“等待激活”表示已启用、还没到它声明的激活时机（如“打开 LaTeX 文档时”），它的命令、快捷键和按钮照常可用，第一次使用时自动启动；“出错”会在卡片上写明原因（如“依赖插件 X 未启用”“依赖插件 X 的版本 1.4.0 不满足 ^2.0.0”）。
+- **依赖**：插件可以依赖其他插件。被依赖的插件先启动；它没安装、没启用或版本不对时，依赖它的插件不会启动；停用被依赖的插件，依赖它的插件也随之停止，重新启用后自动恢复。
+- **配置**：提供配置项的插件在卡片中显示表单（开关、下拉、数字、文字），修改即保存并立即通知插件；与默认值不同的项旁有 ↺ 可恢复默认。
 
 | 权限 | 允许插件做什么 |
 |------|----------------|
-| `editor:read` | 读取当前文档的内容、选中文本与光标位置 |
+| `editor:read` | 读取当前文档的内容、选中文本、光标位置与文档类型 |
 | `editor:write` | 修改当前文档（插入、替换文本，移动光标） |
 | `ui:message` | 显示提示消息 |
 | `ui:dialog` | 弹出输入框、选择列表与确认框 |
 | `ui:statusbar` | 在状态栏显示一项信息 |
+| `ui:view` | 在侧栏「插件视图」中显示列表 |
 | `storage` | 在本机保存插件自己的数据 |
 
-- **执行命令**：按 **⌘⇧P**（Windows / Linux 为 Ctrl+Shift+P）打开命令面板，输入过滤后回车执行。命令作用于聚焦栏的文档；状态栏上的插件信息也可以点击执行对应命令。
-- **内置示例「写作助手」**：插入当前日期、统计字数与预计阅读时间、设置字数目标并在状态栏显示进度。
+插件的入口：
+
+| 入口 | 在哪里 |
+|------|--------|
+| 命令面板 | **⌘⇧P**（Windows / Linux 为 Ctrl+Shift+P），输入过滤后回车执行；有快捷键的命令在右侧显示 |
+| 快捷键 | 插件声明的组合键；与应用快捷键相同或已被其他插件占用的不生效，全部插件快捷键及冲突原因见 设置 → **快捷键** |
+| 斜杠菜单 | Markdown 文档中输入 `/`，插件命令列在内置命令之后（标注“插件 · 名称”） |
+| 标签栏按钮 | 编辑器标签栏右侧（“重新打开关闭的标签”左边） |
+| 侧栏视图 | Ribbon 上的 **插件视图**（拼图图标，只在有插件提供视图时出现），点击列表项执行对应命令 |
+| 状态栏 | 底部状态栏的插件信息，可点击执行对应命令 |
+
+- 命令作用于聚焦栏的文档。LaTeX 文档处于“渲染”视图时插件只能读取，修改需切换到“源码”或“分栏”。
+- **内置示例「写作助手」**：插入当前日期（⌘⇧D，Windows / Linux 为 Ctrl+Alt+D，焦点在编辑器内时；日期格式可在配置中选择）、统计字数与预计阅读时间（⌘⌥K / Ctrl+Alt+K，或标签栏的统计按钮）、设置字数目标并在状态栏与侧栏「写作统计」视图中显示进度。打开 Markdown 或 LaTeX 文档时自动启动。
 - **安装其他插件**：在插件设置中点 **打开插件目录**，把插件文件夹放进去，再回到设置中启用。与内置插件同 ID 的用户插件会覆盖内置插件。只安装你信任来源的插件，并留意它申请的权限。
 
 ### 13.2 编写插件
@@ -681,18 +712,57 @@ export function deactivate() {}
 
 | API | 说明 |
 |-----|------|
-| `app.commands.register(id, handler)` | 注册 manifest 中声明过的命令 |
-| `app.editor.getContent()` / `setContent(text)` | 读取 / 替换当前文档全文（Markdown 或纯文本） |
+| `app.commands.register(id, handler)` | 注册 manifest 中声明过的命令；从侧栏视图执行时 `handler` 收到该项的 `args` |
+| `app.editor.getContent()` / `setContent(text)` | 读取 / 替换当前文档全文（Markdown、纯文本或 LaTeX 源码） |
+| `app.editor.getLanguage()` | 当前文档类型：`markdown` / `latex` / `plain` |
 | `app.editor.getSelection()` / `replaceSelection(text)` / `insertText(text)` | 选中文本、替换选区、在光标处插入 |
-| `app.editor.getCursorPosition()` / `setCursorPosition(line, column)` | 光标位置（行按顶层块计数） |
+| `app.editor.getCursorPosition()` / `setCursorPosition(line, column)` | 光标位置（Markdown 行按顶层块计数，LaTeX 为源码行，均从 1 计） |
 | `app.editor.onDidChange(listener)` | 当前文档内容变化或切换到另一栏 / 另一篇文档时回调 |
 | `app.ui.showMessage(text, type?)` | 提示消息，`type` 为 `info` / `warning` / `error` |
 | `app.ui.showInput({ prompt, placeholder, value })` | 输入框，取消时为 `undefined` |
 | `app.ui.showQuickPick(items, { placeholder })` / `showConfirm(text)` | 选择列表 / 确认框 |
 | `app.statusBar.set({ text, tooltip, command })` / `clear()` | 状态栏项（每个插件一项），`command` 为点击时执行的本插件命令 |
+| `app.views.set(viewId, items)` | 设置侧栏视图的列表，`items` 为 `{ label, description?, command?, args? }`（最多 200 项，需要 `ui:view`） |
+| `app.config.get(key)` / `onDidChange(listener)` | 读取配置（用户没改时为默认值）；用户修改后回调，参数为被修改的键 |
 | `app.storage.get / set / delete / keys` | 插件私有的键值存储（值需可序列化为 JSON） |
 
-限制：`manifest.json` 不超过 64 KB，入口文件不超过 1 MB；插件中没有 `fetch`、DOM 与 Node.js 能力。修改代码后在插件设置中点 **重新加载**。内置的「写作助手」（应用安装目录的 `assets/plugins/writing-tools`）是一个完整的参考实现。
+`manifest.json` 中的其他字段（都可省略）：
+
+```json
+{
+  "dependencies": [{ "id": "base-tools", "version": "^1.2.0", "optional": false }],
+  "activationEvents": ["onLanguage:latex", "onView:stats"],
+  "contributes": {
+    "commands": [{ "id": "insert-rule", "title": "我的插件：插入分隔线" }],
+    "keybindings": [{ "command": "insert-rule", "key": "Ctrl+Alt+H", "mac": "Cmd+Alt+H", "when": "editorFocus" }],
+    "menus": { "editor/context": [{ "command": "insert-rule", "order": 1 }] },
+    "toolbar": [{ "command": "insert-rule", "icon": "zap", "tooltip": "插入分隔线" }],
+    "views": [{ "id": "stats", "name": "我的统计" }],
+    "configuration": {
+      "title": "我的插件",
+      "properties": {
+        "style": { "type": "string", "default": "line", "enum": ["line", "stars"], "enumDescriptions": ["---", "***"] },
+        "count": { "type": "number", "default": 1, "minimum": 1, "maximum": 5, "description": "插入几条" },
+        "notify": { "type": "boolean", "default": true }
+      }
+    }
+  }
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `dependencies` | 依赖的其他插件与版本范围（`1.2.3`、`^1.2.0`、`~1.2.0`、`>=1.0.0 <2.0.0`、`1.x`、`*`，多个范围可用双竖线连接表示“或”）；`optional: true` 的依赖缺失时忽略 |
+| `activationEvents` | 何时启动：`onStartup`（省略本字段时的默认值）、`onLanguage:markdown` / `latex` / `plain`（首次打开该类文档）、`onView:<视图 ID>`（首次显示插件视图）、`onCommand:<命令 ID>`（可省略：执行插件的任何命令都会先启动它） |
+| `keybindings` | `key` 用 `+` 连接，修饰键 `Ctrl` / `Cmd` / `Alt`（`Option`）/ `Shift` / `Mod`（macOS 为 ⌘，其他为 Ctrl），按键为字母、数字、`F1`–`F12`、符号键 `[` `]` `;` `'` `,` `.` `/` `\` `-` `=` 与反引号、`Space`、`Enter`、方向键；必须含 Ctrl / Cmd / Alt 之一（F 键除外）。`mac` / `win` / `linux` 覆盖对应平台的写法；`when: "editorFocus"` 只在焦点位于编辑器时生效 |
+| `menus["editor/context"]` | 加入 Markdown 斜杠菜单（目前只支持这一个位置），`order` 小的在前 |
+| `toolbar` | 标签栏按钮（每个插件最多 3 个），`icon` 取 `calendar` `clock` `chart` `hash` `type` `list` `check` `star` `bookmark` `tag` `zap` `wand` `sparkles` `quote` `link` `sigma` `puzzle` |
+| `views` | 侧栏「插件视图」中的视图（每个插件最多 5 个），内容由 `app.views.set` 提供 |
+| `configuration` | 配置项，类型为 `string` / `number` / `boolean`，必须给出 `default`；可选 `description`、`enum`（及等长的 `enumDescriptions`）、`minimum` / `maximum`（仅数字） |
+
+贡献中引用的命令必须先在 `contributes.commands` 中声明。manifest 有任何不合法的地方，插件卡片会逐条列出原因且不能启用。
+
+限制：`manifest.json` 不超过 64 KB，入口文件不超过 1 MB；插件中没有 `fetch`、DOM 与 Node.js 能力。修改代码后在插件设置中点 **重新加载**。内置的「写作助手」（应用安装目录的 `assets/plugins/writing-tools`）演示了以上全部字段，是一个完整的参考实现。
 
 ### 13.3 插件市场
 

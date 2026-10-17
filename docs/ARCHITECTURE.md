@@ -27,24 +27,22 @@
 │  plugins/   插件目录管理（列出 / 读取入口 / 卸载）            │
 │  tray/      托盘（含最近打开）                               │
 ├──────────────────────────────────────────────────────────────┤
-│ 可复用子包 packages/*（与 UI 无关的算法与服务）                 │
-│  desktop 在用：text-buffer  diff-algorithm  search-service    │
-│               autocomplete-service  fuzzy-match-algorithm     │
-│  未被引用：  syntax-parser  format-parser  plugin-system      │
+│ 可复用子包 packages/*（与 UI 无关的算法与服务，desktop 全部引用）│
+│  text-buffer  diff-algorithm  search-service                  │
+│  autocomplete-service  fuzzy-match-algorithm                  │
+│  syntax-parser  format-parser  plugin-system                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；`lib/latex` 只依赖 `@code-reader/text-buffer`（LaTeX 解析器在 `lib/latex/parser.ts`）。桌面端插件系统在 `lib/plugins` 自成一体，不使用 `plugin-system` 子包。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
+依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；LaTeX 渲染链路（`lib/latex/parser.ts` 起）只依赖 `@code-reader/text-buffer`，LaTeX 诊断 / 折叠 / 大纲（`lib/latex/analysis.ts`）使用 `syntax-parser` 与 `format-parser`；桌面端插件系统 `lib/plugins` 使用 `plugin-system` 的贡献点类型与 `lifecycle` 模块。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
 
-**未被引用的子包（保留，待决定如何接入）**：
+**最后接入的三个子包**：
 
-| 子包 | 主要能力（测试） | 桌面端现状 | 桌面端尚未具备、可由子包提供的能力 |
+| 子包 | 桌面端用到的能力 | 接入位置 | 未使用的部分与原因 |
 |------|------|------|------|
-| `syntax-parser`（约 8.4k 行，4 个测试文件 76 个用例） | 手写 LaTeX tokenizer / 增量解析器（含 `errors` / `warnings`）、LaTeX 块扫描器（文档结构树）、语言注册表与高亮引擎（含自动闭合、折叠标记、缩进规则）、Lezer 增量解析封装与 AST 缓存 | `af13f51` 统一 LaTeX 链路时删除了对它的引用（旧链路用其解析器与块扫描器），`5e8b89e` 移除依赖；现在 LaTeX 解析在 `lib/latex/parser.ts`，编辑器高亮是 `codemirror-latex.ts` 的 StreamLanguage | LaTeX 编辑器的**语法错误提示**（未闭合环境 / 括号，桌面端没有 lint）、**代码折叠**（按环境 / 章节，桌面端没有 foldService）、基于结构树的大纲 |
-| `format-parser`（约 7.9k 行，**没有测试**） | 自研 CommonMark/GFM 解析器（带位置信息的 AST）、LaTeX 解析器（提取 `\label` / `\ref` / `\cite`、文档元数据）、增量编辑解析与流式解析、按内容自动判断格式 | 桌面端从未引用；Markdown 用 markdown-it + ProseMirror（`lib/markdown`），分块渲染按顶层块懒渲染 | LaTeX **交叉引用检查**（未定义的 `\ref`、未引用的 `\label`、参考文献）与文档元数据；超大 Markdown 的增量 / 流式解析。接入前需要先补测试 |
-| `plugin-system`（约 2.5k 行，没有测试） | `PluginManager`（依赖与优先级、`activationEvents` 按需激活、生命周期事件）、`ExtensionRegistry`（菜单、快捷键、工具栏、侧栏视图、语言、主题、配置项、文件类型等贡献点）、沙箱代理 | `45dc0c2` 让桌面端插件接入真实 UI 时改为自建的 `lib/plugins`（Worker 沙箱 + 权限 + 命令 + 状态栏 + 存储），不再引用子包 | manifest 只支持 `commands`；子包定义了但桌面端缺少的是**快捷键、菜单 / 工具栏按钮、侧栏视图、插件配置项、插件间依赖、按事件激活** |
-
-注意：`plugin-system` 的沙箱在主线程执行插件代码，桌面端的 Worker 隔离更安全，接入时宜只复用其贡献点模型与生命周期编排，而不是替换 Worker 运行时。
+| `syntax-parser`（5 个测试文件 89 个用例） | `LatexLezerParser` 的语法错误（未闭合 / 不匹配的环境、多余的 `}` / `\end` / `\)`、未闭合的参数与公式）与 AST（环境 / 章节 → 折叠区间与大纲） | `lib/latex/analysis.ts` → `analysis.worker.ts`；`codemirror-analysis.ts`（lint + foldService）；写作侧栏 `LatexOutline` | 语言注册表 / 高亮引擎、Lezer 封装与 AST 缓存、块扫描器：编辑器高亮已有 CodeMirror StreamLanguage，结构信息取自同一次解析的 AST，不需要第二套。接入时修复了解析前整体分词导致原样输出 / 公式环境模式切换无效、控制符号误报、行号重复计数、`\( a $ \)` 死循环等问题 |
+| `format-parser`（1 个测试文件 13 个用例） | LaTeX 解析器的交叉引用索引（`\label` / `\ref` 系列 / `\cite` 系列 / `\bibitem` / 外部文献库 / `\input`，逐键定位）与文档元数据（标题、作者） | `lib/latex/analysis.ts` 的 `checkCrossReferences` 与 `info` | Markdown 解析与增量 / 流式解析：经评估不接入——增量解析器不识别 setext 标题与引用 / 列表中的标题、把缩进代码当作标题，单字符编辑仍触发整篇重解析；CommonMark 解析器与编辑器使用的 markdown-it 在 HTML 块等细节上不一致。大纲与标题定位必须和编辑器文档模型一致，继续使用 markdown-it。接入时修复了导言区循环吞掉 `\begin{document}`、正文遇任意 `\end` 截断、节点范围多算一个 Token、参数丢失 `$` 等问题 |
+| `plugin-system`（1 个测试文件 32 个用例） | 贡献点数据结构（快捷键、菜单、工具栏、侧栏视图、配置项、依赖）；接入时新增的 `lifecycle` 模块：版本范围、依赖解析、激活事件（`PluginManager` 同样改用它） | `lib/plugins/{types,manifest,keybindings}.ts`、`services/pluginService.ts` | `PluginManager` 的运行时与沙箱代理、`ExtensionRegistry`：子包沙箱在主线程执行插件代码，桌面端保留更安全的 Worker 隔离与自己的 `useSyncExternalStore` 友好注册表；语言、主题、文件类型贡献点需要在 Worker 外执行代码或加载资源，暂不开放 |
 
 ## 2. 主进程
 
@@ -95,7 +93,7 @@
 | `lib/writing` | 写作服务：全文索引、搜索建议、差分（Worker 池）、索引持久化（IndexedDB）、性能监控，以及 DiffViewer 组件（用于版本对比，`diff-lines.ts` 把字符级差分重建为行） |
 | `lib/file-system`、`lib/folders` | 写作文件树模型、拖拽、文件夹（知识库与写作共用 `folders` 表；`moveFolder` 校验循环与同名，删除时子文件夹上移一级） |
 | `lib/editor` | 语言注册表、ProseMirror 输入规则与块级回车转换、视口懒渲染（`lazy-visibility.ts`）、块拖拽手柄与块菜单（`block-handle.ts`、`block-commands.ts`、`popup-menu.ts`）、页面设置模型（`page-settings.ts`，localStorage `writing-page-settings`）、打字机模式插件（`typewriter.ts`）、定位高亮（`reveal-highlight.ts`，编辑器与阅读视图共用） |
-| `lib/plugins` | 桌面端插件系统：manifest 校验（`manifest.ts`）、权限与按权限过滤的上下文（`sandbox.ts`）、每个插件独占的 Worker 运行时（`plugin-runtime.worker.ts`，移除网络 / 持久化 / 动态求值等全局能力）与宿主侧代理（`worker-plugin.ts`、`plugin-protocol.ts`）、加载与生命周期（`plugin-loader.ts`）、命令 / 状态栏注册表（`extension-registry.ts`）、偏好与存储（`preferences.ts`、`storage.ts`）、编辑器桥接（`editor-bridge.ts`：已注册编辑器按最近活动排列，聚焦栏调用 `activate`，内容为 Markdown 文本）；`services/pluginService.ts` 组合主进程插件目录与以上模块 |
+| `lib/plugins` | 桌面端插件系统：manifest 校验（`manifest.ts`）、权限与按权限过滤的上下文（`sandbox.ts`）、每个插件独占的 Worker 运行时（`plugin-runtime.worker.ts`，移除网络 / 持久化 / 动态求值等全局能力）与宿主侧代理（`worker-plugin.ts`、`plugin-protocol.ts`）、加载与生命周期（`plugin-loader.ts`）、运行时贡献注册表（`extension-registry.ts`：状态栏项、侧栏视图内容）、快捷键解析与冲突检测（`keybindings.ts`）、偏好 / 配置与存储（`preferences.ts`、`storage.ts`）、编辑器桥接（`editor-bridge.ts`：已注册编辑器按最近活动排列，聚焦栏调用 `activate`；Markdown 编辑器与 LaTeX 源码编辑器都会注册，带 `language`）；`services/pluginService.ts` 组合主进程插件目录与以上模块，并用 `plugin-system/lifecycle` 编排激活：授权 → 依赖解析（依赖先激活，缺失 / 未启用 / 版本不满足 / 循环时拒绝）→ 激活事件（onStartup / onLanguage / onView；执行命令时按需激活），manifest 声明的命令、快捷键、斜杠菜单、标签栏按钮、侧栏视图从快照的 `contributions` 提供给界面 |
 | `services/` | `database.ts`（渲染侧 SQL 通道，含 `transaction`）、`settingsService.ts`（`settings.json`）、`aiConfigService.ts`（主进程 AI 配置的客户端）、`spellcheckService.ts`、`workspaceService.ts`（知识库）、`flushRegistry.ts`（渲染进程落盘的唯一入口：持有防抖写入的模块注册回调，响应主进程请求并发执行后 ack）、`pluginService.ts`、`ocrLanguageService.ts` |
 | `theme/` | ThemeProvider：light / dark / system，强调色，字体，写入 CSS 变量 |
 
@@ -110,7 +108,7 @@
 | 附件（录音、图片、文件、剪藏图片） | `<知识库根>/attachments/`，数据库只存路径与元数据（录音在 metadata 中记录 `durationMs`）；渲染进程经 `read-binary-file` 转 Blob URL 预览（CSP 不放开 file:） |
 | 扫描版 PDF 识别结果 | `<知识库根>/ocr-results/<条目ID>/`：逐页识别结果、写回正文的全文、扫描页检测结果（按 PDF 内容哈希判断是否过期）；删除条目时清理。识别文本同时追加到条目正文，由已有的 FTS 触发器索引 |
 | 文字识别语言数据 | 内置 eng / chi_sim 在 `assets/ocr/`（构建时生成，不入库）；用户导入的在 `userData/ocr/languages/`；参与识别的语言选择存在 localStorage（`ocrLanguageService`） |
-| 插件 | 内置 `assets/plugins/`，用户插件 `userData/plugins/<id>/`；启用状态与已授予权限在 `settings.json` 的 `plugins`；插件私有存储为 localStorage `plugin-storage:<id>`（有配额） |
+| 插件 | 内置 `assets/plugins/`，用户插件 `userData/plugins/<id>/`；启用状态、已授予权限与用户修改过的配置在 `settings.json` 的 `plugins`；插件私有存储为 localStorage `plugin-storage:<id>`（有配额） |
 | 拼写检查词典 | 内置 en_US（Hunspell `.dic` / `.aff` + LICENSE）在 `packages/desktop/assets/dictionaries/`，经 electron-builder `extraResources` 打包；用户导入的词典与个人词典（`user-words.txt`）在 `userData/spellcheck/` |
 | 写作标签页与分栏 | localStorage `writing-editor-tabs` |
 | 写作页面设置 | localStorage `writing-page-settings`（写作与专注模式共用） |
@@ -137,11 +135,11 @@
 | MainContent | 知识库 `KnowledgeWorkspace`（条目 / 图谱（笔记链接 / 实体两层）/ 问答 + 详情面板 + 标签管理 + 待审阅归类）；写作 `EditorTabs` + `SplitEditor`（每栏一个 `PaneEditor`）+ `BacklinksPanel`，外层 `PageSurface` 应用页面设置；阅读 `ReadingView`（文章、PDF、EPUB） |
 | EditorFooter | 字数、保存状态、反向链接面板开关、版本历史按钮、页面设置浮层 |
 | AgentActivity | 右下角浮窗，任意模式下显示 Agent 处理进度与归类建议记录（「去审阅」） |
-| PluginHost | 包裹整个应用：初始化插件服务、注册插件界面管理器、授权对话框（`PermissionDialog`）、⌘⇧P 命令面板；状态栏项由 Layout 中的 `PluginStatusBar` 显示 |
+| PluginHost | 包裹整个应用：初始化插件服务、注册插件界面管理器、授权对话框（`PermissionDialog`）、⌘⇧P 命令面板（显示快捷键）、插件快捷键分发；状态栏项由 Layout 中的 `PluginStatusBar` 显示，标签栏按钮由 `EditorTabs` 中的 `PluginToolbar` 显示，侧栏「插件视图」为 `PluginViews`（Ribbon 只在有插件视图时显示按钮），斜杠菜单经 `SlashCommandProvider` 的外部命令接入 |
 
 App 层的跨模式导航：条目按 `lib/knowledge/open-target.ts` 决定进入的模式（写作文档进写作、文档附件进阅读、其余进知识库），`openWikiTarget` 解析 `[[ ]]`（含标题 / 块片段，目标不存在时新建文档；阅读模式下目标可在阅读视图呈现时留在阅读模式并由阅读视图定位）。编辑器已处理的按键（`defaultPrevented`）不再触发全局快捷键。
 
-快捷键（`App.tsx`）：⌘N 快速输入（文本）、⌘⇧R 快速输入（录音）、⌘P 搜索（写作文档 + 知识条目）、⌘, 设置、⌘B 侧边栏、⌘S 保存、⌘1/2/3 切换模式、⌘⇧F 专注模式、Esc 退出专注、关闭页面设置或弹窗。写作标签页（`useEditorTabs.ts`）：⌘W 关闭、⌘⇧T 重开、⌃Tab / ⌃⇧Tab 切换、⌘\ 分栏。插件命令面板（`PluginHost`）：⌘⇧P。
+快捷键（`App.tsx`）：⌘N 快速输入（文本）、⌘⇧R 快速输入（录音）、⌘P 搜索（写作文档 + 知识条目）、⌘, 设置、⌘B 侧边栏、⌘S 保存、⌘1/2/3 切换模式、⌘⇧F 专注模式、Esc 退出专注、关闭页面设置或弹窗。写作标签页（`useEditorTabs.ts`）：⌘W 关闭、⌘⇧T 重开、⌃Tab / ⌃⇧Tab 切换、⌘\ 分栏。插件命令面板（`PluginHost`）：⌘⇧P；插件快捷键来自 manifest，与以上快捷键冲突的不生效（`lib/plugins/keybindings.ts` 的 `RESERVED_KEYBINDINGS`）。LaTeX 源码：⌘⇧M 诊断面板、F8 下一处诊断、⌘⌥[ / ⌘⌥] 折叠 / 展开。
 
 样式约定（详见 `packages/desktop/src/render/styles/DESIGN_SYSTEM.md`）：
 
@@ -176,7 +174,7 @@ HeightMap（height-map.ts）── 源码行 ↔ 块 ↔ 实测位置；块内�
 分栏滚动同步（LatexEditor + scroll-sync.ts 的 ScrollSyncLock）
 ```
 
-`lib/latex` 不设汇总入口（无 `index.ts`），全部 13 个模块都从 `LatexEditor.tsx` 可达：它直接使用 `codemirror-latex`、`latex-document`、`incremental-engine`、`render-pipeline`、`scroll-sync`；引擎内部依赖 `block-segmenter`、`parser`、`renderer`（数学环境由 `math-env-handler` 处理）；管线内部依赖 `frame-scheduler`、`height-map`、`worker`；类型统一在 `types.ts`。早期并行的链路（基于内容比较的 `parseAndRender`、`RealHeightMap`、按比例换算的滚动同步、`useLatexPipeline` / `useScrollSync`、`syntax-parser` 解析器选择、AST 缓存管理器与 math-worker 等）已删除。
+`lib/latex` 不设汇总入口（无 `index.ts`），全部 17 个模块都从 `LatexEditor.tsx` 可达：它直接使用 `codemirror-latex`、`codemirror-analysis`、`analysis-client`、`latex-document`、`incremental-engine`、`render-pipeline`、`scroll-sync`；分析客户端在 `analysis.worker` 中调用 `analysis`（`syntax-parser` 语法诊断与结构 + `format-parser` 交叉引用与元数据，写作侧栏 `LatexOutline` 共用同一客户端，同一内容只分析一次）；引擎内部依赖 `block-segmenter`、`parser`、`renderer`（数学环境由 `math-env-handler` 处理）；管线内部依赖 `frame-scheduler`、`height-map`、`worker`；类型统一在 `types.ts`。早期并行的链路（基于内容比较的 `parseAndRender`、`RealHeightMap`、按比例换算的滚动同步、`useLatexPipeline` / `useScrollSync`、`syntax-parser` 解析器选择、AST 缓存管理器与 math-worker 等）已删除。
 
 滚动同步规则（`scroll-sync.ts`）：只有用户真实操作的一侧拥有滚动所有权（时间窗 `SCROLL_OWNER_WINDOW_MS = 150`）。源码滚动（含光标带动）同步预览；预览只有在用户滚轮 / 触摸 / 指针 / 键盘输入后的时间窗内滚动才同步源码；程序设置 `scrollTop` 或内容重排引起的预览滚动一律忽略；预览刷新或测量后只允许“源码 → 预览”。查询返回 `null`（块尚未测量）时等下一次测量再同步。
 
