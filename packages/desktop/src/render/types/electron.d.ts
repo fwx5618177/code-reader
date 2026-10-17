@@ -408,6 +408,13 @@ interface ElectronAPI {
     shouldAutoSave: (itemId: string, minIntervalMs?: number) => Promise<boolean>;
   };
 
+  /** 托盘菜单动作；返回取消订阅函数 */
+  tray: {
+    onQuickNote: (callback: () => void) => () => void;
+    onOpenSearch: (callback: () => void) => () => void;
+    onSwitchMode: (callback: (mode: 'knowledge' | 'writing' | 'reading') => void) => () => void;
+    onOpenSettings: (callback: () => void) => () => void;
+  };
 }
 
 declare global {

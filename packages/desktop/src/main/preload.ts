@@ -95,6 +95,10 @@ const eventChannels = [
   'agent:taskFailed',
   'agent:itemStatusChanged',
   'ai:chatChunk',
+  'tray:quick-note',
+  'tray:open-search',
+  'tray:switch-mode',
+  'tray:open-settings',
 ];
 
 /** 流式对话序号；事件只发往发起请求的窗口，窗口内唯一即可 */
@@ -263,6 +267,14 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('version:auto-save', itemId, content, options),
     shouldAutoSave: (itemId: string, minIntervalMs?: number) =>
       ipcRenderer.invoke('version:should-auto-save', itemId, minIntervalMs),
+  },
+
+  // 托盘菜单动作（主进程推送）
+  tray: {
+    onQuickNote: (callback: () => void) => subscribe('tray:quick-note', callback),
+    onOpenSearch: (callback: () => void) => subscribe('tray:open-search', callback),
+    onSwitchMode: (callback: (mode: string) => void) => subscribe('tray:switch-mode', callback),
+    onOpenSettings: (callback: () => void) => subscribe('tray:open-settings', callback),
   },
 });
 

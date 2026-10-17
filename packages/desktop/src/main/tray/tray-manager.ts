@@ -14,7 +14,6 @@ export class TrayManager {
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
   private isQuitting = false;
-  private recentItems: Array<{ label: string; path: string }> = [];
 
   constructor() {
     // Listen for app quit to clean up
@@ -343,22 +342,6 @@ export class TrayManager {
       },
       { type: 'separator' },
 
-      // 最近打开项目
-      {
-        label: '最近打开',
-        submenu:
-          this.recentItems.length > 0
-            ? this.recentItems.map((item) => ({
-                label: item.label,
-                click: () => {
-                  this.showAndFocusWindow();
-                  this.mainWindow?.webContents.send('tray:open-path', item.path);
-                },
-              }))
-            : [{ label: '暂无记录', enabled: false }],
-      },
-      { type: 'separator' },
-
       // Preferences
       {
         label: '偏好设置',
@@ -411,16 +394,6 @@ export class TrayManager {
         iconType: 'info',
       });
     }
-  }
-
-  /**
-   * 更新最近打开项目列表
-   * @param items 最近打开的项目列表
-   */
-  updateRecentItems(items: Array<{ label: string; path: string }>): void {
-    // 保存最近项目，最多显示10个
-    this.recentItems = items.slice(0, 10);
-    this.updateContextMenu();
   }
 
   /**

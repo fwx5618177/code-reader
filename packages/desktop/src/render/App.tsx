@@ -363,6 +363,18 @@ const App: React.FC = () => {
     isInFocusMode,
   ]);
 
+  // 托盘菜单动作：与对应的全局快捷键行为一致
+  useEffect(() => {
+    const { tray } = window.electron;
+    const unsubscribers = [
+      tray.onQuickNote(() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })),
+      tray.onOpenSearch(() => dispatch({ type: 'TOGGLE_SEARCH', payload: true })),
+      tray.onSwitchMode((mode) => dispatch({ type: 'SET_MODE', payload: mode })),
+      tray.onOpenSettings(() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, []);
+
   // Apply mode changes
   useEffect(() => {
     document.documentElement.setAttribute('data-mode', appState.mode);
