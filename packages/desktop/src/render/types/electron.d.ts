@@ -273,6 +273,13 @@ export interface RecentDocument {
   title: string;
 }
 
+/** 网页剪藏：主进程抓取的网页 */
+export interface FetchedHtml {
+  /** 重定向后的最终地址 */
+  url: string;
+  html: string;
+}
+
 interface HybridSearchOptions extends SemanticSearchOptions {
   semanticWeight?: number;
 }
@@ -422,6 +429,11 @@ interface ElectronAPI {
       options?: { title?: string; minIntervalMs?: number }
     ) => Promise<DocumentVersion | null>;
     shouldAutoSave: (itemId: string, minIntervalMs?: number) => Promise<boolean>;
+  };
+
+  /** 网页剪藏：经主进程抓取 http/https 网页的 HTML（超时或过大时拒绝） */
+  web: {
+    fetchHtml: (url: string) => Promise<FetchedHtml>;
   };
 
   /** 托盘菜单：on* 订阅菜单动作并返回取消订阅函数；setRecentDocuments 更新“最近打开”子菜单 */

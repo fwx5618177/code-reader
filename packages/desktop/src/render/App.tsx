@@ -392,11 +392,13 @@ const App: React.FC = () => {
   const handleQuickInputSubmit = useCallback(
     async (data: QuickInputData) => {
       try {
-        const { item, processing } = await captureQuickInput(data);
+        const { item, processing, warning } = await captureQuickInput(data);
         dispatch({ type: 'TOGGLE_QUICK_INPUT', payload: false });
         await kb.reload();
         setSelectedKnowledgeItemId(item.id);
-        if (processing === 'no-provider') {
+        if (warning) {
+          setNotice(warning);
+        } else if (processing === 'no-provider') {
           setNotice('已保存。尚未配置 AI 服务商，摘要与标签不会自动生成（设置 → AI 服务）');
         } else if (processing === 'submitted') {
           setNotice('已保存，AI 正在后台整理…');

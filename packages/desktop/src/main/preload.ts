@@ -87,6 +87,9 @@ const validChannels = [
   'version:auto-save',
   'version:should-auto-save',
 
+  // 网页剪藏
+  'web:fetchHtml',
+
 ];
 
 // 用于接收事件的通道
@@ -268,6 +271,11 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('version:auto-save', itemId, content, options),
     shouldAutoSave: (itemId: string, minIntervalMs?: number) =>
       ipcRenderer.invoke('version:should-auto-save', itemId, minIntervalMs),
+  },
+
+  // 网页剪藏：由主进程抓取 HTML
+  web: {
+    fetchHtml: (url: string) => ipcRenderer.invoke('web:fetchHtml', url),
   },
 
   // 托盘菜单：动作由主进程推送；最近文档列表由渲染进程提供

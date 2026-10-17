@@ -39,9 +39,11 @@ export {
 export {
   resolveArticle,
   resolveAttachmentKind,
+  documentFormat,
   sourceHost,
   type ArticleSource,
   type AttachmentKind,
+  type DocumentFormat,
 } from './article';
 export {
   applyHighlightMarks,

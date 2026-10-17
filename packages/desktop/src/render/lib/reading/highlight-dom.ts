@@ -2,12 +2,14 @@
 // 正文高亮标记
 // 在渲染后的正文中为已保存的高亮包裹 <mark>，以及清除这些标记。
 //
-// 限制：每条高亮只在“单个文本节点”内查找其首次出现的位置。
-// 跨越多个节点的文本（如横跨加粗、链接或段落边界的选区）无法定位，会被跳过；
-// 这类高亮仍保留在高亮列表中，只是不在正文中显示标记。
+// 定位方式：把正文的所有文本节点拼接为一段“归一化文本”（连续空白折叠为一个空格，
+// 段落等块级边界视为一个空格），在其中查找高亮文本的首次出现，再把匹配区间映射回
+// 各个文本节点。跨越加粗、链接、行内代码甚至段落的高亮会拆成多个 <mark>，
+// 它们共享同一个高亮 ID。
 // ================================
 
 import type { ReadingHighlight } from './reading-state';
+import { isTextBoundary } from './html-blocks';
 
 /** 标记元素上记录高亮 ID 的属性 */
 export const HIGHLIGHT_ID_ATTR = 'data-highlight-id';
@@ -15,21 +17,100 @@ export const HIGHLIGHT_ID_ATTR = 'data-highlight-id';
 /** 数学公式渲染结果内部不做包裹，避免破坏公式排版 */
 const SKIP_SELECTOR = '.math-inline-wrapper, .math-block-wrapper';
 
+/** 归一化文本中每个字符对应的原始位置；null 表示块级边界产生的虚拟空格 */
+type SourcePosition = { node: Text; offset: number } | null;
+
+interface TextIndex {
+  text: string;
+  positions: SourcePosition[];
+}
+
+/** 一个文本节点内需要包裹的区间 */
+interface TextSegment {
+  node: Text;
+  start: number;
+  end: number;
+}
+
 function highlightMarks(root: HTMLElement): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(`mark[${HIGHLIGHT_ID_ATTR}]`));
 }
 
-/** 在单个文本节点中查找文本的首次出现 */
-function findInTextNode(root: HTMLElement, text: string): { node: Text; offset: number } | null {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) =>
-      node.parentElement?.closest(SKIP_SELECTOR) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
-  });
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const offset = (node.nodeValue ?? '').indexOf(text);
-    if (offset >= 0) return { node: node as Text, offset };
+function normalizeQuote(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** 构建归一化文本及其到文本节点的映射 */
+function buildTextIndex(root: HTMLElement): TextIndex {
+  const chars: string[] = [];
+  const positions: SourcePosition[] = [];
+  const endsWithSpace = () => chars.length === 0 || chars[chars.length - 1] === ' ';
+
+  const pushBoundary = () => {
+    if (endsWithSpace()) return;
+    chars.push(' ');
+    positions.push(null);
+  };
+
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const value = node.nodeValue ?? '';
+      for (let offset = 0; offset < value.length; offset++) {
+        const char = value[offset];
+        if (/\s/.test(char)) {
+          if (endsWithSpace()) continue;
+          chars.push(' ');
+        } else {
+          chars.push(char);
+        }
+        positions.push({ node: node as Text, offset });
+      }
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const element = node as Element;
+    if (element.matches(SKIP_SELECTOR)) return;
+    const boundary = isTextBoundary(element);
+    if (boundary) pushBoundary();
+    element.childNodes.forEach(visit);
+    if (boundary) pushBoundary();
+  };
+
+  root.childNodes.forEach(visit);
+  return { text: chars.join(''), positions };
+}
+
+/** 在正文中定位文本，返回按文本节点拆分的区间（文档顺序） */
+function locateSegments(root: HTMLElement, quote: string): TextSegment[] {
+  const needle = normalizeQuote(quote);
+  if (!needle) return [];
+  const index = buildTextIndex(root);
+  const start = index.text.indexOf(needle);
+  if (start < 0) return [];
+
+  const segments: TextSegment[] = [];
+  for (const position of index.positions.slice(start, start + needle.length)) {
+    if (!position) continue;
+    const last = segments[segments.length - 1];
+    if (last && last.node === position.node) {
+      last.end = position.offset + 1;
+    } else {
+      segments.push({ node: position.node, start: position.offset, end: position.offset + 1 });
+    }
   }
-  return null;
+  // 纯空白片段（如块级元素之间的换行）不包裹，避免在 <ul>/<table> 等容器中插入非法子元素
+  return segments.filter(({ node, start, end }) => (node.nodeValue ?? '').slice(start, end).trim() !== '');
+}
+
+/** 把文本节点中的 [start, end) 区间拆出并包裹到 mark 中 */
+function wrapSegment({ node, start, end }: TextSegment, id: string, className: string): void {
+  const target = start > 0 ? node.splitText(start) : node;
+  if (end - start < target.length) target.splitText(end - start);
+  const mark = document.createElement('mark');
+  mark.className = className;
+  mark.setAttribute(HIGHLIGHT_ID_ATTR, id);
+  target.parentNode?.insertBefore(mark, target);
+  mark.appendChild(target);
 }
 
 /**
@@ -49,7 +130,8 @@ export function clearHighlightMarks(root: HTMLElement): void {
 }
 
 /**
- * 为高亮包裹 <mark>，返回成功定位的高亮 ID
+ * 为高亮包裹 <mark>，返回成功定位的高亮 ID。
+ * 逐条处理并在每条之后重新建立索引，重叠的高亮会形成嵌套标记。
  */
 export function applyHighlightMarks(
   root: HTMLElement,
@@ -58,22 +140,17 @@ export function applyHighlightMarks(
 ): Set<string> {
   const applied = new Set<string>();
   for (const highlight of highlights) {
-    const match = findInTextNode(root, highlight.text);
-    if (!match) continue;
-    const range = document.createRange();
-    range.setStart(match.node, match.offset);
-    range.setEnd(match.node, match.offset + highlight.text.length);
-    const mark = document.createElement('mark');
-    mark.className = className;
-    mark.setAttribute(HIGHLIGHT_ID_ATTR, highlight.id);
-    range.surroundContents(mark);
+    const segments = locateSegments(root, highlight.text);
+    if (segments.length === 0) continue;
+    // 各区间位于不同文本节点，拆分互不影响偏移
+    segments.forEach((segment) => wrapSegment(segment, highlight.id, className));
     applied.add(highlight.id);
   }
   return applied;
 }
 
 /**
- * 查找某条高亮的标记元素
+ * 查找某条高亮的第一个标记元素
  */
 export function findHighlightMark(root: HTMLElement, id: string): HTMLElement | null {
   return highlightMarks(root).find((mark) => mark.getAttribute(HIGHLIGHT_ID_ATTR) === id) ?? null;

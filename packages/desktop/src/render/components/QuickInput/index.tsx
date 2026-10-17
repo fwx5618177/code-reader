@@ -20,6 +20,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { QuickInputType } from '../../types/knowledge';
+import { isSingleWebUrl } from '../../lib/knowledge/web-clip';
 import styles from './QuickInput.module.scss';
 
 interface QuickInputProps {
@@ -265,8 +266,11 @@ const QuickInput: React.FC<QuickInputProps> = ({
     }
   };
 
-  // 处理粘贴
+  // 处理粘贴：图片切换到图片模式；在空的文字输入中粘贴单个网址时切换到网址模式（保存时自动剪藏）
   const handlePaste = (e: React.ClipboardEvent) => {
+    if (inputType === 'text' && !content.trim() && isSingleWebUrl(e.clipboardData.getData('text/plain'))) {
+      setInputType('url');
+    }
     const items = Array.from(e.clipboardData.items);
     for (const item of items) {
       if (item.type.startsWith('image/')) {

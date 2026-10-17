@@ -10,8 +10,11 @@ import { aiConfigService } from '../../services/aiConfigService';
 import type { KnowledgeItem, KnowledgeItemType } from '../../types/knowledge';
 import { ensureExtension } from '../documents/file-types';
 import { agentActivity } from '../agent/agentStore';
+import { documentFormat } from '../reading/article';
 import { knowledgeRepository } from './repository';
 import { migrateLegacyKnowledgeStore } from './legacy-migration';
+import { extractDocumentText, type ExtractedDocument } from './document-text';
+import { clipErrorMessage, clipWebPage, normalizeWebUrl, type WebClip } from './web-clip';
 
 let readyPromise: Promise<void> | null = null;
 
@@ -37,13 +40,12 @@ export function ensureKnowledgeReady(): Promise<void> {
   return readyPromise;
 }
 
-/** 根据 MIME 推断附件条目类型 */
+/** 根据 MIME 推断附件条目类型（PDF / EPUB 已在 resolveType 中识别） */
 function typeFromMime(mime: string): KnowledgeItemType {
   if (mime.startsWith('audio/')) return 'audio';
   if (mime.startsWith('video/')) return 'video';
   if (mime.startsWith('image/')) return 'image';
   if (
-    mime === 'application/pdf' ||
     mime.startsWith('text/') ||
     mime.includes('word') ||
     mime.includes('officedocument') ||
@@ -57,6 +59,8 @@ function typeFromMime(mime: string): KnowledgeItemType {
 
 /** 条目类型 */
 function resolveType(data: QuickInputData, attachment: File | undefined): KnowledgeItemType {
+  // PDF / EPUB 无论从哪种输入模式添加，都作为可阅读的文档
+  if (attachment && documentFormat(attachment)) return 'document';
   switch (data.type) {
     case 'text':
       return 'note';
@@ -71,10 +75,16 @@ function resolveType(data: QuickInputData, attachment: File | undefined): Knowle
   }
 }
 
-/** 默认标题 */
-function resolveTitle(data: QuickInputData, type: KnowledgeItemType, attachment?: File): string {
+/** 默认标题：用户填写 > 内容自带标题（网页、EPUB）> 按类型推断 */
+function resolveTitle(
+  data: QuickInputData,
+  type: KnowledgeItemType,
+  attachment?: File,
+  detectedTitle?: string
+): string {
   const explicit = data.title?.trim();
   if (explicit) return explicit;
+  if (detectedTitle) return detectedTitle;
   if (type === 'note') {
     const firstLine = data.content
       .split('\n')
@@ -134,29 +144,77 @@ export async function requestProcessing(item: KnowledgeItem): Promise<Processing
 export interface CaptureResult {
   item: KnowledgeItem;
   processing: ProcessingRequestResult;
+  /** 已保存但有部分处理未成功（如剪藏失败改存书签），需要告知用户 */
+  warning?: string;
+}
+
+/** 剪藏网址；失败时返回原因，由调用方降级为书签 */
+async function clipUrl(input: string): Promise<{ clip: WebClip } | { error: string }> {
+  try {
+    return { clip: await clipWebPage(normalizeWebUrl(input)) };
+  } catch (error) {
+    console.error('[Knowledge] 网页剪藏失败:', error);
+    return { error: clipErrorMessage(error) };
+  }
+}
+
+/** 提取 PDF / EPUB 全文；失败时仍保存原文件并给出提示 */
+async function extractAttachmentText(
+  file: File
+): Promise<{ extracted: ExtractedDocument | null; warning?: string }> {
+  try {
+    const extracted = await extractDocumentText(file);
+    if (extracted && !extracted.text.trim()) {
+      return { extracted, warning: '文档中没有可提取的文字（可能是扫描件），无法全文检索' };
+    }
+    return { extracted };
+  } catch (error) {
+    console.error('[Knowledge] 提取文档文本失败:', error);
+    return {
+      extracted: null,
+      warning: `未能提取文档文字（${error instanceof Error ? error.message : String(error)}），已保存原文件`,
+    };
+  }
 }
 
 /**
- * 快速收集：保存附件、写入条目与标签，并提交 Agent 处理
+ * 快速收集：保存附件、写入条目与标签，并提交 Agent 处理。
+ * 网址默认剪藏正文（失败时保存为书签），PDF / EPUB 提取全文写入正文。
  */
 export async function captureQuickInput(data: QuickInputData): Promise<CaptureResult> {
   await ensureKnowledgeReady();
 
   const attachment = data.attachments?.[0];
-  const type = resolveType(data, attachment);
+  const clipped = data.type === 'url' && data.sourceUrl ? await clipUrl(data.sourceUrl) : null;
+  const webClip = clipped && 'clip' in clipped ? clipped.clip : undefined;
+  const type = webClip ? 'webpage' : resolveType(data, attachment);
   const filePath = attachment ? await saveAttachment(attachment) : undefined;
-  const title = resolveTitle(data, type, attachment);
+  const { extracted, warning: extractWarning } = attachment
+    ? await extractAttachmentText(attachment)
+    : { extracted: null, warning: undefined };
+  const title = resolveTitle(data, type, attachment, webClip?.title ?? extracted?.title);
+  const userText = data.type === 'url' ? '' : data.content;
 
   const item = await knowledgeRepository.create({
     // 文本笔记同时是写作文档，使用 .md 文件名以便在写作模式中打开
     title: type === 'note' ? ensureExtension(title, 'markdown') : title,
     type,
-    content: data.type === 'url' ? undefined : data.content || undefined,
-    sourceUrl: data.sourceUrl,
+    content: webClip?.markdown ?? ([userText, extracted?.text].filter(Boolean).join('\n\n') || undefined),
+    sourceUrl: webClip?.url ?? data.sourceUrl,
     folderId: data.folderId,
     filePath,
     fileSize: attachment?.size,
     mimeType: attachment?.type || undefined,
+    metadata: webClip
+      ? {
+          webClip: {
+            excerpt: webClip.excerpt,
+            byline: webClip.byline,
+            siteName: webClip.siteName,
+            clippedAt: new Date().toISOString(),
+          },
+        }
+      : undefined,
   });
 
   if (data.tags && data.tags.length > 0) {
@@ -164,5 +222,8 @@ export async function captureQuickInput(data: QuickInputData): Promise<CaptureRe
   }
 
   const processing = await requestProcessing(item);
-  return { item, processing };
+  const clipWarning =
+    clipped && 'error' in clipped ? `网页剪藏失败（${clipped.error}），已保存为书签` : undefined;
+  const warning = clipWarning ?? extractWarning;
+  return { item, processing, ...(warning ? { warning } : {}) };
 }

@@ -14,7 +14,9 @@ import readingStyles from '../ReadingWorkspace/ReadingView.module.scss';
 import styles from './Inspector.module.scss';
 
 /** 代码条目未使用代码块包裹时，整体作为代码块渲染 */
-function articleOf(item: Pick<KnowledgeItem, 'type' | 'title' | 'content'>): ArticleSource | null {
+function articleOf(
+  item: Pick<KnowledgeItem, 'type' | 'title' | 'content' | 'filePath' | 'mimeType'>
+): ArticleSource | null {
   const article = resolveArticle(item);
   if (!article || item.type !== 'code' || article.content.includes('```')) return article;
   return { content: `\`\`\`\n${article.content}\n\`\`\``, format: 'markdown' };

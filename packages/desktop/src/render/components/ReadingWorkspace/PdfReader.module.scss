@@ -1,0 +1,135 @@
+// ================================
+// PdfReader PDF 阅读器样式
+// --scale-factor 为当前缩放比例（pdf.js 文本层依赖该变量计算尺寸），
+// --page-width / --page-height 为页面在缩放比例 1 时的尺寸
+// ================================
+
+@use '../../styles/variables' as *;
+
+.reader {
+  margin-bottom: var(--spacing-6);
+  font-family: var(--font-sans);
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  margin-bottom: var(--spacing-3);
+  padding: var(--spacing-1) var(--spacing-2);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.toolButton {
+  @include button-reset;
+  @include flex-center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+
+  &:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.zoomValue {
+  min-width: 44px;
+  font-family: var(--font-mono);
+  text-align: center;
+  color: var(--text-primary);
+}
+
+.pageInfo {
+  margin-left: auto;
+  padding-right: var(--spacing-1);
+}
+
+.pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-4);
+  overflow-x: auto;
+  @include scrollbar;
+}
+
+.page {
+  position: relative;
+  flex-shrink: 0;
+  width: calc(var(--page-width) * var(--scale-factor));
+  height: calc(var(--page-height) * var(--scale-factor));
+  // 缩放后滚动到页首时避开吸顶工具栏
+  scroll-margin-top: 48px;
+  background-color: var(--bg-secondary);
+  box-shadow: var(--shadow-md);
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+// 透明文本层：与 pdf.js 官方查看器的 .textLayer 规则一致
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 0;
+
+  :global(span),
+  br {
+    position: absolute;
+    color: transparent;
+    white-space: pre;
+    cursor: text;
+    transform-origin: 0% 0%;
+  }
+
+  > :not(:global(.markedContent)),
+  :global(.markedContent) :global(span):not(:global(.markedContent)) {
+    z-index: 1;
+  }
+
+  :global(span.markedContent) {
+    top: 0;
+    height: 0;
+  }
+
+  ::selection {
+    background-color: var(--accent-primary-alpha);
+  }
+
+  br::selection {
+    background: transparent;
+  }
+
+  :global(.endOfContent) {
+    display: block;
+    position: absolute;
+    inset: 100% 0 0;
+    z-index: 0;
+    cursor: default;
+    user-select: none;
+  }
+}

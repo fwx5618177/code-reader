@@ -394,6 +394,27 @@ $outline-width: 248px;
   text-align: center;
 }
 
+// EPUB 章节切换
+.chapterNav {
+  @include flex-between;
+  gap: var(--spacing-3);
+  margin-top: var(--spacing-8);
+  padding-top: var(--spacing-4);
+  border-top: 1px solid var(--border-subtle);
+  font-family: var(--font-sans);
+
+  .secondaryButton:disabled {
+    opacity: 0.4;
+    cursor: default;
+    background-color: transparent;
+  }
+}
+
+.chapterInfo {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
 // ================================
 // 可折叠区块（AI 导读、转写文本）
 // ================================

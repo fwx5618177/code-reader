@@ -114,6 +114,11 @@ export default defineConfig({
             return 'virtualization-vendor';
           }
 
+          // pdf.js 仅在打开 PDF 时动态加载，不并入启动即加载的 vendor（含 Worker 与按需加载的 CMap/字体）
+          if (id.includes('node_modules/pdfjs-dist/')) {
+            return undefined;
+          }
+
           // Other node_modules go to common vendor
           if (id.includes('node_modules/')) {
             return 'vendor';

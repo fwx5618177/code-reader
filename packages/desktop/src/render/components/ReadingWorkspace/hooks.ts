@@ -17,6 +17,7 @@ import {
   saveReadingSettings,
   type ReadingSettings,
 } from '../../lib/reading';
+import { openPdf, type PDFDocumentProxy } from '../../lib/reading/pdf';
 import { readBinaryFile } from './system';
 
 /**
@@ -112,6 +113,61 @@ export function useBlobUrl(filePath: string | undefined, mimeType: string | unde
       if (url) URL.revokeObjectURL(url);
     };
   }, [filePath, mimeType]);
+
+  return state;
+}
+
+/** 页面尺寸（缩放比例为 1 时的 CSS 像素） */
+export interface PdfPageSize {
+  width: number;
+  height: number;
+}
+
+export interface LoadedPdf {
+  pdf: PDFDocumentProxy;
+  pageSizes: PdfPageSize[];
+}
+
+export interface PdfDocumentState {
+  document: LoadedPdf | null;
+  error: boolean;
+}
+
+/**
+ * 打开本地 PDF 并读取全部页面尺寸（用于预先占位、按需渲染），卸载或文件变化时释放文档
+ */
+export function usePdfDocument(filePath: string): PdfDocumentState {
+  const [state, setState] = useState<PdfDocumentState>({ document: null, error: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    let opened: PDFDocumentProxy | null = null;
+    setState({ document: null, error: false });
+
+    (async () => {
+      const pdf = await openPdf(await readBinaryFile(filePath));
+      if (cancelled) {
+        void pdf.destroy();
+        return;
+      }
+      opened = pdf;
+      const pageSizes = await Promise.all(
+        Array.from({ length: pdf.numPages }, async (_, index) => {
+          const { width, height } = (await pdf.getPage(index + 1)).getViewport({ scale: 1 });
+          return { width, height };
+        })
+      );
+      if (!cancelled) setState({ document: { pdf, pageSizes }, error: false });
+    })().catch((error) => {
+      console.error('[Reading] 打开 PDF 失败:', error);
+      if (!cancelled) setState({ document: null, error: true });
+    });
+
+    return () => {
+      cancelled = true;
+      void opened?.destroy();
+    };
+  }, [filePath]);
 
   return state;
 }

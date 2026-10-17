@@ -9,6 +9,7 @@ import { getSQLiteService } from './database/sqlite';
 import { registerDatabaseHandlers, cleanupDatabaseHandlers } from './database/ipc-handlers';
 import { registerSearchHandlers, cleanupSearchHandlers } from './database/search-ipc-handlers';
 import { registerVersionHistoryHandlers } from './database/version-ipc-handlers';
+import { registerWebHandlers } from './web/ipc-handlers';
 import { registerAIHandlers, cleanupAIHandlers } from './ai/ipc-handlers';
 import {
   registerAgentHandlers,
@@ -450,6 +451,10 @@ function setupIPC() {
 
   // Version history and Git handlers
   registerVersionHistoryHandlers();
+
+  // 网页剪藏的 HTML 抓取
+  registerWebHandlers();
+
 }
 
 // 初始化数据库和服务
