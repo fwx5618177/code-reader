@@ -234,7 +234,6 @@ export interface SidebarPanelConfig {
   id: SidebarPanel;
   /** 按钮提示与侧栏标题 */
   label: string;
-  shortcut?: string;
 }
 
 /** 各模式可用的侧栏面板，顺序即 Ribbon 按钮顺序 */
@@ -248,7 +247,7 @@ export const MODE_SIDEBAR_PANELS: Record<AppMode, SidebarPanelConfig[]> = {
   ],
   knowledge: [
     { id: 'files', label: '文件夹' },
-    { id: 'search', label: '搜索', shortcut: '⌘⇧F' },
+    { id: 'search', label: '搜索' },
     { id: 'tags', label: '标签' },
     { id: 'recordings', label: '录音' },
     { id: 'graph', label: '知识图谱' },

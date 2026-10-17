@@ -145,7 +145,6 @@ const Ribbon: React.FC<RibbonProps> = ({
               key={button.id}
               icon={PANEL_ICONS[button.id]}
               label={button.label}
-              shortcut={button.shortcut}
               isActive={activePanel === button.id}
               onClick={() => onPanelChange(button.id)}
             />
