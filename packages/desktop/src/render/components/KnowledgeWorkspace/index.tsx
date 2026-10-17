@@ -6,6 +6,8 @@ import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } fr
 import type { KnowledgeItem } from '../../types/knowledge';
 import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
 import type { LinkIndex, RelatedLink } from '../../lib/links/link-index';
+import { isWritingDocument } from '../../lib/documents/constants';
+import { isReadableItem } from '../../lib/knowledge/open-target';
 import KnowledgeGraph, { type KnowledgeGraphMode } from '../KnowledgeGraph';
 import { ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
 import { useActivityByItem, useLibraryTaskRunning } from '../AgentActivity/activity';
@@ -39,8 +41,10 @@ export interface KnowledgeWorkspaceProps {
   /** 打开某条目（按 id），在本工作区内选中并显示详情 */
   selectedItemId?: string;
   onSelectItem: (id: string | undefined) => void;
-  /** 在写作模式中打开（仅 note 类型） */
+  /** 在写作模式中打开（仅写作文档） */
   onOpenInWriting: (itemId: string) => void;
+  /** 在阅读模式中打开（PDF / EPUB / 网页剪藏等可阅读条目） */
+  onOpenInReading: (itemId: string) => void;
   /** 通过双向链接创建新笔记（目标不存在时） */
   onCreateNote: (title: string) => void;
   /** 重命名条目（同时更新其他笔记中指向它的链接） */
@@ -59,6 +63,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   selectedItemId,
   onSelectItem,
   onOpenInWriting,
+  onOpenInReading,
   onCreateNote,
   onRenameItem,
   onQuickCapture,
@@ -134,11 +139,13 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
 
   // ---------- 交互 ----------
 
+  /** Enter / 双击打开条目：写作文档进入写作，可阅读条目进入阅读 */
   const handleOpen = useCallback(
     (item: KnowledgeItem) => {
-      if (item.type === 'note') onOpenInWriting(item.id);
+      if (isWritingDocument(item)) onOpenInWriting(item.id);
+      else if (isReadableItem(item)) onOpenInReading(item.id);
     },
-    [onOpenInWriting]
+    [onOpenInWriting, onOpenInReading]
   );
 
   const handleToggleFavorite = useCallback(
@@ -254,6 +261,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
             tagNameById={tagNameById}
             onSelectItem={onSelectItem}
             onOpenInWriting={onOpenInWriting}
+            onOpenInReading={onOpenInReading}
             onCreateNote={onCreateNote}
             onRenameItem={onRenameItem}
             onOpenSettings={onOpenSettings}

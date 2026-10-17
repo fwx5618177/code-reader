@@ -4,6 +4,8 @@
 // 本模块只通过 IPC 执行查询，并提供仓储层共用的小工具
 // ================================
 
+import type { RunResult, SqlStatement } from '../types/electron';
+
 class DatabaseService {
   private isInitialized = false;
 
@@ -26,13 +28,20 @@ class DatabaseService {
   /**
    * Execute a write query
    */
-  async run(
-    sql: string,
-    params?: unknown[]
-  ): Promise<{ changes: number; lastInsertRowid: number }> {
+  async run(sql: string, params?: unknown[]): Promise<RunResult> {
     this.ensureInitialized();
     const result = await window.electron.ipcRenderer.invoke('db:run', sql, params);
-    return result as { changes: number; lastInsertRowid: number };
+    return result as RunResult;
+  }
+
+  /**
+   * 在同一个事务中依次执行多条写语句：任一失败则全部回滚，不会留下半完成的状态
+   */
+  async transaction(statements: SqlStatement[]): Promise<RunResult[]> {
+    this.ensureInitialized();
+    if (statements.length === 0) return [];
+    const result = await window.electron.ipcRenderer.invoke('db:transaction', statements);
+    return result as RunResult[];
   }
 
   /**

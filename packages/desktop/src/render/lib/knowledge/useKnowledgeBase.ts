@@ -31,11 +31,13 @@ export interface UseKnowledgeBaseReturn extends KnowledgeBaseState {
   setItemTags: (id: string, names: string[]) => Promise<void>;
   /** 删除条目（软删除） */
   removeItem: (id: string) => Promise<void>;
-  /** 新建文件夹 */
-  createFolder: (name: string) => Promise<void>;
+  /** 新建文件夹；parentId 为 null 时建在顶层（同级重名时抛出错误） */
+  createFolder: (name: string, parentId: string | null) => Promise<void>;
   /** 重命名文件夹（同级重名时抛出错误） */
   renameFolder: (id: string, name: string) => Promise<void>;
-  /** 删除文件夹：其中的条目不删除，变为未归档 */
+  /** 把文件夹移到另一个文件夹下（null 为顶层）；成环、重名时抛出错误 */
+  moveFolder: (id: string, parentId: string | null) => Promise<void>;
+  /** 删除文件夹：其中的条目不删除，变为未归档；子文件夹上移一级 */
   deleteFolder: (id: string) => Promise<void>;
   /** 重命名标签（与已有标签同名时合并） */
   renameTag: (id: string, name: string) => Promise<void>;
@@ -124,8 +126,8 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
   }, []);
 
   const createFolder = useCallback(
-    async (name: string) => {
-      await folderRepository.create({ name });
+    async (name: string, parentId: string | null) => {
+      await folderService.createFolder({ name, parentId });
       await reload();
     },
     [reload]
@@ -134,6 +136,14 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
   const renameFolder = useCallback(
     async (id: string, name: string) => {
       await folderService.renameFolder(id, name);
+      await reload();
+    },
+    [reload]
+  );
+
+  const moveFolder = useCallback(
+    async (id: string, parentId: string | null) => {
+      await folderService.moveFolder(id, parentId);
       await reload();
     },
     [reload]
@@ -179,6 +189,7 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
     removeItem,
     createFolder,
     renameFolder,
+    moveFolder,
     deleteFolder,
     renameTag,
     mergeTags,

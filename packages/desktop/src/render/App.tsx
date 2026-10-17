@@ -51,10 +51,13 @@ import {
 } from './lib/documents';
 import { ensureExtension } from './lib/documents/file-types';
 import { pickRecentDocuments } from './lib/documents/recent';
+import { isWritingDocument } from './lib/documents/constants';
+import { itemOpenTarget } from './lib/knowledge/open-target';
 import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
 import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
 import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
+import { buildFolderTree, wouldCreateCycle, type FolderTreeNode } from './lib/folders/types';
 import {
   createLinkResolver,
   displayTitle,
@@ -505,19 +508,20 @@ const App: React.FC = () => {
     dispatch({ type: 'SET_MODE', payload: mode });
   }, []);
 
-  // 侧边栏文件夹：用户文件夹 + 条目数
+  // 侧边栏文件夹：用户文件夹树 + 每个文件夹直接包含的条目数（与选中文件夹时列出的条目一致）
   const virtualFolders = useMemo<VirtualFolder[]>(() => {
     const counts = new Map<string, number>();
     for (const item of kb.items) {
       if (item.folderId) counts.set(item.folderId, (counts.get(item.folderId) ?? 0) + 1);
     }
-    return kb.folders.map((folder) => ({
-      id: folder.id,
-      name: folder.name,
+    const toVirtualFolder = (node: FolderTreeNode): VirtualFolder => ({
+      id: node.id,
+      name: node.name,
       type: 'manual',
-      itemCount: counts.get(folder.id) ?? 0,
-      children: [],
-    }));
+      itemCount: node.documentCount,
+      children: node.children.map(toVirtualFolder),
+    });
+    return buildFolderTree(kb.folders, counts).map(toVirtualFolder);
   }, [kb.items, kb.folders]);
 
   // 知识库工作区的范围
@@ -531,14 +535,6 @@ const App: React.FC = () => {
   const handleFolderSelect = useCallback((folderId: string) => {
     setSelectedFolderId(folderId);
   }, []);
-
-  const handleCreateFolder = useCallback(async () => {
-    try {
-      await kb.createFolder(`新建文件夹 ${kb.folders.length + 1}`);
-    } catch (error) {
-      console.error('创建文件夹失败:', error);
-    }
-  }, [kb.createFolder, kb.folders.length]);
 
   // 知识库文件夹的重命名 / 删除确认对话框
   const [folderDialog, setFolderDialog] = useState<{
@@ -561,17 +557,27 @@ const App: React.FC = () => {
     []
   );
 
+  /** 在顶层（parentId 为 null）或某个文件夹下新建文件夹，名称在同级中不重复 */
+  const handleCreateFolder = useCallback(
+    (parentId: string | null) => {
+      const siblingNames = new Set(
+        kb.folders.filter((folder) => folder.parentId === parentId).map((folder) => folder.name)
+      );
+      let index = siblingNames.size + 1;
+      while (siblingNames.has(`新建文件夹 ${index}`)) index++;
+      const name = `新建文件夹 ${index}`;
+      void runFolderAction(() => kb.createFolder(name, parentId), `已新建「${name}」`, '新建文件夹失败');
+    },
+    [kb.createFolder, kb.folders, runFolderAction]
+  );
+
   const handleEditFolder = useCallback((folder: VirtualFolder) => {
     setFolderDialog({ action: 'rename', folder });
   }, []);
 
-  const handleDeleteFolder = useCallback(
-    (folderId: string) => {
-      const folder = virtualFolders.find((f) => f.id === folderId);
-      if (folder) setFolderDialog({ action: 'delete', folder });
-    },
-    [virtualFolders]
-  );
+  const handleDeleteFolder = useCallback((folder: VirtualFolder) => {
+    setFolderDialog({ action: 'delete', folder });
+  }, []);
 
   const confirmRenameFolder = useCallback(
     (name: string) => {
@@ -612,6 +618,34 @@ const App: React.FC = () => {
     [kb.folders, kb.updateItem, runFolderAction]
   );
 
+  /** 文件夹拖到另一个文件夹上时是否可以放下：父级未变化或会形成环时不接收 */
+  const canMoveFolder = useCallback(
+    (folderId: string, parentId: string | null) => {
+      const folder = kb.folders.find((f) => f.id === folderId);
+      return (
+        folder !== undefined &&
+        folder.parentId !== parentId &&
+        !wouldCreateCycle(kb.folders, folderId, parentId)
+      );
+    },
+    [kb.folders]
+  );
+
+  /** 文件夹拖到另一个文件夹（或「我的文件夹」根节点）上：改变层级 */
+  const handleMoveFolder = useCallback(
+    (folderId: string, parentId: string | null) => {
+      const folder = kb.folders.find((f) => f.id === folderId);
+      if (!folder) return;
+      const target = parentId ? kb.folders.find((f) => f.id === parentId)?.name : undefined;
+      void runFolderAction(
+        () => kb.moveFolder(folderId, parentId),
+        target ? `已将「${folder.name}」移到「${target}」` : `已将「${folder.name}」移到顶层`,
+        '移动文件夹失败'
+      );
+    },
+    [kb.folders, kb.moveFolder, runFolderAction]
+  );
+
   // ================================
   // 跨模式导航：知识库 ⇄ 写作 ⇄ 阅读
   // ================================
@@ -631,6 +665,12 @@ const App: React.FC = () => {
     setSelectedKnowledgeItemId(itemId);
   }, []);
 
+  /** 在阅读模式中打开条目（PDF / EPUB / 网页剪藏等） */
+  const openInReading = useCallback((itemId: string) => {
+    dispatch({ type: 'SET_MODE', payload: 'reading' });
+    setReadingItemId(itemId);
+  }, []);
+
   // 托盘“最近打开”：写作文档按更新时间排序，列表内容变化时才推送给主进程
   const sentRecentDocumentsRef = useRef('');
   useEffect(() => {
@@ -643,14 +683,16 @@ const App: React.FC = () => {
 
   useEffect(() => window.electron.tray.onOpenDocument(openInWriting), [openInWriting]);
 
-  /** 打开条目：笔记进入写作，其他类型在知识库中查看 */
+  /** 打开条目：写作文档进入写作，文档附件（PDF / EPUB 等）进入阅读，其他类型在知识库中查看 */
   const openItem = useCallback(
     (itemId: string) => {
       const item = kb.items.find((i) => i.id === itemId);
-      if (item?.type === 'note') openInWriting(itemId);
+      const target = item ? itemOpenTarget(item) : 'knowledge';
+      if (target === 'writing') openInWriting(itemId);
+      else if (target === 'reading') openInReading(itemId);
       else openInKnowledge(itemId);
     },
-    [kb.items, openInWriting, openInKnowledge]
+    [kb.items, openInWriting, openInReading, openInKnowledge]
   );
 
   /** 由 [[双向链接]] 创建尚不存在的笔记 */
@@ -681,7 +723,7 @@ const App: React.FC = () => {
         return;
       }
       openItem(item.id);
-      if (parts.heading && item.type === 'note') {
+      if (parts.heading && isWritingDocument(item)) {
         setHeadingRequest({ docId: item.id, heading: parts.heading });
       }
     },
@@ -847,10 +889,13 @@ const App: React.FC = () => {
           items={kb.items}
           selectedFolderId={selectedFolderId}
           onFolderSelect={handleFolderSelect}
-          onCreateFolder={handleCreateFolder}
+          onCreateFolder={() => handleCreateFolder(null)}
+          onCreateSubfolder={handleCreateFolder}
           onEditFolder={handleEditFolder}
           onDeleteFolder={handleDeleteFolder}
           onDropItem={handleDropItemOnFolder}
+          onMoveFolder={handleMoveFolder}
+          canMoveFolder={canMoveFolder}
         />
       );
     }
@@ -911,6 +956,7 @@ const App: React.FC = () => {
               selectedItemId={selectedKnowledgeItemId}
               onSelectItem={setSelectedKnowledgeItemId}
               onOpenInWriting={openInWriting}
+              onOpenInReading={openInReading}
               onCreateNote={(title) => void createNoteFromLink(title)}
               onRenameItem={handleRenameItem}
               onQuickCapture={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
@@ -1038,6 +1084,13 @@ const App: React.FC = () => {
     }
   };
 
+  // 轻提示：普通布局与专注模式共用（如重命名后更新链接数的反馈在专注模式中也要可见）
+  const noticeBar = notice ? (
+    <div className="app-notice" role="status">
+      {notice}
+    </div>
+  ) : null;
+
   // Focus mode render - clean, distraction-free with RichEditor
   if (isInFocusMode) {
     return (
@@ -1133,6 +1186,7 @@ const App: React.FC = () => {
             }}
           />
         </div>
+        {noticeBar}
       </div>
       </LinkResolverContext.Provider>
     );
@@ -1206,8 +1260,7 @@ const App: React.FC = () => {
       <SearchPanel
         isOpen={appState.searchOpen}
         onClose={() => dispatch({ type: 'TOGGLE_SEARCH', payload: false })}
-        onOpenDocument={openInWriting}
-        onOpenKnowledgeItem={openInKnowledge}
+        onOpenItem={openItem}
       />
 
       {/* Settings Panel */}
@@ -1238,18 +1291,14 @@ const App: React.FC = () => {
       <ConfirmDialog
         isOpen={folderDialog?.action === 'delete'}
         title="删除文件夹"
-        message={`确定删除文件夹「${folderDialog?.folder.name ?? ''}」吗？其中的 ${folderDialog?.folder.itemCount ?? 0} 个条目不会被删除，将变为未归档。`}
+        message={`确定删除文件夹「${folderDialog?.folder.name ?? ''}」吗？其中的 ${folderDialog?.folder.itemCount ?? 0} 个条目不会被删除，将变为未归档${folderDialog?.folder.children?.length ? `；${folderDialog.folder.children.length} 个子文件夹将上移一级` : ''}。`}
         confirmText="删除"
         isDanger
         onConfirm={confirmDeleteFolder}
         onCancel={closeFolderDialog}
       />
 
-      {notice && (
-        <div className="app-notice" role="status">
-          {notice}
-        </div>
-      )}
+      {noticeBar}
 
     </Layout>
     </LinkResolverContext.Provider>

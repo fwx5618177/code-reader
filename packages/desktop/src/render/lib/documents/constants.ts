@@ -9,6 +9,14 @@
 export const DOCUMENT_TYPE = 'note';
 
 /**
+ * 是否为写作文档（在写作模式中编辑的 Markdown / LaTeX 等笔记）
+ * 类型为 document 的 PDF / EPUB 等附件文档不是写作文档
+ */
+export function isWritingDocument(item: { type: string }): boolean {
+  return item.type === DOCUMENT_TYPE;
+}
+
+/**
  * Document status in database
  */
 export const DOCUMENT_STATUS = 'ready';

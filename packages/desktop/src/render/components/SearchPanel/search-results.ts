@@ -6,7 +6,7 @@
 import type { KnowledgeItemType } from '../../types/knowledge';
 import type { HybridSearchResult } from '../../types/electron';
 import type { DocumentSearchResult } from '../../lib/writing';
-import { DOCUMENT_TYPE } from '../../lib/documents/constants';
+import { DOCUMENT_TYPE, isWritingDocument } from '../../lib/documents/constants';
 import { displayTitle } from '../../lib/links/link-index';
 import { ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
 
@@ -58,7 +58,7 @@ export function mergeSearchResults(
     if (seen.has(result.itemId)) continue;
     seen.add(result.itemId);
     const type = toItemType(result.type);
-    const group: SearchGroupKey = type === DOCUMENT_TYPE ? 'documents' : 'knowledge';
+    const group: SearchGroupKey = isWritingDocument({ type }) ? 'documents' : 'knowledge';
     (group === 'documents' ? documents : knowledge).push({
       id: result.itemId,
       title: displayTitle(result.title) || '无标题',

@@ -5,6 +5,7 @@
 
 import { ipcMain, app } from 'electron';
 import { getSQLiteService, type FTSResult } from './sqlite';
+import { parseTransactionStatements } from './statements';
 import { join } from 'path';
 
 /**
@@ -59,6 +60,24 @@ export function registerDatabaseHandlers(): void {
       };
     } catch (error) {
       console.error('[DB:IPC] Run error:', error);
+      throw error;
+    }
+  });
+
+  /**
+   * 在同一个事务中依次执行多条写语句：任一失败则全部回滚
+   */
+  ipcMain.handle('db:transaction', async (_event, statements: unknown) => {
+    try {
+      const parsed = parseTransactionStatements(statements);
+      return sqlite.transaction(() =>
+        parsed.map(({ sql, params }) => {
+          const result = sqlite.run(sql, params);
+          return { changes: result.changes, lastInsertRowid: Number(result.lastInsertRowid) };
+        })
+      );
+    } catch (error) {
+      console.error('[DB:IPC] Transaction error:', error);
       throw error;
     }
   });
@@ -242,6 +261,7 @@ export function cleanupDatabaseHandlers(): void {
     'db:initialize',
     'db:close',
     'db:run',
+    'db:transaction',
     'db:get',
     'db:all',
     'db:exec',

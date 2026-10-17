@@ -3,10 +3,11 @@
 // 虚拟文件夹和智能分组视图
 // ================================
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Folder,
   FolderOpen,
+  FolderPlus,
   ChevronRight,
   ChevronDown,
   Plus,
@@ -27,7 +28,8 @@ import {
   type FilterRule,
 } from '../../lib/knowledge/filter-rules';
 import type { KnowledgeItem } from '../../types/knowledge';
-import { KNOWLEDGE_ITEM_DRAG_TYPE } from '../../lib/knowledge/drag';
+import { KNOWLEDGE_FOLDER_DRAG_TYPE, KNOWLEDGE_ITEM_DRAG_TYPE } from '../../lib/knowledge/drag';
+import { loadExpandedFolders, saveExpandedFolders } from './expanded-folders';
 
 // ================================
 // 类型定义
@@ -53,10 +55,16 @@ interface VirtualFoldersProps {
   selectedFolderId?: string;
   onFolderSelect: (folderId: string) => void;
   onCreateFolder?: () => void;
+  /** 在用户文件夹下新建子文件夹 */
+  onCreateSubfolder?: (parentId: string) => void;
   onEditFolder?: (folder: VirtualFolder) => void;
-  onDeleteFolder?: (folderId: string) => void;
+  onDeleteFolder?: (folder: VirtualFolder) => void;
   /** 条目从条目流拖到用户文件夹上 */
   onDropItem?: (folderId: string, itemId: string) => void;
+  /** 文件夹拖到另一个用户文件夹上（parentId 为 null 表示拖到「我的文件夹」根节点，即移到顶层） */
+  onMoveFolder?: (folderId: string, parentId: string | null) => void;
+  /** 拖动时判断目标是否可接收（如不能移到自身或子文件夹中） */
+  canMoveFolder?: (folderId: string, parentId: string | null) => boolean;
 }
 
 // ================================
@@ -355,14 +363,24 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
   selectedFolderId,
   onFolderSelect,
   onCreateFolder,
+  onCreateSubfolder,
   onEditFolder,
   onDeleteFolder,
   onDropItem,
+  onMoveFolder,
+  canMoveFolder,
 }) => {
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['smart']));
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(loadExpandedFolders);
   const [contextMenuFolder, setContextMenuFolder] = useState<string | null>(null);
-  // 拖动条目时悬停的文件夹
+  // 拖动条目或文件夹时悬停的文件夹
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  // 正在拖动的文件夹：dragover 期间无法读取 dataTransfer 数据，用它判断目标是否可接收
+  const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    saveExpandedFolders(expandedFolders);
+  }, [expandedFolders]);
+
   // 切换文件夹展开状态
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders((prev) => {
@@ -374,6 +392,16 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
       }
       return next;
     });
+  }, []);
+
+  // 展开文件夹（新建子文件夹、拖入文件夹后让结果可见）
+  const expandFolder = useCallback((folderId: string) => {
+    setExpandedFolders((prev) => (prev.has(folderId) ? prev : new Set(prev).add(folderId)));
+  }, []);
+
+  const endFolderDrag = useCallback(() => {
+    setDraggingFolderId(null);
+    setDropTargetId(null);
   }, []);
 
   // 获取文件夹图标
@@ -420,14 +448,29 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
       const isExpanded = expandedFolders.has(folder.id);
       const isSelected = selectedFolderId === folder.id;
       const hasChildren = folder.children && folder.children.length > 0;
+      // 「智能文件夹」「我的文件夹」两个分组根节点：点击整行展开 / 折叠
+      const isGroup = folder.id === 'smart' || folder.id === 'user';
+      const isUserFolder = folder.type === 'manual' && !isGroup;
       // 只有用户文件夹可以接收拖入的条目
-      const dropItem = folder.type === 'manual' && folder.id !== 'user' ? onDropItem : undefined;
+      const dropItem = isUserFolder ? onDropItem : undefined;
+      // 用户文件夹与「我的文件夹」根节点可以接收拖入的文件夹
+      const folderDropParent = isUserFolder ? folder.id : folder.id === 'user' ? null : undefined;
+      const acceptsFolder =
+        onMoveFolder !== undefined &&
+        folderDropParent !== undefined &&
+        draggingFolderId !== null &&
+        draggingFolderId !== folder.id &&
+        (canMoveFolder?.(draggingFolderId, folderDropParent) ?? true);
+      const acceptsDrop = (types: readonly string[]): boolean =>
+        (dropItem !== undefined && types.includes(KNOWLEDGE_ITEM_DRAG_TYPE)) ||
+        (acceptsFolder && types.includes(KNOWLEDGE_FOLDER_DRAG_TYPE));
 
       const folderItemClasses = [
         styles.folderItem,
         isSelected && styles.folderItemSelected,
         folder.type === 'smart' && styles.folderItemSmart,
         dropTargetId === folder.id && styles.folderItemDropTarget,
+        draggingFolderId === folder.id && styles.folderItemDragging,
       ]
         .filter(Boolean)
         .join(' ');
@@ -441,8 +484,9 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
           <div
             className={folderItemClasses}
             style={{ paddingLeft: `${12 + depth * 16}px` }}
+            draggable={isUserFolder && onMoveFolder !== undefined}
             onClick={() => {
-              if (hasChildren) {
+              if (isGroup && hasChildren) {
                 toggleFolder(folder.id);
               }
               onFolderSelect(folder.id);
@@ -451,37 +495,42 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
               e.preventDefault();
               setContextMenuFolder(folder.id);
             }}
-            onDragOver={
-              dropItem
+            onDragStart={
+              isUserFolder && onMoveFolder
                 ? (e) => {
-                    if (!e.dataTransfer.types.includes(KNOWLEDGE_ITEM_DRAG_TYPE)) return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    setDropTargetId(folder.id);
+                    e.dataTransfer.setData(KNOWLEDGE_FOLDER_DRAG_TYPE, folder.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDraggingFolderId(folder.id);
                   }
                 : undefined
             }
-            onDragLeave={
-              dropItem
-                ? (e) => {
-                    // 移入子元素时不算离开
-                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                      setDropTargetId(null);
-                    }
-                  }
-                : undefined
-            }
-            onDrop={
-              dropItem
-                ? (e) => {
-                    const itemId = e.dataTransfer.getData(KNOWLEDGE_ITEM_DRAG_TYPE);
-                    setDropTargetId(null);
-                    if (!itemId) return;
-                    e.preventDefault();
-                    dropItem(folder.id, itemId);
-                  }
-                : undefined
-            }
+            onDragEnd={isUserFolder && onMoveFolder ? endFolderDrag : undefined}
+            onDragOver={(e) => {
+              if (!acceptsDrop(e.dataTransfer.types)) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setDropTargetId(folder.id);
+            }}
+            onDragLeave={(e) => {
+              // 移入子元素时不算离开
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                setDropTargetId(null);
+              }
+            }}
+            onDrop={(e) => {
+              setDropTargetId(null);
+              if (!acceptsDrop(e.dataTransfer.types)) return;
+              const movedFolderId = e.dataTransfer.getData(KNOWLEDGE_FOLDER_DRAG_TYPE);
+              const itemId = e.dataTransfer.getData(KNOWLEDGE_ITEM_DRAG_TYPE);
+              e.preventDefault();
+              if (movedFolderId && acceptsFolder && folderDropParent !== undefined) {
+                setDraggingFolderId(null);
+                expandFolder(folder.id);
+                onMoveFolder?.(movedFolderId, folderDropParent);
+              } else if (itemId) {
+                dropItem?.(folder.id, itemId);
+              }
+            }}
           >
             {/* 展开/折叠按钮 */}
             <span
@@ -536,6 +585,19 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
           {/* 上下文菜单（「我的文件夹」根节点不可重命名 / 删除） */}
           {contextMenuFolder === folder.id && folder.type === 'manual' && folder.id !== 'user' && (
             <div className={styles.folderContextMenu}>
+              {onCreateSubfolder && (
+                <button
+                  className={styles.contextMenuItem}
+                  onClick={() => {
+                    expandFolder(folder.id);
+                    onCreateSubfolder(folder.id);
+                    setContextMenuFolder(null);
+                  }}
+                >
+                  <FolderPlus size={14} />
+                  <span>新建子文件夹</span>
+                </button>
+              )}
               <button
                 className={styles.contextMenuItem}
                 onClick={() => {
@@ -560,7 +622,7 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
               <button
                 className={`${styles.contextMenuItem} ${styles.contextMenuItemDanger}`}
                 onClick={() => {
-                  onDeleteFolder?.(folder.id);
+                  onDeleteFolder?.(folder);
                   setContextMenuFolder(null);
                 }}
               >
@@ -584,12 +646,18 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
       selectedFolderId,
       contextMenuFolder,
       dropTargetId,
+      draggingFolderId,
       toggleFolder,
+      expandFolder,
+      endFolderDrag,
       getFolderIcon,
       onFolderSelect,
+      onCreateSubfolder,
       onEditFolder,
       onDeleteFolder,
       onDropItem,
+      onMoveFolder,
+      canMoveFolder,
     ]
   );
 

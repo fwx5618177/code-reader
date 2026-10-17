@@ -21,10 +21,8 @@ import styles from './SearchPanel.module.scss';
 interface SearchPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  /** 在写作模式中打开文档 */
-  onOpenDocument: (id: string) => void;
-  /** 在知识库中打开条目 */
-  onOpenKnowledgeItem: (id: string) => void;
+  /** 打开命中的条目：由调用方按条目类型决定进入写作、阅读还是知识库 */
+  onOpenItem: (id: string) => void;
 }
 
 /** 输入停顿多久后发起搜索（毫秒） */
@@ -55,12 +53,7 @@ const Snippet: React.FC<{ snippet: string }> = ({ snippet }) => (
   </div>
 );
 
-const SearchPanel: React.FC<SearchPanelProps> = ({
-  isOpen,
-  onClose,
-  onOpenDocument,
-  onOpenKnowledgeItem,
-}) => {
+const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }) => {
   const [query, setQuery] = useState('');
   const [groups, setGroups] = useState<SearchGroups>(EMPTY_GROUPS);
   const [isLoading, setIsLoading] = useState(false);
@@ -139,11 +132,10 @@ const SearchPanel: React.FC<SearchPanelProps> = ({
     (hit: SearchHit) => {
       const term = query.trim();
       setSearchHistory((prev) => [term, ...prev.filter((t) => t !== term)].slice(0, HISTORY_LIMIT));
-      if (hit.group === 'documents') onOpenDocument(hit.id);
-      else onOpenKnowledgeItem(hit.id);
+      onOpenItem(hit.id);
       onClose();
     },
-    [query, onOpenDocument, onOpenKnowledgeItem, onClose]
+    [query, onOpenItem, onClose]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

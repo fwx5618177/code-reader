@@ -4,6 +4,7 @@
 // ================================
 
 import { databaseService, generateId, now, parseJSON } from '../../services/database';
+import type { SqlStatement } from '../../types/electron';
 import type {
   KnowledgeItem,
   KnowledgeItemStatus,
@@ -245,63 +246,63 @@ class KnowledgeRepository {
     return rows.map(rowToTag);
   }
 
-  /** 按名称查找标签，不存在时创建 */
-  async findOrCreateTag(name: string): Promise<string> {
-    const trimmed = name.trim();
-    const existing = await databaseService.get<{ id: string }>(
-      `SELECT id FROM tags WHERE name = ? AND is_deleted = 0`,
-      [trimmed]
-    );
-    if (existing) return existing.id;
-    const id = generateId();
-    const timestamp = now();
-    await databaseService.run(
-      `INSERT INTO tags (id, name, usage_count, is_auto_generated, created_at, updated_at)
-       VALUES (?, ?, 0, 0, ?, ?)`,
-      [id, trimmed, timestamp, timestamp]
-    );
-    return id;
-  }
-
   /**
    * 设置条目的标签（替换原有标签），同时维护标签使用次数
+   * 新建标签、增删关联与使用次数在同一个事务中写入
    */
   async setItemTags(itemId: string, names: string[]): Promise<void> {
     const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
-    const nextIds = new Set<string>();
-    for (const name of uniqueNames) {
-      nextIds.add(await this.findOrCreateTag(name));
-    }
-
+    const existing =
+      uniqueNames.length > 0
+        ? await databaseService.all<{ id: string; name: string }>(
+            `SELECT id, name FROM tags WHERE is_deleted = 0 AND name IN (${uniqueNames.map(() => '?').join(',')})`,
+            uniqueNames
+          )
+        : [];
+    const idByName = new Map(existing.map((row) => [row.name, row.id]));
     const previous = await databaseService.all<{ tag_id: string }>(
       `SELECT tag_id FROM item_tags WHERE item_id = ?`,
       [itemId]
     );
     const previousIds = new Set(previous.map((row) => row.tag_id));
     const timestamp = now();
+    const statements: SqlStatement[] = [];
+
+    const nextIds = new Set<string>();
+    for (const name of uniqueNames) {
+      let tagId = idByName.get(name);
+      if (!tagId) {
+        tagId = generateId();
+        statements.push({
+          sql: `INSERT INTO tags (id, name, usage_count, is_auto_generated, created_at, updated_at)
+                VALUES (?, ?, 0, 0, ?, ?)`,
+          params: [tagId, name, timestamp, timestamp],
+        });
+      }
+      nextIds.add(tagId);
+    }
 
     for (const tagId of previousIds) {
       if (nextIds.has(tagId)) continue;
-      await databaseService.run(`DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?`, [
-        itemId,
-        tagId,
-      ]);
-      await databaseService.run(
-        `UPDATE tags SET usage_count = MAX(usage_count - 1, 0), updated_at = ? WHERE id = ?`,
-        [timestamp, tagId]
+      statements.push(
+        { sql: `DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?`, params: [itemId, tagId] },
+        {
+          sql: `UPDATE tags SET usage_count = MAX(usage_count - 1, 0), updated_at = ? WHERE id = ?`,
+          params: [timestamp, tagId],
+        }
       );
     }
     for (const tagId of nextIds) {
       if (previousIds.has(tagId)) continue;
-      await databaseService.run(`INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)`, [
-        itemId,
-        tagId,
-      ]);
-      await databaseService.run(
-        `UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?`,
-        [timestamp, tagId]
+      statements.push(
+        { sql: `INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)`, params: [itemId, tagId] },
+        {
+          sql: `UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?`,
+          params: [timestamp, tagId],
+        }
       );
     }
+    await databaseService.transaction(statements);
   }
 
   /**
@@ -330,23 +331,26 @@ class KnowledgeRepository {
   /**
    * 合并标签：源标签关联的条目改为关联目标标签，随后删除源标签并重算目标标签使用次数
    * 源标签物理删除：tags.name 有唯一约束，软删除会占用名称，导致之后无法再创建同名标签
+   * 全部步骤在同一个事务中执行，中途失败不会丢失关联
    */
   async mergeTags(sourceIds: string[], targetId: string): Promise<void> {
     const sources = [...new Set(sourceIds)].filter((sourceId) => sourceId !== targetId);
     if (sources.length === 0) return;
     const placeholders = sources.map(() => '?').join(',');
-    await databaseService.run(
-      `INSERT OR IGNORE INTO item_tags (item_id, tag_id)
-       SELECT item_id, ? FROM item_tags WHERE tag_id IN (${placeholders})`,
-      [targetId, ...sources]
-    );
-    await databaseService.run(`DELETE FROM item_tags WHERE tag_id IN (${placeholders})`, sources);
-    await databaseService.run(`DELETE FROM tags WHERE id IN (${placeholders})`, sources);
-    await databaseService.run(
-      `UPDATE tags SET usage_count = (SELECT COUNT(*) FROM item_tags WHERE tag_id = ?), updated_at = ?
-       WHERE id = ?`,
-      [targetId, now(), targetId]
-    );
+    await databaseService.transaction([
+      {
+        sql: `INSERT OR IGNORE INTO item_tags (item_id, tag_id)
+              SELECT item_id, ? FROM item_tags WHERE tag_id IN (${placeholders})`,
+        params: [targetId, ...sources],
+      },
+      { sql: `DELETE FROM item_tags WHERE tag_id IN (${placeholders})`, params: sources },
+      { sql: `DELETE FROM tags WHERE id IN (${placeholders})`, params: sources },
+      {
+        sql: `UPDATE tags SET usage_count = (SELECT COUNT(*) FROM item_tags WHERE tag_id = ?), updated_at = ?
+              WHERE id = ?`,
+        params: [targetId, now(), targetId],
+      },
+    ]);
   }
 
   /** 设置标签颜色（调色板键名），null 表示清除 */

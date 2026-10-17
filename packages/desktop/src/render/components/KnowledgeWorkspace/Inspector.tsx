@@ -3,10 +3,13 @@
 // ================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ExternalLink, PenLine, Pin, Star, Trash2 } from 'lucide-react';
+import { AlertCircle, BookOpen, ExternalLink, PenLine, Pin, Star, Trash2 } from 'lucide-react';
 import type { KnowledgeItem } from '../../types/knowledge';
 import type { ItemActivity } from '../../lib/agent/agentStore';
 import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
+import { isWritingDocument } from '../../lib/documents/constants';
+import { listFolderPaths } from '../../lib/folders/types';
+import { isReadableItem } from '../../lib/knowledge/open-target';
 import { displayTitle, type LinkIndex, type RelatedLink } from '../../lib/links/link-index';
 import { sourceHost } from '../../lib/reading';
 import { parseWikiLinkInner } from '../../lib/markdown';
@@ -37,6 +40,8 @@ export interface InspectorProps {
   tagNameById: ReadonlyMap<string, string>;
   onSelectItem: (id: string | undefined) => void;
   onOpenInWriting: (itemId: string) => void;
+  /** 在阅读模式中打开可阅读条目（PDF / EPUB / 网页剪藏等） */
+  onOpenInReading: (itemId: string) => void;
   onCreateNote: (title: string) => void;
   /** 重命名条目（同时更新其他笔记中指向它的链接） */
   onRenameItem: (id: string, title: string) => Promise<void>;
@@ -102,6 +107,7 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
   tagNameById,
   onSelectItem,
   onOpenInWriting,
+  onOpenInReading,
   onCreateNote,
   onRenameItem,
   onOpenSettings,
@@ -174,10 +180,16 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
           >
             <Pin size={14} />
           </button>
-          {item.type === 'note' && (
+          {isWritingDocument(item) && (
             <button type="button" className={styles.button} onClick={() => onOpenInWriting(item.id)}>
               <PenLine size={13} />
               在写作中打开
+            </button>
+          )}
+          {isReadableItem(item) && (
+            <button type="button" className={styles.button} onClick={() => onOpenInReading(item.id)}>
+              <BookOpen size={13} />
+              在阅读模式中打开
             </button>
           )}
           <div className={styles.actionsSpacer} />
@@ -213,9 +225,9 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
               }
             >
               <option value="">未归档</option>
-              {kb.folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.name}
+              {listFolderPaths(kb.folders).map(({ id, path }) => (
+                <option key={id} value={id}>
+                  {path}
                 </option>
               ))}
             </select>

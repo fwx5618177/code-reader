@@ -24,9 +24,15 @@ interface DatabaseStats {
   walSizeBytes: number;
 }
 
-interface RunResult {
+export interface RunResult {
   changes: number;
   lastInsertRowid: number;
+}
+
+/** 事务中的单条参数化写语句（db:transaction） */
+export interface SqlStatement {
+  sql: string;
+  params?: unknown[];
 }
 
 // ================================
@@ -406,6 +412,8 @@ interface ElectronAPI {
     initialize: () => Promise<{ success: boolean }>;
     close: () => Promise<{ success: boolean }>;
     run: (sql: string, params?: unknown[]) => Promise<RunResult>;
+    /** 在同一个事务中依次执行，任一失败则全部回滚 */
+    transaction: (statements: SqlStatement[]) => Promise<RunResult[]>;
     get: <T>(sql: string, params?: unknown[]) => Promise<T | undefined>;
     all: <T>(sql: string, params?: unknown[]) => Promise<T[]>;
     search: (

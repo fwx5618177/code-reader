@@ -83,6 +83,7 @@ function kb(
     removeItem: vi.fn(() => Promise.resolve()),
     createFolder: vi.fn(() => Promise.resolve()),
     renameFolder: vi.fn(() => Promise.resolve()),
+    moveFolder: vi.fn(() => Promise.resolve()),
     deleteFolder: vi.fn(() => Promise.resolve()),
     renameTag: vi.fn(() => Promise.resolve()),
     mergeTags: vi.fn(() => Promise.resolve()),
@@ -106,6 +107,7 @@ function renderWorkspace(
     selectedItemId,
     onSelectItem: vi.fn(),
     onOpenInWriting: vi.fn(),
+    onOpenInReading: vi.fn(),
     onCreateNote: vi.fn(),
     onRenameItem: vi.fn(() => Promise.resolve()),
     onQuickCapture: vi.fn(),
@@ -195,13 +197,37 @@ describe('KnowledgeWorkspace', () => {
 
   it('详情面板通过文件夹选择移动条目，选「未归档」移出文件夹', () => {
     const time = new Date(2026, 9, 14, 9);
-    const folders = [{ id: 'f1', name: '工作', parentId: null, order: 0, createdAt: time, updatedAt: time }];
+    const folders = [
+      { id: 'f1', name: '工作', parentId: null, order: 0, createdAt: time, updatedAt: time },
+      { id: 'f2', name: '项目', parentId: 'f1', order: 0, createdAt: time, updatedAt: time },
+    ];
     const { props } = renderWorkspace([make('n1', { folderId: 'f1' })], 'n1', { folders });
     const select = screen.getByLabelText('移动到文件夹') as HTMLSelectElement;
     expect(select.value).toBe('f1');
+    // 子文件夹以完整路径显示
+    expect([...select.options].map((option) => option.textContent)).toEqual(['未归档', '工作', '工作 / 项目']);
 
     fireEvent.change(select, { target: { value: '' } });
     expect(props.kb.updateItem).toHaveBeenCalledWith('n1', { folderId: null });
+  });
+
+  it('可阅读条目的详情面板提供「在阅读模式中打开」，Enter 也进入阅读模式', () => {
+    const epub = make('e1', { title: '书.epub', type: 'document', filePath: '/books/书.epub' });
+    const { props } = renderWorkspace([epub], 'e1');
+
+    expect(screen.queryByRole('button', { name: '在写作中打开' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '在阅读模式中打开' }));
+    expect(props.onOpenInReading).toHaveBeenCalledWith('e1');
+
+    fireEvent.keyDown(screen.getByRole('region'), { key: 'Enter' });
+    expect(props.onOpenInReading).toHaveBeenCalledTimes(2);
+    expect(props.onOpenInWriting).not.toHaveBeenCalled();
+  });
+
+  it('写作文档只提供「在写作中打开」', () => {
+    renderWorkspace(ITEMS, 'n1');
+    expect(screen.getByRole('button', { name: '在写作中打开' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '在阅读模式中打开' })).toBeNull();
   });
 
   it('标签管理列出标签及条目数，Esc 关闭', () => {

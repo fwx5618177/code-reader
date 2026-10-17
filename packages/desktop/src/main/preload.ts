@@ -30,6 +30,7 @@ const validChannels = [
   'db:initialize',
   'db:close',
   'db:run',
+  'db:transaction',
   'db:get',
   'db:all',
   'db:exec',
@@ -188,6 +189,8 @@ contextBridge.exposeInMainWorld('electron', {
     initialize: () => ipcRenderer.invoke('db:initialize'),
     close: () => ipcRenderer.invoke('db:close'),
     run: (sql: string, params?: unknown[]) => ipcRenderer.invoke('db:run', sql, params),
+    transaction: (statements: Array<{ sql: string; params?: unknown[] }>) =>
+      ipcRenderer.invoke('db:transaction', statements),
     get: <T>(sql: string, params?: unknown[]) =>
       ipcRenderer.invoke('db:get', sql, params) as Promise<T | undefined>,
     all: <T>(sql: string, params?: unknown[]) =>

@@ -87,16 +87,15 @@ describe('SearchPanel', () => {
     const props = {
       isOpen: true,
       onClose: vi.fn(),
-      onOpenDocument: vi.fn(),
-      onOpenKnowledgeItem: vi.fn(),
+      onOpenItem: vi.fn(),
     };
     render(<SearchPanel {...props} />);
     return props;
   }
 
-  it('防抖后同时搜索两路，分组展示并按分组打开', async () => {
+  it('防抖后同时搜索两路，分组展示，打开时交由调用方按条目类型路由', async () => {
     searchDocuments.mockResolvedValue([doc('d1', '写作文档A')]);
-    hybrid.mockResolvedValue([hit('w1', 'webpage', '网页B')]);
+    hybrid.mockResolvedValue([hit('w1', 'webpage', '网页B'), hit('p1', 'document', '论文C')]);
     const props = renderPanel();
 
     fireEvent.change(screen.getByLabelText('搜索'), { target: { value: 'react' } });
@@ -106,15 +105,17 @@ describe('SearchPanel', () => {
     expect(hybrid).toHaveBeenCalledWith('react', { limit: 30 });
 
     expect(screen.getByRole('group', { name: '写作文档' }).textContent).toContain('写作文档A');
+    // PDF 等文档附件不是写作文档
+    expect(screen.getByRole('group', { name: '写作文档' }).textContent).not.toContain('论文C');
     expect(screen.getByRole('group', { name: '知识条目' }).textContent).toContain('网页B');
 
     fireEvent.click(screen.getByText('网页B'));
-    expect(props.onOpenKnowledgeItem).toHaveBeenCalledWith('w1');
+    expect(props.onOpenItem).toHaveBeenCalledWith('w1');
     expect(props.onClose).toHaveBeenCalled();
 
     // 键盘：第一项为写作文档
     fireEvent.keyDown(screen.getByLabelText('搜索'), { key: 'Enter' });
-    expect(props.onOpenDocument).toHaveBeenCalledWith('d1');
+    expect(props.onOpenItem).toHaveBeenLastCalledWith('d1');
   });
 
   it('知识库搜索失败时仍展示写作文档结果', async () => {
