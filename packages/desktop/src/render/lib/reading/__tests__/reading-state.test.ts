@@ -6,6 +6,7 @@ import {
   buildExcerptTitle,
   filterShelfItems,
   finishedPatch,
+  formatPageRange,
   formatRelativeTime,
   getReadingState,
   getReadingStatus,
@@ -13,6 +14,7 @@ import {
   patchReadingState,
   pickRecentlyRead,
   progressPatch,
+  segmentPageRange,
   sortShelfItems,
   withReadingState,
 } from '../reading-state';
@@ -75,7 +77,7 @@ describe('getReadingState', () => {
     expect(getReadingState(makeItem({ metadata: { reading: { progress: NaN } } }))).toEqual({});
   });
 
-  it('高亮页码必须是不小于 1 的整数', () => {
+  it('旧数据的单个页码规范化为一个整段片段；页码必须是不小于 1 的整数', () => {
     const createdAt = '2026-10-01T00:00:00.000Z';
     const state = getReadingState(
       makeItem({
@@ -92,11 +94,69 @@ describe('getReadingState', () => {
       })
     );
     expect(state.highlights).toEqual([
-      { id: 'p3', text: '第三页', createdAt, page: 3 },
+      { id: 'p3', text: '第三页', createdAt, segments: [{ page: 3, text: '第三页' }] },
       { id: 'p0', text: '零', createdAt },
       { id: 'pf', text: '小数', createdAt },
       { id: 'ps', text: '字符串', createdAt },
     ]);
+  });
+
+  it('跨页高亮保留各页片段，忽略不合法的片段与偏移；segments 优先于旧的 page', () => {
+    const createdAt = '2026-10-01T00:00:00.000Z';
+    const state = getReadingState(
+      makeItem({
+        metadata: {
+          reading: {
+            highlights: [
+              {
+                id: 'cross',
+                text: '上一页末尾下一页开头',
+                createdAt,
+                page: 9,
+                segments: [
+                  { page: 4, text: '上一页末尾', offset: 120 },
+                  { page: 5, text: '下一页开头', offset: -1 },
+                  { page: 0, text: '非法页码' },
+                  { page: 6, text: '' },
+                  'oops',
+                ],
+              },
+              { id: 'empty', text: '全部片段非法', createdAt, segments: [{ page: 'x', text: 'a' }] },
+            ],
+          },
+        },
+      })
+    );
+    expect(state.highlights).toEqual([
+      {
+        id: 'cross',
+        text: '上一页末尾下一页开头',
+        createdAt,
+        segments: [
+          { page: 4, text: '上一页末尾', offset: 120 },
+          { page: 5, text: '下一页开头' },
+        ],
+      },
+      { id: 'empty', text: '全部片段非法', createdAt },
+    ]);
+  });
+});
+
+describe('segmentPageRange / formatPageRange', () => {
+  it('片段覆盖的首末页；正文高亮没有页码', () => {
+    expect(segmentPageRange(undefined)).toBeUndefined();
+    expect(segmentPageRange([])).toBeUndefined();
+    expect(
+      segmentPageRange([
+        { page: 5, text: 'b' },
+        { page: 4, text: 'a' },
+      ])
+    ).toEqual({ first: 4, last: 5 });
+  });
+
+  it('单页与多页的显示', () => {
+    expect(formatPageRange({ first: 3, last: 3 })).toBe('第 3 页');
+    expect(formatPageRange({ first: 3, last: 4 })).toBe('第 3–4 页');
   });
 });
 
@@ -300,14 +360,17 @@ describe('buildExcerptMarkdown', () => {
     );
   });
 
-  it('PDF 摘录在来源后注明页码', () => {
+  it('PDF 摘录在来源后注明页码（跨页时为页码范围）', () => {
     expect(
       buildExcerptMarkdown({
         quote: '原文',
         source: { title: '论文.pdf', sourceUrl: 'https://example.com/p.pdf' },
-        page: 12,
+        pages: { first: 12, last: 12 },
       })
     ).toBe('> 原文\n\n来源：[[论文.pdf]] · 第 12 页 · [原文链接](https://example.com/p.pdf)\n');
+    expect(
+      buildExcerptMarkdown({ quote: '跨页原文', source: { title: '论文.pdf' }, pages: { first: 12, last: 13 } })
+    ).toBe('> 跨页原文\n\n来源：[[论文.pdf]] · 第 12–13 页\n');
   });
 });
 

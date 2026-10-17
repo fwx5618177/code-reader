@@ -1,5 +1,5 @@
 // ================================
-// 排版设置面板（字体、字号、行宽、行高）
+// 排版设置面板（字体、字号、行宽、行高）；PDF 另有文字识别语言分区
 // ================================
 
 import React from 'react';
@@ -10,12 +10,15 @@ import {
   type ReadingNumericSetting,
   type ReadingSettings,
 } from '../../lib/reading';
+import { OcrLanguageSettings } from './OcrLanguageSettings';
 import styles from './ReadingView.module.scss';
 
 export interface ReadingSettingsPanelProps {
   settings: ReadingSettings;
   onChange: (patch: Partial<ReadingSettings>) => void;
   onReset: () => void;
+  /** 显示文字识别语言分区（阅读 PDF 时） */
+  showOcrLanguages?: boolean;
 }
 
 const FONT_OPTIONS: { value: ReadingFontFamily; label: string }[] = [
@@ -37,6 +40,7 @@ export const ReadingSettingsPanel: React.FC<ReadingSettingsPanelProps> = ({
   settings,
   onChange,
   onReset,
+  showOcrLanguages = false,
 }) => (
   <div className={styles.settingsPanel} role="dialog" aria-label="排版设置">
     <div className={styles.settingsRow}>
@@ -87,5 +91,7 @@ export const ReadingSettingsPanel: React.FC<ReadingSettingsPanelProps> = ({
     <button className={styles.settingsReset} onClick={onReset}>
       恢复默认
     </button>
+
+    {showOcrLanguages && <OcrLanguageSettings />}
   </div>
 );

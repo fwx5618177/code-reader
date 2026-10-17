@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { documentFormat, resolveArticle, resolveAttachmentKind, sourceHost } from '../article';
-import { applyHighlightMarks, clearHighlightMarks, findHighlightMark, selectedText } from '../highlight-dom';
+import {
+  applyHighlightMarks,
+  clearHighlightMarks,
+  findHighlightMark,
+  selectedTextSpan,
+  selectionSegments,
+  setActiveHighlight,
+} from '../highlight-dom';
 
 describe('resolveArticle', () => {
   it('空内容没有正文', () => {
@@ -146,7 +153,36 @@ describe('highlight-dom', () => {
     expect(applyHighlightMarks(root, [{ id: 'h3', text: '文字，其中' }], 'hl')).toEqual(new Set(['h3']));
   });
 
-  describe('selectedText', () => {
+  it('同一文字出现多次时按记录的位置定位到最近的一处，没有位置时取首次出现', () => {
+    const root = render('<span>重点在这里，重点在那里，重点在远处</span>');
+    applyHighlightMarks(
+      root,
+      [
+        { id: 'second', text: '重点', offset: 7 },
+        { id: 'first', text: '重点' },
+      ],
+      'hl'
+    );
+    expect(root.innerHTML).toBe(
+      '<span><mark class="hl" data-highlight-id="first">重点</mark>在这里，' +
+        '<mark class="hl" data-highlight-id="second">重点</mark>在那里，重点在远处</span>'
+    );
+  });
+
+  it('选中某条高亮时其全部标记加上选中样式，撤销后移除', () => {
+    const root = render('<p>前半<strong>加粗</strong>后半</p>');
+    applyHighlightMarks(root, [{ id: 'h1', text: '半加粗后' }, { id: 'h2', text: '前' }], 'hl');
+    const undo = setActiveHighlight(root, 'h1', 'active');
+    expect(Array.from(root.querySelectorAll('mark.active')).map((mark) => mark.textContent)).toEqual([
+      '半',
+      '加粗',
+      '后',
+    ]);
+    undo();
+    expect(root.querySelector('mark.active')).toBeNull();
+  });
+
+  describe('selectedTextSpan / selectionSegments', () => {
     /** 与 PDF 文本层相同的结构：绝对定位的文字片段 + 行尾 <br> */
     const TEXT_LAYER = '<span>Hello </span><span>world</span><br role="presentation"><span>next   line</span>';
 
@@ -157,23 +193,55 @@ describe('highlight-dom', () => {
       return range;
     }
 
-    it('返回选区覆盖的归一化文本：跨节点拼接，换行与连续空白折叠为空格', () => {
+    it('返回选区覆盖的归一化文本及其位置：跨节点拼接，换行与连续空白折叠为空格', () => {
       const root = render(TEXT_LAYER);
-      expect(selectedText(root, select(root, [0, 2], [3, 6]))).toBe('llo world next');
+      expect(selectedTextSpan(root, select(root, [0, 2], [3, 6]))).toEqual({ text: 'llo world next', offset: 2 });
     });
 
-    it('返回的文本可以被重新定位为高亮', () => {
+    it('选区以空白开头时位置指向第一个文字', () => {
       const root = render(TEXT_LAYER);
-      const text = selectedText(root, select(root, [1, 0], [3, 4]));
-      expect(text).toBe('world next');
-      applyHighlightMarks(root, [{ id: 'h1', text }], 'hl');
+      expect(selectedTextSpan(root, select(root, [0, 5], [1, 5]))).toEqual({ text: 'world', offset: 6 });
+    });
+
+    it('返回的文本与位置可以被重新定位为高亮', () => {
+      const root = render(TEXT_LAYER);
+      const span = selectedTextSpan(root, select(root, [1, 0], [3, 4]))!;
+      expect(span.text).toBe('world next');
+      applyHighlightMarks(root, [{ id: 'h1', ...span }], 'hl');
       expect(Array.from(root.querySelectorAll('mark')).map((mark) => mark.textContent)).toEqual(['world', 'next']);
     });
 
-    it('选区不在 root 中时返回空字符串', () => {
+    it('选区不在 root 中或只覆盖空白时返回 null', () => {
       const root = render(TEXT_LAYER);
       const other = render('<span>其他</span>');
-      expect(selectedText(root, select(other, [0, 0], [0, 2]))).toBe('');
+      expect(selectedTextSpan(root, select(other, [0, 0], [0, 2]))).toBeNull();
+      expect(selectedTextSpan(root, select(root, [0, 5], [0, 6]))).toBeNull();
+    });
+
+    it('跨页选区按页拆成片段，没有被选中文字的页面跳过；片段可在所属页中重新定位', () => {
+      const pageTexts = ['第一页的正文结尾', '第二页开头的文字', '第三页'];
+      const container = render(pageTexts.map((text) => `<div><div><span>${text}</span></div></div>`).join(''));
+      const layers = Array.from(container.children).map((page) => page.firstElementChild as HTMLElement);
+      const range = document.createRange();
+      range.setStart(layers[0].querySelector('span')!.firstChild!, 4);
+      range.setEnd(layers[1].querySelector('span')!.firstChild!, 5);
+
+      const segments = selectionSegments(
+        layers.map((root, index) => ({ page: index + 1, root })),
+        range
+      );
+      expect(segments).toEqual([
+        { page: 1, text: '正文结尾', offset: 4 },
+        { page: 2, text: '第二页开头', offset: 0 },
+      ]);
+
+      for (const { page, text, offset } of segments) {
+        applyHighlightMarks(layers[page - 1], [{ id: 'h1', text, offset }], 'hl');
+      }
+      expect(Array.from(container.querySelectorAll('mark')).map((mark) => mark.textContent)).toEqual([
+        '正文结尾',
+        '第二页开头',
+      ]);
     });
   });
 });

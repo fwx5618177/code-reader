@@ -59,6 +59,42 @@
   padding-right: var(--spacing-1);
 }
 
+// 扫描页识别：提示、入口与进度
+.ocrStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding-left: var(--spacing-2);
+  border-left: 1px solid var(--border-primary);
+  white-space: nowrap;
+}
+
+.ocrButton {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 26px;
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-sm);
+  color: var(--accent-primary);
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.ocrError {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-error);
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
 .pages {
   display: flex;
   flex-direction: column;
@@ -129,6 +165,12 @@
     color: transparent;
     background-color: var(--accent-primary-alpha);
     border-radius: 2px;
+    cursor: pointer;
+  }
+
+  // 选中的高亮（点击任一片段后，各页片段一起显示）
+  .highlightMarkActive {
+    outline: 2px solid var(--accent-primary);
   }
 
   :global(.endOfContent) {
@@ -139,4 +181,9 @@
     cursor: default;
     user-select: none;
   }
+}
+
+// 识别结果生成的文本层：字体须与测量文字宽度时一致（见 ocr-text-layer.ts）
+.ocrLayer {
+  font-family: var(--font-sans);
 }

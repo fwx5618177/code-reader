@@ -7,7 +7,9 @@ import React, { useMemo, useState } from 'react';
 import { Quote, Trash2 } from 'lucide-react';
 import type { RenderedHeading } from '../../lib/markdown';
 import {
+  formatPageRange,
   formatRelativeTime,
+  segmentPageRange,
   type ReadingBookmark,
   type ReadingHighlight,
 } from '../../lib/reading';
@@ -106,6 +108,7 @@ export const HighlightList: React.FC<HighlightListProps> = ({
     <>
       {highlights.map((highlight) => {
         const located = locatedHighlightIds.has(highlight.id);
+        const pages = segmentPageRange(highlight.segments);
         return (
           <div key={highlight.id} className={styles.highlightCard}>
             <button
@@ -119,7 +122,7 @@ export const HighlightList: React.FC<HighlightListProps> = ({
             {highlight.note && <div className={styles.highlightNote}>{highlight.note}</div>}
             <div className={styles.highlightMeta}>
               <span>{formatRelativeTime(highlight.createdAt)}</span>
-              {highlight.page !== undefined && <span>第 {highlight.page} 页</span>}
+              {pages && <span>{formatPageRange(pages)}</span>}
               {highlight.excerptItemId && (
                 <span className={styles.highlightBadge}>
                   <Quote size={10} />

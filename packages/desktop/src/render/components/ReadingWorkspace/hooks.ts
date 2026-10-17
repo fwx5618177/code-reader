@@ -17,7 +17,7 @@ import {
   saveReadingSettings,
   type ReadingSettings,
 } from '../../lib/reading';
-import { openPdf, type PDFDocumentProxy } from '../../lib/reading/pdf';
+import { hashFileContent, openPdf, type PDFDocumentProxy } from '../../lib/reading/pdf';
 import { readBinaryFile } from './system';
 
 /**
@@ -126,6 +126,8 @@ export interface PdfPageSize {
 export interface LoadedPdf {
   pdf: PDFDocumentProxy;
   pageSizes: PdfPageSize[];
+  /** 文件内容哈希（扫描页检测缓存据此判断是否过期） */
+  contentHash: string;
 }
 
 export interface PdfDocumentState {
@@ -134,7 +136,7 @@ export interface PdfDocumentState {
 }
 
 /**
- * 打开本地 PDF 并读取全部页面尺寸（用于预先占位、按需渲染），卸载或文件变化时释放文档。
+ * 打开本地 PDF 并读取全部页面尺寸（用于预先占位、按需渲染）与内容哈希，卸载或文件变化时释放文档。
  * filePath 为 undefined 时不加载（非 PDF 条目）
  */
 export function usePdfDocument(filePath: string | undefined): PdfDocumentState {
@@ -147,7 +149,10 @@ export function usePdfDocument(filePath: string | undefined): PdfDocumentState {
     setState({ document: null, error: false });
 
     (async () => {
-      const pdf = await openPdf(await readBinaryFile(filePath));
+      const data = await readBinaryFile(filePath);
+      // 先哈希再打开：pdf.js 会把数据转移给 Worker
+      const contentHash = await hashFileContent(data);
+      const pdf = await openPdf(data);
       if (cancelled) {
         void pdf.destroy();
         return;
@@ -159,7 +164,7 @@ export function usePdfDocument(filePath: string | undefined): PdfDocumentState {
           return { width, height };
         })
       );
-      if (!cancelled) setState({ document: { pdf, pageSizes }, error: false });
+      if (!cancelled) setState({ document: { pdf, pageSizes, contentHash }, error: false });
     })().catch((error) => {
       console.error('[Reading] 打开 PDF 失败:', error);
       if (!cancelled) setState({ document: null, error: true });

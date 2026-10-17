@@ -2,6 +2,7 @@ import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 import { build } from 'esbuild';
+import { ocrAssetsPlugin } from './scripts/ocr-assets';
 
 /**
  * Vite plugin to build Electron main process and preload script using esbuild
@@ -51,7 +52,7 @@ function electronMainPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [electronMainPlugin(), react()],
+  plugins: [electronMainPlugin(), ocrAssetsPlugin(__dirname), react()],
   server: {
     port: 5173,
     strictPort: true,

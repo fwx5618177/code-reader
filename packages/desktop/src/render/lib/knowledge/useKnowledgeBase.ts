@@ -10,7 +10,7 @@ import { folderService } from '../folders/service';
 import type { Folder as DocumentFolder } from '../folders/types';
 import { agentActivity } from '../agent/agentStore';
 import { knowledgeRepository, type UpdateKnowledgeItemInput } from './repository';
-import { ensureKnowledgeReady } from './service';
+import { ensureKnowledgeReady, removeKnowledgeItem } from './service';
 
 export interface KnowledgeBaseState {
   items: KnowledgeItem[];
@@ -29,7 +29,7 @@ export interface UseKnowledgeBaseReturn extends KnowledgeBaseState {
   updateItem: (id: string, input: UpdateKnowledgeItemInput) => Promise<void>;
   /** 设置条目标签 */
   setItemTags: (id: string, names: string[]) => Promise<void>;
-  /** 删除条目（软删除） */
+  /** 删除条目（软删除，并清理文字识别缓存） */
   removeItem: (id: string) => Promise<void>;
   /** 新建文件夹；parentId 为 null 时建在顶层（同级重名时抛出错误） */
   createFolder: (name: string, parentId: string | null) => Promise<void>;
@@ -121,7 +121,7 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
   );
 
   const removeItem = useCallback(async (id: string) => {
-    await knowledgeRepository.remove(id);
+    await removeKnowledgeItem(id);
     setState((prev) => ({ ...prev, items: prev.items.filter((i) => i.id !== id) }));
   }, []);
 

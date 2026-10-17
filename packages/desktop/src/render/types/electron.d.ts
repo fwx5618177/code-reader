@@ -346,6 +346,23 @@ export interface SpellcheckDictionaryFiles {
   dic: Uint8Array;
 }
 
+/** 文字识别语言：内置随应用打包，用户导入的可删除 */
+export interface OcrLanguageInfo {
+  /** tesseract 语言代码，如 eng、chi_sim */
+  code: string;
+  source: 'builtin' | 'user';
+}
+
+/** 一个条目已保存的文字识别结果 */
+export interface OcrStoredResults {
+  /** 各页的识别结果（JSON 文本），按页码升序 */
+  pages: Array<{ page: number; data: string }>;
+  /** 最近一次写入正文的识别全文；从未写入时为 null */
+  indexedText: string | null;
+  /** 扫描页检测结果（JSON 文本）；从未检测时为 null */
+  scan: string | null;
+}
+
 interface HybridSearchOptions extends SemanticSearchOptions {
   semanticWeight?: number;
 }
@@ -556,6 +573,19 @@ interface ElectronAPI {
     getUserWords: () => Promise<string[]>;
     addUserWord: (word: string) => Promise<void>;
     removeUserWord: (word: string) => Promise<void>;
+  };
+
+  /** 扫描版 PDF 文字识别：列出/导入（弹出文件选择框，取消时返回空数组）/删除语言数据；
+   *  在当前知识库中按“条目 + 页码”读写识别结果与扫描页检测结果，removeResults 删除条目的全部缓存 */
+  ocr: {
+    listLanguages: () => Promise<OcrLanguageInfo[]>;
+    importLanguage: () => Promise<OcrLanguageInfo[]>;
+    removeLanguage: (code: string) => Promise<void>;
+    readResults: (itemId: string) => Promise<OcrStoredResults>;
+    writePageResult: (itemId: string, page: number, data: string) => Promise<void>;
+    writeIndexedText: (itemId: string, text: string) => Promise<void>;
+    writeScanResult: (itemId: string, data: string) => Promise<void>;
+    removeResults: (itemId: string) => Promise<void>;
   };
 
   /** 托盘菜单：on* 订阅菜单动作并返回取消订阅函数；setRecentDocuments 更新“最近打开”子菜单 */

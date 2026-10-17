@@ -5,6 +5,9 @@ node_modules/
 dist/
 build/
 
+# 构建时从 node_modules 复制的 OCR 资源（见 packages/desktop/scripts/ocr-assets.ts）
+packages/desktop/assets/ocr/
+
 # Environment files
 .env
 .env.local

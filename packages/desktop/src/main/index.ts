@@ -13,6 +13,7 @@ import { registerEntityHandlers, cleanupEntityHandlers } from './database/entity
 import { registerVersionHistoryHandlers } from './database/version-ipc-handlers';
 import { registerWebHandlers } from './web/ipc-handlers';
 import { registerSpellcheckHandlers } from './spellcheck/ipc-handlers';
+import { registerOcrHandlers, registerOcrScheme } from './ocr/ipc-handlers';
 import { registerAIHandlers, cleanupAIHandlers } from './ai/ipc-handlers';
 import {
   registerAgentHandlers,
@@ -30,6 +31,9 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// 自定义协议须在 app ready 之前注册权限
+registerOcrScheme();
 
 let mainWindow: BrowserWindow | null = null;
 const childWindows: Map<string, BrowserWindow> = new Map();
@@ -181,14 +185,16 @@ function createWindow() {
   // - worker-src blob:：允许从 Blob URL 创建 Worker（用于差分计算等后台任务）
   // - img-src https:：Markdown 与网页剪藏中的远程图片；media-src blob:：本地音视频附件以 Blob URL 播放
   // - connect-src 不放行任何外部服务：AI 请求只由主进程发起，渲染进程不直连网络
+  // - ocr-resource:：文字识别 Worker 从本地协议加载脚本（script-src）与语言数据（connect-src）；
+  //   'wasm-unsafe-eval' 仅允许编译 WebAssembly（识别引擎），不放行 eval
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           process.env.NODE_ENV === 'development'
-            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*"
-            : "default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'",
+            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob: ocr-resource:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* ocr-resource:"
+            : "default-src 'self'; script-src 'self' blob: ocr-resource: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ocr-resource:",
         ],
       },
     });
@@ -476,6 +482,9 @@ function setupIPC() {
 
   // 拼写检查词典与用户词表
   registerSpellcheckHandlers(getPackageRoot());
+
+  // 扫描版 PDF 文字识别：资源协议、语言数据与识别结果
+  registerOcrHandlers(getPackageRoot());
 
   // 知识库管理与切换
   registerWorkspaceHandlers();

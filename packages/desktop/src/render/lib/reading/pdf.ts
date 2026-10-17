@@ -86,6 +86,15 @@ export function loadPdfjs(): Promise<Pdfjs> {
 /**
  * 打开 PDF 文档。pdf.js 会转移传入的缓冲区，调用方之后不应再使用 data。
  */
+/**
+ * 文件内容的 SHA-256（十六进制），用于判断按条目缓存的派生数据是否过期。
+ * 须在 openPdf 之前调用：pdf.js 会把数据转移给 Worker，之后缓冲区可能已分离
+ */
+export async function hashFileContent(data: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
   const pdfjs = await loadPdfjs();
   return pdfjs.getDocument({
@@ -162,21 +171,57 @@ function pageText(items: Array<TextItem | TextMarkedContent>): string {
 }
 
 /**
- * 提取 PDF 全部页面的文本，页与页之间以空行分隔（扫描件等无文本层的页面为空）
+ * 逐页提取文本层文字（下标 0 为第 1 页；扫描件等没有文本层的页面为空字符串）。
+ * signal 中止时在当前页之后停止并抛出 AbortError
+ */
+export async function extractPageTexts(
+  pdf: Pick<PDFDocumentProxy, 'numPages' | 'getPage'>,
+  signal?: AbortSignal
+): Promise<string[]> {
+  const pages: string[] = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    signal?.throwIfAborted();
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pages.push(pageText(content.items));
+  }
+  return pages;
+}
+
+/**
+ * 提取 PDF 全部页面的文本，页与页之间以空行分隔（扫描件等无文本层的页面为空，
+ * 可在阅读视图中识别后追加到正文）
  */
 export async function extractPdfText(data: Uint8Array): Promise<string> {
   const pdf = await openPdf(data);
   try {
-    const pages: string[] = [];
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-      const text = pageText(content.items);
-      if (text) pages.push(text);
-      page.cleanup();
-    }
-    return pages.join('\n\n');
+    return (await extractPageTexts(pdf)).filter(Boolean).join('\n\n');
   } finally {
     await pdf.destroy();
   }
+}
+
+/** 文字识别的渲染分辨率：300 DPI（PDF 坐标单位为 1/72 英寸） */
+const OCR_RENDER_SCALE = 300 / 72;
+/** 画布最长边上限，避免超大幅面占用过多内存 */
+const OCR_MAX_CANVAS_SIDE = 4096;
+
+/**
+ * 把页面渲染到新画布（供文字识别），返回画布与渲染比例（画布像素 / 缩放比例 1 下的页面坐标）
+ */
+export async function renderPageToCanvas(
+  pdf: Pick<PDFDocumentProxy, 'getPage'>,
+  pageNumber: number
+): Promise<{ canvas: HTMLCanvasElement; scale: number }> {
+  const page = await pdf.getPage(pageNumber);
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(OCR_RENDER_SCALE, OCR_MAX_CANVAS_SIDE / Math.max(base.width, base.height));
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.floor(viewport.width);
+  canvas.height = Math.floor(viewport.height);
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('无法创建画布');
+  await page.render({ canvasContext: context, viewport }).promise;
+  return { canvas, scale: canvas.width / base.width };
 }

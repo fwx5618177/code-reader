@@ -1,0 +1,89 @@
+// ================================
+// 文字识别语言设置（排版面板中的分区）
+// ================================
+
+@use '../../styles/variables' as *;
+
+.section {
+  margin-top: var(--spacing-3);
+  padding-top: var(--spacing-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.header {
+  @include flex-between;
+  margin-bottom: var(--spacing-2);
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.importButton {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--spacing-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--accent-primary);
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.languages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+}
+
+.language {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.languageActive {
+  border-color: var(--accent-primary);
+  background-color: var(--accent-primary-alpha);
+  color: var(--text-primary);
+}
+
+.languageToggle {
+  @include button-reset;
+  padding: 2px var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: inherit;
+}
+
+.languageRemove {
+  @include button-reset;
+  @include flex-center;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+
+  &:hover {
+    color: var(--color-error);
+  }
+}
+
+.hint {
+  margin-top: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.error {
+  margin-top: var(--spacing-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-error);
+}

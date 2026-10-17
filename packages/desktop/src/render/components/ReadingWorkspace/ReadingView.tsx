@@ -52,6 +52,7 @@ import {
   READING_STATUS_LABELS,
   resolveArticle,
   resolveAttachmentKind,
+  segmentPageRange,
   sourceHost,
   withReadingState,
   type ReadingBookmark,
@@ -75,9 +76,15 @@ import {
   type ReadingSidebarPanel,
 } from './ReadingOutline';
 import { ReadingSettingsPanel } from './ReadingSettingsPanel';
-import { SelectionToolbar, type SelectionAnchor } from './SelectionToolbar';
+import {
+  HighlightToolbar,
+  SelectionToolbar,
+  type SelectionAnchor,
+  type ToolbarAnchor,
+} from './SelectionToolbar';
 import { openExternal } from './system';
 import { isEpubChapterView, useEpubReader, type EpubScrollTarget } from './useEpubReader';
+import { usePdfOcr } from './usePdfOcr';
 import { usePdfReader } from './usePdfReader';
 import styles from './ReadingView.module.scss';
 
@@ -220,6 +227,13 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   const epubRef = useLatestRef(epub);
   const pdf = usePdfReader(attachmentKind === 'pdf' ? item.filePath : undefined);
   const { readerRef: pdfReaderRef } = pdf;
+  // 扫描页识别结果追加到条目正文（PDF 的正文只用于全文检索）
+  const ocr = usePdfOcr({
+    itemId: item.id,
+    document: pdf.file.document ?? undefined,
+    getContent: () => itemRef.current.content ?? '',
+    saveContent: (content) => onUpdateItemRef.current(itemRef.current.id, { content }),
+  });
   const rendered: RenderedDocument | null = epub.view ?? markdownRendered;
   const showTranscript = item.type === 'audio' && !!item.transcript;
   const showGuide = !!item.summary || (item.keyPoints?.length ?? 0) > 0;
@@ -229,6 +243,8 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
   const [locatedHighlightIds, setLocatedHighlightIds] = useState<ReadonlySet<string>>(new Set());
   const [selectionAnchor, setSelectionAnchor] = useState<SelectionAnchor | null>(null);
+  /** 点击选中的高亮（PDF）及其工具栏位置 */
+  const [selectedHighlight, setSelectedHighlight] = useState<{ id: string; anchor: ToolbarAnchor } | null>(null);
 
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   useDismiss(settingsAnchorRef, closeSettings, settingsOpen);
@@ -387,20 +403,27 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
 
   // ---------- 高亮与摘录 ----------
 
-  /** 在选区（视口坐标）上方显示工具栏，位置换算为相对正文内容容器 */
-  const showSelectionToolbar = useCallback((rect: DOMRect, text: string, page?: number) => {
+  /** 工具栏锚点：视口坐标换算为相对正文内容容器，水平方向限位 */
+  const toolbarAnchor = useCallback((rect: DOMRect): ToolbarAnchor | null => {
     const contentEl = contentRef.current;
-    if (!contentEl) return;
+    if (!contentEl) return null;
     const base = contentEl.getBoundingClientRect();
     const center = rect.left + rect.width / 2 - base.left;
-    setSelectionAnchor({
-      text,
-      page,
+    return {
       top: rect.top - base.top,
       bottom: rect.bottom - base.top,
       left: Math.min(Math.max(center, TOOLBAR_HALF_WIDTH), base.width - TOOLBAR_HALF_WIDTH),
-    });
+    };
   }, []);
+
+  /** 在选区（视口坐标）上方显示工具栏 */
+  const showSelectionToolbar = useCallback(
+    (rect: DOMRect, text: string, segments?: SelectionAnchor['segments']) => {
+      const anchor = toolbarAnchor(rect);
+      if (anchor) setSelectionAnchor({ ...anchor, text, segments });
+    },
+    [toolbarAnchor]
+  );
 
   const handleSelectionEnd = useCallback(() => {
     const articleEl = articleRef.current;
@@ -420,11 +443,23 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
 
   const handlePdfTextSelect = useCallback(
     (selection: PdfTextSelection | null) => {
-      if (selection) showSelectionToolbar(selection.rect, selection.text, selection.page);
+      if (selection) showSelectionToolbar(selection.rect, selection.text, selection.segments);
       else setSelectionAnchor(null);
     },
     [showSelectionToolbar]
   );
+
+  // 点击高亮的任一片段：选中整条高亮并在被点击的片段旁显示工具栏
+  const handlePdfHighlightClick = useCallback(
+    (id: string, rect: DOMRect) => {
+      const anchor = toolbarAnchor(rect);
+      setSelectionAnchor(null);
+      setSelectedHighlight(anchor ? { id, anchor } : null);
+    },
+    [toolbarAnchor]
+  );
+
+  const dismissSelectedHighlight = useCallback(() => setSelectedHighlight(null), []);
 
   const dismissSelection = useCallback(() => setSelectionAnchor(null), []);
 
@@ -442,7 +477,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   );
 
   const createExcerpt = useCallback(
-    async ({ text: quote, page }: SelectionAnchor, note: string, tags: string[]) => {
+    async ({ text: quote, segments }: SelectionAnchor, note: string, tags: string[]) => {
       const current = itemRef.current;
       const trimmedNote = note.trim();
       const excerptItemId = await onCreateExcerpt({
@@ -451,14 +486,14 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
           quote,
           note: trimmedNote,
           source: { title: current.title, sourceUrl: current.sourceUrl },
-          page,
+          pages: segmentPageRange(segments),
         }),
         sourceItemId: current.id,
         tags,
       });
       await addHighlight({
         text: quote,
-        page,
+        segments,
         excerptItemId,
         ...(trimmedNote ? { note: trimmedNote } : {}),
       });
@@ -476,12 +511,13 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     [updateReading]
   );
 
-  // PDF 高亮按页定位（所在页可能尚未渲染），其他正文直接查找标记
+  // PDF 高亮按首个片段所在页定位（所在页可能尚未渲染），其他正文直接查找标记
   const scrollToHighlight = useCallback(
     (id: string) => {
-      const page = readingRef.current.highlights?.find((highlight) => highlight.id === id)?.page;
-      if (page !== undefined) {
-        pdfReaderRef.current?.scrollToHighlight(id, page);
+      const highlight = readingRef.current.highlights?.find((candidate) => candidate.id === id);
+      const pages = segmentPageRange(highlight?.segments);
+      if (pages) {
+        pdfReaderRef.current?.scrollToHighlight(id, pages.first);
         return;
       }
       const articleEl = articleRef.current;
@@ -490,9 +526,9 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     [pdfReaderRef]
   );
 
-  // PDF 高亮只在所在页渲染时才有标记，带页码即可跳转
+  // PDF 高亮只在所在页渲染时才有标记，带页面片段即可跳转
   const pdfHighlightIds = useMemo<ReadonlySet<string>>(
-    () => new Set(highlights.filter((highlight) => highlight.page !== undefined).map((highlight) => highlight.id)),
+    () => new Set(highlights.filter((highlight) => highlight.segments).map((highlight) => highlight.id)),
     [highlights]
   );
 
@@ -658,7 +694,12 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
               <Type size={16} />
             </button>
             {settingsOpen && (
-              <ReadingSettingsPanel settings={settings} onChange={updateSettings} onReset={resetSettings} />
+              <ReadingSettingsPanel
+                settings={settings}
+                onChange={updateSettings}
+                onReset={resetSettings}
+                showOcrLanguages={attachmentKind === 'pdf'}
+              />
             )}
           </div>
           <button
@@ -727,8 +768,11 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
                 state={pdf.file}
                 onLayout={restoreScroll}
                 highlights={highlights}
+                activeHighlightId={selectedHighlight?.id ?? null}
+                onHighlightClick={handlePdfHighlightClick}
                 onPageChange={pdf.setCurrentPage}
                 onTextSelect={handlePdfTextSelect}
+                ocr={ocr}
               />
             ) : (
               attachmentKind &&
@@ -790,9 +834,20 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
             {selectionAnchor && (
               <SelectionToolbar
                 anchor={selectionAnchor}
-                onHighlight={() => addHighlight({ text: selectionAnchor.text, page: selectionAnchor.page })}
+                onHighlight={() => addHighlight({ text: selectionAnchor.text, segments: selectionAnchor.segments })}
                 onExcerpt={(note, tags) => createExcerpt(selectionAnchor, note, tags)}
                 onDismiss={dismissSelection}
+              />
+            )}
+
+            {selectedHighlight && (
+              <HighlightToolbar
+                anchor={selectedHighlight.anchor}
+                onDelete={() => {
+                  deleteHighlight(selectedHighlight.id);
+                  setSelectedHighlight(null);
+                }}
+                onDismiss={dismissSelectedHighlight}
               />
             )}
           </div>

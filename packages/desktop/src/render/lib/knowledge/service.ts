@@ -44,6 +44,21 @@ export function ensureKnowledgeReady(): Promise<void> {
   return readyPromise;
 }
 
+/**
+ * 删除条目（软删除），并清理它在当前知识库中的文字识别缓存（识别结果、扫描页检测结果）。
+ * 知识库条目的所有删除入口都经过这里（写作文档的删除只针对 note 类型，不会有识别缓存）。
+ * 目前没有恢复已删除条目的入口，缓存可以随删除一起清理；清理失败不影响删除本身
+ * （缓存是可重建的派生数据，且条目已从数据库删除）
+ */
+export async function removeKnowledgeItem(id: string): Promise<void> {
+  await knowledgeRepository.remove(id);
+  try {
+    await window.electron.ocr.removeResults(id);
+  } catch (error) {
+    console.error('[Knowledge] 清理文字识别缓存失败:', id, error);
+  }
+}
+
 /** 根据 MIME 推断附件条目类型（PDF / EPUB 已在 resolveType 中识别） */
 function typeFromMime(mime: string): KnowledgeItemType {
   if (mime.startsWith('audio/')) return 'audio';
@@ -182,7 +197,10 @@ async function extractAttachmentText(
   try {
     const extracted = await extractDocumentText(file);
     if (extracted && !extracted.text.trim()) {
-      return { extracted, warning: '文档中没有可提取的文字（可能是扫描件），无法全文检索' };
+      return {
+        extracted,
+        warning: '文档中没有可提取的文字（可能是扫描件）；PDF 可在阅读模式中点击“识别扫描页”后全文检索',
+      };
     }
     return { extracted };
   } catch (error) {

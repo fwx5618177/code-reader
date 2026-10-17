@@ -2,7 +2,9 @@
 // PDF 阅读器
 // 画布渲染页面 + 透明文本层（可选中复制）；全部页面按尺寸预先占位，
 // 只渲染滚动区域附近的页面，离开后释放画布。支持缩放与适合宽度。
-// 高亮按页保存：页面文本层渲染完成后在该页内定位并标记，页面释放时标记随文本层一起移除。
+// 扫描页识别后用识别结果生成文本层（结构与 pdf.js 文本层一致），选区、高亮与摘录同样可用。
+// 高亮按页保存片段（跨页选区拆为多个片段）：页面文本层渲染完成后在该页内定位并标记本页的片段，
+// 页面释放时标记随文本层一起移除，重新渲染后再次恢复。
 // ================================
 
 import React, {
@@ -16,16 +18,24 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react';
+import { Loader2, Maximize2, ScanText, X, ZoomIn, ZoomOut } from 'lucide-react';
 import {
   applyHighlightMarks,
   clearHighlightMarks,
   findHighlightMark,
-  selectedText,
+  HIGHLIGHT_ID_ATTR,
+  joinTextRuns,
+  selectionSegments,
+  setActiveHighlight,
+  type HighlightSegment,
+  type HighlightTarget,
   type ReadingHighlight,
 } from '../../lib/reading';
+import type { OcrPageResult } from '../../lib/reading/ocr';
+import { renderOcrTextLayer } from '../../lib/reading/ocr-text-layer';
 import { loadPdfjs, type PDFDocumentProxy } from '../../lib/reading/pdf';
 import type { LoadedPdf, PdfPageSize } from './hooks';
+import type { PdfOcrState } from './usePdfOcr';
 import styles from './PdfReader.module.scss';
 
 const MIN_ZOOM = 0.5;
@@ -37,7 +47,8 @@ const RENDER_MARGIN = '100% 0px';
 const CURRENT_PAGE_MARGIN = '-50% 0px -50% 0px';
 const PAGE_ATTR = 'data-page';
 const TEXT_LAYER_ATTR = 'data-text-layer';
-const NO_HIGHLIGHTS: readonly ReadingHighlight[] = [];
+const NO_READING_HIGHLIGHTS: readonly ReadingHighlight[] = [];
+const NO_HIGHLIGHTS: readonly HighlightTarget[] = [];
 
 /** 等待所在页渲染后再定位的高亮 */
 interface PendingReveal {
@@ -72,33 +83,41 @@ function closestPage(node: Node): HTMLElement | null {
   return element?.closest<HTMLElement>(`[${PAGE_ATTR}]`) ?? null;
 }
 
-/** 文本层中的选区 */
+/** 文本层中的选区（可以跨越多页） */
 export interface PdfTextSelection {
-  /** 选中的原文（与高亮定位使用同一套归一化规则） */
+  /** 选中的原文：各页片段按顺序拼接 */
   text: string;
-  /** 所在页码（从 1 开始） */
-  page: number;
+  /** 按页拆分的片段（与高亮定位使用同一套归一化规则） */
+  segments: HighlightSegment[];
   /** 选区在视口中的位置 */
   rect: DOMRect;
 }
 
-/** 读取单页文本层内的选区；跨页、不在文本层内或没有文字时返回 null */
-function readPageSelection(container: HTMLElement): PdfTextSelection | null {
+/** 读取文本层内的选区并按页拆分；不在阅读器内或没有文字时返回 null */
+function readSelection(container: HTMLElement): PdfTextSelection | null {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
   const range = selection.getRangeAt(0);
-  const page = closestPage(range.startContainer);
-  if (!page || page !== closestPage(range.endContainer) || !container.contains(page)) return null;
-  const textLayer = page.querySelector<HTMLElement>(`[${TEXT_LAYER_ATTR}]`);
-  const text = textLayer ? selectedText(textLayer, range) : '';
-  return text ? { text, page: pageNumberOf(page), rect: range.getBoundingClientRect() } : null;
+  if (!container.contains(range.commonAncestorContainer)) return null;
+  // 只有已渲染的页面有文本层；选区两端所在页面必然已渲染
+  const pages = Array.from(container.querySelectorAll<HTMLElement>(`[${TEXT_LAYER_ATTR}]`)).flatMap((root) => {
+    const page = closestPage(root);
+    return page ? [{ page: pageNumberOf(page), root }] : [];
+  });
+  const segments = selectionSegments(pages, range);
+  if (segments.length === 0) return null;
+  return {
+    text: joinTextRuns(segments.map((segment) => segment.text)),
+    segments,
+    rect: range.getBoundingClientRect(),
+  };
 }
 
 /** 供外层调用的跳转方法 */
 export interface PdfReaderHandle {
   /** 滚动到指定页的页首 */
   scrollToPage(page: number): void;
-  /** 滚动到高亮：所在页已渲染时直接定位，否则先到该页页首，待文本层渲染后再定位 */
+  /** 滚动到高亮：所在页（首个片段所在页）已渲染时直接定位，否则先到该页页首，待文本层渲染后再定位 */
   scrollToHighlight(id: string, page: number): void;
 }
 
@@ -106,16 +125,31 @@ export interface PdfReaderProps {
   document: LoadedPdf;
   /** 页面占位完成、可以恢复滚动位置时调用（仅一次） */
   onLayout?: () => void;
-  /** 需要标记的高亮（只处理带页码的） */
+  /** 需要标记的高亮（只处理带页面片段的） */
   highlights?: readonly ReadingHighlight[];
+  /** 选中的高亮：其全部片段以选中样式显示 */
+  activeHighlightId?: string | null;
+  /** 点击高亮标记（任一片段）；rect 为被点击标记在视口中的位置 */
+  onHighlightClick?: (id: string, rect: DOMRect) => void;
   /** 当前页变化 */
   onPageChange?: (page: number) => void;
   /** 在文本层中选中文字（null 表示没有有效选区）；不提供时不处理选区 */
   onTextSelect?: (selection: PdfTextSelection | null) => void;
+  /** 扫描页文字识别；不提供时不显示识别入口 */
+  ocr?: PdfOcrState;
 }
 
 export const PdfReader = forwardRef<PdfReaderHandle, PdfReaderProps>(function PdfReader(
-  { document: { pdf, pageSizes }, onLayout, highlights = NO_HIGHLIGHTS, onPageChange, onTextSelect },
+  {
+    document: { pdf, pageSizes },
+    onLayout,
+    highlights = NO_READING_HIGHLIGHTS,
+    activeHighlightId = null,
+    onHighlightClick,
+    onPageChange,
+    onTextSelect,
+    ocr,
+  },
   ref
 ) {
   const pagesRef = useRef<HTMLDivElement>(null);
@@ -226,22 +260,35 @@ export const PdfReader = forwardRef<PdfReaderHandle, PdfReaderProps>(function Pd
     onPageChange?.(currentPage);
   }, [currentPage, onPageChange]);
 
-  // 高亮按页分组；没有高亮的页面共用同一个空数组，避免无关页面重新标记
+  // 高亮片段按页分组；没有高亮的页面共用同一个空数组，避免无关页面重新标记
   const highlightsByPage = useMemo(() => {
-    const byPage = new Map<number, ReadingHighlight[]>();
+    const byPage = new Map<number, HighlightTarget[]>();
     for (const highlight of highlights) {
-      if (highlight.page === undefined) continue;
-      const list = byPage.get(highlight.page);
-      if (list) list.push(highlight);
-      else byPage.set(highlight.page, [highlight]);
+      for (const { page, text, offset } of highlight.segments ?? []) {
+        const target: HighlightTarget = { id: highlight.id, text, offset };
+        const list = byPage.get(page);
+        if (list) list.push(target);
+        else byPage.set(page, [target]);
+      }
     }
     return byPage;
   }, [highlights]);
 
   const handleMouseUp = useCallback(() => {
     const container = pagesRef.current;
-    if (onTextSelect && container) onTextSelect(readPageSelection(container));
+    if (onTextSelect && container) onTextSelect(readSelection(container));
   }, [onTextSelect]);
+
+  // 点击高亮标记（拖选文字结束时的点击不算）
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const mark = (event.target as Element).closest<HTMLElement>(`mark[${HIGHLIGHT_ID_ATTR}]`);
+      const selection = window.getSelection();
+      if (!mark || !onHighlightClick || (selection && !selection.isCollapsed)) return;
+      onHighlightClick(mark.getAttribute(HIGHLIGHT_ID_ATTR) ?? '', mark.getBoundingClientRect());
+    },
+    [onHighlightClick]
+  );
 
   return (
     <div className={styles.reader}>
@@ -269,6 +316,7 @@ export const PdfReader = forwardRef<PdfReaderHandle, PdfReaderProps>(function Pd
         <span className={styles.pageInfo}>
           第 {currentPage} / {pageSizes.length} 页
         </span>
+        {ocr && <OcrControls ocr={ocr} />}
       </div>
 
       <div
@@ -276,25 +324,70 @@ export const PdfReader = forwardRef<PdfReaderHandle, PdfReaderProps>(function Pd
         className={styles.pages}
         style={{ '--scale-factor': zoom ?? 1 } as React.CSSProperties}
         onMouseUp={onTextSelect ? handleMouseUp : undefined}
+        onClick={onHighlightClick ? handleClick : undefined}
       >
         {zoom !== null &&
-          pageSizes.map((size, index) => (
-            <PdfPage
-              key={index + 1}
-              pdf={pdf}
-              pageNumber={index + 1}
-              size={size}
-              zoom={zoom}
-              active={activePages.has(index + 1)}
-              highlights={highlightsByPage.get(index + 1) ?? NO_HIGHLIGHTS}
-              revealHighlightId={pendingReveal?.page === index + 1 ? pendingReveal.id : null}
-              onRevealed={clearPendingReveal}
-            />
-          ))}
+          pageSizes.map((size, index) => {
+            const pageNumber = index + 1;
+            const pageHighlights = highlightsByPage.get(pageNumber) ?? NO_HIGHLIGHTS;
+            const ocrResult = ocr?.results.get(pageNumber);
+            return (
+              <PdfPage
+                key={pageNumber}
+                pdf={pdf}
+                pageNumber={pageNumber}
+                size={size}
+                zoom={zoom}
+                active={activePages.has(pageNumber)}
+                highlights={pageHighlights}
+                activeHighlightId={
+                  pageHighlights.some((highlight) => highlight.id === activeHighlightId) ? activeHighlightId : null
+                }
+                ocrResult={ocrResult && ocrResult.lines.length > 0 ? ocrResult : null}
+                revealHighlightId={pendingReveal?.page === pageNumber ? pendingReveal.id : null}
+                onRevealed={clearPendingReveal}
+              />
+            );
+          })}
       </div>
     </div>
   );
 });
+
+// ================================
+// 工具栏：扫描页识别入口与进度
+// ================================
+
+const OcrControls: React.FC<{ ocr: PdfOcrState }> = ({ ocr: { scannedPages, results, progress, error, run, cancel } }) => {
+  if (progress) {
+    return (
+      <span className={styles.ocrStatus} role="status">
+        <Loader2 size={14} className={styles.spinner} />
+        识别中 {progress.done}/{progress.total}
+        <button className={styles.toolButton} onClick={cancel} title="取消识别" aria-label="取消识别">
+          <X size={14} />
+        </button>
+      </span>
+    );
+  }
+  if (!scannedPages || scannedPages.length === 0) {
+    return error ? <span className={styles.ocrError}>{error}</span> : null;
+  }
+  const pending = scannedPages.filter((page) => !results.has(page)).length;
+  return (
+    <span className={styles.ocrStatus}>
+      {error ? (
+        <span className={styles.ocrError}>{error}</span>
+      ) : (
+        <span>{pending > 0 ? `检测到 ${pending} 页扫描页` : `已识别 ${scannedPages.length} 页扫描页`}</span>
+      )}
+      <button className={styles.ocrButton} onClick={() => run(pending === 0)}>
+        <ScanText size={14} />
+        {pending > 0 ? '识别扫描页' : '重新识别'}
+      </button>
+    </span>
+  );
+};
 
 // ================================
 // 单页：激活时渲染画布与文本层，未激活时只保留占位
@@ -306,8 +399,12 @@ interface PdfPageProps {
   size: PdfPageSize;
   zoom: number;
   active: boolean;
-  /** 本页的高亮 */
-  highlights: readonly ReadingHighlight[];
+  /** 本页的高亮片段 */
+  highlights: readonly HighlightTarget[];
+  /** 本页中需要显示为选中的高亮 */
+  activeHighlightId: string | null;
+  /** 本页的识别结果；有结果时用它生成文本层，取代 pdf.js 文本层 */
+  ocrResult: OcrPageResult | null;
   /** 本页高亮标记完成后需要滚动到的高亮 */
   revealHighlightId: string | null;
   onRevealed: () => void;
@@ -320,6 +417,8 @@ const PdfPage = memo(function PdfPage({
   zoom,
   active,
   highlights,
+  activeHighlightId,
+  ocrResult,
   revealHighlightId,
   onRevealed,
 }: PdfPageProps) {
@@ -328,16 +427,15 @@ const PdfPage = memo(function PdfPage({
   /** 文本层已按当前缩放渲染完成，可以标记高亮 */
   const [textReady, setTextReady] = useState(false);
 
+  // 画布
   useEffect(() => {
     const canvas = canvasRef.current;
-    const textContainer = textLayerRef.current;
-    if (!active || !canvas || !textContainer) return;
+    if (!active || !canvas) return;
     let cancelled = false;
     let cancelRender: (() => void) | null = null;
-    let cancelText: (() => void) | null = null;
 
     (async () => {
-      const [page, { TextLayer }] = await Promise.all([pdf.getPage(pageNumber), loadPdfjs()]);
+      const page = await pdf.getPage(pageNumber);
       if (cancelled) return;
       const viewport = page.getViewport({ scale: zoom });
       const ratio = window.devicePixelRatio || 1;
@@ -352,17 +450,6 @@ const PdfPage = memo(function PdfPage({
       });
       cancelRender = () => renderTask.cancel();
       await renderTask.promise;
-      if (cancelled) return;
-
-      textContainer.replaceChildren();
-      const textLayer = new TextLayer({
-        textContentSource: page.streamTextContent(),
-        container: textContainer,
-        viewport,
-      });
-      cancelText = () => textLayer.cancel();
-      await textLayer.render();
-      if (!cancelled) setTextReady(true);
     })().catch((error) => {
       // 滚动离开或缩放导致的取消属于正常流程
       if (!cancelled) console.error(`[Reading] 渲染 PDF 第 ${pageNumber} 页失败:`, error);
@@ -371,10 +458,42 @@ const PdfPage = memo(function PdfPage({
     return () => {
       cancelled = true;
       cancelRender?.();
+    };
+  }, [active, pdf, pageNumber, zoom]);
+
+  // 文本层：有识别结果时由识别结果生成（位置随 --scale-factor 缩放），否则由 pdf.js 按当前缩放渲染
+  useEffect(() => {
+    const textContainer = textLayerRef.current;
+    if (!active || !textContainer) return;
+    let cancelled = false;
+    let cancelText: (() => void) | null = null;
+
+    (async () => {
+      if (ocrResult) {
+        renderOcrTextLayer(textContainer, ocrResult, size);
+      } else {
+        const [page, { TextLayer }] = await Promise.all([pdf.getPage(pageNumber), loadPdfjs()]);
+        if (cancelled) return;
+        textContainer.replaceChildren();
+        const textLayer = new TextLayer({
+          textContentSource: page.streamTextContent(),
+          container: textContainer,
+          viewport: page.getViewport({ scale: zoom }),
+        });
+        cancelText = () => textLayer.cancel();
+        await textLayer.render();
+      }
+      if (!cancelled) setTextReady(true);
+    })().catch((error) => {
+      if (!cancelled) console.error(`[Reading] 渲染 PDF 第 ${pageNumber} 页文本层失败:`, error);
+    });
+
+    return () => {
+      cancelled = true;
       cancelText?.();
       setTextReady(false);
     };
-  }, [active, pdf, pageNumber, zoom]);
+  }, [active, pdf, pageNumber, zoom, ocrResult, size]);
 
   // 在本页文本层内标记高亮；高亮变化、重新渲染或页面释放前清除旧标记
   useLayoutEffect(() => {
@@ -383,6 +502,13 @@ const PdfPage = memo(function PdfPage({
     applyHighlightMarks(textContainer, highlights, styles.highlightMark);
     return () => clearHighlightMarks(textContainer);
   }, [textReady, highlights]);
+
+  // 在标记之后执行：选中的高亮加上选中样式（标记重建后重新应用）
+  useLayoutEffect(() => {
+    const textContainer = textLayerRef.current;
+    if (!textReady || !textContainer || !activeHighlightId) return;
+    return setActiveHighlight(textContainer, activeHighlightId, styles.highlightMarkActive);
+  }, [textReady, highlights, activeHighlightId]);
 
   // 在标记之后执行：定位等待中的高亮（文字无法定位时停留在页首）
   useEffect(() => {
@@ -401,7 +527,11 @@ const PdfPage = memo(function PdfPage({
       {active && (
         <>
           <canvas ref={canvasRef} className={styles.canvas} />
-          <div ref={textLayerRef} className={styles.textLayer} data-text-layer="" />
+          <div
+            ref={textLayerRef}
+            className={`${styles.textLayer} ${ocrResult ? styles.ocrLayer : ''}`}
+            data-text-layer=""
+          />
         </>
       )}
     </div>

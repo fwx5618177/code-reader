@@ -6,7 +6,7 @@
     "output": "release",
     "buildResources": "assets"
   },
-  "files": ["dist/**/*", "assets/**/*", "!assets/dictionaries/**/*"],
+  "files": ["dist/**/*", "assets/**/*", "!assets/dictionaries/**/*", "!assets/ocr/**/*"],
   "extraResources": [
     {
       "from": "assets/icons",
@@ -16,6 +16,11 @@
     {
       "from": "assets/dictionaries",
       "to": "assets/dictionaries",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "assets/ocr",
+      "to": "assets/ocr",
       "filter": ["**/*"]
     }
   ],

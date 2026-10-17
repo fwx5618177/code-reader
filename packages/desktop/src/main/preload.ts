@@ -107,6 +107,16 @@ const validChannels = [
   'spellcheck:addUserWord',
   'spellcheck:removeUserWord',
 
+  // 扫描版 PDF 文字识别
+  'ocr:listLanguages',
+  'ocr:importLanguage',
+  'ocr:removeLanguage',
+  'ocr:readResults',
+  'ocr:writePageResult',
+  'ocr:writeIndexedText',
+  'ocr:writeScanResult',
+  'ocr:removeResults',
+
   // 知识库（多库切换）
   'workspace:list',
   'workspace:getCurrent',
@@ -324,6 +334,19 @@ contextBridge.exposeInMainWorld('electron', {
     getUserWords: () => ipcRenderer.invoke('spellcheck:getUserWords'),
     addUserWord: (word: string) => ipcRenderer.invoke('spellcheck:addUserWord', word),
     removeUserWord: (word: string) => ipcRenderer.invoke('spellcheck:removeUserWord', word),
+  },
+
+  // 扫描版 PDF 文字识别：语言数据由主进程管理（识别引擎经 ocr-resource:// 协议加载），识别结果按条目保存在当前知识库
+  ocr: {
+    listLanguages: () => ipcRenderer.invoke('ocr:listLanguages'),
+    importLanguage: () => ipcRenderer.invoke('ocr:importLanguage'),
+    removeLanguage: (code: string) => ipcRenderer.invoke('ocr:removeLanguage', code),
+    readResults: (itemId: string) => ipcRenderer.invoke('ocr:readResults', itemId),
+    writePageResult: (itemId: string, page: number, data: string) =>
+      ipcRenderer.invoke('ocr:writePageResult', itemId, page, data),
+    writeIndexedText: (itemId: string, text: string) => ipcRenderer.invoke('ocr:writeIndexedText', itemId, text),
+    writeScanResult: (itemId: string, data: string) => ipcRenderer.invoke('ocr:writeScanResult', itemId, data),
+    removeResults: (itemId: string) => ipcRenderer.invoke('ocr:removeResults', itemId),
   },
 
   // 托盘菜单：动作由主进程推送；最近文档列表由渲染进程提供
