@@ -167,15 +167,17 @@ function createWindow() {
   });
 
   // 设置 Content-Security-Policy
-  // 注意：worker-src blob: 允许从 Blob URL 创建 Worker（用于差分计算等后台任务）
+  // - worker-src blob:：允许从 Blob URL 创建 Worker（用于差分计算等后台任务）
+  // - img-src https:：Markdown 与网页剪藏中的远程图片；media-src blob:：本地音视频附件以 Blob URL 播放
+  // - connect-src 不放行任何外部服务：AI 请求只由主进程发起，渲染进程不直连网络
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           process.env.NODE_ENV === 'development'
-            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* https://*.openai.com https://*.anthropic.com"
-            : "default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.openai.com https://*.anthropic.com",
+            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:*"
+            : "default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'",
         ],
       },
     });
