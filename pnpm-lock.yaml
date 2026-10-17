@@ -90,9 +90,6 @@ importers:
       '@code-reader/search-service':
         specifier: workspace:*
         version: link:../search-service
-      '@code-reader/syntax-parser':
-        specifier: workspace:*
-        version: link:../syntax-parser
       '@code-reader/text-buffer':
         specifier: workspace:*
         version: link:../text-buffer

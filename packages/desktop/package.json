@@ -30,7 +30,6 @@
     "@code-reader/diff-algorithm": "workspace:*",
     "@code-reader/fuzzy-match-algorithm": "workspace:*",
     "@code-reader/search-service": "workspace:*",
-    "@code-reader/syntax-parser": "workspace:*",
     "@code-reader/text-buffer": "workspace:*",
     "@codemirror/autocomplete": "^6.16.0",
     "@codemirror/commands": "^6.5.0",
