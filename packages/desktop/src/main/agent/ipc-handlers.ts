@@ -147,6 +147,30 @@ export function registerAgentHandlers(mainWindow: BrowserWindow | null): void {
     }
   );
 
+  /**
+   * 整库自动归类，返回任务 ID
+   */
+  ipcMain.handle('agent:categorizeLibrary', async (): Promise<string> => {
+    try {
+      return executor.categorizeLibrary();
+    } catch (error) {
+      console.error('[Agent:IPC] Categorize library error:', error);
+      throw error;
+    }
+  });
+
+  /**
+   * 为所有条目抽取实体，返回新提交的条目数
+   */
+  ipcMain.handle('agent:extractAllEntities', async (): Promise<number> => {
+    try {
+      return executor.extractAllEntities();
+    } catch (error) {
+      console.error('[Agent:IPC] Extract all entities error:', error);
+      throw error;
+    }
+  });
+
   console.log('[Agent:IPC] Agent handlers registered');
 }
 
@@ -175,6 +199,8 @@ export async function cleanupAgentHandlers(): Promise<void> {
     'agent:getPendingCount',
     'agent:getTasksForItem',
     'agent:processItem',
+    'agent:categorizeLibrary',
+    'agent:extractAllEntities',
   ];
 
   handlers.forEach((channel) => {

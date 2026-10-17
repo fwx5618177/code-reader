@@ -9,6 +9,9 @@ export const TASK_TYPES = [
   'extract-tags',
   'generate-embedding',
   'find-related',
+  // 自动归类：target_item_id 为空时表示对整个知识库归类
+  'categorize',
+  'extract-entities',
 ] as const;
 
 export type TaskType = (typeof TASK_TYPES)[number];

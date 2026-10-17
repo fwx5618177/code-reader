@@ -8,6 +8,7 @@ import { readFile, stat, writeFile, mkdir, access, rename } from 'fs/promises';
 import { getSQLiteService } from './database/sqlite';
 import { registerDatabaseHandlers, cleanupDatabaseHandlers } from './database/ipc-handlers';
 import { registerSearchHandlers, cleanupSearchHandlers } from './database/search-ipc-handlers';
+import { registerEntityHandlers, cleanupEntityHandlers } from './database/entity-ipc-handlers';
 import { registerVersionHistoryHandlers } from './database/version-ipc-handlers';
 import { registerWebHandlers } from './web/ipc-handlers';
 import { registerSpellcheckHandlers } from './spellcheck/ipc-handlers';
@@ -452,6 +453,9 @@ function setupIPC() {
   // Semantic search handlers
   registerSearchHandlers();
 
+  // 实体图谱查询
+  registerEntityHandlers();
+
   // Version history and Git handlers
   registerVersionHistoryHandlers();
 
@@ -494,6 +498,7 @@ async function cleanup() {
 
     // Cleanup handlers
     cleanupSearchHandlers();
+    cleanupEntityHandlers();
     cleanupAIHandlers();
     cleanupDatabaseHandlers();
 

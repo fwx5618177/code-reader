@@ -2,15 +2,18 @@
 // Agent 活动状态（渲染进程）
 // 订阅主进程 Agent 的任务事件，汇总为"每个条目的处理进度"，
 // 供知识库条目流、详情面板与任务浮窗共用。
+// itemId 为 null 的活动表示面向整个知识库的任务（如整库自动归类）。
 // ================================
 
 import { useSyncExternalStore } from 'react';
 import type {
   ItemProcessingStatus,
   ProcessItemOptions,
+  TaskCompletedEvent,
   TaskStatus,
   TaskType,
 } from '../../types/electron';
+import { describeCategorizeResult, isCategorizeResult, type ChangeDescription } from './change-records';
 
 /** 任务显示名称 */
 export const TASK_LABELS: Record<TaskType, string> = {
@@ -19,6 +22,8 @@ export const TASK_LABELS: Record<TaskType, string> = {
   'extract-tags': '提取标签',
   'generate-embedding': '建立语义索引',
   'find-related': '发现关联',
+  categorize: '自动归类',
+  'extract-entities': '提取实体',
 };
 
 /** 单个任务的进度 */
@@ -31,22 +36,33 @@ export interface TaskActivity {
   error?: string;
 }
 
-/** 一个条目的处理状态 */
+/** 一个条目（或整个知识库）的处理状态 */
 export interface ItemActivity {
-  itemId: string;
+  /** 为 null 表示整个知识库 */
+  itemId: string | null;
   status: ItemProcessingStatus;
   tasks: TaskActivity[];
   updatedAt: number;
+}
+
+/** 自动归类等结构性变更的记录，保留到用户关闭 */
+export interface ChangeRecord extends ChangeDescription {
+  taskId: string;
+  /** 为 null 表示整库任务 */
+  itemId: string | null;
+  createdAt: number;
 }
 
 /** 处理完成的条目在活动列表中保留的时长 */
 const FINISHED_RETENTION_MS = 8000;
 
 class AgentActivityStore {
-  private readonly activities = new Map<string, ItemActivity>();
+  private readonly activities = new Map<string | null, ItemActivity>();
   private snapshot: ItemActivity[] = [];
+  private records: ChangeRecord[] = [];
   private readonly listeners = new Set<() => void>();
-  private readonly itemListeners = new Set<(itemId: string) => void>();
+  private readonly itemListeners = new Set<(itemId: string | null) => void>();
+  private readonly completedListeners = new Set<(event: TaskCompletedEvent) => void>();
   private attached = false;
 
   /** 订阅主进程事件（幂等） */
@@ -72,7 +88,21 @@ class AgentActivityStore {
         status: 'completed',
         progress: 100,
       });
-      this.notifyItem(event.targetItemId);
+      if (event.type === 'categorize' && isCategorizeResult(event.result)) {
+        this.records = [
+          {
+            taskId: event.taskId,
+            itemId: event.targetItemId,
+            createdAt: Date.now(),
+            ...describeCategorizeResult(event.result),
+          },
+          ...this.records,
+        ];
+        this.publish();
+      }
+      // 归类会新建文件夹、合并标签，影响条目之外的数据，按整库变化通知
+      this.notifyItem(event.type === 'categorize' ? null : event.targetItemId);
+      for (const listener of this.completedListeners) listener(event);
     });
 
     agent.onTaskFailed((event) => {
@@ -91,7 +121,7 @@ class AgentActivityStore {
       activity.status = event.status;
       activity.updatedAt = Date.now();
       this.publish();
-      this.notifyItem(event.itemId);
+      if (event.itemId !== null) this.notifyItem(event.itemId);
       if (event.status !== 'processing') {
         setTimeout(() => this.pruneFinished(), FINISHED_RETENTION_MS);
       }
@@ -105,25 +135,59 @@ class AgentActivityStore {
 
   getSnapshot = (): ItemActivity[] => this.snapshot;
 
-  /** 条目数据被 Agent 更新（摘要、标签、状态）时回调 */
-  onItemChanged(listener: (itemId: string) => void): () => void {
+  getRecords = (): ChangeRecord[] => this.records;
+
+  /**
+   * 知识库数据被 Agent 更新时回调：itemId 为条目 ID 时只影响该条目（摘要、标签、状态），
+   * 为 null 时影响多个条目或文件夹 / 标签（自动归类），需要整体刷新
+   */
+  onItemChanged(listener: (itemId: string | null) => void): () => void {
     this.itemListeners.add(listener);
     return () => this.itemListeners.delete(listener);
+  }
+
+  /** 任意任务完成时回调（如实体抽取完成后刷新实体图谱） */
+  onTaskCompleted(listener: (event: TaskCompletedEvent) => void): () => void {
+    this.attach();
+    this.completedListeners.add(listener);
+    return () => this.completedListeners.delete(listener);
   }
 
   /**
    * 提交条目处理
    */
   async process(itemId: string, options: ProcessItemOptions): Promise<void> {
+    this.markProcessing(itemId);
+    await window.electron.agent.processItem(itemId, options);
+  }
+
+  /** 提交整库自动归类 */
+  async categorizeLibrary(): Promise<void> {
+    this.markProcessing(null);
+    await window.electron.agent.categorizeLibrary();
+  }
+
+  /** 为所有条目抽取实体，返回提交的条目数（各条目的活动由主进程事件创建） */
+  async extractAllEntities(): Promise<number> {
+    this.attach();
+    return window.electron.agent.extractAllEntities();
+  }
+
+  /** 关闭一条变更记录 */
+  dismissRecord(taskId: string): void {
+    this.records = this.records.filter((record) => record.taskId !== taskId);
+    this.publish();
+  }
+
+  private markProcessing(itemId: string | null): void {
     this.attach();
     const activity = this.ensureActivity(itemId);
     activity.status = 'processing';
     activity.updatedAt = Date.now();
     this.publish();
-    await window.electron.agent.processItem(itemId, options);
   }
 
-  private ensureActivity(itemId: string): ItemActivity {
+  private ensureActivity(itemId: string | null): ItemActivity {
     let activity = this.activities.get(itemId);
     if (!activity) {
       activity = { itemId, status: 'processing', tasks: [], updatedAt: Date.now() };
@@ -132,7 +196,7 @@ class AgentActivityStore {
     return activity;
   }
 
-  private upsertTask(itemId: string, task: TaskActivity): void {
+  private upsertTask(itemId: string | null, task: TaskActivity): void {
     const activity = this.ensureActivity(itemId);
     const index = activity.tasks.findIndex((t) => t.taskId === task.taskId);
     if (index === -1) activity.tasks = [...activity.tasks, task];
@@ -161,7 +225,7 @@ class AgentActivityStore {
     for (const listener of this.listeners) listener();
   }
 
-  private notifyItem(itemId: string): void {
+  private notifyItem(itemId: string | null): void {
     for (const listener of this.itemListeners) listener(itemId);
   }
 }
@@ -171,4 +235,9 @@ export const agentActivity = new AgentActivityStore();
 /** 当前所有条目的处理活动 */
 export function useAgentActivity(): ItemActivity[] {
   return useSyncExternalStore(agentActivity.subscribe, agentActivity.getSnapshot);
+}
+
+/** 尚未关闭的变更记录（最新在前） */
+export function useChangeRecords(): ChangeRecord[] {
+  return useSyncExternalStore(agentActivity.subscribe, agentActivity.getRecords);
 }

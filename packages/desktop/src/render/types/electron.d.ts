@@ -3,6 +3,8 @@
 // Exposed via preload.ts
 // ================================
 
+import type { KnowledgeItemType } from './knowledge';
+
 // ================================
 // Database Types
 // ================================
@@ -177,7 +179,9 @@ export type TaskType =
   | 'summarize'
   | 'extract-tags'
   | 'generate-embedding'
-  | 'find-related';
+  | 'find-related'
+  | 'categorize'
+  | 'extract-entities';
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
@@ -188,7 +192,8 @@ interface AgentTask {
   id: string;
   type: TaskType;
   status: TaskStatus;
-  targetItemId: string;
+  /** 为空表示面向整个知识库的任务 */
+  targetItemId: string | null;
   priority: number;
   progress: number;
   errorMessage?: string;
@@ -203,16 +208,16 @@ interface AgentTask {
 
 interface TaskProgress {
   taskId: string;
-  targetItemId: string;
+  targetItemId: string | null;
   type: TaskType;
   progress: number;
   status: TaskStatus;
   message?: string;
 }
 
-interface TaskCompletedEvent {
+export interface TaskCompletedEvent {
   taskId: string;
-  targetItemId: string;
+  targetItemId: string | null;
   type: TaskType;
   /** 任务执行结果，结构随任务类型而定 */
   result?: unknown;
@@ -220,15 +225,16 @@ interface TaskCompletedEvent {
 
 interface TaskFailedEvent {
   taskId: string;
-  targetItemId: string;
+  targetItemId: string | null;
   type: TaskType;
   error: string;
   /** 为 true 时任务已重新排队，稍后自动重试；false 表示永久失败 */
   willRetry: boolean;
 }
 
+/** itemId 为空表示库级任务（如整库归类）的状态 */
 interface ItemStatusChangedEvent {
-  itemId: string;
+  itemId: string | null;
   status: ItemProcessingStatus;
 }
 
@@ -238,6 +244,41 @@ export interface ProcessItemOptions {
   extractTags?: boolean;
   generateEmbedding?: boolean;
   findRelated?: boolean;
+  extractEntities?: boolean;
+  categorize?: boolean;
+}
+
+/** categorize 任务结果：实际生效的变更 */
+export interface CategorizeResult {
+  scope: 'item' | 'library';
+  analyzedCount: number;
+  createdFolders: string[];
+  moves: Array<{ itemId: string; title: string; folder: string }>;
+  tagAdditions: Array<{ itemId: string; title: string; tags: string[] }>;
+  tagMerges: Array<{ from: string; into: string }>;
+}
+
+export type EntityType =
+  | 'person'
+  | 'organization'
+  | 'place'
+  | 'concept'
+  | 'event'
+  | 'work'
+  | 'technology'
+  | 'other';
+
+/** extract-entities 任务结果 */
+export interface ExtractEntitiesResult {
+  chunkCount: number;
+  entities: Array<{ name: string; type: EntityType; mentions: number }>;
+}
+
+/** 实体图谱数据（仅包含未删除条目及其关联的实体） */
+export interface EntityGraphData {
+  entities: Array<{ id: string; name: string; type: EntityType; itemCount: number }>;
+  links: Array<{ itemId: string; entityId: string; mentionCount: number }>;
+  items: Array<{ id: string; title: string; type: KnowledgeItemType }>;
 }
 
 // ================================
@@ -412,10 +453,18 @@ interface ElectronAPI {
     getPendingCount: () => Promise<number>;
     getTasksForItem: (itemId: string) => Promise<AgentTask[]>;
     processItem: (targetItemId: string, options?: ProcessItemOptions) => Promise<string[]>;
+    /** 整库自动归类，返回任务 ID（已有进行中的整库归类时返回其 ID） */
+    categorizeLibrary: () => Promise<string>;
+    /** 为所有有文本的条目抽取实体，返回新提交的条目数 */
+    extractAllEntities: () => Promise<number>;
     onProgress: (callback: (progress: TaskProgress) => void) => () => void;
     onTaskCompleted: (callback: (event: TaskCompletedEvent) => void) => () => void;
     onTaskFailed: (callback: (event: TaskFailedEvent) => void) => () => void;
     onItemStatusChanged: (callback: (event: ItemStatusChangedEvent) => void) => () => void;
+  };
+
+  entities: {
+    getGraph: () => Promise<EntityGraphData>;
   };
 
   search: {

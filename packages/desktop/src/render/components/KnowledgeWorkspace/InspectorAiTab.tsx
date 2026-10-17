@@ -3,19 +3,18 @@
 // ================================
 
 import React, { useState } from 'react';
-import { AlertCircle, Settings, Sparkles } from 'lucide-react';
+import { AlertCircle, FolderTree, Network, Settings, Sparkles } from 'lucide-react';
 import type { KnowledgeItem } from '../../types/knowledge';
 import type { ItemActivity } from '../../lib/agent/agentStore';
-import { requestProcessing, type ProcessingRequestResult } from '../../lib/knowledge/service';
+import {
+  requestProcessing,
+  type AiUnavailableReason,
+  type ProcessingRequestResult,
+} from '../../lib/knowledge/service';
+import { AI_UNAVAILABLE_HINTS, requestItemTask } from '../../lib/agent/actions';
 import { TaskProgressList } from '../AgentActivity/TaskProgressList';
 import { activeTaskLabel } from '../AgentActivity/activity';
 import styles from './Inspector.module.scss';
-
-/** 提交被拒绝时的提示 */
-const REJECTED_HINTS: Record<Exclude<ProcessingRequestResult, 'submitted'>, string> = {
-  'no-provider': '尚未配置可用的 AI 服务商，配置后即可生成摘要、标签与语义索引。',
-  'ai-disabled': 'AI 功能已在设置中关闭，开启后即可处理条目。',
-};
 
 export interface InspectorAiTabProps {
   item: KnowledgeItem;
@@ -25,20 +24,21 @@ export interface InspectorAiTabProps {
 
 export const InspectorAiTab: React.FC<InspectorAiTabProps> = ({ item, activity, onOpenSettings }) => {
   const [submitting, setSubmitting] = useState(false);
-  const [rejected, setRejected] = useState<Exclude<ProcessingRequestResult, 'submitted'> | null>(null);
+  const [rejected, setRejected] = useState<AiUnavailableReason | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const status = activity?.status ?? item.status;
   const processing = status === 'processing';
   const keyPoints = item.keyPoints?.filter((point) => point.trim()) ?? [];
   const hasResult = !!item.summary?.trim() || keyPoints.length > 0;
+  const hasText = !!(item.content?.trim() || item.transcript?.trim() || item.summary?.trim());
 
-  const handleProcess = async () => {
+  const submit = async (request: () => Promise<ProcessingRequestResult>) => {
     setSubmitting(true);
     setRejected(null);
     setError(null);
     try {
-      const result = await requestProcessing(item);
+      const result = await request();
       if (result !== 'submitted') setRejected(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -93,7 +93,7 @@ export const InspectorAiTab: React.FC<InspectorAiTabProps> = ({ item, activity, 
 
       {rejected && (
         <div className={styles.hint} data-kind="warning">
-          <span>{REJECTED_HINTS[rejected]}</span>
+          <span>{AI_UNAVAILABLE_HINTS[rejected]}</span>
           <button type="button" className={styles.linkButton} onClick={onOpenSettings}>
             <Settings size={12} />
             前往设置
@@ -112,10 +112,30 @@ export const InspectorAiTab: React.FC<InspectorAiTabProps> = ({ item, activity, 
           type="button"
           className={styles.button}
           disabled={processing || submitting}
-          onClick={handleProcess}
+          onClick={() => void submit(() => requestProcessing(item))}
         >
           <Sparkles size={13} />
           {processing ? 'AI 处理中…' : hasResult || status === 'error' ? '重新处理' : '开始 AI 解读'}
+        </button>
+        <button
+          type="button"
+          className={styles.button}
+          disabled={processing || submitting}
+          title="由 AI 选择文件夹并补充规范化的标签，改动会记录在 AI 任务浮窗中"
+          onClick={() => void submit(() => requestItemTask(item, { categorize: true }))}
+        >
+          <FolderTree size={13} />
+          自动归类
+        </button>
+        <button
+          type="button"
+          className={styles.button}
+          disabled={processing || submitting || !hasText}
+          title={hasText ? '抽取人物、组织、概念等实体，完成后可在「图谱 → 实体」中查看' : '条目没有可分析的文本'}
+          onClick={() => void submit(() => requestItemTask(item, { extractEntities: true }))}
+        >
+          <Network size={13} />
+          提取实体
         </button>
       </div>
     </div>

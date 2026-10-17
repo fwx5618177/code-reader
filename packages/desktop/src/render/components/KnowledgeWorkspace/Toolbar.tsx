@@ -4,6 +4,7 @@
 
 import React from 'react';
 import {
+  FolderTree,
   LayoutGrid,
   List as ListIcon,
   MessageSquare,
@@ -28,6 +29,8 @@ import {
 import type { StreamLayout, WorkspacePrefs } from './preferences';
 import { TagFilter } from './TagFilter';
 import { TagDot } from './TagColor';
+import { LibraryAiButton } from '../AgentActivity/LibraryAiButton';
+import { requestCategorizeLibrary } from '../../lib/agent/actions';
 import styles from './Toolbar.module.scss';
 
 export type WorkspaceView = 'items' | 'graph' | 'ask';
@@ -61,6 +64,10 @@ export interface ToolbarProps {
   onQuickCapture: () => void;
   /** 打开标签管理 */
   onManageTags: () => void;
+  /** 整库自动归类正在执行 */
+  categorizing: boolean;
+  /** 打开设置（AI 不可用时引导配置） */
+  onOpenSettings: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -78,6 +85,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onPrefsChange,
   onQuickCapture,
   onManageTags,
+  categorizing,
+  onOpenSettings,
 }) => {
   const isItems = view === 'items';
   const filtered = resultCount !== scopeCount;
@@ -147,6 +156,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             )}
           </label>
         )}
+
+        <LibraryAiButton
+          className={styles.control}
+          label="自动归类"
+          icon={FolderTree}
+          confirmTitle="自动归类整个知识库"
+          confirmMessage="AI 将为所有条目选择文件夹（必要时新建）、补充规范化的标签，并合并近似重复的标签。已有标签不会被移除，所有改动会记录在右下角的 AI 任务中。"
+          busy={categorizing}
+          run={requestCategorizeLibrary}
+          onOpenSettings={onOpenSettings}
+        />
 
         <button type="button" className={styles.primaryButton} onClick={onQuickCapture}>
           <Plus size={14} />

@@ -126,6 +126,31 @@
   }
 }
 
+// 图层内的 AI 动作（提取全部实体）
+.actionButton {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 28px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  transition: $transition-colors;
+
+  &:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+}
+
 // ================================
 // 筛选开关
 // ================================
@@ -257,12 +282,101 @@
   &[data-role='faint'] {
     background-color: var(--text-faint);
   }
+  &[data-role='entity'] {
+    background-color: var(--code-keyword);
+  }
 }
 
 .dashedLine {
   width: 8px;
   border-top: 1px dashed var(--text-secondary);
   flex-shrink: 0;
+}
+
+// ================================
+// 实体详情侧栏：点击实体节点后列出相关条目
+// ================================
+
+.entityPanel {
+  @include card;
+  position: absolute;
+  top: var(--spacing-3);
+  right: var(--spacing-3);
+  bottom: var(--spacing-3);
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  max-width: calc(100% - 2 * var(--spacing-3));
+  overflow: hidden;
+}
+
+.entityHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-2) var(--spacing-2) var(--spacing-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.entityName {
+  @include truncate;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: $font-weight-medium;
+}
+
+.entityType {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.entityCount {
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.entityItems {
+  @include scrollbar;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 var(--spacing-1) var(--spacing-2);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.entityItem {
+  @include button-reset;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.entityItemTitle {
+  @include truncate;
+  flex: 1;
+  min-width: 0;
+}
+
+.entityItemMentions {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
 }
 
 // ================================

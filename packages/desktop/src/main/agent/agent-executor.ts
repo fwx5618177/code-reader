@@ -10,6 +10,9 @@ import { cosineSimilarity, decodeEmbedding, encodeEmbedding } from '../database/
 import { getAIService } from '../ai/ai-service';
 import { BrowserWindow } from 'electron';
 import { TASK_TYPES, type TaskType } from './task-types';
+import { generateId } from './id';
+import { runCategorize } from './categorize-task';
+import { runExtractEntities } from './extract-entities-task';
 
 // ================================
 // Types
@@ -24,7 +27,8 @@ export interface AgentTask {
   id: string;
   type: TaskType;
   status: TaskStatus;
-  targetItemId: string;
+  /** 为空表示面向整个知识库的任务 */
+  targetItemId: string | null;
   priority: number;
   progress: number;
   errorMessage?: string;
@@ -40,7 +44,7 @@ export interface AgentTask {
 /** agent:progress 事件载荷 */
 export interface TaskProgress {
   taskId: string;
-  targetItemId: string;
+  targetItemId: string | null;
   type: TaskType;
   progress: number;
   status: TaskStatus;
@@ -50,7 +54,7 @@ export interface TaskProgress {
 /** agent:taskCompleted 事件载荷 */
 export interface TaskCompletedEvent {
   taskId: string;
-  targetItemId: string;
+  targetItemId: string | null;
   type: TaskType;
   result?: unknown;
 }
@@ -58,15 +62,15 @@ export interface TaskCompletedEvent {
 /** agent:taskFailed 事件载荷；willRetry 为 true 时任务已重新排队，将在 retryDelay 之后重试 */
 export interface TaskFailedEvent {
   taskId: string;
-  targetItemId: string;
+  targetItemId: string | null;
   type: TaskType;
   error: string;
   willRetry: boolean;
 }
 
-/** agent:itemStatusChanged 事件载荷 */
+/** agent:itemStatusChanged 事件载荷；itemId 为空表示库级任务的状态（不对应任何条目） */
 export interface ItemStatusChangedEvent {
-  itemId: string;
+  itemId: string | null;
   status: ItemProcessingStatus;
 }
 
@@ -76,13 +80,18 @@ export interface ProcessItemOptions {
   extractTags?: boolean;
   generateEmbedding?: boolean;
   findRelated?: boolean;
+  extractEntities?: boolean;
+  categorize?: boolean;
 }
 
 interface TaskRef {
   id: string;
   type: TaskType;
-  targetItemId: string;
+  targetItemId: string | null;
 }
+
+/** 面向单个条目的任务 */
+type ItemTaskRef = TaskRef & { targetItemId: string };
 
 interface TaskSpec {
   type: TaskType;
@@ -94,10 +103,17 @@ interface TaskSpec {
  * 任务执行产出：异步阶段只计算，不写库；写回条目的操作放在 commit 中，
  * 由 processTask 在确认任务未被取消后与任务完成状态在同一事务中执行
  */
-interface TaskOutput {
+export interface TaskOutput {
   result: unknown;
   commit?: () => void;
 }
+
+/** 任务执行中的进度回调：progress 为 0-100 */
+export type ReportProgress = (progress: number, message: string) => void;
+
+/** 归类放在摘要、标签之后执行，以便利用已生成的摘要 */
+const CATEGORIZE_PRIORITY = 3;
+const EXTRACT_ENTITIES_PRIORITY = 4;
 
 // processItem 的处理步骤；同一条目内按优先级从高到低串行执行，后续步骤依赖前序步骤的产出
 const PROCESS_ITEM_STEPS: ReadonlyArray<{
@@ -110,6 +126,8 @@ const PROCESS_ITEM_STEPS: ReadonlyArray<{
   { option: 'extractTags', type: 'extract-tags', priority: 7 },
   { option: 'generateEmbedding', type: 'generate-embedding', priority: 6 },
   { option: 'findRelated', type: 'find-related', priority: 5 },
+  { option: 'extractEntities', type: 'extract-entities', priority: EXTRACT_ENTITIES_PRIORITY },
+  { option: 'categorize', type: 'categorize', priority: CATEGORIZE_PRIORITY },
 ];
 
 // ================================
@@ -155,7 +173,7 @@ export class AgentExecutor extends EventEmitter {
   private isRunning = false;
   // 进程内正在执行的任务；任务被取消后数据库状态变为 cancelled，但执行体仍会运行到结束，
   // 因此“条目是否忙碌”需要同时参考这里，而不能只看数据库
-  private activeTasks: Map<string, { targetItemId: string; promise: Promise<void> }> = new Map();
+  private activeTasks: Map<string, { targetItemId: string | null; promise: Promise<void> }> = new Map();
   private pollTimer: NodeJS.Timeout | null = null;
   private mainWindow: BrowserWindow | null = null;
 
@@ -261,6 +279,45 @@ export class AgentExecutor extends EventEmitter {
   }
 
   /**
+   * 整库自动归类（target_item_id 为空的库级任务）；已有未结束的整库归类时返回其任务 ID，不重复创建
+   */
+  categorizeLibrary(): string {
+    const pending = getSQLiteService().get<{ id: string }>(
+      `SELECT id FROM agent_tasks
+       WHERE target_item_id IS NULL AND type = 'categorize'
+         AND status IN ('pending', 'processing') AND is_deleted = 0
+       LIMIT 1`
+    );
+    if (pending) return pending.id;
+    return this.enqueueTasks(null, [{ type: 'categorize', priority: CATEGORIZE_PRIORITY }])[0];
+  }
+
+  /**
+   * 为有文本的条目批量抽取实体，返回新提交的条目数。跳过：
+   * - 已有未结束抽取任务的条目；
+   * - 最近一次抽取完成后没有再修改过的条目（实体已是最新）
+   */
+  extractAllEntities(): number {
+    const items = getSQLiteService().all<{ id: string }>(
+      `SELECT k.id FROM knowledge_items k
+       WHERE k.is_deleted = 0
+         AND (TRIM(COALESCE(k.content, '')) != '' OR TRIM(COALESCE(k.transcript, '')) != ''
+              OR TRIM(COALESCE(k.summary, '')) != '')
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_tasks t
+           WHERE t.target_item_id = k.id AND t.type = 'extract-entities' AND t.is_deleted = 0
+             AND (t.status IN ('pending', 'processing')
+                  OR (t.status = 'completed' AND t.completed_at >= k.updated_at))
+         )
+       ORDER BY k.created_at ASC`
+    );
+    for (const item of items) {
+      this.enqueueTasks(item.id, [{ type: 'extract-entities', priority: EXTRACT_ENTITIES_PRIORITY }]);
+    }
+    return items.length;
+  }
+
+  /**
    * Cancel a task
    */
   async cancelTask(taskId: string): Promise<boolean> {
@@ -333,10 +390,10 @@ export class AgentExecutor extends EventEmitter {
   }
 
   /**
-   * 在一个事务内创建任务并把条目标记为 processing。
-   * 若条目已有未结束的任务，新任务并入同一批次，条目最终状态由整批任务的结果决定。
+   * 在一个事务内创建任务并把条目标记为 processing（库级任务没有条目状态，只通知界面）。
+   * 若目标已有未结束的任务，新任务并入同一批次，最终状态由整批任务的结果决定。
    */
-  private enqueueTasks(targetItemId: string, specs: TaskSpec[]): string[] {
+  private enqueueTasks(targetItemId: string | null, specs: TaskSpec[]): string[] {
     for (const spec of specs) {
       if (!isTaskType(spec.type)) {
         throw new Error(`Unsupported task type: ${spec.type}`);
@@ -349,15 +406,15 @@ export class AgentExecutor extends EventEmitter {
     const { taskIds, statusChanged } = sqlite.transaction(() => {
       const openBatch = sqlite.get<{ batch_id: string | null }>(
         `SELECT batch_id FROM agent_tasks
-         WHERE target_item_id = ? AND status IN ('pending', 'processing') AND is_deleted = 0
+         WHERE target_item_id IS ? AND status IN ('pending', 'processing') AND is_deleted = 0
          ORDER BY created_at DESC, rowid DESC
          LIMIT 1`,
         [targetItemId]
       );
-      const batchId = openBatch?.batch_id ?? this.generateId();
+      const batchId = openBatch?.batch_id ?? generateId();
 
       const ids = specs.map((spec) => {
-        const taskId = this.generateId();
+        const taskId = generateId();
         sqlite.run(
           `INSERT INTO agent_tasks (id, type, status, target_item_id, priority, max_retries, batch_id, created_at, updated_at)
            VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
@@ -375,6 +432,7 @@ export class AgentExecutor extends EventEmitter {
         return taskId;
       });
 
+      if (targetItemId === null) return { taskIds: ids, statusChanged: true };
       const statusUpdate = sqlite.run(
         `UPDATE knowledge_items SET status = 'processing' WHERE id = ? AND status != 'processing'`,
         [targetItemId]
@@ -385,7 +443,7 @@ export class AgentExecutor extends EventEmitter {
 
     taskIds.forEach((taskId, index) => {
       const type = specs[index].type;
-      console.log(`[AgentExecutor] Created task ${taskId} (${type}) for item ${targetItemId}`);
+      console.log(`[AgentExecutor] Created task ${taskId} (${type}) for ${targetItemId === null ? 'library' : `item ${targetItemId}`}`);
       this.emit('taskCreated', { taskId, type, targetItemId });
     });
 
@@ -449,29 +507,34 @@ export class AgentExecutor extends EventEmitter {
 
     const sqlite = getSQLiteService();
     const now = new Date().toISOString();
-    const busyItems = notInClause(
-      't.target_item_id',
-      Array.from(new Set(Array.from(this.activeTasks.values(), (task) => task.targetItemId)))
-    );
+    const busyTargets = new Set(Array.from(this.activeTasks.values(), (task) => task.targetItemId));
+    const busyItemIds = [...busyTargets].filter((id): id is string => id !== null);
+    // target_item_id 为空的库级任务自成一个队列；NOT IN 对 NULL 不成立，需要单独放行
+    const busyClause =
+      (busyTargets.has(null) ? ' AND t.target_item_id IS NOT NULL' : '') +
+      (busyItemIds.length > 0
+        ? ` AND (t.target_item_id IS NULL OR t.target_item_id NOT IN (${busyItemIds.map(() => '?').join(', ')}))`
+        : '');
 
-    // 同一条目的任务严格串行，且按 priority DESC, created_at ASC 的顺序执行：
+    // 同一条目（或库级队列）的任务严格串行，且按 priority DESC, created_at ASC 的顺序执行：
     // 1. 条目已有 processing 任务（或进程内仍在运行的已取消任务）时不可运行；
     // 2. 只有条目的“队首”待执行任务可运行，处于重试等待中的队首同样会阻塞后续任务；
     // 3. 重试任务需等到 next_attempt_at 之后。
     // 每个条目至多产出一个候选，不同条目之间并发执行，总数不超过 maxConcurrent。
-    const tasks = sqlite.all<{ id: string; type: TaskType; target_item_id: string }>(
+    // 队列归属用 IS 比较，使库级任务（NULL）之间同样互斥
+    const tasks = sqlite.all<{ id: string; type: TaskType; target_item_id: string | null }>(
       `SELECT t.id, t.type, t.target_item_id
        FROM agent_tasks t
        WHERE t.status = 'pending' AND t.is_deleted = 0
          AND (t.next_attempt_at IS NULL OR t.next_attempt_at <= ?)
          AND NOT EXISTS (
            SELECT 1 FROM agent_tasks p
-           WHERE p.target_item_id = t.target_item_id
+           WHERE p.target_item_id IS t.target_item_id
              AND p.status = 'processing' AND p.is_deleted = 0
          )
          AND NOT EXISTS (
            SELECT 1 FROM agent_tasks o
-           WHERE o.target_item_id = t.target_item_id
+           WHERE o.target_item_id IS t.target_item_id
              AND o.status = 'pending' AND o.is_deleted = 0
              AND (
                o.priority > t.priority
@@ -480,10 +543,10 @@ export class AgentExecutor extends EventEmitter {
                  OR (o.created_at = t.created_at AND o.rowid < t.rowid)
                ))
              )
-         )${busyItems.sql}
+         )${busyClause}
        ORDER BY t.priority DESC, t.created_at ASC, t.rowid ASC
        LIMIT ?`,
-      [now, ...busyItems.params, availableSlots]
+      [now, ...busyItemIds, availableSlots]
     );
 
     for (const task of tasks) {
@@ -575,20 +638,33 @@ export class AgentExecutor extends EventEmitter {
   }
 
   private executeTask(task: TaskRef): Promise<TaskOutput> {
-    switch (task.type) {
+    const report: ReportProgress = (progress, message) =>
+      this.sendProgress(task, progress, 'processing', message);
+    if (task.type === 'categorize') {
+      return runCategorize(task.targetItemId, report);
+    }
+
+    const targetItemId = task.targetItemId;
+    if (targetItemId === null) {
+      return Promise.reject(new Error(`Task type ${task.type} requires a target item`));
+    }
+    const itemTask: ItemTaskRef = { ...task, targetItemId };
+    switch (itemTask.type) {
       case 'transcribe':
-        return this.executeTranscribe(task);
+        return this.executeTranscribe(itemTask);
       case 'summarize':
-        return this.executeSummarize(task);
+        return this.executeSummarize(itemTask);
       case 'extract-tags':
-        return this.executeExtractTags(task);
+        return this.executeExtractTags(itemTask);
       case 'generate-embedding':
-        return this.executeGenerateEmbedding(task);
+        return this.executeGenerateEmbedding(itemTask);
       case 'find-related':
-        return this.executeFindRelated(task);
+        return this.executeFindRelated(itemTask);
+      case 'extract-entities':
+        return runExtractEntities(targetItemId, report);
       default:
         // 旧版本数据库中可能残留已移除类型的任务
-        return Promise.reject(new Error(`Unknown task type: ${String(task.type)}`));
+        return Promise.reject(new Error(`Unknown task type: ${String(itemTask.type)}`));
     }
   }
 
@@ -659,28 +735,29 @@ export class AgentExecutor extends EventEmitter {
   }
 
   /**
-   * 条目的某个任务结束（完成/失败/取消）后调用：
-   * 若条目已无待执行或执行中的任务，按最近一批任务是否存在永久失败将条目置为 error 或 ready
+   * 条目（或库级队列）的某个任务结束（完成/失败/取消）后调用：
+   * 若已无待执行或执行中的任务，按最近一批任务是否存在永久失败将其置为 error 或 ready
    */
-  private onItemTaskSettled(itemId: string): void {
+  private onItemTaskSettled(itemId: string | null): void {
     try {
       this.updateItemStatusIfIdle(itemId);
     } catch (error) {
-      console.error(`[AgentExecutor] Failed to update status of item ${itemId}:`, error);
+      console.error(`[AgentExecutor] Failed to update status of ${itemId === null ? 'library tasks' : `item ${itemId}`}:`, error);
     }
     this.schedulePoll();
   }
 
-  private updateItemStatusIfIdle(itemId: string): void {
+  private updateItemStatusIfIdle(itemId: string | null): void {
     const isRunningInProcess = Array.from(this.activeTasks.values()).some(
       (task) => task.targetItemId === itemId
     );
     if (isRunningInProcess) return;
 
+    // 用 IS 比较，使库级任务（target_item_id 为空）同样适用
     const sqlite = getSQLiteService();
     const remaining = sqlite.get<{ count: number }>(
       `SELECT COUNT(*) as count FROM agent_tasks
-       WHERE target_item_id = ? AND status IN ('pending', 'processing') AND is_deleted = 0`,
+       WHERE target_item_id IS ? AND status IN ('pending', 'processing') AND is_deleted = 0`,
       [itemId]
     );
     if ((remaining?.count ?? 0) > 0) return;
@@ -688,7 +765,7 @@ export class AgentExecutor extends EventEmitter {
     // 新批次只会在条目空闲时开启，因此最近创建的任务所在批次就是刚结束的批次
     const latest = sqlite.get<{ batch_id: string | null }>(
       `SELECT batch_id FROM agent_tasks
-       WHERE target_item_id = ? AND is_deleted = 0
+       WHERE target_item_id IS ? AND is_deleted = 0
        ORDER BY created_at DESC, rowid DESC
        LIMIT 1`,
       [itemId]
@@ -699,12 +776,17 @@ export class AgentExecutor extends EventEmitter {
     const hasFailure =
       sqlite.get(
         `SELECT 1 FROM agent_tasks
-         WHERE target_item_id = ? AND batch_id IS ? AND status = 'failed' AND is_deleted = 0
+         WHERE target_item_id IS ? AND batch_id IS ? AND status = 'failed' AND is_deleted = 0
          LIMIT 1`,
         [itemId, latest.batch_id]
       ) !== undefined;
 
     const status: ItemProcessingStatus = hasFailure ? 'error' : 'ready';
+    // 库级任务没有对应的条目状态，只通知界面结束
+    if (itemId === null) {
+      this.sendItemStatusChanged(null, status);
+      return;
+    }
     const updated = sqlite.run(
       `UPDATE knowledge_items SET status = ? WHERE id = ? AND status != ?`,
       [status, itemId, status]
@@ -722,7 +804,7 @@ export class AgentExecutor extends EventEmitter {
   /**
    * Execute transcription task
    */
-  private async executeTranscribe(task: TaskRef): Promise<TaskOutput> {
+  private async executeTranscribe(task: ItemTaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -764,7 +846,7 @@ export class AgentExecutor extends EventEmitter {
   /**
    * Execute summarization task
    */
-  private async executeSummarize(task: TaskRef): Promise<TaskOutput> {
+  private async executeSummarize(task: ItemTaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -806,7 +888,7 @@ export class AgentExecutor extends EventEmitter {
   /**
    * Execute tag extraction task
    */
-  private async executeExtractTags(task: TaskRef): Promise<TaskOutput> {
+  private async executeExtractTags(task: ItemTaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -845,7 +927,7 @@ export class AgentExecutor extends EventEmitter {
         let tagRow = sqlite.get<{ id: string }>(`SELECT id FROM tags WHERE name = ?`, [tag.name]);
 
         if (!tagRow) {
-          const tagId = this.generateId();
+          const tagId = generateId();
           sqlite.run(
             `INSERT INTO tags (id, name, is_auto_generated, created_at, updated_at) VALUES (?, ?, 1, ?, ?)`,
             [tagId, tag.name, now, now]
@@ -873,7 +955,7 @@ export class AgentExecutor extends EventEmitter {
   /**
    * Execute embedding generation task
    */
-  private async executeGenerateEmbedding(task: TaskRef): Promise<TaskOutput> {
+  private async executeGenerateEmbedding(task: ItemTaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -904,7 +986,7 @@ export class AgentExecutor extends EventEmitter {
 
     this.sendProgress(task, 80, 'processing', 'Saving embedding...');
 
-    const embeddingId = this.generateId();
+    const embeddingId = generateId();
     const commit = () => {
       const now = new Date().toISOString();
 
@@ -941,7 +1023,7 @@ export class AgentExecutor extends EventEmitter {
   /**
    * Execute find related items task
    */
-  private async executeFindRelated(task: TaskRef): Promise<TaskOutput> {
+  private async executeFindRelated(task: ItemTaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
 
     // Get source embedding
@@ -986,7 +1068,7 @@ export class AgentExecutor extends EventEmitter {
         sqlite.run(
           `INSERT OR REPLACE INTO links (id, source_id, target_id, type, strength, created_at, updated_at)
            VALUES (?, ?, ?, 'ai-suggested', ?, ?, ?)`,
-          [this.generateId(), task.targetItemId, related.itemId, related.similarity, now, now]
+          [generateId(), task.targetItemId, related.itemId, related.similarity, now, now]
         );
       }
     };
@@ -997,13 +1079,6 @@ export class AgentExecutor extends EventEmitter {
   // ================================
   // Utilities
   // ================================
-
-  /**
-   * Generate a unique ID
-   */
-  private generateId(): string {
-    return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-  }
 
   /**
    * 向主窗口发送事件
@@ -1030,7 +1105,7 @@ export class AgentExecutor extends EventEmitter {
     this.send('agent:progress', payload);
   }
 
-  private sendItemStatusChanged(itemId: string, status: ItemProcessingStatus): void {
+  private sendItemStatusChanged(itemId: string | null, status: ItemProcessingStatus): void {
     this.emit('itemStatusChanged', { itemId, status });
     this.send<ItemStatusChangedEvent>('agent:itemStatusChanged', { itemId, status });
   }

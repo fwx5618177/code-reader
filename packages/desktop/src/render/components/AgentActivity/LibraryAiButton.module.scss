@@ -1,0 +1,79 @@
+// ================================
+// 整库 AI 动作按钮样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// 提示气泡：显示在按钮下方，手动关闭
+.feedback {
+  @include card;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--spacing-1) var(--spacing-2);
+  width: 260px;
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+
+  &[data-kind='unavailable'] {
+    border-color: var(--color-warning);
+  }
+
+  &[data-kind='error'] {
+    border-color: var(--color-error);
+    color: var(--color-error);
+  }
+}
+
+.feedbackText {
+  flex: 1;
+  min-width: 0;
+}
+
+.linkButton {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--accent-primary);
+  font-size: var(--font-size-xs);
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.closeButton {
+  @include button-reset;
+  @include flex-center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}

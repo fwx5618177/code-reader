@@ -1,15 +1,16 @@
 // ================================
-// AI 任务浮窗：右下角显示 Agent 正在处理的条目与各任务进度
-// 没有活动时不渲染；条目较多时使用虚拟列表
+// AI 任务浮窗：右下角显示 Agent 正在处理的条目（或整个知识库）与各任务进度，以及自动归类的改动记录
+// 没有活动且没有记录时不渲染；条目较多时使用虚拟列表
 // ================================
 
 import React, { useMemo, useState } from 'react';
 import { List, type RowComponentProps } from 'react-window';
-import { ChevronDown, Sparkles } from 'lucide-react';
-import { useAgentActivity, type ItemActivity } from '../../lib/agent/agentStore';
+import { ChevronDown, Library, Sparkles } from 'lucide-react';
+import { useAgentActivity, useChangeRecords, type ItemActivity } from '../../lib/agent/agentStore';
 import { displayTitle } from '../../lib/links/link-index';
 import type { ItemProcessingStatus, TaskStatus } from '../../types/electron';
 import { StatusIcon, TaskProgressList, TASK_ROW_HEIGHT } from './TaskProgressList';
+import { ChangeRecordList } from './ChangeRecordList';
 import styles from './AgentActivity.module.scss';
 
 export interface AgentActivityPanelProps {
@@ -52,22 +53,34 @@ function ActivityRow({
   onOpenItem,
 }: RowComponentProps<ActivityRowProps>): React.ReactElement {
   const activity = activities[index];
-  const title = displayTitle(resolveTitle(activity.itemId) ?? '') || '未命名条目';
   const status = ITEM_STATUS[activity.status];
+  const itemId = activity.itemId;
+  const title =
+    itemId === null ? '整个知识库' : displayTitle(resolveTitle(itemId) ?? '') || '未命名条目';
   return (
     <div style={style} className={styles.row} {...ariaAttributes}>
-      <button
-        type="button"
-        className={styles.itemButton}
-        title={`打开「${title}」`}
-        onClick={() => onOpenItem(activity.itemId)}
-      >
-        <StatusIcon status={status.icon} />
-        <span className={styles.itemTitle}>{title}</span>
-        <span className={styles.itemStatus} data-status={activity.status}>
-          {status.text}
-        </span>
-      </button>
+      {itemId === null ? (
+        <div className={styles.itemButton}>
+          <Library size={14} className={styles.headerIcon} />
+          <span className={styles.itemTitle}>{title}</span>
+          <span className={styles.itemStatus} data-status={activity.status}>
+            {status.text}
+          </span>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className={styles.itemButton}
+          title={`打开「${title}」`}
+          onClick={() => onOpenItem(itemId)}
+        >
+          <StatusIcon status={status.icon} />
+          <span className={styles.itemTitle}>{title}</span>
+          <span className={styles.itemStatus} data-status={activity.status}>
+            {status.text}
+          </span>
+        </button>
+      )}
       {activity.tasks.length > 0 ? (
         <TaskProgressList tasks={activity.tasks} />
       ) : (
@@ -79,6 +92,7 @@ function ActivityRow({
 
 const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, onOpenItem }) => {
   const activities = useAgentActivity();
+  const records = useChangeRecords();
   const [expanded, setExpanded] = useState(false);
 
   const rowProps = useMemo(
@@ -90,12 +104,12 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, o
     [activities]
   );
 
-  if (activities.length === 0) return null;
+  if (activities.length === 0 && records.length === 0) return null;
 
   const processingCount = activities.filter((a) => a.status === 'processing').length;
   const errorCount = activities.filter((a) => a.status === 'error').length;
   let summaryStatus: TaskStatus = 'completed';
-  let summaryText = 'AI 处理完成';
+  let summaryText = activities.length > 0 ? 'AI 处理完成' : 'AI 整理记录';
   if (processingCount > 0) {
     summaryStatus = 'processing';
     summaryText = 'AI 处理中';
@@ -103,6 +117,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, o
     summaryStatus = 'failed';
     summaryText = 'AI 处理失败';
   }
+  const badgeCount = activities.length + records.length;
 
   if (!expanded) {
     return (
@@ -115,7 +130,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, o
       >
         <StatusIcon status={summaryStatus} />
         <span>{summaryText}</span>
-        <span className={styles.badge}>{activities.length}</span>
+        <span className={styles.badge}>{badgeCount}</span>
       </button>
     );
   }
@@ -125,7 +140,7 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, o
       <header className={styles.header}>
         <Sparkles size={14} className={styles.headerIcon} />
         <span className={styles.headerTitle}>AI 任务</span>
-        <span className={styles.badge}>{activities.length}</span>
+        <span className={styles.badge}>{badgeCount}</span>
         <span className={styles.headerSummary}>
           {processingCount > 0 ? `${processingCount} 个处理中` : summaryText}
         </span>
@@ -139,15 +154,20 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, o
           <ChevronDown size={14} />
         </button>
       </header>
-      <List
-        className={styles.list}
-        style={{ height: listHeight }}
-        rowComponent={ActivityRow}
-        rowCount={activities.length}
-        rowHeight={activityRowHeight}
-        rowProps={rowProps}
-        overscanCount={2}
-      />
+      {records.length > 0 && (
+        <ChangeRecordList records={records} resolveTitle={resolveTitle} onOpenItem={onOpenItem} />
+      )}
+      {activities.length > 0 && (
+        <List
+          className={styles.list}
+          style={{ height: listHeight }}
+          rowComponent={ActivityRow}
+          rowCount={activities.length}
+          rowHeight={activityRowHeight}
+          rowProps={rowProps}
+          overscanCount={2}
+        />
+      )}
     </section>
   );
 };

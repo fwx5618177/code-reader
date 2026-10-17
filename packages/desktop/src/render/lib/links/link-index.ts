@@ -23,7 +23,7 @@ export interface Backlink {
 export interface GraphNode {
   id: string;
   title: string;
-  type: KnowledgeItem['type'] | 'unresolved';
+  type: KnowledgeItem['type'] | 'unresolved' | 'entity';
   /** 连接数（决定节点大小） */
   degree: number;
 }

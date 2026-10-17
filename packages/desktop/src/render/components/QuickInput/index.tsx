@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import type { QuickInputType } from '../../types/knowledge';
 import { isSingleWebUrl } from '../../lib/knowledge/web-clip';
+import { useRecordingWaveform } from './useRecordingWaveform';
 import styles from './QuickInput.module.scss';
 
 interface QuickInputProps {
@@ -95,6 +96,8 @@ const QuickInput: React.FC<QuickInputProps> = ({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  /** 录音中的麦克风音频流，用于绘制实时波形；停止录音后为 null */
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showTagInput, setShowTagInput] = useState(false);
 
@@ -103,6 +106,9 @@ const QuickInput: React.FC<QuickInputProps> = ({
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const waveformRef = useRef<HTMLCanvasElement>(null);
+
+  useRecordingWaveform(waveformRef, recordingStream);
 
   // 设置初始模式并在打开时聚焦
   useEffect(() => {
@@ -155,6 +161,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
     setTagInput('');
     setAttachments([]);
     setIsRecording(false);
+    setRecordingStream(null);
     setRecordingTime(0);
     setShowTagInput(false);
   }, []);
@@ -218,6 +225,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
 
       mediaRecorder.start();
       setIsRecording(true);
+      setRecordingStream(stream);
 
       // 开始计时
       recordingTimerRef.current = setInterval(() => {
@@ -234,6 +242,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      setRecordingStream(null);
 
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
@@ -380,6 +389,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
                     <span className={styles.pulse} />
                     <span className={styles.time}>{formatTime(recordingTime)}</span>
                   </div>
+                  <canvas ref={waveformRef} className={styles.waveform} role="img" aria-label="录音音量" />
                   <button className={styles.stopButton} onClick={stopRecording}>
                     <StopCircle size={24} />
                     <span>停止录音</span>

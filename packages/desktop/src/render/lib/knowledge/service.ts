@@ -117,16 +117,29 @@ async function saveAttachment(file: File): Promise<string> {
   return path;
 }
 
+/** AI 不可用的原因 */
+export type AiUnavailableReason = 'ai-disabled' | 'no-provider';
+
 /** 处理提交结果 */
-export type ProcessingRequestResult = 'submitted' | 'ai-disabled' | 'no-provider';
+export type ProcessingRequestResult = 'submitted' | AiUnavailableReason;
+
+/**
+ * 检查能否提交 AI 任务：可用时返回 null，否则返回原因
+ */
+export async function checkAiAvailability(): Promise<AiUnavailableReason | null> {
+  const settings = await settingsService.get();
+  if (!settings.enableAI) return 'ai-disabled';
+  if (!(await aiConfigService.hasUsableProvider())) return 'no-provider';
+  return null;
+}
 
 /**
  * 按设置提交 Agent 处理
  */
 export async function requestProcessing(item: KnowledgeItem): Promise<ProcessingRequestResult> {
+  const unavailable = await checkAiAvailability();
+  if (unavailable) return unavailable;
   const settings = await settingsService.get();
-  if (!settings.enableAI) return 'ai-disabled';
-  if (!(await aiConfigService.hasUsableProvider())) return 'no-provider';
 
   const isAudio = item.type === 'audio' && !!item.filePath;
   const hasText = !!(item.content?.trim() || item.transcript?.trim());

@@ -8,7 +8,7 @@ import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBas
 import type { LinkIndex, RelatedLink } from '../../lib/links/link-index';
 import KnowledgeGraph, { type KnowledgeGraphMode } from '../KnowledgeGraph';
 import { ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
-import { useActivityByItem } from '../AgentActivity/activity';
+import { useActivityByItem, useLibraryTaskRunning } from '../AgentActivity/activity';
 import {
   EMPTY_FILTERS,
   applyFilters,
@@ -71,6 +71,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const conversation = useAskConversation();
   const activityByItem = useActivityByItem();
+  const categorizing = useLibraryTaskRunning();
 
   useEffect(() => savePrefs(prefs), [prefs]);
   const updatePrefs = useCallback(
@@ -211,6 +212,8 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
         onPrefsChange={updatePrefs}
         onQuickCapture={onQuickCapture}
         onManageTags={() => setTagManagerOpen(true)}
+        categorizing={categorizing}
+        onOpenSettings={onOpenSettings}
       />
 
       <div className={styles.content}>
@@ -227,6 +230,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
                 onModeChange={setGraphMode}
                 onOpenItem={handleGraphOpen}
                 onCreateNote={onCreateNote}
+                onOpenSettings={onOpenSettings}
               />
             </div>
           )}

@@ -1,23 +1,31 @@
 // ================================
-// AI 任务浮窗测试：无活动时隐藏、折叠徽标、展开后的任务进度与打开条目
+// AI 任务浮窗测试：无活动时隐藏、折叠徽标、展开后的任务进度与打开条目、整库任务与归类记录
 // ================================
 
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ItemActivity } from '../../../lib/agent/agentStore';
+import type { ChangeRecord, ItemActivity } from '../../../lib/agent/agentStore';
 import AgentActivityPanel from '..';
 
-const state = vi.hoisted(() => ({ activities: [] as ItemActivity[] }));
+const state = vi.hoisted(() => ({
+  activities: [] as ItemActivity[],
+  records: [] as ChangeRecord[],
+  dismissRecord: (_taskId: string) => undefined as void,
+}));
 
 vi.mock('../../../lib/agent/agentStore', () => ({
   useAgentActivity: () => state.activities,
+  useChangeRecords: () => state.records,
+  agentActivity: { dismissRecord: (taskId: string) => state.dismissRecord(taskId) },
   TASK_LABELS: {
     transcribe: '语音转写',
     summarize: '生成摘要',
     'extract-tags': '提取标签',
     'generate-embedding': '建立语义索引',
     'find-related': '发现关联',
+    categorize: '自动归类',
+    'extract-entities': '提取实体',
   },
 }));
 
@@ -26,6 +34,7 @@ const resolveTitle = (id: string) => TITLES[id];
 
 describe('AgentActivityPanel', () => {
   beforeEach(() => {
+    state.records = [];
     state.activities = [
       {
         itemId: 'a',
@@ -73,5 +82,53 @@ describe('AgentActivityPanel', () => {
 
     fireEvent.click(screen.getByTitle('收起'));
     expect(screen.queryByText('会议录音')).toBeNull();
+  });
+
+  it('整库任务显示为「整个知识库」，不可打开', () => {
+    const onOpenItem = vi.fn();
+    state.activities = [
+      {
+        itemId: null,
+        status: 'processing',
+        updatedAt: Date.now(),
+        tasks: [{ taskId: 'lib', type: 'categorize', status: 'processing', progress: 30, message: '分析条目' }],
+      },
+    ];
+    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} />);
+    fireEvent.click(screen.getByRole('button', { name: /AI 处理中/ }));
+    expect(screen.getByText('整个知识库')).toBeTruthy();
+    expect(screen.getByText('自动归类')).toBeTruthy();
+    expect(screen.queryByTitle(/打开/)).toBeNull();
+  });
+
+  it('没有活动时仍显示归类记录，可打开条目与关闭记录', () => {
+    const onOpenItem = vi.fn();
+    const dismissed: string[] = [];
+    state.dismissRecord = (taskId) => {
+      dismissed.push(taskId);
+    };
+    state.activities = [];
+    state.records = [
+      {
+        taskId: 'r1',
+        itemId: 'a',
+        createdAt: Date.now(),
+        summary: '整理了该条目：移动 1 个条目',
+        details: ['「会议录音」 移入「工作」'],
+      },
+      { taskId: 'r2', itemId: null, createdAt: Date.now(), summary: '整理了 3 个条目，没有需要调整的地方', details: [] },
+    ];
+    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} />);
+    const pill = screen.getByRole('button', { name: /AI 整理记录/ });
+    expect(pill.textContent).toContain('2');
+    fireEvent.click(pill);
+
+    expect(screen.getByText('「会议录音」 移入「工作」')).toBeTruthy();
+    expect(screen.getByText('整库自动归类')).toBeTruthy();
+    fireEvent.click(screen.getByTitle('打开「会议录音」'));
+    expect(onOpenItem).toHaveBeenCalledWith('a');
+
+    fireEvent.click(screen.getAllByTitle('关闭记录')[1]);
+    expect(dismissed).toEqual(['r2']);
   });
 });

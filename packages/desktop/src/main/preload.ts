@@ -68,6 +68,11 @@ const validChannels = [
   'agent:getPendingCount',
   'agent:getTasksForItem',
   'agent:processItem',
+  'agent:categorizeLibrary',
+  'agent:extractAllEntities',
+
+  // 实体图谱
+  'entities:getGraph',
 
   // 语义搜索
   'search:semantic',
@@ -243,12 +248,19 @@ contextBridge.exposeInMainWorld('electron', {
     getTasksForItem: (itemId: string) => ipcRenderer.invoke('agent:getTasksForItem', itemId),
     processItem: (targetItemId: string, options?: unknown) =>
       ipcRenderer.invoke('agent:processItem', targetItemId, options),
+    categorizeLibrary: () => ipcRenderer.invoke('agent:categorizeLibrary'),
+    extractAllEntities: () => ipcRenderer.invoke('agent:extractAllEntities'),
     onProgress: (callback: (progress: unknown) => void) => subscribe('agent:progress', callback),
     onTaskCompleted: (callback: (event: unknown) => void) =>
       subscribe('agent:taskCompleted', callback),
     onTaskFailed: (callback: (event: unknown) => void) => subscribe('agent:taskFailed', callback),
     onItemStatusChanged: (callback: (event: unknown) => void) =>
       subscribe('agent:itemStatusChanged', callback),
+  },
+
+  // 实体图谱便捷方法
+  entities: {
+    getGraph: () => ipcRenderer.invoke('entities:getGraph'),
   },
 
   // 语义搜索便捷方法

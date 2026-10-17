@@ -2,17 +2,31 @@
 // 知识图谱视图
 // 全局图谱：所有条目及其双向链接 / AI 关联
 // 局部图谱：当前条目 depth 跳以内的邻域
+// 图层：笔记链接（双向链接与 AI 关联）/ 实体（条目与 AI 抽取的人物、组织、概念等实体）
 // ================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, SlidersHorizontal } from 'lucide-react';
+import { Network, Search, SlidersHorizontal, X } from 'lucide-react';
 import type { LinkIndex, RelatedLink } from '../../lib/links';
+import { displayTitle } from '../../lib/links/link-index';
+import {
+  ENTITY_TYPE_LABELS,
+  buildEntityGraph,
+  entityIdOfNode,
+  itemsOfEntity,
+} from '../../lib/entities/entity-graph';
+import { useEntityGraph } from '../../lib/entities/useEntityGraph';
+import { requestExtractAllEntities } from '../../lib/agent/actions';
+import { LibraryAiButton } from '../AgentActivity/LibraryAiButton';
+import { useTaskTypeRunning } from '../AgentActivity/activity';
 import GraphCanvas from './GraphCanvas';
 import { localGraph, matchesQuery, normalizeQuery } from './graph-data';
 import { LEGEND, NODE_COLOR_ROLE } from './graph-style';
 import styles from './KnowledgeGraph.module.scss';
 
 export type KnowledgeGraphMode = 'global' | 'local';
+
+type GraphLayer = 'links' | 'entities';
 
 export interface KnowledgeGraphProps {
   index: LinkIndex;
@@ -26,7 +40,9 @@ export interface KnowledgeGraphProps {
   onOpenItem: (id: string) => void;
   /** 点击未创建的链接目标时创建同名笔记 */
   onCreateNote?: (title: string) => void;
-  /** 嵌入侧边栏的紧凑样式：无图例，筛选项折叠 */
+  /** AI 不可用时引导打开设置 */
+  onOpenSettings?: () => void;
+  /** 嵌入侧边栏的紧凑样式：无图例、无实体图层，筛选项折叠 */
   compact?: boolean;
 }
 
@@ -36,6 +52,11 @@ type Depth = (typeof DEPTHS)[number];
 const MODE_OPTIONS: { mode: KnowledgeGraphMode; label: string }[] = [
   { mode: 'global', label: '全局' },
   { mode: 'local', label: '局部' },
+];
+
+const LAYER_OPTIONS: { layer: GraphLayer; label: string }[] = [
+  { layer: 'links', label: '笔记链接' },
+  { layer: 'entities', label: '实体' },
 ];
 
 const NO_RELATED: RelatedLink[] = [];
@@ -48,31 +69,50 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   onModeChange,
   onOpenItem,
   onCreateNote,
+  onOpenSettings,
   compact = false,
 }) => {
   const [query, setQuery] = useState('');
+  const [layer, setLayer] = useState<GraphLayer>('links');
   const [showOrphans, setShowOrphans] = useState(false);
   const [showUnresolved, setShowUnresolved] = useState(true);
   const [showRelated, setShowRelated] = useState(true);
+  const [sharedEntitiesOnly, setSharedEntitiesOnly] = useState(false);
   const [depth, setDepth] = useState<Depth>(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
   /** 搜索后按 Enter 定位到的节点（覆盖 focusId 的居中与描边） */
   const [searchFocusId, setSearchFocusId] = useState<string>();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  /** 实体图层中点击的实体，侧栏列出与其关联的条目 */
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+
+  const showEntities = !compact && layer === 'entities';
+  const entityGraph = useEntityGraph(showEntities);
+  const extractingEntities = useTaskTypeRunning('extract-entities');
 
   useEffect(() => {
     setSearchFocusId(undefined);
   }, [focusId]);
 
+  useEffect(() => {
+    setSelectedEntityId(null);
+  }, [layer]);
+
   // 局部图谱总是包含孤立条目，保证没有链接的当前条目也能显示
-  const graph = useMemo(() => {
-    const full = index.graph(showRelated ? related : NO_RELATED, {
+  const fullGraph = useMemo(() => {
+    if (showEntities) {
+      return entityGraph.data ? buildEntityGraph(entityGraph.data, sharedEntitiesOnly) : null;
+    }
+    return index.graph(showRelated ? related : NO_RELATED, {
       includeOrphans: mode === 'local' || showOrphans,
       includeUnresolved: showUnresolved,
     });
-    if (mode === 'global') return full;
-    return focusId ? localGraph(full, focusId, depth) : null;
-  }, [index, related, showOrphans, showUnresolved, showRelated, mode, focusId, depth]);
+  }, [showEntities, entityGraph.data, sharedEntitiesOnly, index, related, showOrphans, showUnresolved, showRelated, mode]);
+
+  const graph = useMemo(() => {
+    if (!fullGraph || mode === 'global') return fullGraph;
+    return focusId ? localGraph(fullGraph, focusId, depth) : null;
+  }, [fullGraph, mode, focusId, depth]);
 
   const nodesById = useMemo(
     () => new Map(graph?.nodes.map((node) => [node.id, node])),
@@ -89,6 +129,7 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
       const node = nodesById.get(id);
       if (!node) return;
       if (node.type === 'unresolved') onCreateNote?.(node.title);
+      else if (node.type === 'entity') setSelectedEntityId(entityIdOfNode(id));
       else onOpenItem(id);
     },
     [nodesById, onCreateNote, onOpenItem]
@@ -107,9 +148,32 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   const hovered = hoveredId ? nodesById.get(hoveredId) : undefined;
   const showFilters = !compact || filtersOpen;
 
+  const selectedEntity =
+    showEntities && selectedEntityId
+      ? entityGraph.data?.entities.find((entity) => entity.id === selectedEntityId)
+      : undefined;
+  const entityItems =
+    selectedEntity && entityGraph.data ? itemsOfEntity(entityGraph.data, selectedEntity.id) : [];
+
   let emptyHint: string | null = null;
-  if (!graph) emptyHint = '打开一个条目以查看它的局部图谱';
-  else if (graph.nodes.length === 0) emptyHint = '还没有链接。在笔记中输入 [[标题]] 建立双向链接';
+  if (showEntities && !entityGraph.data) {
+    emptyHint = entityGraph.error ? `实体加载失败：${entityGraph.error}` : '正在加载实体…';
+  } else if (!graph) {
+    emptyHint = showEntities ? '当前条目还没有实体。可在条目详情的「AI 解读」中提取' : '打开一个条目以查看它的局部图谱';
+  } else if (graph.nodes.length === 0) {
+    emptyHint = showEntities
+      ? '还没有实体。点击「提取全部实体」，或在条目详情的「AI 解读」中提取'
+      : '还没有链接。在笔记中输入 [[标题]] 建立双向链接';
+  }
+
+  let hoveredText: string | undefined;
+  if (hovered?.type === 'unresolved') {
+    hoveredText = `${hovered.title}（未创建${onCreateNote ? '，点击创建' : ''}）`;
+  } else if (hovered?.type === 'entity') {
+    hoveredText = `${hovered.title}（实体，点击查看相关条目）`;
+  } else {
+    hoveredText = hovered?.title;
+  }
 
   return (
     <div className={`${styles.graph} ${compact ? styles.compact : ''}`}>
@@ -124,6 +188,22 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
             onKeyDown={handleSearchKeyDown}
           />
         </label>
+
+        {!compact && (
+          <div className={styles.segmented} role="group" aria-label="图层">
+            {LAYER_OPTIONS.map((option) => (
+              <button
+                key={option.layer}
+                type="button"
+                className={styles.segment}
+                aria-pressed={layer === option.layer}
+                onClick={() => setLayer(option.layer)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {mode === 'local' && (
           <div className={styles.segmented} role="group" aria-label="局部图谱深度">
@@ -158,6 +238,20 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
           </div>
         )}
 
+        {showEntities && (
+          <LibraryAiButton
+            className={styles.actionButton}
+            label="提取全部实体"
+            icon={Network}
+            confirmTitle="提取全部实体"
+            confirmMessage="AI 将从所有新增或修改过的条目中抽取人物、组织、概念等实体，长文会分段分析后合并。条目较多时需要一些时间，进度见右下角的 AI 任务。"
+            emptyHint="所有条目的实体都已是最新（没有新增或修改过的有文本条目）。"
+            busy={extractingEntities}
+            run={requestExtractAllEntities}
+            onOpenSettings={onOpenSettings}
+          />
+        )}
+
         {compact && (
           <button
             type="button"
@@ -173,32 +267,45 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
 
       {showFilters && (
         <div className={styles.filters}>
-          {mode === 'global' && (
+          {showEntities ? (
             <label className={styles.toggle}>
               <input
                 type="checkbox"
-                checked={showOrphans}
-                onChange={(event) => setShowOrphans(event.target.checked)}
+                checked={sharedEntitiesOnly}
+                onChange={(event) => setSharedEntitiesOnly(event.target.checked)}
               />
-              显示孤立节点
+              只显示关联多个条目的实体
             </label>
+          ) : (
+            <>
+              {mode === 'global' && (
+                <label className={styles.toggle}>
+                  <input
+                    type="checkbox"
+                    checked={showOrphans}
+                    onChange={(event) => setShowOrphans(event.target.checked)}
+                  />
+                  显示孤立节点
+                </label>
+              )}
+              <label className={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={showUnresolved}
+                  onChange={(event) => setShowUnresolved(event.target.checked)}
+                />
+                显示未创建的链接
+              </label>
+              <label className={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={showRelated}
+                  onChange={(event) => setShowRelated(event.target.checked)}
+                />
+                显示 AI 关联
+              </label>
+            </>
           )}
-          <label className={styles.toggle}>
-            <input
-              type="checkbox"
-              checked={showUnresolved}
-              onChange={(event) => setShowUnresolved(event.target.checked)}
-            />
-            显示未创建的链接
-          </label>
-          <label className={styles.toggle}>
-            <input
-              type="checkbox"
-              checked={showRelated}
-              onChange={(event) => setShowRelated(event.target.checked)}
-            />
-            显示 AI 关联
-          </label>
         </div>
       )}
 
@@ -223,7 +330,7 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                 {label}
               </li>
             ))}
-            {showRelated && (
+            {!showEntities && showRelated && (
               <li className={styles.legendItem}>
                 <span className={styles.dashedLine} />
                 AI 关联
@@ -231,15 +338,41 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
             )}
           </ul>
         )}
+
+        {selectedEntity && (
+          <aside className={styles.entityPanel} aria-label={`实体「${selectedEntity.name}」`}>
+            <header className={styles.entityHeader}>
+              <span className={styles.swatch} data-role="entity" />
+              <span className={styles.entityName} title={selectedEntity.name}>
+                {selectedEntity.name}
+              </span>
+              <span className={styles.entityType}>{ENTITY_TYPE_LABELS[selectedEntity.type]}</span>
+              <button
+                type="button"
+                className={styles.iconButton}
+                title="关闭"
+                onClick={() => setSelectedEntityId(null)}
+              >
+                <X size={12} />
+              </button>
+            </header>
+            <p className={styles.entityCount}>出现在 {entityItems.length} 个条目中</p>
+            <ul className={styles.entityItems}>
+              {entityItems.map((item) => (
+                <li key={item.id}>
+                  <button type="button" className={styles.entityItem} onClick={() => onOpenItem(item.id)}>
+                    <span className={styles.entityItemTitle}>{displayTitle(item.title) || '未命名条目'}</span>
+                    <span className={styles.entityItemMentions}>{item.mentionCount} 次</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        )}
       </div>
 
       <div className={styles.footer}>
-        <span className={styles.hovered}>
-          {hovered &&
-            (hovered.type === 'unresolved'
-              ? `${hovered.title}（未创建${onCreateNote ? '，点击创建' : ''}）`
-              : hovered.title)}
-        </span>
+        <span className={styles.hovered}>{hoveredText}</span>
         {graph && (
           <span className={styles.counts}>
             {graph.nodes.length} 个节点 · {graph.edges.length} 条连线

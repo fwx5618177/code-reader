@@ -97,7 +97,8 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
     if (!enabled) return;
     void reload();
     return agentActivity.onItemChanged((id) => {
-      void reloadItem(id);
+      // id 为 null：自动归类等改动了多个条目或文件夹 / 标签，整体重新加载
+      void (id === null ? reload() : reloadItem(id));
     });
   }, [enabled, reload, reloadItem]);
 

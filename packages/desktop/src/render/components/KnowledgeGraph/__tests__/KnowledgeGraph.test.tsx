@@ -182,4 +182,61 @@ describe('KnowledgeGraph', () => {
     canvas.dispatchEvent(new MouseEvent('pointerup', init));
     expect(onOpenItem).toHaveBeenCalledWith('c');
   });
+
+  it('实体图层：加载实体图谱，可只看共享实体，点击实体列出相关条目', async () => {
+    const getGraph = vi.fn().mockResolvedValue({
+      entities: [
+        { id: 'e1', name: 'OpenAI', type: 'organization', itemCount: 2 },
+        { id: 'e2', name: '张三', type: 'person', itemCount: 1 },
+      ],
+      links: [
+        { itemId: 'a', entityId: 'e1', mentionCount: 1 },
+        { itemId: 'b', entityId: 'e1', mentionCount: 4 },
+        { itemId: 'b', entityId: 'e2', mentionCount: 1 },
+      ],
+      items: [
+        { id: 'a', title: 'A', type: 'note' },
+        { id: 'b', title: 'B.md', type: 'note' },
+      ],
+    });
+    vi.stubGlobal('electron', { entities: { getGraph } });
+    const onOpenItem = vi.fn();
+    const { container } = render(
+      <KnowledgeGraph index={index} related={related} mode="global" onOpenItem={onOpenItem} />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '实体' }));
+    await screen.findByText('4 个节点 · 3 条连线');
+    expect(getGraph).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText('显示 AI 关联')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('只显示关联多个条目的实体'));
+    expect(counts()).toBe('3 个节点 · 2 条连线');
+
+    // 定位到实体节点并点击：侧栏按提及次数列出相关条目
+    const input = screen.getByPlaceholderText('搜索节点，Enter 定位');
+    fireEvent.change(input, { target: { value: 'openai' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    flushFrames();
+    const canvas = container.querySelector('canvas')!;
+    const init = { clientX: WIDTH / 2, clientY: HEIGHT / 2, button: 0, bubbles: true };
+    act(() => {
+      canvas.dispatchEvent(new MouseEvent('pointerdown', init));
+      canvas.dispatchEvent(new MouseEvent('pointerup', init));
+    });
+    expect(onOpenItem).not.toHaveBeenCalled();
+
+    const panel = screen.getByLabelText('实体「OpenAI」');
+    expect(panel.textContent).toContain('组织');
+    expect(panel.textContent).toContain('出现在 2 个条目中');
+    const entries = panel.querySelectorAll('li button');
+    expect(Array.from(entries, (entry) => entry.textContent)).toEqual(['B4 次', 'A1 次']);
+    fireEvent.click(entries[0]);
+    expect(onOpenItem).toHaveBeenCalledWith('b');
+  });
+
+  it('紧凑模式没有实体图层', () => {
+    render(<KnowledgeGraph index={index} related={related} mode="global" compact onOpenItem={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: '实体' })).toBeNull();
+  });
 });

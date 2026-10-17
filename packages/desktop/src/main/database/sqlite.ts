@@ -8,6 +8,7 @@ import { app } from 'electron';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { TASK_TYPES } from '../agent/task-types';
+import { ENTITY_TYPES } from '../agent/entity-types';
 
 // ================================
 // Types
@@ -37,18 +38,33 @@ export interface RunResult {
 // Schema Definitions
 // ================================
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
+
+/** 字符串常量列表 → SQL 的 IN 列表（取值均为代码内常量，不含引号） */
+const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
 
 /** agent_tasks.type 允许的取值，来自执行器支持的任务类型 */
-const AGENT_TASK_TYPES_SQL = TASK_TYPES.map((type) => `'${type}'`).join(', ');
+const AGENT_TASK_TYPES_SQL = sqlList(TASK_TYPES);
 
-/** agent_tasks 建表语句；全新数据库与 v4 重建迁移共用，保证两条路径结构一致 */
+/** v4 迁移当时保留的任务类型；迁移是历史快照，不随 TASK_TYPES 变化 */
+const V4_TASK_TYPES_SQL = sqlList([
+  'transcribe',
+  'summarize',
+  'extract-tags',
+  'generate-embedding',
+  'find-related',
+]);
+
+/**
+ * agent_tasks 建表语句；全新数据库与重建迁移共用，保证两条路径结构一致。
+ * target_item_id 为空表示面向整个知识库的任务（如整库自动归类）
+ */
 const agentTasksTableSql = (name: string) => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL CHECK (type IN (${AGENT_TASK_TYPES_SQL})),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
-  target_item_id TEXT NOT NULL,
+  target_item_id TEXT,
   priority INTEGER NOT NULL DEFAULT 5,
   progress INTEGER NOT NULL DEFAULT 0,
   error_message TEXT,
@@ -80,7 +96,48 @@ CREATE INDEX IF NOT EXISTS idx_tasks_target ON agent_tasks(target_item_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_priority ON agent_tasks(priority DESC, created_at ASC);
 `;
 
-const CREATE_TABLES_SQL = `
+/**
+ * 重建 agent_tasks：SQLite 不支持修改 CHECK / NOT NULL 约束，只能建新表、复制、替换并重建索引。
+ * 只保留 keepTypesSql 中的类型，以及库级任务或目标条目仍存在的任务
+ */
+const rebuildAgentTasksSql = (keepTypesSql: string) => `
+  DROP TABLE IF EXISTS agent_tasks_rebuild;
+  ${agentTasksTableSql('agent_tasks_rebuild')}
+  INSERT INTO agent_tasks_rebuild (${AGENT_TASKS_COLUMNS})
+    SELECT ${AGENT_TASKS_COLUMNS} FROM agent_tasks
+    WHERE type IN (${keepTypesSql})
+      AND (target_item_id IS NULL OR target_item_id IN (SELECT id FROM knowledge_items));
+  DROP TABLE agent_tasks;
+  ALTER TABLE agent_tasks_rebuild RENAME TO agent_tasks;
+  ${AGENT_TASKS_INDEXES_SQL}
+`;
+
+/** 实体图谱：实体按规范化名称去重，条目与实体多对多关联；全新数据库与 v5 迁移共用 */
+const ENTITY_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS entities (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'other' CHECK (type IN (${sqlList(ENTITY_TYPES)})),
+  normalized_name TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS item_entities (
+  item_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  mention_count INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (item_id, entity_id),
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE,
+  FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
+CREATE INDEX IF NOT EXISTS idx_item_entities_entity ON item_entities(entity_id);
+`;
+
+export const CREATE_TABLES_SQL = `
 -- Knowledge Items table
 CREATE TABLE IF NOT EXISTS knowledge_items (
   id TEXT PRIMARY KEY,
@@ -209,6 +266,9 @@ CREATE TABLE IF NOT EXISTS links (
 
 -- Agent Tasks table
 ${agentTasksTableSql('agent_tasks')}
+
+-- Entity graph tables
+${ENTITY_TABLES_SQL}
 
 -- App Settings table
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -392,7 +452,7 @@ function addColumnIfMissing(
 /**
  * 增量迁移，按 version 升序执行。全新数据库直接按 CREATE_TABLES_SQL / CREATE_FTS_SQL 建出最新结构，不执行迁移。
  */
-const MIGRATIONS: Migration[] = [
+export const MIGRATIONS: Migration[] = [
   {
     version: 3,
     description: 'agent_tasks 新增 batch_id/next_attempt_at；items_fts 去掉不存在的 tags 列并改用 trigram 分词',
@@ -415,17 +475,15 @@ const MIGRATIONS: Migration[] = [
     description: 'agent_tasks 重建：类型约束去掉已移除的 categorize / extract-entities',
     // SQLite 不支持修改 CHECK 约束，只能建新表、复制、替换；已移除类型的任务与孤儿任务不再保留
     up: (db) => {
-      db.exec(`
-        DROP TABLE IF EXISTS agent_tasks_v4;
-        ${agentTasksTableSql('agent_tasks_v4')}
-        INSERT INTO agent_tasks_v4 (${AGENT_TASKS_COLUMNS})
-          SELECT ${AGENT_TASKS_COLUMNS} FROM agent_tasks
-          WHERE type IN (${AGENT_TASK_TYPES_SQL})
-            AND target_item_id IN (SELECT id FROM knowledge_items);
-        DROP TABLE agent_tasks;
-        ALTER TABLE agent_tasks_v4 RENAME TO agent_tasks;
-        ${AGENT_TASKS_INDEXES_SQL}
-      `);
+      db.exec(rebuildAgentTasksSql(V4_TASK_TYPES_SQL));
+    },
+  },
+  {
+    version: 5,
+    description: 'agent_tasks 重建：新增 categorize / extract-entities 类型，target_item_id 允许为空；新增实体图谱表',
+    up: (db) => {
+      db.exec(rebuildAgentTasksSql(AGENT_TASK_TYPES_SQL));
+      db.exec(ENTITY_TABLES_SQL);
     },
   },
 ];

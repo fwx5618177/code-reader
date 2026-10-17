@@ -6,7 +6,15 @@
 
 import type { GraphNode } from '../../lib/links';
 
-export type NodeColorRole = 'accent' | 'info' | 'success' | 'warning' | 'secondary' | 'muted' | 'faint';
+export type NodeColorRole =
+  | 'accent'
+  | 'info'
+  | 'success'
+  | 'warning'
+  | 'secondary'
+  | 'muted'
+  | 'faint'
+  | 'entity';
 
 /** 颜色角色及其 CSS 变量（顺序即图例顺序） */
 export const COLOR_ROLES: readonly { role: NodeColorRole; cssVar: string }[] = [
@@ -17,6 +25,8 @@ export const COLOR_ROLES: readonly { role: NodeColorRole; cssVar: string }[] = [
   { role: 'secondary', cssVar: '--accent-secondary' },
   { role: 'muted', cssVar: '--text-muted' },
   { role: 'faint', cssVar: '--text-faint' },
+  // 实体节点需要与所有条目类型都不同的颜色，取主题中的语法高亮关键字色（亮 / 暗主题均有定义）
+  { role: 'entity', cssVar: '--code-keyword' },
 ];
 
 export const NODE_COLOR_ROLE: Record<GraphNode['type'], NodeColorRole> = {
@@ -30,6 +40,7 @@ export const NODE_COLOR_ROLE: Record<GraphNode['type'], NodeColorRole> = {
   bookmark: 'muted',
   file: 'muted',
   unresolved: 'faint',
+  entity: 'entity',
 };
 
 const NODE_TYPE_LABELS: Record<GraphNode['type'], string> = {
@@ -43,6 +54,7 @@ const NODE_TYPE_LABELS: Record<GraphNode['type'], string> = {
   bookmark: '书签',
   file: '文件',
   unresolved: '未创建',
+  entity: '实体',
 };
 
 /** 图例：每个颜色角色对应的类型名称 */
