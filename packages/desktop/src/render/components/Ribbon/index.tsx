@@ -74,7 +74,7 @@ const RibbonButton: React.FC<RibbonButtonProps> = ({
 
   return (
     <Tooltip content={label} shortcut={shortcut} position="right" delay={300}>
-      <button className={buttonClasses} onClick={onClick} disabled={disabled}>
+      <button className={buttonClasses} onClick={onClick} disabled={disabled} aria-label={label}>
         {icon}
         {badge !== undefined && <span className={styles.badge}>{badge}</span>}
       </button>

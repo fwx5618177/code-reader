@@ -67,7 +67,16 @@ class TesseractWorkerClient {
   private failure: Error | null = null;
 
   constructor(workerPath: string) {
-    this.worker = new Worker(workerPath);
+    // ocr-resource:// 与页面不同源，不能直接作为 Worker 入口；与 tesseract.js 的做法一致，
+    // 用同源的 Blob 脚本 importScripts 引擎脚本（CSP 放行了 worker-src blob: 与 script-src ocr-resource:）
+    const bootstrap = URL.createObjectURL(
+      new Blob([`importScripts(${JSON.stringify(workerPath)});`], { type: 'application/javascript' })
+    );
+    try {
+      this.worker = new Worker(bootstrap);
+    } finally {
+      URL.revokeObjectURL(bootstrap);
+    }
     this.worker.onerror = (event) => {
       event.preventDefault();
       this.fail(new Error(event.message || '文字识别引擎加载失败'));

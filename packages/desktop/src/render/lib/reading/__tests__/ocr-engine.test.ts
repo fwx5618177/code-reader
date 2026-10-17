@@ -56,7 +56,20 @@ beforeEach(() => {
   FakeWorker.instances = [];
   FakeWorker.reply = () => ({ status: 'resolve', data: {} });
   vi.stubGlobal('Worker', FakeWorker);
+  // jsdom 没有实现 Blob URL
+  URL.createObjectURL = vi.fn(() => 'blob:ocr-bootstrap');
+  URL.revokeObjectURL = vi.fn();
 });
+
+/** 启动 Worker 的 Blob 脚本内容 */
+function bootstrapScript(): Promise<string> {
+  const blob = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsText(blob);
+  });
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,7 +82,10 @@ describe('createOcrSession', () => {
 
     const session = await createOcrSession(['chi_sim', 'eng']);
     const worker = FakeWorker.instances[0];
-    expect(worker.url).toBe('ocr-resource://engine/worker.min.js');
+    // 引擎脚本不同源，经同源 Blob 脚本 importScripts 加载
+    expect(worker.url).toBe('blob:ocr-bootstrap');
+    expect(await bootstrapScript()).toBe('importScripts("ocr-resource://engine/worker.min.js");');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:ocr-bootstrap');
     expect(worker.received.map((packet) => packet.action)).toEqual(['load', 'loadLanguage', 'initialize', 'setParameters']);
     expect(worker.received[1].payload).toMatchObject({
       langs: ['chi_sim', 'eng'],
