@@ -898,6 +898,7 @@ const App: React.FC = () => {
             <VersionHistory
               itemId={selectedDocId || ''}
               isOpen={showVersionHistory}
+              currentContent={currentDocument?.content ?? ''}
               onClose={() => setShowVersionHistory(false)}
               onRestore={() => {
                 // 版本恢复后强制重新加载文档内容
@@ -996,6 +997,7 @@ const App: React.FC = () => {
           <VersionHistory
             itemId={selectedDocId || ''}
             isOpen={showVersionHistory}
+            currentContent={currentDocument?.content ?? ''}
             onClose={() => setShowVersionHistory(false)}
             onRestore={() => {
               // 版本恢复后强制重新加载文档内容

@@ -6,18 +6,12 @@
 import React, { useMemo, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import { useContentDiff } from '../useWritingService';
 import type { DiffStats } from '@code-reader/diff-algorithm';
+import { diffsToLines, type Diff, type DiffLine } from './diff-lines';
 import styles from './DiffViewer.module.scss';
 
 // ================================
 // 类型定义
 // ================================
-
-type DiffOp = -1 | 0 | 1;
-type Diff = [DiffOp, string];
-
-const DIFF_DELETE = -1;
-const DIFF_EQUAL = 0;
-const DIFF_INSERT = 1;
 
 export type DiffViewMode = 'inline' | 'split' | 'unified';
 
@@ -65,13 +59,6 @@ export interface DiffViewerHandle {
 // 辅助类型
 // ================================
 
-interface DiffLine {
-  type: 'insert' | 'delete' | 'equal';
-  content: string;
-  sourceLineNum?: number;
-  targetLineNum?: number;
-}
-
 interface CollapsedLine {
   type: 'collapsed';
   count: number;
@@ -83,55 +70,6 @@ type DisplayLine = DiffLine | CollapsedLine;
 // ================================
 // 辅助函数
 // ================================
-
-/**
- * 将差分结果转换为行列表
- */
-function diffsToLines(diffs: Diff[]): DiffLine[] {
-  const lines: DiffLine[] = [];
-  let sourceLineNum = 1;
-  let targetLineNum = 1;
-
-  for (const [op, text] of diffs) {
-    const textLines = text.split('\n');
-
-    for (let i = 0; i < textLines.length; i++) {
-      const lineText = textLines[i];
-      const isLastPart = i === textLines.length - 1;
-
-      if (lineText.length === 0 && isLastPart) {
-        continue;
-      }
-
-      switch (op) {
-        case DIFF_INSERT:
-          lines.push({
-            type: 'insert',
-            content: lineText,
-            targetLineNum: targetLineNum++,
-          });
-          break;
-        case DIFF_DELETE:
-          lines.push({
-            type: 'delete',
-            content: lineText,
-            sourceLineNum: sourceLineNum++,
-          });
-          break;
-        case DIFF_EQUAL:
-          lines.push({
-            type: 'equal',
-            content: lineText,
-            sourceLineNum: sourceLineNum++,
-            targetLineNum: targetLineNum++,
-          });
-          break;
-      }
-    }
-  }
-
-  return lines;
-}
 
 /**
  * 折叠连续的未更改行
@@ -197,6 +135,20 @@ function collapseEqualLines(lines: DiffLine[], threshold: number): DisplayLine[]
   return result;
 }
 
+/** 渲染一行的片段：只高亮实际发生变化的部分 */
+function renderSegments(line: DiffLine): React.ReactNode {
+  const changedClassName = line.type === 'insert' ? styles.textInsert : styles.textDelete;
+  return line.segments.map((segment, index) =>
+    segment.changed ? (
+      <span key={index} className={changedClassName}>
+        {segment.text}
+      </span>
+    ) : (
+      <React.Fragment key={index}>{segment.text}</React.Fragment>
+    )
+  );
+}
+
 // ================================
 // 加载动画组件
 // ================================
@@ -259,7 +211,7 @@ export const DiffViewer = forwardRef<DiffViewerHandle, DiffViewerProps>(
     // 将差分转换为行
     const diffLines = useMemo(() => {
       if (!lastDiff?.diffs) return [];
-      return diffsToLines(lastDiff.diffs as Diff[]);
+      return diffsToLines(lastDiff.diffs as readonly Diff[]);
     }, [lastDiff]);
 
     // 应用折叠
@@ -309,18 +261,6 @@ export const DiffViewer = forwardRef<DiffViewerHandle, DiffViewerProps>(
       }
     }, []);
 
-    // 获取文本的类名
-    const getTextClassName = useCallback((type: 'insert' | 'delete' | 'equal') => {
-      switch (type) {
-        case 'insert':
-          return styles.textInsert;
-        case 'delete':
-          return styles.textDelete;
-        default:
-          return '';
-      }
-    }, []);
-
     // 渲染行
     const renderInlineLine = useCallback(
       (line: DisplayLine, index: number): React.ReactNode => {
@@ -353,7 +293,6 @@ export const DiffViewer = forwardRef<DiffViewerHandle, DiffViewerProps>(
         }
 
         const lineClassName = `${styles.inlineLine} ${getLineClassName(line.type)}`;
-        const textClassName = getTextClassName(line.type);
         const lineNum = line.type === 'delete' ? line.sourceLineNum : line.targetLineNum;
         const prefix = line.type === 'insert' ? '+ ' : line.type === 'delete' ? '- ' : '  ';
 
@@ -361,22 +300,13 @@ export const DiffViewer = forwardRef<DiffViewerHandle, DiffViewerProps>(
           <div key={`line-${index}`} className={lineClassName}>
             {showLineNumbers && <div className={styles.lineNumber}>{lineNum}</div>}
             <div className={styles.lineContent}>
-              <span className={textClassName}>
-                {prefix}
-                {line.content}
-              </span>
+              {prefix}
+              {renderSegments(line)}
             </div>
           </div>
         );
       },
-      [
-        showLineNumbers,
-        expandedSections,
-        diffLines,
-        toggleCollapsed,
-        getLineClassName,
-        getTextClassName,
-      ]
+      [showLineNumbers, expandedSections, diffLines, toggleCollapsed, getLineClassName]
     );
 
     // 渲染分栏视图
@@ -389,39 +319,29 @@ export const DiffViewer = forwardRef<DiffViewerHandle, DiffViewerProps>(
           <div className={`${styles.splitPane} ${styles.left}`}>
             <div className={styles.splitHeader}>{sourceTitle}</div>
             <div className={styles.inlineContent}>
-              {sourceLines.map((line, index) => {
-                const lineClassName = `${styles.inlineLine} ${getLineClassName(line.type)}`;
-                const textClassName = line.type === 'delete' ? styles.textDelete : '';
-                return (
-                  <div key={`source-${index}`} className={lineClassName}>
-                    {showLineNumbers && (
-                      <div className={styles.lineNumber}>{line.sourceLineNum}</div>
-                    )}
-                    <div className={styles.lineContent}>
-                      <span className={textClassName}>{line.content}</span>
-                    </div>
-                  </div>
-                );
-              })}
+              {sourceLines.map((line, index) => (
+                <div
+                  key={`source-${index}`}
+                  className={`${styles.inlineLine} ${getLineClassName(line.type)}`}
+                >
+                  {showLineNumbers && <div className={styles.lineNumber}>{line.sourceLineNum}</div>}
+                  <div className={styles.lineContent}>{renderSegments(line)}</div>
+                </div>
+              ))}
             </div>
           </div>
           <div className={styles.splitPane}>
             <div className={styles.splitHeader}>{targetTitle}</div>
             <div className={styles.inlineContent}>
-              {targetLines.map((line, index) => {
-                const lineClassName = `${styles.inlineLine} ${getLineClassName(line.type)}`;
-                const textClassName = line.type === 'insert' ? styles.textInsert : '';
-                return (
-                  <div key={`target-${index}`} className={lineClassName}>
-                    {showLineNumbers && (
-                      <div className={styles.lineNumber}>{line.targetLineNum}</div>
-                    )}
-                    <div className={styles.lineContent}>
-                      <span className={textClassName}>{line.content}</span>
-                    </div>
-                  </div>
-                );
-              })}
+              {targetLines.map((line, index) => (
+                <div
+                  key={`target-${index}`}
+                  className={`${styles.inlineLine} ${getLineClassName(line.type)}`}
+                >
+                  {showLineNumbers && <div className={styles.lineNumber}>{line.targetLineNum}</div>}
+                  <div className={styles.lineContent}>{renderSegments(line)}</div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

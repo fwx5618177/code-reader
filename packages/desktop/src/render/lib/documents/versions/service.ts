@@ -11,7 +11,11 @@ import { DocumentVersion, CreateVersionInput, VersionComparison, ChangeType } fr
 // Constants
 // ================================
 
-/** Default number of versions to keep when pruning */
+/**
+ * 版本保留策略：每篇文档只保留最近 50 个版本，每次新增版本（保存、自动保存、恢复）后自动清理更旧的版本。
+ * 自动保存至少间隔 5 分钟，50 个版本足以覆盖数小时的连续写作；
+ * 每个版本都是完整快照，删除旧版本不影响其余版本的预览与恢复。
+ */
 const DEFAULT_PRUNE_KEEP_COUNT = 50;
 
 /** Default limit for version history queries */
@@ -36,6 +40,7 @@ class VersionService {
     });
 
     console.log('[VersionService] Version created:', version.id, 'v' + version.versionNumber);
+    await this.pruneAfterCreate(input.itemId);
 
     return version;
   }
@@ -84,6 +89,7 @@ class VersionService {
         version.id,
         'v' + version.versionNumber
       );
+      await this.pruneAfterCreate(itemId);
     }
 
     return version;
@@ -177,6 +183,7 @@ class VersionService {
       '-> new version:',
       restoredVersion.id
     );
+    await this.pruneAfterCreate(itemId);
 
     return restoredVersion;
   }
@@ -210,6 +217,18 @@ class VersionService {
     }
 
     return deletedCount;
+  }
+
+  /**
+   * 新增版本后按保留策略清理旧版本
+   * 版本已创建成功，清理失败只记录日志，下次创建时会再次清理
+   */
+  private async pruneAfterCreate(itemId: string): Promise<void> {
+    try {
+      await this.pruneVersions(itemId);
+    } catch (error) {
+      console.error('[VersionService] 清理旧版本失败:', itemId, error);
+    }
   }
 
   /**
