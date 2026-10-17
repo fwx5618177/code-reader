@@ -76,6 +76,8 @@ export interface CompletionProvider {
   readonly type: CompletionType;
   /** 触发字符 */
   readonly triggerCharacters?: string[];
+  /** 显示条数上限（不设置时使用插件配置的 maxResults）；多个提供者同时激活时取最大值 */
+  readonly maxResults?: number;
   /** 是否应该激活 */
   shouldActivate(context: CompletionContext): boolean;
   /** 获取补全项 */
@@ -400,19 +402,21 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
   /** 收集所有激活提供者的补全项 */
   const updateCompletions = async (context: CompletionContext): Promise<CompletionItem[]> => {
     const allItems: CompletionItem[] = [];
+    let limit = opts.maxResults;
 
     for (const provider of opts.providers) {
       if (provider.shouldActivate(context)) {
         try {
           const items = await provider.getCompletions(context);
           allItems.push(...items);
+          if (provider.maxResults !== undefined) limit = Math.max(limit, provider.maxResults);
         } catch (error) {
           console.error(`[Autocomplete] 提供者 ${provider.name} 出错:`, error);
         }
       }
     }
 
-    return filterAndSortItems(allItems, context.query, opts.maxResults);
+    return filterAndSortItems(allItems, context.query, limit);
   };
 
   /** 接受补全 */

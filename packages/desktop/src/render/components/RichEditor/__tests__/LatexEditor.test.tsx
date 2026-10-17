@@ -9,6 +9,7 @@ import { render, waitFor, fireEvent, screen } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
 import { foldable } from '@codemirror/language';
 import { LatexEditor } from '../LatexEditor';
+import { getEditorBridge } from '../../../lib/plugins/editor-bridge';
 
 const SOURCE = [
   '\\documentclass{article}',
@@ -137,5 +138,23 @@ describe('LatexEditor', () => {
     const view = getView(container);
     rerender(<LatexEditor initialContent={SOURCE} revealHeading={{ heading: '章节', occurrence: 0 }} />);
     await waitFor(() => expect(view.state.selection.main.head).toBe(SOURCE.indexOf('\\section{章节}')));
+  });
+
+  it('注册到插件编辑器桥接：插件读写作用于 LaTeX 源码，卸载后注销', () => {
+    const onChange = vi.fn();
+    const { container, unmount } = render(<LatexEditor initialContent={SOURCE} onChange={onChange} />);
+    const view = getView(container);
+    const api = getEditorBridge().createEditorAPI();
+
+    expect(api.getLanguage()).toBe('latex');
+    expect(api.getContent()).toBe(SOURCE);
+    view.dispatch({ selection: { anchor: SOURCE.indexOf('第一段') } });
+    expect(api.getCursorPosition()).toEqual({ line: 5, column: 1 });
+    api.insertText('插件');
+    expect(view.state.doc.toString()).toContain('插件第一段');
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(getEditorBridge().getEditor()).toBeNull();
   });
 });

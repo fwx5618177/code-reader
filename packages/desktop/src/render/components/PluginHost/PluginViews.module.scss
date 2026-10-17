@@ -1,0 +1,74 @@
+// ================================
+// 插件视图面板：每个视图一节，列表项可点击执行插件命令
+// ================================
+
+@use '../../styles/variables' as *;
+
+.views {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--spacing-1) 0 var(--spacing-3);
+  @include scrollbar;
+}
+
+.view + .view {
+  margin-top: var(--spacing-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.title {
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-1);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  @include truncate;
+}
+
+.hint {
+  margin: 0;
+  padding: var(--spacing-1) var(--spacing-3);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 3px var(--spacing-3);
+  text-align: left;
+}
+
+.clickable {
+  @include button-reset;
+  cursor: pointer;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+}
+
+.label {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  @include truncate;
+}
+
+.description {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  @include truncate;
+}

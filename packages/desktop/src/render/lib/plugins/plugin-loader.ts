@@ -4,25 +4,18 @@
 // ================================
 
 import { getEditorBridge } from './editor-bridge';
-import { STATUS_BAR_ITEMS, type ExtensionRegistry } from './extension-registry';
+import { STATUS_BAR_ITEMS, VIEW_ITEMS, type ExtensionRegistry } from './extension-registry';
+import { configurationValues } from './preferences';
 import { createSandboxedContext, type Permission } from './sandbox';
 import { createPluginStorage } from './storage';
-import type { Disposable, Plugin, PluginContext, PluginId, StorageAPI } from './types';
-
-/** 命令面板可执行的插件命令 */
-export interface PluginCommand {
-  pluginId: PluginId;
-  pluginName: string;
-  /** 插件内命令 ID */
-  commandId: string;
-  title: string;
-  description?: string;
-}
+import type { ConfigurationAPI, Disposable, Plugin, PluginContext, PluginId, PluginManifest, StorageAPI } from './types';
 
 export interface PluginLoaderOptions {
   registry: ExtensionRegistry;
   /** 插件私有存储，默认使用 localStorage */
   storageFor?: (pluginId: PluginId) => StorageAPI;
+  /** 插件配置，默认只提供 manifest 中的默认值 */
+  configurationFor?: (manifest: PluginManifest) => ConfigurationAPI;
   /** 激活超时（毫秒） */
   activationTimeout?: number;
 }
@@ -47,16 +40,28 @@ export class PluginLoader {
   private readonly active = new Map<PluginId, ActivePlugin>();
   private readonly registry: ExtensionRegistry;
   private readonly storageFor: (pluginId: PluginId) => StorageAPI;
+  private readonly configurationFor: (manifest: PluginManifest) => ConfigurationAPI;
   private readonly activationTimeout: number;
 
   constructor(options: PluginLoaderOptions) {
     this.registry = options.registry;
     this.storageFor = options.storageFor ?? ((pluginId) => createPluginStorage(pluginId));
+    this.configurationFor =
+      options.configurationFor ??
+      ((manifest) => {
+        const defaults = configurationValues({}, manifest);
+        return { get: (key) => defaults[key]!, onDidChange: () => ({ dispose: () => undefined }) };
+      });
     this.activationTimeout = options.activationTimeout ?? DEFAULT_ACTIVATION_TIMEOUT;
   }
 
   isActive(pluginId: PluginId): boolean {
     return this.active.has(pluginId);
+  }
+
+  /** 已激活的插件是否已注册该命令的处理器 */
+  hasCommand(pluginId: PluginId, commandId: string): boolean {
+    return this.active.get(pluginId)?.commands.has(commandId) ?? false;
   }
 
   /**
@@ -78,6 +83,13 @@ export class PluginLoader {
         set: (item) => this.registry.set(STATUS_BAR_ITEMS, pluginId, item),
         clear: () => this.registry.remove(STATUS_BAR_ITEMS, pluginId),
       },
+      views: {
+        set: (viewId, items) => {
+          const current = this.registry.get(VIEW_ITEMS).find((entry) => entry.pluginId === pluginId)?.value;
+          this.registry.set(VIEW_ITEMS, pluginId, { ...current, [viewId]: items });
+        },
+      },
+      configuration: this.configurationFor(manifest),
       registerCommand: (id, handler): Disposable => {
         if (commands.has(id)) throw new Error(`命令 ${id} 已注册`);
         commands.set(id, handler);
@@ -120,24 +132,6 @@ export class PluginLoader {
     }
     entry.commands.clear();
     this.registry.removeAllByPlugin(pluginId);
-  }
-
-  /** 已激活插件中已注册处理器的命令（标题取自 manifest） */
-  getCommands(): PluginCommand[] {
-    const result: PluginCommand[] = [];
-    for (const [pluginId, { plugin, commands }] of this.active) {
-      for (const command of plugin.manifest.contributes.commands) {
-        if (!commands.has(command.id)) continue;
-        result.push({
-          pluginId,
-          pluginName: plugin.manifest.name,
-          commandId: command.id,
-          title: command.title,
-          description: command.description,
-        });
-      }
-    }
-    return result;
   }
 
   async executeCommand(pluginId: PluginId, commandId: string, ...args: unknown[]): Promise<unknown> {

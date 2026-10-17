@@ -8,6 +8,7 @@ import type { Disposable } from '../types';
 
 function fakeEditor(content: string): EditorInstance {
   return {
+    language: 'markdown',
     getContent: () => content,
     setContent: vi.fn(),
     getSelection: () => '',

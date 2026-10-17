@@ -63,6 +63,15 @@ interface SlashCommand {
   run: (view: EditorView, from: number, to: number) => void;
 }
 
+/** 外部提供的斜杠命令（如插件命令）：删除触发文本后执行 run */
+export interface ExternalSlashCommand {
+  id: string;
+  label: string;
+  detail: string;
+  keywords?: string;
+  run: () => void;
+}
+
 /**
  * 斜杠命令补全
  */
@@ -70,9 +79,17 @@ export class SlashCommandProvider implements CompletionProvider {
   readonly name = 'slash-command';
   readonly type: CompletionType = 'command';
   readonly triggerCharacters = ['/'];
+  /** 命令数量有限，全部列出（面板可滚动），排在后面的插件命令不会被截掉 */
+  readonly maxResults = Infinity;
   private readonly commands: SlashCommand[];
 
-  constructor(schema: Schema) {
+  /**
+   * @param externalCommands 每次打开菜单时读取的外部命令，排在内置命令之后
+   */
+  constructor(
+    schema: Schema,
+    private readonly externalCommands: () => readonly ExternalSlashCommand[] = () => []
+  ) {
     const { nodes, marks } = schema;
     const heading = (level: number): SlashCommand => ({
       id: `h${level}`,
@@ -203,14 +220,27 @@ export class SlashCommandProvider implements CompletionProvider {
   }
 
   getCompletions(): CompletionItem[] {
-    return this.commands.map((command, index) => ({
+    const commands: SlashCommand[] = [
+      ...this.commands,
+      ...this.externalCommands().map((command) => ({
+        id: command.id,
+        label: command.label,
+        detail: command.detail,
+        keywords: command.keywords ?? '',
+        run: (view: EditorView, from: number, to: number) => {
+          view.dispatch(view.state.tr.delete(from, to));
+          command.run();
+        },
+      })),
+    ];
+    return commands.map((command, index) => ({
       id: command.id,
       label: command.label,
       detail: command.detail,
       insertText: '',
       type: this.type,
       icon: '/',
-      priority: this.commands.length - index,
+      priority: commands.length - index,
       filterText: `${command.label} ${command.keywords}`,
       apply: command.run,
     }));

@@ -1,11 +1,11 @@
 // ================================
 // 扩展点注册表
 // 插件向扩展点贡献数据，界面订阅扩展点渲染；每个插件在每个扩展点上最多一条贡献（再次设置即替换）。
-// 命令不走注册表：命令由 PluginLoader 管理，标题取自 manifest。
-// 目前已接入界面的扩展点只有状态栏项；新增扩展点时须同时提供界面入口。
+// 这里只有插件运行时动态产生的数据（状态栏项、侧栏视图内容）；命令、快捷键、菜单、工具栏等静态贡献
+// 来自 manifest，由 pluginService 按插件状态提供。新增扩展点时须同时提供界面入口。
 // ================================
 
-import type { PluginId, StatusBarItem } from './types';
+import type { PluginId, StatusBarItem, ViewItem } from './types';
 
 export interface ExtensionPoint<T> {
   readonly id: string;
@@ -23,6 +23,12 @@ export interface Contribution<T> {
 export const STATUS_BAR_ITEMS: ExtensionPoint<StatusBarItem> = {
   id: 'statusBar.item',
   description: '状态栏项（每个插件一项，可点击执行本插件命令）',
+};
+
+/** 侧栏「插件视图」的内容：视图 ID → 列表项，由 PluginViewsPanel 渲染 */
+export const VIEW_ITEMS: ExtensionPoint<Readonly<Record<string, readonly ViewItem[]>>> = {
+  id: 'sidebar.viewItems',
+  description: '插件侧栏视图的列表内容（视图在 manifest.contributes.views 中声明）',
 };
 
 const EMPTY: readonly Contribution<never>[] = [];

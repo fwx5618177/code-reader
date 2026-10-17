@@ -7,10 +7,12 @@
 // 界面交互（消息、输入框、选择列表、确认框）由 PluginHost 注册的 UIManager 提供。
 // ================================
 
-import type { Disposable, EditorAPI, UIAPI } from './types';
+import type { Disposable, EditorAPI, EditorLanguage, UIAPI } from './types';
 
-/** 编辑器实例接口（由 RichEditor 实现） */
+/** 编辑器实例接口（由 RichEditor 与 LatexEditor 实现） */
 export interface EditorInstance {
+  /** 文档语言 */
+  readonly language: EditorLanguage;
   getContent(): string;
   setContent(content: string): void;
   getSelection(): string;
@@ -85,6 +87,12 @@ class EditorBridge {
     return this.editors[this.editors.length - 1] ?? null;
   }
 
+  /** 活动编辑器切换或其内容变化时回调（插件服务据此触发 onLanguage 激活事件） */
+  onDidChange(listener: () => void): Disposable {
+    this.changeListeners.add(listener);
+    return { dispose: () => this.changeListeners.delete(listener) };
+  }
+
   /** 创建作用于当前活动编辑器的 API */
   createEditorAPI(): EditorAPI {
     const active = (): EditorInstance => {
@@ -100,10 +108,8 @@ class EditorBridge {
       insertText: (text) => active().insertText(text),
       getCursorPosition: () => active().getCursorPosition(),
       setCursorPosition: (line, column) => active().setCursorPosition(line, column),
-      onDidChange: (listener) => {
-        this.changeListeners.add(listener);
-        return { dispose: () => this.changeListeners.delete(listener) };
-      },
+      getLanguage: () => active().language,
+      onDidChange: (listener) => this.onDidChange(listener),
     };
   }
 

@@ -4,7 +4,17 @@
 // 只能经宿主提供的、按权限过滤的 API 操作编辑器与界面
 // ================================
 
+import type {
+  ConfigurationContribution,
+  KeybindingContribution,
+  MenuItemContribution,
+  PluginDependency,
+  SidebarViewContribution,
+  ToolbarItemContribution,
+} from '@code-reader/plugin-system';
 import type { Permission } from './sandbox';
+
+export type { PluginDependency };
 
 /** 插件唯一标识符（同时是插件目录名） */
 export type PluginId = string;
@@ -26,6 +36,37 @@ export interface CommandContribution {
   description?: string;
 }
 
+/** 快捷键：when 只支持 editorFocus（焦点在编辑器内时生效） */
+export type PluginKeybinding = Pick<KeybindingContribution, 'command' | 'key' | 'mac' | 'win' | 'linux'> & {
+  when?: 'editorFocus';
+};
+
+/** 编辑器斜杠菜单（menus["editor/context"]）中的命令 */
+export type PluginMenuItem = Pick<MenuItemContribution, 'command' | 'order'>;
+
+/** 编辑器标签栏右侧的工具按钮：icon 为内置图标名（见 TOOLBAR_ICONS） */
+export type PluginToolbarItem = Pick<ToolbarItemContribution, 'command' | 'icon' | 'tooltip' | 'order'>;
+
+/** 侧栏「插件视图」中的一个视图；内容由插件用 app.views.set 提供 */
+export type PluginView = Pick<SidebarViewContribution, 'id' | 'name'>;
+
+/** 插件配置项：只支持字符串、数字、布尔（可带枚举） */
+export interface PluginConfigurationProperty {
+  type: 'string' | 'number' | 'boolean';
+  default: string | number | boolean;
+  description?: string;
+  enum?: Array<string | number>;
+  enumDescriptions?: string[];
+  minimum?: number;
+  maximum?: number;
+}
+
+export interface PluginConfiguration extends Pick<ConfigurationContribution, 'title'> {
+  properties: Record<string, PluginConfigurationProperty>;
+}
+
+export type ConfigurationValue = PluginConfigurationProperty['default'];
+
 /** 经校验的插件清单 */
 export interface PluginManifest {
   id: PluginId;
@@ -38,9 +79,27 @@ export interface PluginManifest {
   main: string;
   /** 插件需要的权限；未声明的权限永远不会被授予 */
   permissions: Permission[];
+  /** 依赖的其他插件（版本范围如 ^1.0.0），依赖先激活；必需依赖不可用时拒绝激活 */
+  dependencies: PluginDependency[];
+  /** 激活时机；未声明时为 ["onStartup"] */
+  activationEvents?: string[];
   contributes: {
     commands: CommandContribution[];
+    keybindings: PluginKeybinding[];
+    /** 只支持 editor/context（斜杠菜单） */
+    menus: { 'editor/context': PluginMenuItem[] };
+    toolbar: PluginToolbarItem[];
+    views: PluginView[];
+    configuration?: PluginConfiguration;
   };
+}
+
+/** 侧栏视图中的一项，点击执行本插件命令（args 作为命令参数） */
+export interface ViewItem {
+  label: string;
+  description?: string;
+  command?: string;
+  args?: unknown[];
 }
 
 /** 状态栏项（每个插件最多一项） */
@@ -60,9 +119,13 @@ export interface EditorAPI {
   insertText(text: string): void;
   getCursorPosition(): { line: number; column: number };
   setCursorPosition(line: number, column: number): void;
+  /** 活动编辑器的文档语言：markdown / latex / plain */
+  getLanguage(): EditorLanguage;
   /** 活动编辑器内容变化或切换活动编辑器时触发 */
   onDidChange(listener: () => void): Disposable;
 }
+
+export type EditorLanguage = 'markdown' | 'latex' | 'plain';
 
 /** 界面交互 API */
 export interface UIAPI {
@@ -80,6 +143,14 @@ export interface StorageAPI {
   keys(): string[];
 }
 
+/** 插件配置（只读；用户在「设置 → 插件」中修改） */
+export interface ConfigurationAPI {
+  /** 配置值；用户未修改时为 manifest 中的默认值 */
+  get(key: string): ConfigurationValue;
+  /** 用户修改配置后回调（参数为被修改的键） */
+  onDidChange(listener: (key: string) => void): Disposable;
+}
+
 /** 提供给插件的上下文（已按权限过滤） */
 export interface PluginContext {
   readonly pluginId: PluginId;
@@ -94,6 +165,11 @@ export interface PluginContext {
     set(item: StatusBarItem): void;
     clear(): void;
   };
+  /** 侧栏视图内容（视图须在 manifest.contributes.views 中声明） */
+  readonly views: {
+    set(viewId: string, items: ViewItem[]): void;
+  };
+  readonly configuration: ConfigurationAPI;
   readonly storage: StorageAPI;
 }
 

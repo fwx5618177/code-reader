@@ -171,6 +171,8 @@ class WorkerPlugin implements Plugin {
         return context.editor.getSelection();
       case 'editor.getCursorPosition':
         return context.editor.getCursorPosition();
+      case 'editor.getLanguage':
+        return context.editor.getLanguage();
       case 'editor.setContent':
         return context.editor.setContent(first);
       case 'editor.replaceSelection':
@@ -199,6 +201,15 @@ class WorkerPlugin implements Plugin {
         return context.statusBar.set(first as StatusBarItem);
       case 'statusBar.clear':
         return context.statusBar.clear();
+      case 'views.set':
+        return context.views.set(first, second);
+      case 'config.get':
+        return context.configuration.get(first);
+      case 'config.subscribe':
+        context.subscriptions.push(
+          context.configuration.onDidChange((key) => this.post({ type: 'configChanged', key }))
+        );
+        return undefined;
       case 'storage.get':
         return context.storage.get(first);
       case 'storage.set':

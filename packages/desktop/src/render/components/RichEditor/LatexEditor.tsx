@@ -43,6 +43,7 @@ import { latexAnalysis } from '../../lib/latex/codemirror-analysis';
 import type { LatexAnalysis } from '../../lib/latex/analysis';
 import { requestLatexAnalysis } from '../../lib/latex/analysis-client';
 import { findHeadingIndex } from '../../lib/markdown';
+import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
 import {
   LatexDocument,
   editorChangesToChangeSet,
@@ -86,6 +87,8 @@ export interface LatexEditorProps {
   debounceMs?: number;
   /** 定位到章节（侧栏大纲点击）：occurrence 为同名章节中的序号 */
   revealHeading?: { heading: string; occurrence?: number } | null;
+  /** 是否为聚焦的一栏（插件编辑器 API 作用于聚焦的一栏） */
+  active?: boolean;
 }
 
 /** 编辑器视图模式 */
@@ -558,9 +561,14 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   showLineNumbers = true,
   debounceMs = DEFAULT_DEBOUNCE_MS,
   revealHeading = null,
+  active = true,
 }) => {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
   // 文档模型与增量引擎（每个编辑器实例独立，组件以文档为 key 挂载）
   const [latexDocument] = useState(() => new LatexDocument(normalizeLatexSource(initialContent)));
@@ -769,6 +777,7 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
     (changes: DocumentChange[]) => {
       const content = latexDocument.getText();
       onChangeRef.current?.(content);
+      getEditorBridge().notifyContentChange();
       runEngineUpdate(changes);
 
       if (refreshTimerRef.current) {
@@ -793,6 +802,67 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
       engine.destroy();
     };
   }, [engine]);
+
+  // ================================
+  // 插件编辑器桥接：读写作用于源码编辑器（行列号从 1 计）；仅预览时只能读取
+  // ================================
+
+  const bridgeEditorRef = useRef<EditorInstance | null>(null);
+
+  useEffect(() => {
+    const editableView = (): EditorView => {
+      const view = sourceViewRef.current;
+      if (!view) throw new Error('LaTeX 文档处于预览视图，请切换到源码或分栏后再修改');
+      if (readOnlyRef.current) throw new Error('文档为只读');
+      return view;
+    };
+    const instance: EditorInstance = {
+      language: 'latex',
+      getContent: () => sourceViewRef.current?.state.doc.toString() ?? latexDocument.getText(),
+      setContent(content) {
+        const view = editableView();
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: content } });
+      },
+      getSelection() {
+        const view = sourceViewRef.current;
+        if (!view) return '';
+        const { from, to } = view.state.selection.main;
+        return view.state.sliceDoc(from, to);
+      },
+      replaceSelection(text) {
+        const view = editableView();
+        view.dispatch(view.state.replaceSelection(text));
+      },
+      insertText(text) {
+        const view = editableView();
+        const at = view.state.selection.main.head;
+        view.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length } });
+      },
+      getCursorPosition() {
+        const view = sourceViewRef.current;
+        if (!view) return { line: 1, column: 1 };
+        const head = view.state.selection.main.head;
+        const line = view.state.doc.lineAt(head);
+        return { line: line.number, column: head - line.from + 1 };
+      },
+      setCursorPosition(line, column) {
+        const view = editableView();
+        const target = view.state.doc.line(Math.min(Math.max(line, 1), view.state.doc.lines));
+        view.dispatch({ selection: { anchor: Math.min(target.from + Math.max(column - 1, 0), target.to) } });
+      },
+      focus: () => sourceViewRef.current?.focus(),
+    };
+    const registration = getEditorBridge().registerEditor(instance, activeRef.current);
+    bridgeEditorRef.current = instance;
+    return () => {
+      registration.dispose();
+      bridgeEditorRef.current = null;
+    };
+  }, [latexDocument]);
+
+  useEffect(() => {
+    if (active && bridgeEditorRef.current) getEditorBridge().activate(bridgeEditorRef.current);
+  }, [active]);
 
   // ================================
   // 布局

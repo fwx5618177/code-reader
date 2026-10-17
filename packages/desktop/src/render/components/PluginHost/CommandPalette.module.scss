@@ -73,8 +73,20 @@
 
 .detail {
   flex-shrink: 0;
+  margin-left: auto;
   font-size: var(--font-size-xs);
   color: var(--text-muted);
+}
+
+.shortcut {
+  flex-shrink: 0;
+  padding: 0 var(--spacing-1);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .empty {

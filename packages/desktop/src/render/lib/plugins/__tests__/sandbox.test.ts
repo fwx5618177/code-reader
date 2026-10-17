@@ -14,7 +14,15 @@ function manifest(permissions: Permission[]): PluginManifest {
     version: '1.0.0',
     main: 'main.js',
     permissions,
-    contributes: { commands: [{ id: 'run', title: 'Run' }] },
+    dependencies: [],
+    contributes: {
+      commands: [{ id: 'run', title: 'Run' }],
+      keybindings: [],
+      menus: { 'editor/context': [] },
+      toolbar: [],
+      views: [{ id: 'list', name: '列表' }],
+      configuration: { title: 'Demo', properties: { size: { type: 'number', default: 1 } } },
+    },
   };
 }
 
@@ -28,6 +36,7 @@ function createHost(): SandboxHost {
       insertText: vi.fn(),
       getCursorPosition: vi.fn(() => ({ line: 1, column: 1 })),
       setCursorPosition: vi.fn(),
+      getLanguage: vi.fn(() => 'latex' as const),
       onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
     },
     ui: {
@@ -38,6 +47,8 @@ function createHost(): SandboxHost {
     },
     storage: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), keys: vi.fn(() => []) },
     statusBar: { set: vi.fn(), clear: vi.fn() },
+    views: { set: vi.fn() },
+    configuration: { get: vi.fn(() => 3), onDidChange: vi.fn(() => ({ dispose: vi.fn() })) },
     registerCommand: vi.fn(() => ({ dispose: vi.fn() })),
   };
 }
@@ -90,6 +101,39 @@ describe('createSandboxedContext', () => {
     context.ui.showMessage('2');
     expect(() => context.ui.showMessage('3')).toThrow('过于频繁');
     expect(host.ui.showMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('侧栏视图需要 ui:view 权限，只能写入已声明的视图，列表项经校验与复制', () => {
+    const host = createHost();
+    expect(() => createSandboxedContext(manifest([]), [], host).views.set('list', [])).toThrow(PermissionDeniedError);
+
+    const context = createSandboxedContext(manifest(['ui:view']), ['ui:view'], host);
+    const args = [{ id: 1 }];
+    context.views.set('list', [{ label: '第一项', description: '说明', command: 'run', args }]);
+    expect(host.views.set).toHaveBeenCalledWith('list', [{ label: '第一项', description: '说明', command: 'run', args: [{ id: 1 }] }]);
+    expect((host.views.set as ReturnType<typeof vi.fn>).mock.calls[0][1][0].args).not.toBe(args);
+
+    expect(() => context.views.set('ghost', [])).toThrow('视图 ghost 未在');
+    expect(() => context.views.set('list', [{ label: 'x', command: 'ghost' }])).toThrow('命令 ghost');
+    expect(() => context.views.set('list', [{ label: 'x'.repeat(121) }])).toThrow(RangeError);
+    expect(() => context.views.set('list', [{ label: 'x', args: 'no' as never }])).toThrow('args');
+    expect(() => context.views.set('list', Array.from({ length: 201 }, () => ({ label: 'x' })))).toThrow('200');
+  });
+
+  it('配置只能读取已声明的项，无需权限', () => {
+    const host = createHost();
+    const context = createSandboxedContext(manifest([]), [], host);
+    expect(context.configuration.get('size')).toBe(3);
+    expect(() => context.configuration.get('ghost')).toThrow('配置项 ghost');
+    const listener = vi.fn();
+    context.configuration.onDidChange(listener);
+    expect(host.configuration.onDidChange).toHaveBeenCalledWith(listener);
+  });
+
+  it('读取文档语言需要 editor:read', () => {
+    const host = createHost();
+    expect(createSandboxedContext(manifest(['editor:read']), ['editor:read'], host).editor.getLanguage()).toBe('latex');
+    expect(() => createSandboxedContext(manifest([]), [], host).editor.getLanguage()).toThrow(PermissionDeniedError);
   });
 });
 

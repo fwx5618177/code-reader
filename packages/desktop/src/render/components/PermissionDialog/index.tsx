@@ -5,7 +5,7 @@
 
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Database, Edit3, Eye, Layout, MessageSquare, Shield, ShieldAlert, X } from 'lucide-react';
+import { AlertTriangle, Database, Edit3, Eye, Layout, ListTree, MessageSquare, Shield, ShieldAlert, X } from 'lucide-react';
 import {
   PERMISSION_CATEGORY_NAMES,
   PERMISSION_INFO,
@@ -27,6 +27,7 @@ const PERMISSION_ICONS: Record<Permission, React.ReactNode> = {
   'ui:message': <MessageSquare size={16} />,
   'ui:dialog': <Layout size={16} />,
   'ui:statusbar': <Layout size={16} />,
+  'ui:view': <ListTree size={16} />,
   storage: <Database size={16} />,
 };
 

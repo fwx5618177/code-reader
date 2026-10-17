@@ -11,6 +11,8 @@ export interface PaletteItem {
   key: string;
   label: string;
   detail?: string;
+  /** 快捷键提示 */
+  shortcut?: string;
 }
 
 export interface CommandPaletteProps {
@@ -90,6 +92,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ items, placeholder, emp
               >
                 <span className={styles.label}>{item.label}</span>
                 {item.detail && <span className={styles.detail}>{item.detail}</span>}
+                {item.shortcut && <kbd className={styles.shortcut}>{item.shortcut}</kbd>}
               </li>
             ))}
           </ul>

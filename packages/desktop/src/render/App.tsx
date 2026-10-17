@@ -38,6 +38,7 @@ import {
   describeUpdated,
   diaryTitle,
 } from './components/SidebarPanels';
+import PluginViewsPanel from './components/PluginHost/PluginViews';
 import {
   ReadingShelf,
   ReadingView,
@@ -1144,6 +1145,8 @@ const App: React.FC = () => {
   };
 
   const renderSidebarContent = () => {
+    // 插件视图在各模式中相同
+    if (activeSidebarPanel.id === 'plugins') return <PluginViewsPanel />;
     switch (appState.mode) {
       case 'knowledge':
         return renderKnowledgeSidebar();

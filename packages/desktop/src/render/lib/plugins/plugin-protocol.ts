@@ -9,6 +9,7 @@ export const HOST_METHODS = [
   'editor.getContent',
   'editor.getSelection',
   'editor.getCursorPosition',
+  'editor.getLanguage',
   'editor.setContent',
   'editor.replaceSelection',
   'editor.insertText',
@@ -20,6 +21,9 @@ export const HOST_METHODS = [
   'ui.showConfirm',
   'statusBar.set',
   'statusBar.clear',
+  'views.set',
+  'config.get',
+  'config.subscribe',
   'storage.get',
   'storage.set',
   'storage.delete',
@@ -36,6 +40,7 @@ export type HostMessage =
   | ({ type: 'result'; id: number } & Outcome)
   | { type: 'runCommand'; id: number; command: string; args: unknown[] }
   | { type: 'editorChanged' }
+  | { type: 'configChanged'; key: string }
   | { type: 'deactivate' };
 
 /** Worker → 宿主 */

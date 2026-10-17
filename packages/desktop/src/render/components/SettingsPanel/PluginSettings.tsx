@@ -5,9 +5,12 @@
 // ================================
 
 import React, { useState, useSyncExternalStore } from 'react';
-import { AlertCircle, FolderOpen, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, FolderOpen, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
+import { parseActivationEvent } from '@code-reader/plugin-system/lifecycle';
 import { ConfirmDialog } from '../InputDialog';
+import type { ResolvedKeybinding } from '../../lib/plugins/keybindings';
 import { PERMISSION_INFO } from '../../lib/plugins/sandbox';
+import type { ConfigurationValue, PluginConfigurationProperty, PluginManifest } from '../../lib/plugins/types';
 import { pluginService, type PluginEntry, type PluginStatus } from '../../services/pluginService';
 import type { PluginSignatureCheck } from '../../types/electron';
 import { PluginMarket } from './PluginMarket';
@@ -17,10 +20,30 @@ import pluginStyles from './PluginSettings.module.scss';
 
 const STATUS_TEXT: Record<PluginStatus, string> = {
   disabled: '未启用',
+  idle: '等待激活',
   loading: '加载中…',
   active: '运行中',
   error: '出错',
 };
+
+const LANGUAGE_NAMES: Record<string, string> = { markdown: 'Markdown', latex: 'LaTeX', plain: '纯文本' };
+
+/** 激活事件的说明 */
+function describeActivationEvent(event: string, manifest: PluginManifest): string {
+  const parsed = parseActivationEvent(event);
+  switch (parsed?.kind) {
+    case 'onStartup':
+      return '启动时';
+    case 'onCommand':
+      return `执行「${manifest.contributes.commands.find((command) => command.id === parsed.argument)?.title ?? parsed.argument}」时`;
+    case 'onLanguage':
+      return `打开 ${LANGUAGE_NAMES[parsed.argument ?? ''] ?? parsed.argument} 文档时`;
+    case 'onView':
+      return `显示视图「${manifest.contributes.views.find((view) => view.id === parsed.argument)?.name ?? parsed.argument}」时`;
+    default:
+      return event;
+  }
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -45,6 +68,113 @@ export function signatureLabel(check: PluginSignatureCheck): { text: string; tit
 
 type PluginTab = 'installed' | 'market' | 'trust';
 
+/** 文本与数字配置：失焦或回车时提交，数字超出范围时不提交并提示 */
+const ConfigurationInput: React.FC<{
+  id: string;
+  property: PluginConfigurationProperty;
+  value: ConfigurationValue;
+  onCommit: (value: ConfigurationValue) => void;
+}> = ({ id, property, value, onCommit }) => {
+  const [draft, setDraft] = useState(String(value));
+  const [invalid, setInvalid] = useState(false);
+  const [previous, setPrevious] = useState(value);
+  if (previous !== value) {
+    setPrevious(value);
+    setDraft(String(value));
+    setInvalid(false);
+  }
+
+  const commit = () => {
+    if (property.type === 'string') {
+      if (draft !== value) onCommit(draft);
+      return;
+    }
+    const number = Number(draft);
+    const ok =
+      draft.trim() !== '' &&
+      Number.isFinite(number) &&
+      (property.minimum === undefined || number >= property.minimum) &&
+      (property.maximum === undefined || number <= property.maximum);
+    setInvalid(!ok);
+    if (ok && number !== value) onCommit(number);
+  };
+
+  return (
+    <input
+      id={id}
+      type={property.type === 'number' ? 'number' : 'text'}
+      className={`${styles.settingInput} ${property.type === 'number' ? styles.settingNumberInput : ''}`}
+      value={draft}
+      min={property.minimum}
+      max={property.maximum}
+      aria-invalid={invalid}
+      title={invalid ? `请输入${property.minimum ?? '-∞'}～${property.maximum ?? '∞'}之间的数字` : undefined}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit();
+      }}
+    />
+  );
+};
+
+/** 插件配置表单（manifest.contributes.configuration）：修改即保存，运行中的插件通过 config.onDidChange 收到通知 */
+const PluginConfigurationForm: React.FC<{
+  title: string;
+  properties: Record<string, PluginConfigurationProperty>;
+  values: Record<string, ConfigurationValue>;
+  onChange: (key: string, value: ConfigurationValue | undefined) => void;
+}> = ({ title, properties, values, onChange }) => (
+  <fieldset className={pluginStyles.configuration}>
+    <legend className={pluginStyles.groupLabel}>{title}</legend>
+    {Object.entries(properties).map(([key, property]) => {
+      const value = values[key] ?? property.default;
+      const id = `plugin-config-${title}-${key}`;
+      return (
+        <div key={key} className={pluginStyles.configItem}>
+          <label htmlFor={id} className={pluginStyles.configLabel}>
+            <code>{key}</code>
+            {property.description && <span>{property.description}</span>}
+          </label>
+          <div className={styles.settingInputWrapper}>
+            {property.type === 'boolean' ? (
+              <input id={id} type="checkbox" checked={value === true} onChange={(e) => onChange(key, e.target.checked)} />
+            ) : property.enum ? (
+              <select
+                id={id}
+                className={styles.settingSelect}
+                value={String(value)}
+                onChange={(e) =>
+                  onChange(key, property.type === 'number' ? Number(e.target.value) : e.target.value)
+                }
+              >
+                {property.enum.map((option, index) => (
+                  <option key={String(option)} value={String(option)}>
+                    {property.enumDescriptions?.[index] ?? String(option)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <ConfigurationInput id={id} property={property} value={value} onCommit={(next) => onChange(key, next)} />
+            )}
+            {value !== property.default && (
+              <button
+                type="button"
+                className={pluginStyles.resetButton}
+                onClick={() => onChange(key, undefined)}
+                title={`恢复默认值：${String(property.default)}`}
+                aria-label={`将 ${key} 恢复默认值`}
+              >
+                <RotateCcw size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    })}
+  </fieldset>
+);
+
 const TABS: Array<{ id: PluginTab; label: string }> = [
   { id: 'installed', label: '已安装' },
   { id: 'market', label: '市场' },
@@ -53,12 +183,15 @@ const TABS: Array<{ id: PluginTab; label: string }> = [
 
 const PluginCard: React.FC<{
   entry: PluginEntry;
+  keybindings: readonly ResolvedKeybinding[];
   onToggle: (enabled: boolean) => void;
   onReload: () => void;
   onUninstall: () => void;
-}> = ({ entry, onToggle, onReload, onUninstall }) => {
+  onConfigure: (key: string, value: ConfigurationValue | undefined) => void;
+}> = ({ entry, keybindings, onToggle, onReload, onUninstall, onConfigure }) => {
   const { manifest } = entry;
   const granted = new Set(entry.grantedPermissions);
+  const commandTitle = (id: string) => manifest?.contributes.commands.find((command) => command.id === id)?.title ?? id;
 
   return (
     <div className={`${styles.settingItem} ${pluginStyles.card}`}>
@@ -132,6 +265,79 @@ const PluginCard: React.FC<{
             ))}
           </ul>
         </div>
+      )}
+
+      {manifest && manifest.contributes.keybindings.length > 0 && (
+        <div className={pluginStyles.group}>
+          <span className={pluginStyles.groupLabel}>快捷键</span>
+          <ul className={pluginStyles.chips}>
+            {manifest.contributes.keybindings.map((binding) => {
+              const resolved = keybindings.find(
+                (item) => item.pluginId === entry.id && item.binding === binding
+              );
+              return (
+                <li
+                  key={`${binding.command}-${binding.key}`}
+                  className={`${pluginStyles.chip} ${resolved?.conflict ? pluginStyles.conflict : ''}`}
+                  title={resolved?.conflict ?? (binding.when === 'editorFocus' ? '仅在编辑器内生效' : undefined)}
+                >
+                  <kbd>{resolved?.label ?? binding.key}</kbd> {commandTitle(binding.command)}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {manifest && (manifest.contributes.menus['editor/context'].length > 0 || manifest.contributes.toolbar.length > 0 || manifest.contributes.views.length > 0) && (
+        <div className={pluginStyles.group}>
+          <span className={pluginStyles.groupLabel}>入口</span>
+          <ul className={pluginStyles.chips}>
+            {manifest.contributes.menus['editor/context'].map((item) => (
+              <li key={`menu-${item.command}`} className={pluginStyles.chip}>
+                斜杠菜单：{commandTitle(item.command)}
+              </li>
+            ))}
+            {manifest.contributes.toolbar.map((item) => (
+              <li key={`toolbar-${item.command}`} className={pluginStyles.chip}>
+                标签栏按钮：{item.tooltip ?? commandTitle(item.command)}
+              </li>
+            ))}
+            {manifest.contributes.views.map((view) => (
+              <li key={`view-${view.id}`} className={pluginStyles.chip}>
+                侧栏视图：{view.name}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {manifest && (manifest.dependencies.length > 0 || manifest.activationEvents) && (
+        <div className={pluginStyles.group}>
+          <span className={pluginStyles.groupLabel}>生命周期</span>
+          <ul className={pluginStyles.chips}>
+            {manifest.dependencies.map((dependency) => (
+              <li key={`dep-${dependency.id}`} className={pluginStyles.chip}>
+                依赖 {dependency.id} {dependency.version}
+                {dependency.optional ? '（可选）' : ''}
+              </li>
+            ))}
+            {manifest.activationEvents?.map((event) => (
+              <li key={`event-${event}`} className={pluginStyles.chip} title={event}>
+                {describeActivationEvent(event, manifest)}激活
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {manifest?.contributes.configuration && (
+        <PluginConfigurationForm
+          title={manifest.contributes.configuration.title}
+          properties={manifest.contributes.configuration.properties}
+          values={entry.configuration}
+          onChange={onConfigure}
+        />
       )}
 
       {entry.errors.length > 0 && (
@@ -236,9 +442,11 @@ export const PluginSettings: React.FC = () => {
                 <PluginCard
                   key={entry.id}
                   entry={entry}
+                  keybindings={snapshot.contributions.keybindings}
                   onToggle={(enabled) => run(() => pluginService.setEnabled(entry.id, enabled))}
                   onReload={() => run(() => pluginService.reload(entry.id))}
                   onUninstall={() => setPendingUninstall(entry)}
+                  onConfigure={(key, value) => run(() => pluginService.setConfiguration(entry.id, key, value))}
                 />
               ))}
             </div>

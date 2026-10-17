@@ -1029,8 +1029,15 @@
 }
 
 .shortcutAction {
+  display: flex;
+  flex-direction: column;
   font-size: var(--font-size-sm);
   color: var(--text-primary);
+}
+
+.shortcutConflict {
+  font-size: var(--font-size-xs);
+  color: var(--color-warning);
 }
 
 .shortcutKey {

@@ -32,6 +32,7 @@ import {
   createTableKeymap,
   SlashCommandProvider,
   WikiLinkCompletionProvider,
+  type ExternalSlashCommand,
   createBlockIdPlugin,
   extractHeadings,
   findLinkTargetInDoc,
@@ -79,6 +80,7 @@ import { createWikiEmbedView } from './WikiEmbedView';
 import { DocumentPreview } from './DocumentPreview';
 import { LatexEditor } from './LatexEditor';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
+import { pluginService } from '../../services/pluginService';
 import { createBlockKeymap } from '../../lib/editor/block-commands';
 import { createBlockHandlePlugin } from '../../lib/editor/block-handle';
 import { createRevealHighlightPlugin, flashNode } from '../../lib/editor/reveal-highlight';
@@ -589,6 +591,16 @@ function revealLinkTargetInView(view: EditorView, subpath: string, occurrence = 
 /** 已执行过的标题定位请求（编辑器重新挂载时不重复滚动） */
 const revealedHeadingRequests = new WeakSet<object>();
 
+/** 插件贡献到斜杠菜单的命令（manifest.contributes.menus["editor/context"]），每次打开菜单时读取 */
+const pluginSlashCommands = (): ExternalSlashCommand[] =>
+  pluginService.getSnapshot().contributions.slashItems.map((item) => ({
+    id: `plugin:${item.pluginId}.${item.commandId}`,
+    label: item.title,
+    detail: `插件 · ${item.pluginName}`,
+    keywords: item.description,
+    run: () => pluginService.runCommand(item.pluginId, item.commandId),
+  }));
+
 /**
  * RichEditor Component
  *
@@ -809,7 +821,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     const providers: CompletionProvider[] = [new EmojiCompletionProvider()];
     if (isMarkdown) {
       providers.unshift(
-        new SlashCommandProvider(schema),
+        new SlashCommandProvider(schema, pluginSlashCommands),
         new WikiLinkCompletionProvider(
           schema,
           () => linkTargetsRef.current,
@@ -965,6 +977,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
 
     // 注册编辑器到 EditorBridge，使插件系统可以访问（内容为 Markdown / 纯文本）
     const editorInstance: EditorInstance = {
+      language: format,
       getContent(): string {
         return editorViewRef.current ? serializeContent(editorViewRef.current.state.doc, format) : '';
       },
@@ -1628,6 +1641,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
             readOnly={readOnly}
             showLineNumbers={true}
             revealHeading={revealHeading}
+            active={active}
           />
         ) : (
           <>

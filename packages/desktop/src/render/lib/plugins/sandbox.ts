@@ -7,10 +7,27 @@
 //    未授权、未声明的命令、超频的界面调用一律抛错。
 // ================================
 
-import type { Disposable, PluginContext, PluginManifest, StatusBarItem, EditorAPI, UIAPI, StorageAPI } from './types';
+import type {
+  ConfigurationAPI,
+  Disposable,
+  PluginContext,
+  PluginManifest,
+  StatusBarItem,
+  EditorAPI,
+  UIAPI,
+  StorageAPI,
+  ViewItem,
+} from './types';
 
 /** 插件可申请的权限 */
-export type Permission = 'editor:read' | 'editor:write' | 'ui:message' | 'ui:dialog' | 'ui:statusbar' | 'storage';
+export type Permission =
+  | 'editor:read'
+  | 'editor:write'
+  | 'ui:message'
+  | 'ui:dialog'
+  | 'ui:statusbar'
+  | 'ui:view'
+  | 'storage';
 
 export type PermissionCategory = 'editor' | 'ui' | 'storage';
 
@@ -28,6 +45,7 @@ export const PERMISSION_INFO: Record<Permission, PermissionInfo> = {
   'ui:message': { category: 'ui', description: '显示提示消息', risk: 'low' },
   'ui:dialog': { category: 'ui', description: '弹出输入框、选择列表与确认框', risk: 'low' },
   'ui:statusbar': { category: 'ui', description: '在状态栏显示一项信息', risk: 'low' },
+  'ui:view': { category: 'ui', description: '在侧栏「插件视图」中显示列表', risk: 'low' },
   storage: { category: 'storage', description: '在本机保存插件自己的数据', risk: 'low' },
 };
 
@@ -57,6 +75,8 @@ export interface SandboxHost {
   ui: UIAPI;
   storage: StorageAPI;
   statusBar: { set(item: StatusBarItem): void; clear(): void };
+  views: { set(viewId: string, items: ViewItem[]): void };
+  configuration: ConfigurationAPI;
   /** 以插件内命令 ID 注册命令处理器 */
   registerCommand(id: string, handler: (...args: unknown[]) => unknown): Disposable;
 }
@@ -73,6 +93,9 @@ const MAX_MESSAGE_LENGTH = 500;
 const MAX_STATUS_TEXT_LENGTH = 60;
 const MAX_TOOLTIP_LENGTH = 200;
 const MAX_QUICK_PICK_ITEMS = 200;
+const MAX_VIEW_ITEMS = 200;
+const MAX_VIEW_LABEL_LENGTH = 120;
+const MAX_VIEW_ARGS_LENGTH = 2000;
 
 function assertString(value: unknown, name: string, maxLength = Infinity): string {
   if (typeof value !== 'string') throw new TypeError(`${name} 必须是字符串`);
@@ -98,6 +121,8 @@ export function createSandboxedContext(
   const pluginId = manifest.id;
   const effective = new Set(manifest.permissions.filter((permission) => granted.includes(permission)));
   const declaredCommands = new Set(manifest.contributes.commands.map((command) => command.id));
+  const declaredViews = new Set(manifest.contributes.views.map((view) => view.id));
+  const configurationKeys = new Set(Object.keys(manifest.contributes.configuration?.properties ?? {}));
   const uiCallTimes: number[] = [];
 
   const checkPermission = (permission: Permission): void => {
@@ -118,6 +143,22 @@ export function createSandboxedContext(
       throw new Error(`命令 ${command} 未在插件 ${pluginId} 的 manifest.contributes.commands 中声明`);
     }
     return command;
+  };
+
+  const toViewItem = (item: unknown, index: number): ViewItem => {
+    if (!item || typeof item !== 'object') throw new TypeError(`视图第 ${index + 1} 项必须是对象`);
+    const { label, description, command, args } = item as Record<string, unknown>;
+    const result: ViewItem = { label: assertString(label, '视图项文字', MAX_VIEW_LABEL_LENGTH) };
+    if (description !== undefined) result.description = assertString(description, '视图项说明', MAX_TOOLTIP_LENGTH);
+    if (command !== undefined) result.command = assertDeclaredCommand(command);
+    if (args !== undefined) {
+      const serialized = Array.isArray(args) ? JSON.stringify(args) : undefined;
+      if (serialized === undefined || serialized.length > MAX_VIEW_ARGS_LENGTH) {
+        throw new TypeError(`视图项的 args 必须是可序列化为 JSON 的数组（不超过 ${MAX_VIEW_ARGS_LENGTH} 个字符）`);
+      }
+      result.args = JSON.parse(serialized) as unknown[];
+    }
+    return result;
   };
 
   return {
@@ -144,6 +185,10 @@ export function createSandboxedContext(
       getCursorPosition() {
         checkPermission('editor:read');
         return host.editor.getCursorPosition();
+      },
+      getLanguage() {
+        checkPermission('editor:read');
+        return host.editor.getLanguage();
       },
       onDidChange(listener) {
         checkPermission('editor:read');
@@ -210,6 +255,30 @@ export function createSandboxedContext(
       clear() {
         checkPermission('ui:statusbar');
         host.statusBar.clear();
+      },
+    },
+
+    views: {
+      set(viewId, items) {
+        checkPermission('ui:view');
+        const view = assertString(viewId, '视图 ID');
+        if (!declaredViews.has(view)) throw new Error(`视图 ${view} 未在插件 ${pluginId} 的 manifest.contributes.views 中声明`);
+        if (!Array.isArray(items) || items.length > MAX_VIEW_ITEMS) {
+          throw new RangeError(`视图内容必须是不超过 ${MAX_VIEW_ITEMS} 项的数组`);
+        }
+        host.views.set(view, items.map(toViewItem));
+      },
+    },
+
+    configuration: {
+      get(key) {
+        const name = assertString(key, '配置项');
+        if (!configurationKeys.has(name)) throw new Error(`配置项 ${name} 未在插件 ${pluginId} 的 manifest.contributes.configuration 中声明`);
+        return host.configuration.get(name);
+      },
+      onDidChange(listener) {
+        if (typeof listener !== 'function') throw new TypeError('监听器必须是函数');
+        return host.configuration.onDidChange(listener);
       },
     },
 

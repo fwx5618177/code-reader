@@ -31,6 +31,7 @@
     "@code-reader/diff-algorithm": "workspace:*",
     "@code-reader/format-parser": "workspace:*",
     "@code-reader/fuzzy-match-algorithm": "workspace:*",
+    "@code-reader/plugin-system": "workspace:*",
     "@code-reader/search-service": "workspace:*",
     "@code-reader/syntax-parser": "workspace:*",
     "@code-reader/text-buffer": "workspace:*",

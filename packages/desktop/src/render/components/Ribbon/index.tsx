@@ -4,7 +4,7 @@
 // Mode switching is handled by TitleBar
 // ================================
 
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import {
   Files,
   Tag,
@@ -19,8 +19,10 @@ import {
   Bookmark,
   BookMarked,
   Link2,
+  Puzzle,
 } from 'lucide-react';
 import { AppMode, MODE_SIDEBAR_PANELS, SidebarPanel } from '../../types/app-modes';
+import { pluginService } from '../../services/pluginService';
 import Tooltip from '../Tooltip';
 import styles from './Ribbon.module.scss';
 
@@ -98,7 +100,10 @@ const PANEL_ICONS: Record<SidebarPanel, React.ReactNode> = {
   calendar: <Calendar size={20} />,
   outline: <List size={20} />,
   references: <Link2 size={20} />,
+  plugins: <Puzzle size={20} />,
 };
+
+const hasPluginViews = () => pluginService.getSnapshot().contributions.views.length > 0;
 
 // ================================
 // Ribbon 组件
@@ -112,7 +117,11 @@ const Ribbon: React.FC<RibbonProps> = ({
   currentMode = 'knowledge',
   onOpenSettings,
 }) => {
-  const navigationButtons = MODE_SIDEBAR_PANELS[currentMode];
+  const showPluginViews = useSyncExternalStore(pluginService.subscribe, hasPluginViews);
+  // 「插件视图」只在有插件贡献视图时显示
+  const navigationButtons = MODE_SIDEBAR_PANELS[currentMode].filter(
+    (button) => button.id !== 'plugins' || showPluginViews
+  );
 
   return (
     <div className={styles.ribbon}>

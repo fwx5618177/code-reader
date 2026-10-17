@@ -117,6 +117,28 @@ export {
 } from './sandbox';
 
 // ================================
+// 生命周期编排导出（版本范围、依赖解析、激活事件）
+// ================================
+
+export {
+  parseVersion,
+  isValidVersion,
+  compareVersions,
+  isValidVersionRange,
+  satisfiesVersionRange,
+  resolveDependencies,
+  ACTIVATION_EVENT_KINDS,
+  DEFAULT_ACTIVATION_EVENTS,
+  activationEvent,
+  parseActivationEvent,
+  shouldActivate,
+  type DependencyNode,
+  type DependencyResolution,
+  type ActivationEventKind,
+  type ParsedActivationEvent,
+} from './lifecycle';
+
+// ================================
 // 默认导出
 // ================================
 

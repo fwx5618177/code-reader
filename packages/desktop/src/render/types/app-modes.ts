@@ -225,7 +225,8 @@ export type SidebarPanel =
   | 'chapters' // Book chapters (for reading mode)
   | 'references' // References and links
   | 'recordings' // Voice recordings (knowledge mode)
-  | 'graph'; // Knowledge graph
+  | 'graph' // Knowledge graph
+  | 'plugins'; // 插件贡献的侧栏视图（只在有插件视图时显示 Ribbon 按钮）
 
 /**
  * 侧栏面板配置（Ribbon 按钮与侧栏标题共用）
@@ -244,6 +245,7 @@ export const MODE_SIDEBAR_PANELS: Record<AppMode, SidebarPanelConfig[]> = {
     { id: 'files', label: '书库' },
     { id: 'search', label: '搜索' },
     { id: 'recent', label: '最近阅读' },
+    { id: 'plugins', label: '插件视图' },
   ],
   knowledge: [
     { id: 'files', label: '文件夹' },
@@ -253,6 +255,7 @@ export const MODE_SIDEBAR_PANELS: Record<AppMode, SidebarPanelConfig[]> = {
     { id: 'graph', label: '知识图谱' },
     { id: 'calendar', label: '日历' },
     { id: 'recent', label: '最近' },
+    { id: 'plugins', label: '插件视图' },
   ],
   writing: [
     { id: 'outline', label: '大纲' },
@@ -260,6 +263,7 @@ export const MODE_SIDEBAR_PANELS: Record<AppMode, SidebarPanelConfig[]> = {
     { id: 'references', label: '参考' },
     { id: 'tags', label: '标签' },
     { id: 'recent', label: '最近' },
+    { id: 'plugins', label: '插件视图' },
   ],
 };
 

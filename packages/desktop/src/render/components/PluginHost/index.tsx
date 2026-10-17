@@ -4,6 +4,7 @@
 // - 向 EditorBridge 注册界面管理器：插件的消息、输入框、选择列表、确认框
 // - 渲染授权对话框（启用插件 / 插件新增权限时）
 // - ⌘⇧P / Ctrl+Shift+P 命令面板，执行插件命令
+// - 插件快捷键（manifest.contributes.keybindings，冲突的绑定不生效）
 // ================================
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -11,8 +12,8 @@ import InputDialog, { ConfirmDialog } from '../InputDialog';
 import PermissionDialog from '../PermissionDialog';
 import CommandPalette from './CommandPalette';
 import { getEditorBridge } from '../../lib/plugins/editor-bridge';
-import type { PluginCommand } from '../../lib/plugins/plugin-loader';
-import { pluginService } from '../../services/pluginService';
+import { matchesKeyboardEvent } from '../../lib/plugins/keybindings';
+import { pluginService, type ContributedCommand } from '../../services/pluginService';
 import styles from './PluginHost.module.scss';
 
 type ToastType = 'info' | 'warning' | 'error';
@@ -25,7 +26,7 @@ interface Toast {
 
 /** 同一时间只显示一个对话框 */
 type HostDialog =
-  | { kind: 'commands'; commands: PluginCommand[] }
+  | { kind: 'commands'; commands: ContributedCommand[] }
   | { kind: 'pick'; items: string[]; placeholder?: string; resolve: (value: string | undefined) => void }
   | {
       kind: 'input';
@@ -36,8 +37,8 @@ type HostDialog =
 
 interface PluginHostContextValue {
   openCommandPalette: () => void;
-  /** 执行插件命令（先把焦点交还活动编辑器） */
-  runCommand: (pluginId: string, commandId: string) => void;
+  /** 执行插件命令（先把焦点交还活动编辑器，失败时提示） */
+  runCommand: (pluginId: string, commandId: string, args?: unknown[]) => void;
 }
 
 const PluginHostContext = createContext<PluginHostContextValue | null>(null);
@@ -59,6 +60,15 @@ function isCommandPaletteShortcut(e: KeyboardEvent): boolean {
   // 用 e.code 判断：macOS 上按住 ⌘⇧ 时 e.key 的大小写不稳定
   return (e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === 'KeyP';
 }
+
+/** 焦点是否在写作编辑器内（Markdown 的 ProseMirror 或 LaTeX 源码的 CodeMirror） */
+function isEditorFocused(): boolean {
+  const active = document.activeElement;
+  return active instanceof HTMLElement && active.closest('.ProseMirror, .cm-editor') !== null;
+}
+
+const runCommand = (pluginId: string, commandId: string, args?: unknown[]) =>
+  pluginService.runCommand(pluginId, commandId, args);
 
 export const PluginHost: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const snapshot = useSyncExternalStore(pluginService.subscribe, pluginService.getSnapshot);
@@ -89,16 +99,6 @@ export const PluginHost: React.FC<{ children: React.ReactNode }> = ({ children }
     setToasts((current) => [...current, { id, message, type }].slice(-MAX_TOASTS));
     setTimeout(() => setToasts((current) => current.filter((toast) => toast.id !== id)), TOAST_DURATION);
   }, []);
-
-  const runCommand = useCallback(
-    (pluginId: string, commandId: string) => {
-      getEditorBridge().getEditor()?.focus();
-      pluginService.executeCommand(pluginId, commandId).catch((error) => {
-        showToast(`命令执行失败：${errorMessage(error)}`, 'error');
-      });
-    },
-    [showToast]
-  );
 
   const openCommandPalette = useCallback(() => {
     if (dialogRef.current || pluginService.getSnapshot().permissionRequest) return;
@@ -140,7 +140,24 @@ export const PluginHost: React.FC<{ children: React.ReactNode }> = ({ children }
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [closeDialog, openCommandPalette]);
 
-  const contextValue = useMemo(() => ({ openCommandPalette, runCommand }), [openCommandPalette, runCommand]);
+  // 插件快捷键：捕获阶段处理；对话框打开时不响应，与应用快捷键冲突的绑定已在解析时排除
+  const keybindings = snapshot.contributions.keybindings;
+  useEffect(() => {
+    const active = keybindings.filter((item) => !item.conflict);
+    if (active.length === 0) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (dialogRef.current || pluginService.getSnapshot().permissionRequest) return;
+      const match = active.find((item) => matchesKeyboardEvent(item.parsed, e));
+      if (!match || (match.binding.when === 'editorFocus' && !isEditorFocused())) return;
+      e.preventDefault();
+      e.stopPropagation();
+      runCommand(match.pluginId, match.binding.command);
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [keybindings]);
+
+  const contextValue = useMemo(() => ({ openCommandPalette, runCommand }), [openCommandPalette]);
 
   const renderDialog = (): React.ReactNode => {
     if (!dialog) return null;
@@ -152,6 +169,7 @@ export const PluginHost: React.FC<{ children: React.ReactNode }> = ({ children }
               key: `${command.pluginId}.${command.commandId}`,
               label: command.title,
               detail: command.pluginName,
+              shortcut: command.keybinding,
             }))}
             placeholder="输入命令名称"
             emptyText="还没有可用的插件命令，可在“设置 → 插件”中启用插件"

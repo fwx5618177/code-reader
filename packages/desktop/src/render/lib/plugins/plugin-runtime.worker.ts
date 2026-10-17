@@ -83,6 +83,31 @@ function call(method: HostMethod, ...args: unknown[]): Promise<unknown> {
 
 const commandHandlers = new Map<string, (...args: unknown[]) => unknown>();
 const changeListeners = new Set<() => void>();
+const configListeners = new Set<(key: string) => void>();
+
+/** 第一个监听器加入时向宿主订阅，订阅失败则撤销 */
+async function addListener<T>(listeners: Set<T>, listener: T, method: HostMethod): Promise<void> {
+  if (typeof listener !== 'function') throw new TypeError('监听器必须是函数');
+  const first = listeners.size === 0;
+  listeners.add(listener);
+  if (!first) return;
+  try {
+    await call(method);
+  } catch (error) {
+    listeners.clear();
+    throw error;
+  }
+}
+
+function notify<A extends unknown[]>(listeners: Set<(...args: A) => void>, ...args: A): void {
+  for (const listener of listeners) {
+    try {
+      listener(...args);
+    } catch (error) {
+      console.error('[插件] 监听器出错:', error);
+    }
+  }
+}
 
 const app = Object.freeze({
   commands: Object.freeze({
@@ -105,19 +130,10 @@ const app = Object.freeze({
     replaceSelection: (text: string) => call('editor.replaceSelection', text),
     insertText: (text: string) => call('editor.insertText', text),
     setCursorPosition: (line: number, column: number) => call('editor.setCursorPosition', line, column),
+    /** 活动文档的语言：markdown / latex / plain（需要 editor:read 权限） */
+    getLanguage: () => call('editor.getLanguage'),
     /** 活动编辑器内容变化或切换时回调（需要 editor:read 权限） */
-    async onDidChange(listener: () => void): Promise<void> {
-      if (typeof listener !== 'function') throw new TypeError('监听器必须是函数');
-      const first = changeListeners.size === 0;
-      changeListeners.add(listener);
-      if (!first) return;
-      try {
-        await call('editor.subscribeChange');
-      } catch (error) {
-        changeListeners.clear();
-        throw error;
-      }
-    },
+    onDidChange: (listener: () => void) => addListener(changeListeners, listener, 'editor.subscribeChange'),
   }),
   ui: Object.freeze({
     showMessage: (message: string, type?: 'info' | 'warning' | 'error') => call('ui.showMessage', message, type),
@@ -129,6 +145,15 @@ const app = Object.freeze({
   statusBar: Object.freeze({
     set: (item: { text: string; tooltip?: string; command?: string }) => call('statusBar.set', item),
     clear: () => call('statusBar.clear'),
+  }),
+  /** 侧栏视图（需要 ui:view 权限）：items 为 { label, description?, command?, args? } 列表 */
+  views: Object.freeze({
+    set: (viewId: string, items: unknown[]) => call('views.set', viewId, items),
+  }),
+  /** 插件配置（只读，用户在「设置 → 插件」中修改） */
+  config: Object.freeze({
+    get: (key: string) => call('config.get', key),
+    onDidChange: (listener: (key: string) => void) => addListener(configListeners, listener, 'config.subscribe'),
   }),
   storage: Object.freeze({
     get: (key: string) => call('storage.get', key),
@@ -189,13 +214,10 @@ self.onmessage = (event: MessageEvent<HostMessage>) => {
       void runCommand(message.id, message.command, message.args);
       return;
     case 'editorChanged':
-      for (const listener of changeListeners) {
-        try {
-          listener();
-        } catch (error) {
-          console.error('[插件] 编辑器变更监听器出错:', error);
-        }
-      }
+      notify(changeListeners);
+      return;
+    case 'configChanged':
+      notify(configListeners, message.key);
       return;
     case 'deactivate':
       Promise.resolve()

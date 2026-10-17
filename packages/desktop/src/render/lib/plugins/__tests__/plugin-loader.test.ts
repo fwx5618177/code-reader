@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getEditorBridge, type EditorInstance } from '../editor-bridge';
-import { ExtensionRegistry, STATUS_BAR_ITEMS } from '../extension-registry';
+import { ExtensionRegistry, STATUS_BAR_ITEMS, VIEW_ITEMS } from '../extension-registry';
 import { PluginLoader } from '../plugin-loader';
 import type { HostMessage, HostMethod, WorkerMessage } from '../plugin-protocol';
 import type { Permission } from '../sandbox';
@@ -19,12 +19,18 @@ const manifest: PluginManifest = {
   name: 'Demo',
   version: '1.0.0',
   main: 'main.js',
-  permissions: ['editor:read', 'editor:write', 'ui:statusbar'],
+  permissions: ['editor:read', 'editor:write', 'ui:statusbar', 'ui:view'],
+  dependencies: [],
   contributes: {
     commands: [
       { id: 'insert', title: '插入问候' },
       { id: 'unused', title: '未注册的命令' },
     ],
+    keybindings: [],
+    menus: { 'editor/context': [] },
+    toolbar: [],
+    views: [{ id: 'list', name: '列表' }],
+    configuration: { title: 'Demo', properties: { greeting: { type: 'string', default: '你好' } } },
   },
 };
 
@@ -81,6 +87,7 @@ class FakeWorker implements PluginWorker {
         this.emit({ type: 'deactivated' });
         return;
       case 'editorChanged':
+      case 'configChanged':
         return;
     }
   }
@@ -96,6 +103,7 @@ class FakeWorker implements PluginWorker {
 
 function createMockEditor(): EditorInstance & { text: string } {
   const editor = {
+    language: 'markdown' as const,
     text: '',
     getContent: () => editor.text,
     setContent: vi.fn((content: string) => {
@@ -143,9 +151,8 @@ describe('PluginLoader + Worker 插件', () => {
     });
     await promise;
 
-    expect(loader.getCommands()).toEqual([
-      { pluginId: 'demo', pluginName: 'Demo', commandId: 'insert', title: '插入问候', description: undefined },
-    ]);
+    expect(loader.hasCommand('demo', 'insert')).toBe(true);
+    expect(loader.hasCommand('demo', 'unused')).toBe(false);
     await loader.executeCommand('demo', 'insert');
     expect(editor.insertText).toHaveBeenCalledWith('你好');
     expect(editor.text).toBe('你好');
@@ -185,7 +192,7 @@ describe('PluginLoader + Worker 插件', () => {
 
     await loader.deactivate('demo');
     expect(loader.isActive('demo')).toBe(false);
-    expect(loader.getCommands()).toEqual([]);
+    expect(loader.hasCommand('demo', 'insert')).toBe(false);
     expect(registry.get(STATUS_BAR_ITEMS)).toEqual([]);
     expect(worker.terminated).toBe(true);
     await expect(loader.executeCommand('demo', 'insert')).rejects.toThrow('不可用');
@@ -199,7 +206,7 @@ describe('PluginLoader + Worker 插件', () => {
 
     await expect(promise).rejects.toThrow('初始化失败');
     expect(loader.isActive('demo')).toBe(false);
-    expect(loader.getCommands()).toEqual([]);
+    expect(loader.hasCommand('demo', 'insert')).toBe(false);
     expect(worker.terminated).toBe(true);
   });
 
@@ -232,5 +239,53 @@ describe('PluginLoader + Worker 插件', () => {
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     expect(worker.received.filter((message) => message.type === 'editorChanged')).toHaveLength(1);
+  });
+
+  it('插件写入侧栏视图，停用后移除', async () => {
+    const { promise } = activate(async (w) => {
+      await w.call('views.set', 'list', [{ label: '一' }]);
+      await w.call('views.set', 'list', [{ label: '二', command: 'insert' }]);
+    });
+    await promise;
+    expect(registry.get(VIEW_ITEMS)).toEqual([{ pluginId: 'demo', value: { list: [{ label: '二', command: 'insert' }] } }]);
+
+    await loader.deactivate('demo');
+    expect(registry.get(VIEW_ITEMS)).toEqual([]);
+  });
+
+  it('读取配置与文档语言，配置变更通知 Worker', async () => {
+    const listeners = new Set<(key: string) => void>();
+    loader = new PluginLoader({
+      registry,
+      configurationFor: () => ({
+        get: (key) => (key === 'greeting' ? '嗨' : 0),
+        onDidChange: (listener) => {
+          listeners.add(listener);
+          return { dispose: () => listeners.delete(listener) };
+        },
+      }),
+    });
+    let values: unknown[] = [];
+    const { worker, promise } = activate(async (w) => {
+      values = [await w.call('config.get', 'greeting'), await w.call('editor.getLanguage')];
+      await w.call('config.subscribe');
+    });
+    await promise;
+    expect(values).toEqual(['嗨', 'markdown']);
+
+    for (const listener of listeners) listener('greeting');
+    expect(worker.received).toContainEqual({ type: 'configChanged', key: 'greeting' });
+
+    await loader.deactivate('demo');
+    expect(listeners.size).toBe(0);
+  });
+
+  it('未提供配置来源时使用 manifest 默认值', async () => {
+    let value: unknown;
+    const { promise } = activate(async (w) => {
+      value = await w.call('config.get', 'greeting');
+    });
+    await promise;
+    expect(value).toBe('你好');
   });
 });

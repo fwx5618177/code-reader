@@ -26,6 +26,7 @@ import {
   PluginState,
 } from '../types';
 import { ExtensionRegistry } from '../registry';
+import { resolveDependencies, satisfiesVersionRange } from '../lifecycle';
 
 // ================================
 // 插件管理器配置
@@ -361,8 +362,9 @@ export class PluginManager {
   async deactivateAll(): Promise<void> {
     const pluginIds = Array.from(this.plugins.keys());
 
-    // 反向依赖顺序停用
-    const sorted = this.sortByDependencies(pluginIds).reverse();
+    // 反向依赖顺序停用；依赖解析不通过的插件不在顺序中，最先停用
+    const ordered = this.sortByDependencies(pluginIds);
+    const sorted = [...pluginIds.filter((id) => !ordered.includes(id)), ...ordered.reverse()];
 
     for (const pluginId of sorted) {
       const instance = this.plugins.get(pluginId);
@@ -523,19 +525,24 @@ export class PluginManager {
   }
 
   /**
-   * 检查依赖
+   * 检查依赖：必需依赖须已加载且版本满足范围，并先于本插件激活；可选依赖不满足时忽略
    */
   private async checkDependencies(manifest: PluginManifest): Promise<void> {
     const dependencies = manifest.dependencies || [];
 
     for (const dep of dependencies) {
       const instance = this.plugins.get(dep.id);
+      const satisfied = instance !== undefined && satisfiesVersionRange(instance.plugin.manifest.version, dep.version);
 
-      if (!instance) {
+      if (!satisfied) {
         if (dep.optional) {
           continue;
         }
-        throw new Error(`缺少必需的依赖插件: ${dep.id}`);
+        throw new Error(
+          instance
+            ? `依赖插件 ${dep.id} 的版本 ${instance.plugin.manifest.version} 不满足 ${dep.version}`
+            : `缺少必需的依赖插件: ${dep.id}`
+        );
       }
 
       // 确保依赖已激活
@@ -546,41 +553,19 @@ export class PluginManager {
   }
 
   /**
-   * 按依赖排序
+   * 按依赖排序；不能激活的插件（缺依赖、版本不满足、循环依赖）记录原因后排除
    */
   private sortByDependencies(pluginIds: PluginId[]): PluginId[] {
-    const result: PluginId[] = [];
-    const visited = new Set<PluginId>();
-    const visiting = new Set<PluginId>();
-
-    const visit = (id: PluginId): void => {
-      if (visited.has(id)) return;
-      if (visiting.has(id)) {
-        throw new Error(`检测到循环依赖: ${id}`);
-      }
-
-      visiting.add(id);
-
-      const instance = this.plugins.get(id);
-      if (instance) {
-        const deps = instance.plugin.manifest.dependencies || [];
-        for (const dep of deps) {
-          if (pluginIds.includes(dep.id)) {
-            visit(dep.id);
-          }
-        }
-      }
-
-      visiting.delete(id);
-      visited.add(id);
-      result.push(id);
-    };
-
-    for (const id of pluginIds) {
-      visit(id);
+    const { order, problems } = resolveDependencies(
+      pluginIds.flatMap((id) => {
+        const manifest = this.plugins.get(id)?.plugin.manifest;
+        return manifest ? [{ id, version: manifest.version, dependencies: manifest.dependencies }] : [];
+      })
+    );
+    for (const [pluginId, reason] of problems) {
+      console.error(`[PluginManager] 插件 "${pluginId}" 无法激活: ${reason}`);
     }
-
-    return result;
+    return order;
   }
 
   /**

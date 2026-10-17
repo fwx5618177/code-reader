@@ -283,6 +283,8 @@ export interface PluginPreference {
   enabled: boolean;
   /** 用户已授予的权限（插件更新后新增的权限需重新授权） */
   grantedPermissions: string[];
+  /** 用户修改过的插件配置（未修改的项取 manifest 默认值） */
+  configuration?: Record<string, string | number | boolean>;
 }
 
 /**

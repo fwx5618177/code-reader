@@ -49,7 +49,8 @@
     color: var(--color-success);
   }
 
-  &.loading {
+  &.loading,
+  &.idle {
     color: var(--color-info);
   }
 
@@ -96,6 +97,63 @@
 
   &.granted {
     border-color: var(--color-success);
+  }
+
+  // 与应用或其他插件冲突而未生效的快捷键
+  &.conflict {
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+    text-decoration: line-through;
+  }
+
+  kbd {
+    font-family: var(--font-mono);
+  }
+}
+
+// 插件配置
+.configuration {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.configItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+}
+
+.configLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+
+  code {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+}
+
+.resetButton {
+  @include button-reset;
+  display: inline-flex;
+  padding: var(--spacing-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
   }
 }
 

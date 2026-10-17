@@ -41,6 +41,7 @@ import {
   type AIProviderView,
 } from '../../services/aiConfigService';
 import { settingsService } from '../../services/settingsService';
+import { pluginService } from '../../services/pluginService';
 import { ThemeSettings } from '../ThemeSettings';
 import { SettingSelect, SettingToggle } from './SettingControls';
 import { SpellCheckSettings } from './SpellCheckSettings';
@@ -523,6 +524,7 @@ const AppearanceSettingsTab: React.FC = () => {
 // ================================
 
 const ShortcutsSettingsTab: React.FC = () => {
+  const { keybindings } = useSyncExternalStore(pluginService.subscribe, pluginService.getSnapshot).contributions;
   const shortcuts = [
     { action: '快速输入', shortcut: '⌘ N' },
     { action: '全局搜索', shortcut: '⌘ P' },
@@ -549,6 +551,32 @@ const ShortcutsSettingsTab: React.FC = () => {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>插件快捷键</h3>
+        <p className={styles.sectionDescription}>
+          已启用插件在 manifest 中声明的快捷键。与应用快捷键相同、或已被其他插件占用的组合不会生效
+        </p>
+        {keybindings.length === 0 ? (
+          <p className={styles.sectionDescription}>没有插件快捷键</p>
+        ) : (
+          <div className={styles.shortcutsList}>
+            {keybindings.map((item) => (
+              <div
+                key={`${item.pluginId}.${item.binding.command}.${item.label}`}
+                className={styles.shortcutItem}
+                title={item.conflict ?? undefined}
+              >
+                <span className={styles.shortcutAction}>
+                  {item.commandTitle}（{item.pluginName}）
+                  {item.conflict && <span className={styles.shortcutConflict}>{item.conflict}</span>}
+                </span>
+                <kbd className={styles.shortcutKey}>{item.label}</kbd>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import React, { useCallback, useState } from 'react';
 import { Columns2, PanelRightClose, RotateCcw, X } from 'lucide-react';
 import type { PaneIndex, TabGroup } from '../../lib/editor-tabs';
 import styles from './EditorTabs.module.scss';
+import PluginToolbar from '../PluginHost/PluginToolbar';
 
 /** 拖动标签时携带的数据类型，只接受本应用的标签拖放 */
 const TAB_DRAG_TYPE = 'application/x-writing-tab';
@@ -165,6 +166,7 @@ export const EditorTabs: React.FC<EditorTabsProps> = ({
 
       {showActions && (
         <div className={styles.actions}>
+          <PluginToolbar buttonClassName={styles.actionButton} />
           <button
             className={styles.actionButton}
             onClick={onReopen}

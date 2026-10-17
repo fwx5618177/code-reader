@@ -76,6 +76,7 @@ export {
   SlashCommandProvider,
   WikiLinkCompletionProvider,
   type CompletionBlockSource,
+  type ExternalSlashCommand,
 } from './completion';
 export { createTableKeymap } from './table-keymap';
 
