@@ -24,6 +24,8 @@ export interface RecordingsPanelProps {
   onOpenDetails: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** 更新条目 metadata（回填旧录音的时长） */
+  onUpdateMetadata: (id: string, metadata: Record<string, unknown>) => Promise<void>;
   /** 操作失败时的提示 */
   onError: (message: string) => void;
 }
@@ -58,6 +60,7 @@ export const RecordingsPanel: React.FC<RecordingsPanelProps> = ({
   onOpenDetails,
   onRename,
   onDelete,
+  onUpdateMetadata,
   onError,
 }) => {
   const recordings = useMemo(() => listRecordings(items), [items]);
@@ -72,6 +75,13 @@ export const RecordingsPanel: React.FC<RecordingsPanelProps> = ({
   );
   const onRequestRename = useCallback((item: KnowledgeItem) => setPending({ kind: 'rename', item }), []);
   const onRequestDelete = useCallback((item: KnowledgeItem) => setPending({ kind: 'delete', item }), []);
+  // 回填失败不影响显示（时长已读到），只记录错误
+  const onBackfillMetadata = useCallback(
+    (id: string, metadata: Record<string, unknown>) => {
+      onUpdateMetadata(id, metadata).catch((error) => console.error('[Recordings] 回填录音时长失败:', id, error));
+    },
+    [onUpdateMetadata]
+  );
 
   const rowProps = useMemo<RowData>(
     () => ({
@@ -83,8 +93,19 @@ export const RecordingsPanel: React.FC<RecordingsPanelProps> = ({
       onOpenDetails,
       onRename: onRequestRename,
       onDelete: onRequestDelete,
+      onBackfillMetadata,
     }),
-    [recordings, activityByItem, selectedItemId, playingId, onTogglePlay, onOpenDetails, onRequestRename, onRequestDelete]
+    [
+      recordings,
+      activityByItem,
+      selectedItemId,
+      playingId,
+      onTogglePlay,
+      onOpenDetails,
+      onRequestRename,
+      onRequestDelete,
+      onBackfillMetadata,
+    ]
   );
 
   const confirmRename = (value: string) => {

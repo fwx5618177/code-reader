@@ -3,7 +3,7 @@
 // ================================
 
 import { describe, it, expect } from 'vitest';
-import { durationMetadata, recordedDurationSeconds } from '../recording-metadata';
+import { backfilledDurationMetadata, durationMetadata, recordedDurationSeconds } from '../recording-metadata';
 
 describe('durationMetadata', () => {
   it('有效时长取整写入 durationMs', () => {
@@ -28,5 +28,21 @@ describe('recordedDurationSeconds', () => {
     expect(recordedDurationSeconds({ metadata: { webClip: {} } })).toBeNull();
     expect(recordedDurationSeconds({ metadata: { durationMs: '65000' } })).toBeNull();
     expect(recordedDurationSeconds({ metadata: { durationMs: -1 } })).toBeNull();
+  });
+});
+
+describe('backfilledDurationMetadata', () => {
+  it('没有记录时把读到的时长并入原有 metadata', () => {
+    expect(backfilledDurationMetadata({ metadata: { source: 'import' } }, 65.4)).toEqual({
+      source: 'import',
+      durationMs: 65_400,
+    });
+    expect(backfilledDurationMetadata({}, 3)).toEqual({ durationMs: 3_000 });
+  });
+
+  it('已有记录、未读到或读到无效时长时不写入', () => {
+    expect(backfilledDurationMetadata({ metadata: { durationMs: 1_000 } }, 65)).toBeNull();
+    expect(backfilledDurationMetadata({}, null)).toBeNull();
+    expect(backfilledDurationMetadata({}, 0)).toBeNull();
   });
 });

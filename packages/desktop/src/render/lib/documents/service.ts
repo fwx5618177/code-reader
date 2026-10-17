@@ -14,6 +14,7 @@ import {
   documentToListItem,
 } from './types';
 import { WELCOME_DOCUMENT_TITLE, WELCOME_DOCUMENT_CONTENT } from './constants';
+import { getEditorManager } from '../core';
 
 // ================================
 // Service Class
@@ -117,6 +118,8 @@ class DocumentService {
   async deleteDocument(id: string): Promise<boolean> {
     await this.initialize();
 
+    // 先销毁托管编辑实例：取消排队中的自动保存，仍挂着该文档的编辑栏不再写入
+    getEditorManager().forceDestroy(id);
     const success = await documentRepository.delete(id);
 
     if (success) {

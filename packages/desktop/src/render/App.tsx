@@ -258,6 +258,12 @@ const App: React.FC = () => {
     [saveCurrentDocument, reloadDocument, kb.reload]
   );
 
+  /** 替换条目 metadata（录音列表回填旧录音的时长） */
+  const handleUpdateItemMetadata = useCallback(
+    (id: string, metadata: Record<string, unknown>) => kb.updateItem(id, { metadata }),
+    [kb.updateItem]
+  );
+
   /** 重命名条目（写作侧边栏与知识库详情面板） */
   const handleRenameItem = useCallback(
     async (id: string, newTitle: string) => {
@@ -964,6 +970,7 @@ const App: React.FC = () => {
             onOpenDetails={openKnowledgeDetails}
             onRename={handleRenameItem}
             onDelete={kb.removeItem}
+            onUpdateMetadata={handleUpdateItemMetadata}
             onError={setNotice}
           />
         );

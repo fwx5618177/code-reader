@@ -1,5 +1,5 @@
 // ================================
-// 删除条目测试：软删除后清理该条目的文字识别缓存；清理失败不影响删除
+// 删除条目测试：先销毁托管编辑实例再软删除，之后清理该条目的文字识别缓存；清理失败不影响删除
 // ================================
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,8 @@ import { knowledgeRepository } from '../repository';
 vi.mock('../repository', () => ({
   knowledgeRepository: { remove: vi.fn() },
 }));
+const forceDestroy = vi.hoisted(() => vi.fn());
+vi.mock('../../core', () => ({ getEditorManager: () => ({ forceDestroy }) }));
 
 describe('removeKnowledgeItem', () => {
   const removeResults = vi.fn();
@@ -16,6 +18,7 @@ describe('removeKnowledgeItem', () => {
 
   beforeEach(() => {
     remove.mockReset().mockResolvedValue(undefined);
+    forceDestroy.mockReset();
     removeResults.mockReset().mockResolvedValue(undefined);
     vi.stubGlobal('electron', { ocr: { removeResults } });
   });
@@ -25,9 +28,11 @@ describe('removeKnowledgeItem', () => {
     vi.restoreAllMocks();
   });
 
-  it('软删除条目后清理该条目的识别缓存', async () => {
+  it('先销毁编辑实例（取消排队的自动保存），再软删除并清理识别缓存', async () => {
     await removeKnowledgeItem('item-1');
 
+    expect(forceDestroy).toHaveBeenCalledWith('item-1');
+    expect(forceDestroy.mock.invocationCallOrder[0]).toBeLessThan(remove.mock.invocationCallOrder[0]);
     expect(remove).toHaveBeenCalledWith('item-1');
     expect(removeResults).toHaveBeenCalledWith('item-1');
     expect(remove.mock.invocationCallOrder[0]).toBeLessThan(removeResults.mock.invocationCallOrder[0]);

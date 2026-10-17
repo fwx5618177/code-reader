@@ -149,8 +149,9 @@ class DocumentRepository {
     params.push(id);
     params.push(DOCUMENT_TYPE);
 
+    // 已删除的文档不再接受写入（删除前排队的自动保存不会把它写回）
     const result = await databaseService.run(
-      `UPDATE knowledge_items SET ${updates.join(', ')} WHERE id = ? AND type = ?`,
+      `UPDATE knowledge_items SET ${updates.join(', ')} WHERE id = ? AND type = ? AND is_deleted = 0`,
       params
     );
 

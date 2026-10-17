@@ -155,6 +155,7 @@ describe('RecordingsPanel', () => {
       onOpenDetails: vi.fn(),
       onRename: vi.fn(() => Promise.resolve()),
       onDelete: vi.fn(() => Promise.resolve()),
+      onUpdateMetadata: vi.fn((_id: string, _metadata: Record<string, unknown>) => Promise.resolve()),
       onError: vi.fn(),
     };
     render(<RecordingsPanel items={recordings} {...props} />);
@@ -174,6 +175,12 @@ describe('RecordingsPanel', () => {
 
     fireEvent.click(screen.getByTitle('周会.webm'));
     expect(props.onOpenDetails).toHaveBeenCalledWith('r1');
+  });
+
+  it('没有记录时长的录音读到时长后回填 metadata，已有记录的不写', () => {
+    const props = renderPanel();
+    expect(props.onUpdateMetadata).toHaveBeenCalledTimes(1);
+    expect(props.onUpdateMetadata).toHaveBeenCalledWith('r1', { durationMs: 65_000 });
   });
 
   it('重命名保留扩展名，删除需确认', () => {

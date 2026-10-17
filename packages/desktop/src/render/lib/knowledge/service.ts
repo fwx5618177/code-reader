@@ -19,6 +19,7 @@ import { clipWebPage, normalizeWebUrl, type WebClip } from './web-clip';
 import { localizeClipImages, type LocalizedClip } from './clip-images';
 import { durationMetadata } from './recording-metadata';
 import { ipcErrorMessage } from '../utils/ipc-error';
+import { getEditorManager } from '../core';
 
 let readyPromise: Promise<void> | null = null;
 
@@ -51,6 +52,8 @@ export function ensureKnowledgeReady(): Promise<void> {
  * （缓存是可重建的派生数据，且条目已从数据库删除）
  */
 export async function removeKnowledgeItem(id: string): Promise<void> {
+  // 笔记条目可能正在写作模式中编辑：先销毁托管编辑实例，取消排队中的自动保存
+  getEditorManager().forceDestroy(id);
   await knowledgeRepository.remove(id);
   try {
     await window.electron.ocr.removeResults(id);

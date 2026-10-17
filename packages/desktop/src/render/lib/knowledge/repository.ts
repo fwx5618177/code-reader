@@ -221,7 +221,11 @@ class KnowledgeRepository {
       params.push(now());
     }
     params.push(id);
-    await databaseService.run(`UPDATE knowledge_items SET ${sets.join(', ')} WHERE id = ?`, params);
+    // 已删除的条目不再接受写入（删除前发起的异步写回不会改动它）
+    await databaseService.run(
+      `UPDATE knowledge_items SET ${sets.join(', ')} WHERE id = ? AND is_deleted = 0`,
+      params
+    );
   }
 
   /** 软删除 */

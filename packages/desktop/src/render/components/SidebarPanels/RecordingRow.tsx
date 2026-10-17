@@ -2,13 +2,13 @@
 // 录音列表行：标题、创建时间、时长与转写状态，悬停显示操作
 // ================================
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Info, Pause, Pencil, Play, Trash2 } from 'lucide-react';
 import type { KnowledgeItem } from '../../types/knowledge';
 import type { ItemActivity } from '../../lib/agent/agentStore';
 import { displayTitle } from '../../lib/links/link-index';
 import { absoluteTime } from '../KnowledgeWorkspace/item-display';
-import { recordedDurationSeconds } from '../../lib/knowledge/recording-metadata';
+import { backfilledDurationMetadata, recordedDurationSeconds } from '../../lib/knowledge/recording-metadata';
 import { useAudioDuration } from './audio-duration';
 import { formatDuration, transcriptState, TRANSCRIPT_LABELS } from './recordings';
 import styles from './RecordingRow.module.scss';
@@ -22,6 +22,8 @@ export interface RecordingRowProps {
   onOpenDetails: (id: string) => void;
   onRename: (item: KnowledgeItem) => void;
   onDelete: (item: KnowledgeItem) => void;
+  /** 条目没有记录时长、读取音频文件得到后，把时长写回条目 metadata */
+  onBackfillMetadata: (id: string, metadata: Record<string, unknown>) => void;
 }
 
 export const RecordingRow: React.FC<RecordingRowProps> = ({
@@ -33,11 +35,16 @@ export const RecordingRow: React.FC<RecordingRowProps> = ({
   onOpenDetails,
   onRename,
   onDelete,
+  onBackfillMetadata,
 }) => {
-  // 优先使用录音时记录的时长，缺失时才读取音频文件
+  // 优先使用录音时记录的时长，缺失时才读取音频文件，读到后回填到条目
   const recorded = recordedDurationSeconds(item);
   const probed = useAudioDuration(recorded === null ? item.filePath : undefined, item.mimeType);
   const duration = recorded ?? probed;
+  useEffect(() => {
+    const metadata = backfilledDurationMetadata(item, probed);
+    if (metadata) onBackfillMetadata(item.id, metadata);
+  }, [item, probed, onBackfillMetadata]);
   const transcript = transcriptState(item, activity);
   const title = displayTitle(item.title) || '未命名录音';
 

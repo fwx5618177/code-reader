@@ -144,7 +144,9 @@ export const PaneEditor: React.FC<PaneEditorProps> = ({ docId, focused, executor
     if (content === null || !synced) return;
     pendingRef.current = null;
     syncedRef.current = { ...synced, content };
-    modelRef.current?.updateContent(content);
+    const model = modelRef.current;
+    // 文档已被删除时托管实例已销毁，本栏残留的编辑直接丢弃
+    if (model && !model.isDestroyed()) model.updateContent(content);
   }, []);
 
   const handleChange = useCallback(
@@ -159,7 +161,7 @@ export const PaneEditor: React.FC<PaneEditorProps> = ({ docId, focused, executor
   const handleTitleChange = useCallback((title: string) => {
     const model = modelRef.current;
     const synced = syncedRef.current;
-    if (!model || !synced) return;
+    if (!model || !synced || model.isDestroyed()) return;
     const finalTitle = keepFileExtension(model.getTitle(), title);
     // 本栏输入框保留用户输入的原样，补回扩展名后的标题不再同步回来
     syncedRef.current = { ...synced, title: finalTitle };
