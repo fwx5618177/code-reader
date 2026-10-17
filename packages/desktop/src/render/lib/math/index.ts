@@ -64,6 +64,7 @@ export {
 export type {
   MathNodeType,
   MathNode,
+  AtomClass,
   TextNode,
   NumberNode,
   OperatorNode,
@@ -84,6 +85,14 @@ export type {
   SpaceNode,
   AccentNode,
   DelimiterNode,
+  SizedDelimiterNode,
+  FontNode,
+  StyleNode,
+  ColorNode,
+  EncloseNode,
+  OverUnderNode,
+  XArrowNode,
+  PhantomNode,
   ErrorNode,
   RootNode,
   AnyMathNode,
@@ -91,16 +100,7 @@ export type {
   LineBreakNode,
 } from './parser';
 
-export {
-  MathParser,
-  parseMath,
-  GREEK_LETTERS,
-  MATH_SYMBOLS,
-  DELIMITERS,
-  ACCENTS,
-  FUNCTION_NAMES,
-  SPACE_COMMANDS,
-} from './parser';
+export { MathParser, parseMath, parseDimension } from './parser';
 
 // ================================
 // 导出渲染器
@@ -462,19 +462,8 @@ export function getMathPlainText(latex: string): string {
 // ================================
 
 /**
- * 数学公式样式
- *
- * 样式文件位于: ./math-rendering.scss
- *
- * 使用方法:
- * 1. 在你的主样式文件中导入:
- *    @use 'path/to/math/math-rendering';
- *
- * 2. 或在组件中导入:
- *    import './path/to/math/math-rendering.scss';
- *
- * 样式使用 CSS 类名控制，不使用内联样式，
- * 确保与主题颜色保持一致。
+ * 数学公式样式位于 src/render/styles/math-rendering.scss，
+ * 由 styles/global.scss 全局引入。渲染器只输出类名，颜色跟随主题变量。
  */
 
 // ================================
