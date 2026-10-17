@@ -9,20 +9,11 @@ import { getSQLiteService } from '../database/sqlite';
 import { cosineSimilarity, decodeEmbedding, encodeEmbedding } from '../database/embedding-vector';
 import { getAIService } from '../ai/ai-service';
 import { BrowserWindow } from 'electron';
+import { TASK_TYPES, type TaskType } from './task-types';
 
 // ================================
 // Types
 // ================================
-
-export const TASK_TYPES = [
-  'transcribe',
-  'summarize',
-  'extract-tags',
-  'generate-embedding',
-  'find-related',
-] as const;
-
-export type TaskType = (typeof TASK_TYPES)[number];
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
@@ -97,6 +88,15 @@ interface TaskSpec {
   type: TaskType;
   priority?: number;
   maxRetries?: number;
+}
+
+/**
+ * 任务执行产出：异步阶段只计算，不写库；写回条目的操作放在 commit 中，
+ * 由 processTask 在确认任务未被取消后与任务完成状态在同一事务中执行
+ */
+interface TaskOutput {
+  result: unknown;
+  commit?: () => void;
 }
 
 // processItem 的处理步骤；同一条目内按优先级从高到低串行执行，后续步骤依赖前序步骤的产出
@@ -525,25 +525,39 @@ export class AgentExecutor extends EventEmitter {
     this.sendProgress(task, 0, 'processing', 'Starting...');
     this.emit('taskStarted', { taskId: task.id, type: task.type });
 
-    let result: unknown;
+    let output: TaskOutput;
     try {
-      result = await this.executeTask(task);
+      output = await this.executeTask(task);
     } catch (error) {
       this.handleTaskError(task, error);
       return;
     }
+    const { result, commit } = output;
 
-    // 执行期间任务可能已被取消，此时不能覆盖为 completed
+    // 执行期间任务可能已被取消：先把状态从 processing 转为 completed，
+    // 成功后才写回条目，两者在同一事务中，已取消的任务不会产生任何副作用
     const completedAt = new Date().toISOString();
-    const completed = sqlite.run(
-      `UPDATE agent_tasks
-       SET status = 'completed', progress = 100, result = ?, error_message = NULL,
-           next_attempt_at = NULL, completed_at = ?, updated_at = ?
-       WHERE id = ? AND status = 'processing'`,
-      [JSON.stringify(result), completedAt, completedAt, task.id]
-    );
+    let completed: boolean;
+    try {
+      completed = sqlite.transaction(() => {
+        const updated = sqlite.run(
+          `UPDATE agent_tasks
+           SET status = 'completed', progress = 100, result = ?, error_message = NULL,
+               next_attempt_at = NULL, completed_at = ?, updated_at = ?
+           WHERE id = ? AND status = 'processing'`,
+          [JSON.stringify(result), completedAt, completedAt, task.id]
+        );
+        if (updated.changes === 0) return false;
+        commit?.();
+        return true;
+      });
+    } catch (error) {
+      // 写回失败时事务已回滚，任务仍为 processing，按普通失败处理（重试或失败）
+      this.handleTaskError(task, error);
+      return;
+    }
 
-    if (completed.changes === 0) {
+    if (!completed) {
       console.log(`[AgentExecutor] Task ${task.id} was cancelled while running; result not recorded`);
       return;
     }
@@ -560,7 +574,7 @@ export class AgentExecutor extends EventEmitter {
     console.log(`[AgentExecutor] Task ${task.id} completed successfully`);
   }
 
-  private executeTask(task: TaskRef): Promise<unknown> {
+  private executeTask(task: TaskRef): Promise<TaskOutput> {
     switch (task.type) {
       case 'transcribe':
         return this.executeTranscribe(task);
@@ -708,7 +722,7 @@ export class AgentExecutor extends EventEmitter {
   /**
    * Execute transcription task
    */
-  private async executeTranscribe(task: TaskRef): Promise<unknown> {
+  private async executeTranscribe(task: TaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -731,20 +745,26 @@ export class AgentExecutor extends EventEmitter {
 
     this.sendProgress(task, 80, 'processing', 'Saving transcript...');
 
-    // Update item with transcript（条目状态由任务生命周期统一管理）
-    const now = new Date().toISOString();
-    sqlite.run(
-      `UPDATE knowledge_items SET transcript = ?, transcript_timestamps = ?, updated_at = ? WHERE id = ?`,
-      [result.text, JSON.stringify(result.segments || []), now, task.targetItemId]
-    );
+    // 条目状态由任务生命周期统一管理
+    const commit = () => {
+      sqlite.run(
+        `UPDATE knowledge_items SET transcript = ?, transcript_timestamps = ?, updated_at = ? WHERE id = ?`,
+        [
+          result.text,
+          JSON.stringify(result.segments || []),
+          new Date().toISOString(),
+          task.targetItemId,
+        ]
+      );
+    };
 
-    return result;
+    return { result, commit };
   }
 
   /**
    * Execute summarization task
    */
-  private async executeSummarize(task: TaskRef): Promise<unknown> {
+  private async executeSummarize(task: TaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -768,20 +788,25 @@ export class AgentExecutor extends EventEmitter {
 
     this.sendProgress(task, 80, 'processing', 'Saving summary...');
 
-    // Update item with summary
-    const now = new Date().toISOString();
-    sqlite.run(
-      `UPDATE knowledge_items SET summary = ?, key_points = ?, updated_at = ? WHERE id = ?`,
-      [result.summary, JSON.stringify(result.keyPoints), now, task.targetItemId]
-    );
+    const commit = () => {
+      sqlite.run(
+        `UPDATE knowledge_items SET summary = ?, key_points = ?, updated_at = ? WHERE id = ?`,
+        [
+          result.summary,
+          JSON.stringify(result.keyPoints),
+          new Date().toISOString(),
+          task.targetItemId,
+        ]
+      );
+    };
 
-    return result;
+    return { result, commit };
   }
 
   /**
    * Execute tag extraction task
    */
-  private async executeExtractTags(task: TaskRef): Promise<unknown> {
+  private async executeExtractTags(task: TaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -812,44 +837,43 @@ export class AgentExecutor extends EventEmitter {
     this.sendProgress(task, 60, 'processing', 'Saving tags...');
 
     // Create/update tags and link to item
-    const now = new Date().toISOString();
+    const commit = () => {
+      const now = new Date().toISOString();
 
-    for (const tag of result.tags) {
-      // Get or create tag
-      let tagRow = sqlite.get<{ id: string }>(
-        `SELECT id FROM tags WHERE name = ?`,
-        [tag.name]
-      );
+      for (const tag of result.tags) {
+        // Get or create tag
+        let tagRow = sqlite.get<{ id: string }>(`SELECT id FROM tags WHERE name = ?`, [tag.name]);
 
-      if (!tagRow) {
-        const tagId = this.generateId();
+        if (!tagRow) {
+          const tagId = this.generateId();
+          sqlite.run(
+            `INSERT INTO tags (id, name, is_auto_generated, created_at, updated_at) VALUES (?, ?, 1, ?, ?)`,
+            [tagId, tag.name, now, now]
+          );
+          tagRow = { id: tagId };
+        }
+
+        // Link tag to item
         sqlite.run(
-          `INSERT INTO tags (id, name, is_auto_generated, created_at, updated_at) VALUES (?, ?, 1, ?, ?)`,
-          [tagId, tag.name, now, now]
+          `INSERT OR IGNORE INTO item_tags (item_id, tag_id, created_at) VALUES (?, ?, ?)`,
+          [task.targetItemId, tagRow.id, now]
         );
-        tagRow = { id: tagId };
+
+        // Update usage count
+        sqlite.run(`UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?`, [
+          now,
+          tagRow.id,
+        ]);
       }
+    };
 
-      // Link tag to item
-      sqlite.run(
-        `INSERT OR IGNORE INTO item_tags (item_id, tag_id, created_at) VALUES (?, ?, ?)`,
-        [task.targetItemId, tagRow.id, now]
-      );
-
-      // Update usage count
-      sqlite.run(
-        `UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?`,
-        [now, tagRow.id]
-      );
-    }
-
-    return result;
+    return { result, commit };
   }
 
   /**
    * Execute embedding generation task
    */
-  private async executeGenerateEmbedding(task: TaskRef): Promise<unknown> {
+  private async executeGenerateEmbedding(task: TaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
     const aiService = getAIService();
 
@@ -880,40 +904,44 @@ export class AgentExecutor extends EventEmitter {
 
     this.sendProgress(task, 80, 'processing', 'Saving embedding...');
 
-    // Save embedding
     const embeddingId = this.generateId();
-    const now = new Date().toISOString();
+    const commit = () => {
+      const now = new Date().toISOString();
 
-    // Delete old embeddings for this item
-    sqlite.run(`DELETE FROM embeddings WHERE item_id = ?`, [task.targetItemId]);
+      // Delete old embeddings for this item
+      sqlite.run(`DELETE FROM embeddings WHERE item_id = ?`, [task.targetItemId]);
 
-    // Insert new embedding
-    sqlite.run(
-      `INSERT INTO embeddings (id, item_id, model, dimensions, vector, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        embeddingId,
-        task.targetItemId,
-        result.model,
-        result.dimensions,
-        encodeEmbedding(result.embeddings[0]),
+      // Insert new embedding
+      sqlite.run(
+        `INSERT INTO embeddings (id, item_id, model, dimensions, vector, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          embeddingId,
+          task.targetItemId,
+          result.model,
+          result.dimensions,
+          encodeEmbedding(result.embeddings[0]),
+          now,
+        ]
+      );
+
+      // Mark item as indexed
+      sqlite.run(`UPDATE knowledge_items SET is_indexed = 1, updated_at = ? WHERE id = ?`, [
         now,
-      ]
-    );
+        task.targetItemId,
+      ]);
+    };
 
-    // Mark item as indexed
-    sqlite.run(
-      `UPDATE knowledge_items SET is_indexed = 1, updated_at = ? WHERE id = ?`,
-      [now, task.targetItemId]
-    );
-
-    return { embeddingId, dimensions: result.dimensions, model: result.model };
+    return {
+      result: { embeddingId, dimensions: result.dimensions, model: result.model },
+      commit,
+    };
   }
 
   /**
    * Execute find related items task
    */
-  private async executeFindRelated(task: TaskRef): Promise<unknown> {
+  private async executeFindRelated(task: TaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
 
     // Get source embedding
@@ -952,18 +980,18 @@ export class AgentExecutor extends EventEmitter {
 
     this.sendProgress(task, 80, 'processing', 'Creating links...');
 
-    // Create links
-    const now = new Date().toISOString();
-    for (const related of topRelated) {
-      const linkId = this.generateId();
-      sqlite.run(
-        `INSERT OR REPLACE INTO links (id, source_id, target_id, type, strength, created_at, updated_at)
-         VALUES (?, ?, ?, 'ai-suggested', ?, ?, ?)`,
-        [linkId, task.targetItemId, related.itemId, related.similarity, now, now]
-      );
-    }
+    const commit = () => {
+      const now = new Date().toISOString();
+      for (const related of topRelated) {
+        sqlite.run(
+          `INSERT OR REPLACE INTO links (id, source_id, target_id, type, strength, created_at, updated_at)
+           VALUES (?, ?, ?, 'ai-suggested', ?, ?, ?)`,
+          [this.generateId(), task.targetItemId, related.itemId, related.similarity, now, now]
+        );
+      }
+    };
 
-    return { relatedCount: topRelated.length, related: topRelated };
+    return { result: { relatedCount: topRelated.length, related: topRelated }, commit };
   }
 
   // ================================

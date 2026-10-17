@@ -6,10 +6,10 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import {
   getAgentExecutor,
-  type TaskType,
   type AgentTask,
   type ProcessItemOptions,
 } from './agent-executor';
+import type { TaskType } from './task-types';
 
 /**
  * Register all agent-related IPC handlers

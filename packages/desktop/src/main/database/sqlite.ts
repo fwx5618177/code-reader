@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { app } from 'electron';
 import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { TASK_TYPES } from '../agent/task-types';
 
 // ================================
 // Types
@@ -36,7 +37,48 @@ export interface RunResult {
 // Schema Definitions
 // ================================
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
+
+/** agent_tasks.type 允许的取值，来自执行器支持的任务类型 */
+const AGENT_TASK_TYPES_SQL = TASK_TYPES.map((type) => `'${type}'`).join(', ');
+
+/** agent_tasks 建表语句；全新数据库与 v4 重建迁移共用，保证两条路径结构一致 */
+const agentTasksTableSql = (name: string) => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL CHECK (type IN (${AGENT_TASK_TYPES_SQL})),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
+  target_item_id TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 5,
+  progress INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  max_retries INTEGER NOT NULL DEFAULT 3,
+  result TEXT,
+  -- 同一次处理请求（processItem）创建的任务共享 batch_id，用于判定条目最终状态
+  batch_id TEXT,
+  -- 失败重试时的最早可执行时间（ISO 字符串），为空表示可立即执行
+  next_attempt_at TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  is_deleted INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT,
+  FOREIGN KEY (target_item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+);
+`;
+
+const AGENT_TASKS_COLUMNS =
+  'id, type, status, target_item_id, priority, progress, error_message, retry_count, max_retries, ' +
+  'result, batch_id, next_attempt_at, started_at, completed_at, created_at, updated_at, is_deleted, deleted_at';
+
+const AGENT_TASKS_INDEXES_SQL = `
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON agent_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_type ON agent_tasks(type);
+CREATE INDEX IF NOT EXISTS idx_tasks_target ON agent_tasks(target_item_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_priority ON agent_tasks(priority DESC, created_at ASC);
+`;
 
 const CREATE_TABLES_SQL = `
 -- Knowledge Items table
@@ -166,29 +208,7 @@ CREATE TABLE IF NOT EXISTS links (
 );
 
 -- Agent Tasks table
-CREATE TABLE IF NOT EXISTS agent_tasks (
-  id TEXT PRIMARY KEY,
-  type TEXT NOT NULL CHECK (type IN ('transcribe', 'summarize', 'extract-tags', 'categorize', 'extract-entities', 'generate-embedding', 'find-related')),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
-  target_item_id TEXT NOT NULL,
-  priority INTEGER NOT NULL DEFAULT 5,
-  progress INTEGER NOT NULL DEFAULT 0,
-  error_message TEXT,
-  retry_count INTEGER NOT NULL DEFAULT 0,
-  max_retries INTEGER NOT NULL DEFAULT 3,
-  result TEXT,
-  -- 同一次处理请求（processItem）创建的任务共享 batch_id，用于判定条目最终状态
-  batch_id TEXT,
-  -- 失败重试时的最早可执行时间（ISO 字符串），为空表示可立即执行
-  next_attempt_at TEXT,
-  started_at TEXT,
-  completed_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  is_deleted INTEGER NOT NULL DEFAULT 0,
-  deleted_at TEXT,
-  FOREIGN KEY (target_item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
-);
+${agentTasksTableSql('agent_tasks')}
 
 -- App Settings table
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -291,10 +311,7 @@ CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_id);
 CREATE INDEX IF NOT EXISTS idx_links_type ON links(type);
 
 -- Tasks indexes
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON agent_tasks(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_type ON agent_tasks(type);
-CREATE INDEX IF NOT EXISTS idx_tasks_target ON agent_tasks(target_item_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_priority ON agent_tasks(priority DESC, created_at ASC);
+${AGENT_TASKS_INDEXES_SQL}
 
 -- Embeddings indexes
 CREATE INDEX IF NOT EXISTS idx_embeddings_item ON embeddings(item_id);
@@ -391,6 +408,24 @@ const MIGRATIONS: Migration[] = [
       `);
       db.exec(CREATE_FTS_SQL);
       db.exec(REBUILD_FTS_SQL);
+    },
+  },
+  {
+    version: 4,
+    description: 'agent_tasks 重建：类型约束去掉已移除的 categorize / extract-entities',
+    // SQLite 不支持修改 CHECK 约束，只能建新表、复制、替换；已移除类型的任务与孤儿任务不再保留
+    up: (db) => {
+      db.exec(`
+        DROP TABLE IF EXISTS agent_tasks_v4;
+        ${agentTasksTableSql('agent_tasks_v4')}
+        INSERT INTO agent_tasks_v4 (${AGENT_TASKS_COLUMNS})
+          SELECT ${AGENT_TASKS_COLUMNS} FROM agent_tasks
+          WHERE type IN (${AGENT_TASK_TYPES_SQL})
+            AND target_item_id IN (SELECT id FROM knowledge_items);
+        DROP TABLE agent_tasks;
+        ALTER TABLE agent_tasks_v4 RENAME TO agent_tasks;
+        ${AGENT_TASKS_INDEXES_SQL}
+      `);
     },
   },
 ];
