@@ -76,24 +76,6 @@ export function createFailedResult(
 // 保存负载
 // ================================
 
-/**
- * 保存负载（全量或增量）
- */
-export interface SavePayload {
-  /** 保存类型 */
-  readonly type: 'full' | 'incremental';
-  /** 文档 ID */
-  readonly documentId: string;
-  /** 目标版本 ID */
-  readonly versionId: number;
-  /** 目标内容哈希 */
-  readonly contentHash: string;
-  /** 全量快照（type === 'full' 时存在） */
-  readonly snapshot?: ContentSnapshot;
-  /** 增量数据（type === 'incremental' 时存在） */
-  readonly incremental?: IncrementalSaveData;
-}
-
 // ================================
 // 保存策略
 // ================================

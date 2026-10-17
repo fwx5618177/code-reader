@@ -52,18 +52,6 @@ export function dismissWelcomeGuide(): void {
 }
 
 // ================================
-// 辅助函数：重置引导关闭状态
-// ================================
-
-export function resetWelcomeGuide(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    console.warn('[WelcomeGuide] 无法重置关闭状态');
-  }
-}
-
-// ================================
 // 组件
 // ================================
 

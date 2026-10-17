@@ -258,22 +258,6 @@ export type QuickInputType =
   | 'file' // 文件
   | 'url'; // 网址
 
-/**
- * 快速输入记录
- */
-export interface QuickInputRecord {
-  /** 输入类型 */
-  type: QuickInputType;
-  /** 内容 */
-  content: string;
-  /** 附件路径 */
-  attachments?: string[];
-  /** 来源 */
-  source?: string;
-  /** 时间戳 */
-  timestamp: Date;
-}
-
 // ================================
 // Search (搜索)
 // ================================

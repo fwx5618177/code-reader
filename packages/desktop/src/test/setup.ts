@@ -301,13 +301,6 @@ export function wait(ms: number): Promise<void> {
 }
 
 /**
- * Flush all pending promises
- */
-export async function flushPromises(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-/**
  * Wait for a condition to be true
  */
 export async function waitFor(

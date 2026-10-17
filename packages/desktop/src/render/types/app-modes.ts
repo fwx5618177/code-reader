@@ -550,20 +550,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 // Helper Functions
 // ================================
 
-/**
- * Get the effective UI config for current state
- */
-export function getEffectiveUIConfig(state: AppState): AppModeUIConfig {
-  const baseConfig = APP_MODE_CONFIGS[state.mode].ui;
-
-  if (state.mode === 'writing' && state.writingFeature !== 'normal') {
-    const featureOverrides = WRITING_FEATURES[state.writingFeature].uiOverrides;
-    return { ...baseConfig, ...featureOverrides };
-  }
-
-  return baseConfig;
-}
-
 /** 当前模式的活动侧栏面板配置 */
 export function getActiveSidebarPanel(state: AppState): SidebarPanelConfig {
   const panels = MODE_SIDEBAR_PANELS[state.mode];

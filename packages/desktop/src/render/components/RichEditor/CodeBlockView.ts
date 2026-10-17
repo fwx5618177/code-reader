@@ -109,17 +109,6 @@ async function getSharedAutocompleteService(): Promise<AutocompleteService> {
 }
 
 /**
- * 销毁共享的补全服务（应用退出时调用）
- */
-export function destroySharedAutocompleteService(): void {
-  if (sharedAutocompleteService) {
-    sharedAutocompleteService.destroy();
-    sharedAutocompleteService = null;
-    autocompleteServiceInitPromise = null;
-  }
-}
-
-/**
  * 将语言 ID 映射到 Prism 语言名称
  */
 function getPrismLanguage(language: string): string {
