@@ -398,8 +398,8 @@ import { DocumentEditorManager, createSuccessResult } from './lib/core';
 
 const manager = DocumentEditorManager.getInstance();
 
-// 获取实例
-const { instance, isNew } = manager.acquire('doc-123', {
+// 获取实例（同一文档只有一个实例；已存在时沿用其内容，initialTitle / initialContent 不生效）
+const { instance } = manager.acquire('doc-123', {
   initialTitle: '我的文档',
   executor: {
     save: async (snapshot) => {
@@ -413,11 +413,15 @@ const { instance, isNew } = manager.acquire('doc-123', {
   },
 });
 
-// 使用
-instance.model.updateContent('<p>Hello World</p>');
-instance.saveEngine.requestSave();
+// 使用：实例自身负责自动保存（内容变化 → requestSave）与保存成功后的 markAsSaved，
+// 不依赖任何订阅方；多个持有方（如分栏的两栏）写入同一实例
+const unsubscribe = instance.model.onContentChange(() => {
+  /* 只更新本持有方的状态 */
+});
+instance.model.updateContent('Hello World');
 
-// 释放
+// 释放：先取消自己的订阅；实例留在缓存中，待保存的更改照常写回
+unsubscribe();
 manager.release('doc-123');
 ```
 

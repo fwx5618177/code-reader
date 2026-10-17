@@ -11,19 +11,22 @@
 | 全文索引与搜索 | `@code-reader/search-service` | 写作文档全文搜索与建议 | `lib/writing` |
 | 补全服务 | `@code-reader/autocomplete-service` | CodeMirror 代码块补全（Markdown / Emoji / 代码片段 provider） | `components/RichEditor/CodeBlockView.ts` |
 | 文本存储（Piece Table / Rope） | `@code-reader/text-buffer` | LaTeX 编辑缓冲区，按规模选择结构 | `lib/latex/latex-document.ts` |
-| 增量语法解析 | `@code-reader/syntax-parser` | LaTeX 增量解析 | `lib/latex/incremental-engine.ts` |
 
 ## 2. desktop 内的业务算法
 
 | 算法 | 文件 | 用途 | 说明 |
 |------|------|------|------|
-| Hunspell 词缀展开与查词 | `lib/spellcheck/affix.ts`、`hunspell.ts` | 拼写检查 | 解析 `.aff` 的 PFX/SFX（条件、剥离、交叉组合、链式后缀）、四种 FLAG 格式与别名、简单复合词、大小写规则；词典为独立资源文件（`assets/dictionaries/`，用户导入的在 `userData/spellcheck/`），在 Worker 中加载与查询 |
+| Hunspell 词缀展开与查词 | `lib/spellcheck/affix.ts`、`hunspell.ts`、`compound-rule.ts` | 拼写检查 | 解析 `.aff` 的 PFX/SFX（条件、剥离、交叉组合、链式后缀）、四种 FLAG 格式与别名、复合词（COMPOUNDFLAG/BEGIN/MIDDLE/END、ONLYINCOMPOUND、COMPOUNDMIN，COMPOUNDRULE 用 NFA 状态集合逐部分匹配并在切分中剪枝）、大小写规则；词典为独立资源文件（`assets/dictionaries/`，用户导入的在 `userData/spellcheck/`），在 Worker 中加载与查询 |
 | 拼写建议生成 | `lib/spellcheck/suggest.ts` | 右键菜单建议 | 候选：`.aff` 中 REP 常见错误替换、基于 TRY 字符的一次编辑、拆成两个词、大小写修正、同首字母词形中编辑距离 ≤ 2 的词；按 Damerau-Levenshtein 距离排序，并参考 REP 命中、首字母、键盘相邻 |
 | 分词与跳过规则 | `lib/spellcheck/tokenize.ts` | 拼写检查范围 | 只检查拉丁字母单词；跳过 CJK、代码、链接、公式、URL、邮箱、路径、含数字或下划线的词、全大写缩写、驼峰标识符 |
 | Barnes–Hut 力导向布局 | `lib/links/force-layout.ts` | 知识图谱布局 | 四叉树近似斥力，O(n log n) |
 | 链接重命名改写 | `lib/links/rename.ts` | 重命名笔记时更新 `[[ ]]` | 只替换链接目标名，保留别名、标题片段与原文其余字节；跳过代码与公式 |
 | 嵌入展开 | `lib/links/embed.ts` | `![[ ]]` 嵌入 | 深度上限 + 已访问集合防止循环 |
-| 跨文本节点定位 | `lib/reading/highlight-dom.ts` | 阅读高亮 | TreeWalker 拼接文本节点，全局偏移映射回 (节点, 偏移)，逐节点包裹 `<mark>` |
+| 跨文本节点定位 | `lib/reading/highlight-dom.ts` | 阅读高亮 | TreeWalker 拼接文本节点，全局偏移映射回 (节点, 偏移)，逐节点包裹 `<mark>`；PDF 跨页选区按页拆成片段，每页在本页文本层内定位 |
+| LaTeX 块分割与块级增量 | `lib/latex/block-segmenter.ts`、`incremental-engine.ts` | LaTeX 增量解析 | 只在完整解析器也会切分顶层节点的位置切块；编辑映射到旧块后，未触及且起点对齐的块平移复用，其余位置重新分块、只解析新块 |
+| 实测高度映射 | `lib/latex/height-map.ts` | LaTeX 分栏滚动同步 | 块位置只来自 DOM 实测，块内按行在实测上下沿间线性插值；未测量的块不参与查询 |
+| 块 ID 写入 | `lib/links/block-id.ts` | 块级引用 | 在目标文档源码中按 token 位置插入 ` ^id` 或独立段落 `^id`，其余字节不变 |
+| 版本分层保留 | `main/database/version-retention.ts` | 版本清理 | 按时间段分层：近期全留，之后每个自然日 / 周 / 月各留一个，最新版本始终保留 |
 | 行级差分重建 | `lib/writing/components/diff-lines.ts` | 版本对比视图 | 把字符级差分重建为“旧行 + 新行”，行内只高亮变化部分 |
 
-Markdown 解析与序列化由 `lib/markdown`（markdown-it + ProseMirror）负责；增量解析器与 CommonMark 解析器在子包 `packages/format-parser`。数学公式使用自研解析与渲染（`lib/math`），不依赖 KaTeX / MathJax。
+Markdown 解析与序列化由 `lib/markdown`（markdown-it + ProseMirror）负责；LaTeX 解析器在 `lib/latex/parser.ts`。子包 `packages/format-parser`、`packages/syntax-parser`、`packages/plugin-system` 目前不被 desktop 引用。数学公式使用自研解析与渲染（`lib/math`），不依赖 KaTeX / MathJax。

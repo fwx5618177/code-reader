@@ -380,19 +380,22 @@ initialize()
 
 ### 编辑保存流程
 
+写作编辑器的输入不经过 `useDocuments`：分栏的每一栏（`components/SplitEditor/PaneEditor.tsx`）持有自己文档的托管实例并直接写入，
+`useDocuments` 从同一实例派生当前文档的标题与内容。`updateLocal` 用于其他入口修改当前文档（如侧栏重命名、专注模式标题栏）。
+
 ```
-用户输入
-  → updateLocal({ content: html })
-  → editor.updateContent(html)  // EditorModel 版本递增
-  → dispatch(EDITOR_UPDATE_LOCAL)
-  → SaveEngine 自动调度保存
-  
+用户输入（任一栏）
+  → PaneEditor 微防抖 16ms
+  → instance.model.updateContent(markdown)  // EditorModel 版本递增
+  → 实例自身调度保存（requestSave）
+  → 所有持有该实例的 hook 更新状态；其他打开同一文档的栏把内容作为外部更新同步
+
 保存执行
   → SaveEngine 拉取 EditorModel 最新内容
-  → executor.save(snapshot)
+  → executor.save(snapshot)（各栏与会话共用 useDocuments 的 saveExecutor）
   → documentService.saveDocument(id, data)
-  → dispatch(LIST_UPDATE_ITEM)
-  → editor.markAsSaved(versionId)
+  → dispatch(LIST_UPDATE_ITEM)、config.onDocumentSaved（同步 [[ ]] 到 links 表）、按间隔创建版本
+  → 实例自身 markAsSaved(versionId, contentHash)
 ```
 
 ### 文档切换流程
@@ -404,7 +407,7 @@ selectDocument(newId)
   → getDocument(newId)
   → editor.switchDocument(id, title, content)
     → DocumentEditorManager.release(oldId)
-    → DocumentEditorManager.acquire(newId)
+    → DocumentEditorManager.acquire(newId)  // 已被某一栏持有时沿用内存中的内容
   → dispatch(EDITOR_LOAD_SUCCESS)
 ```
 
