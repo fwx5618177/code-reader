@@ -57,8 +57,6 @@ import {
   Edit3,
   Maximize2,
   Minimize2,
-  Type,
-  AlignCenter,
   Search,
   X,
   ChevronUp,
@@ -80,6 +78,7 @@ import { LatexEditor } from './LatexEditor';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
 import { createBlockKeymap } from '../../lib/editor/block-commands';
 import { createBlockHandlePlugin } from '../../lib/editor/block-handle';
+import { createTypewriterPlugin, setTypewriterEnabled } from '../../lib/editor/typewriter';
 import type { PopupMenuClasses } from '../../lib/editor/popup-menu';
 import { createSpellcheckPlugin } from '../../lib/spellcheck/prosemirror-plugin';
 import { spellcheckService } from '../../services/spellcheckService';
@@ -91,7 +90,6 @@ import styles from './RichEditor.module.scss';
 // ================================
 
 export type EditorMode = 'edit' | 'preview' | 'split';
-export type ViewMode = 'normal' | 'focus' | 'typewriter';
 
 export interface EditorOptions {
   /** 是否参与自研拼写检查（实际启用与否由设置中的「拼写检查」开关决定） */
@@ -100,8 +98,8 @@ export interface EditorOptions {
   showWordCount?: boolean;
   showLineNumbers?: boolean;
   defaultCodeLanguage?: string;
+  /** 打字机模式：光标所在行保持在编辑区垂直中央（可在编辑器存活期间切换） */
   typewriterMode?: boolean;
-  focusMode?: boolean;
   showToolbar?: boolean;
   showBorder?: boolean;
   minHeight?: string;
@@ -172,7 +170,6 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
   if (prevOpts.showBorder !== nextOpts.showBorder) return false;
   if (prevOpts.showWordCount !== nextOpts.showWordCount) return false;
   if (prevOpts.showTitle !== nextOpts.showTitle) return false;
-  if (prevOpts.focusMode !== nextOpts.focusMode) return false;
   if (prevOpts.typewriterMode !== nextOpts.typewriterMode) return false;
   if (prevOpts.placeholder !== nextOpts.placeholder) return false;
   if (prevOpts.minHeight !== nextOpts.minHeight) return false;
@@ -224,7 +221,6 @@ const DEFAULT_OPTIONS: EditorOptions = {
   showLineNumbers: true,
   defaultCodeLanguage: 'javascript',
   typewriterMode: false,
-  focusMode: false,
   showToolbar: true,
   showBorder: false,
   minHeight: '300px',
@@ -690,7 +686,6 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
 
   // State - only UI state, no save state
   const [editorMode, setEditorMode] = useState<EditorMode>('edit');
-  const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
   /** 当前文档的存储内容（预览面板使用） */
@@ -845,6 +840,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       searchHighlightPlugin,
       autocompletePlugin,
       wikiLinkClickPlugin,
+      createTypewriterPlugin({ enabled: Boolean(options.typewriterMode), className: styles.typewriter }),
     ];
     if (isMarkdown) {
       plugins.push(
@@ -999,6 +995,11 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     });
     return () => cancelAnimationFrame(frame);
   }, [revealHeading]);
+
+  // 打字机模式开关变化时切换插件状态（初始值已在创建插件时传入）
+  useEffect(() => {
+    if (editorViewRef.current) setTypewriterEnabled(editorViewRef.current, Boolean(options.typewriterMode));
+  }, [options.typewriterMode]);
 
   // Update editable state when mode changes
   useEffect(() => {
@@ -1374,13 +1375,11 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   const editorClassName = useMemo(() => {
     const classes = [styles.richEditor, className];
     classes.push(styles[`mode${editorMode.charAt(0).toUpperCase()}${editorMode.slice(1)}`]);
-    if (viewMode === 'typewriter') classes.push(styles.typewriterMode);
-    if (viewMode === 'focus') classes.push(styles.focusMode);
     if (readOnly) classes.push(styles.readOnly);
     if (options.showBorder) classes.push(styles.withBorder);
     if (chunked) classes.push(styles.chunkedRendering);
     return classes.filter(Boolean).join(' ');
-  }, [className, editorMode, viewMode, readOnly, options.showBorder, chunked]);
+  }, [className, editorMode, readOnly, options.showBorder, chunked]);
 
   return (
     <div
@@ -1490,24 +1489,6 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
 
           {/* Spacer */}
           <div className={styles.toolbarSpacer} />
-
-          {/* View Mode Toggle */}
-          <div className={styles.toolbarGroup}>
-            <ToolbarButton
-              icon={<Type size={16} />}
-              title="打字机模式"
-              onClick={() => setViewMode(viewMode === 'typewriter' ? 'normal' : 'typewriter')}
-              isActive={viewMode === 'typewriter'}
-            />
-            <ToolbarButton
-              icon={<AlignCenter size={16} />}
-              title="专注模式"
-              onClick={() => setViewMode(viewMode === 'focus' ? 'normal' : 'focus')}
-              isActive={viewMode === 'focus'}
-            />
-          </div>
-
-          <ToolbarDivider />
 
           {/* Editor Mode Toggle */}
           <div className={styles.toolbarGroup}>

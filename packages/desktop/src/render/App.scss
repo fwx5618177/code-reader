@@ -445,7 +445,8 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 800px;
+  // 随页面设置的页宽变化（--page-content-width 由 PageSurface 写入），叠加左右内边距
+  max-width: calc(var(--page-content-width, 720px) + 2 * var(--spacing-8));
   width: 100%;
   margin: 0 auto;
   padding: var(--spacing-6) var(--spacing-8);

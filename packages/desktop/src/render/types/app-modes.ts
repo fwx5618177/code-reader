@@ -12,15 +12,15 @@ import type { QuickInputType } from './knowledge';
 /**
  * 应用模式
  * - knowledge: 知识库模式 - 管理笔记、录音、文档、多媒体（高频写入，低频读取）
- * - writing: 写作模式 - Markdown / LaTeX 写作，包含专注、打字机功能
+ * - writing: 写作模式 - Markdown / LaTeX 写作，包含专注功能（打字机模式属于页面设置）
  * - reading: 阅读模式 - 文章、电子书阅读管理
  */
 export type AppMode = 'knowledge' | 'writing' | 'reading';
 
 /**
- * Writing mode features (sub-features of writing mode)
+ * 写作模式的子功能（改变界面布局）；打字机模式是编辑行为，由页面设置的 typewriter 决定
  */
-export type WritingFeature = 'normal' | 'focus' | 'typewriter';
+export type WritingFeature = 'normal' | 'focus';
 
 /**
  * App mode configuration
@@ -165,17 +165,6 @@ export const WRITING_FEATURES: Record<WritingFeature, WritingFeatureConfig> = {
       showTitleBar: false,
       showStatusBar: false,
       showTabs: false,
-      distractionFree: true,
-    },
-  },
-  typewriter: {
-    id: 'typewriter',
-    name: 'Typewriter',
-    nameCN: '打字机',
-    description: 'Keep current line centered, focus on writing flow',
-    icon: 'AlignCenter',
-    uiOverrides: {
-      sidebarCollapsed: true,
       distractionFree: true,
     },
   },

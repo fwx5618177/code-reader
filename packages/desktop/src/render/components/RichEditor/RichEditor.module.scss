@@ -31,25 +31,14 @@
       opacity: 0.6;
     }
   }
+}
 
-  &.focusMode {
-    .prosemirror > * {
-      opacity: 0.4;
-      transition: opacity 0.2s ease;
-    }
-
-    .prosemirror > *:focus-within,
-    .prosemirror > *:hover {
-      opacity: 1;
-    }
-  }
-
-  &.typewriterMode {
-    .prosemirror {
-      padding-top: 40vh;
-      padding-bottom: 40vh;
-    }
-  }
+// 打字机模式（类名由 typewriter 插件加到编辑区根元素）：
+// 高度随内容增长并在末尾留出半屏空白，使最后几行也能滚动到可视区域中央
+.prosemirror.typewriter {
+  height: auto;
+  min-height: 100%;
+  padding-bottom: 50vh;
 }
 
 // ================================
@@ -213,12 +202,15 @@
 // ================================
 
 .prosemirror {
+  // 间隙光标等插件装饰以编辑区为定位基准
+  position: relative;
   height: 100%;
   outline: none;
   color: var(--text-primary);
-  font-family: var(--font-family-sans);
-  font-size: var(--font-size-base);
-  line-height: 1.75;
+  // 字体、字号与整数 px 行高由页面设置（PageSurface）提供，行高与纸张背景的线距一致
+  font-family: var(--page-font-family, var(--font-family-sans));
+  font-size: var(--page-font-size, var(--font-size-base));
+  line-height: var(--page-line, 1.75);
   white-space: pre-wrap; // Required by ProseMirror for proper text handling
   word-wrap: break-word;
 
@@ -255,8 +247,24 @@
     outline: none;
   }
 
-  // Placeholder
-  &.ProseMirror-focused .ProseMirror-gapcursor {
+  // 间隙光标（prosemirror-gapcursor）：在无法放置文本光标的块之间显示横向闪烁光标，类名由插件生成
+  :global(.ProseMirror-gapcursor) {
+    display: none;
+    pointer-events: none;
+    position: absolute;
+
+    &::after {
+      content: '';
+      display: block;
+      position: absolute;
+      top: -2px;
+      width: 20px;
+      border-top: 1px solid var(--text-primary);
+      animation: gapcursor-blink 1.1s steps(2, start) infinite;
+    }
+  }
+
+  &:global(.ProseMirror-focused) :global(.ProseMirror-gapcursor) {
     display: block;
   }
 
@@ -429,7 +437,7 @@
     border-radius: var(--radius-md);
     margin: var(--spacing-4) 0;
 
-    &.ProseMirror-selectednode {
+    &:global(.ProseMirror-selectednode) {
       outline: 2px solid var(--accent-primary);
       outline-offset: 2px;
     }
@@ -477,7 +485,7 @@
       font-size: 0.8em;
     }
 
-    &.ProseMirror-selectednode {
+    &:global(.ProseMirror-selectednode) {
       outline: 2px solid var(--accent-primary);
     }
   }
@@ -541,6 +549,101 @@
 .chunkedRendering .prosemirror > * {
   content-visibility: auto;
   contain-intrinsic-size: auto 1.75em;
+}
+
+// ================================
+// 页面设置：纸张背景（横线 / 方格 / 点阵）
+// PageSurface 提供 data-page-background、--page-line（整数 px 行高）与 --page-rule-color。
+// 背景画在滚动容器 .editorMain 上并随内容滚动（local），
+// 首行起点为 .editorContainer 的上内边距 var(--spacing-6)，线落在每行底边
+// ================================
+
+$page-rule-rows: repeating-linear-gradient(
+  to bottom,
+  transparent var(--spacing-6),
+  transparent calc(var(--spacing-6) + var(--page-line) - 1px),
+  var(--page-rule-color) calc(var(--spacing-6) + var(--page-line) - 1px),
+  var(--page-rule-color) calc(var(--spacing-6) + var(--page-line))
+);
+
+:global([data-page-background='lines']) .editorMain {
+  background-attachment: local;
+  background-image: $page-rule-rows;
+}
+
+:global([data-page-background='grid']) .editorMain {
+  background-attachment: local;
+  background-image:
+    $page-rule-rows,
+    repeating-linear-gradient(
+      to right,
+      var(--page-rule-color) 0,
+      var(--page-rule-color) 1px,
+      transparent 1px,
+      transparent var(--page-line)
+    );
+}
+
+:global([data-page-background='dots']) .editorMain {
+  background-attachment: local;
+  background-image: radial-gradient(circle, var(--page-rule-color) 1.5px, transparent 2px);
+  background-size: var(--page-line) var(--page-line);
+  // 平铺格中心即圆点，偏移半格使圆点落在每行底边
+  background-position: calc(var(--page-line) / -2) calc(var(--spacing-6) + var(--page-line) / 2);
+}
+
+// 有纸张背景时块级元素按整行排布（间距与行高都取 --page-line 的倍数），正文始终落在线格内；
+// 代码块、图片、公式等自有高度的内容不强制对齐
+:global([data-page-background]:not([data-page-background='none'])) .prosemirror {
+  p,
+  ul,
+  ol,
+  blockquote,
+  table {
+    margin: 0 0 var(--page-line);
+  }
+
+  li,
+  li p,
+  li > ul,
+  li > ol,
+  blockquote > :last-child {
+    margin: 0;
+  }
+
+  blockquote {
+    padding-block: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: var(--page-line) 0 0;
+    line-height: var(--page-line);
+
+    &:first-child {
+      margin-top: 0;
+    }
+  }
+
+  // 大号标题占两行
+  h1,
+  h2 {
+    line-height: calc(2 * var(--page-line));
+  }
+
+  h1 {
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  // 2px 分割线连同上下外边距恰好占一行
+  hr {
+    margin: calc((var(--page-line) - 2px) / 2) 0;
+  }
 }
 
 // ================================
@@ -1805,6 +1908,12 @@
   }
   50% {
     opacity: 0.5;
+  }
+}
+
+@keyframes gapcursor-blink {
+  to {
+    visibility: hidden;
   }
 }
 

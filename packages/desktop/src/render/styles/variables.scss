@@ -193,6 +193,8 @@ $spacing-16: 64px;
 $font-sans:
   -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 $font-mono: 'Fira Code', 'JetBrains Mono', 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+// 正文衬线字体（阅读排版与写作页面设置共用）
+$font-serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', Georgia, serif;
 
 // Font Sizes
 $font-size-xs: 11px;

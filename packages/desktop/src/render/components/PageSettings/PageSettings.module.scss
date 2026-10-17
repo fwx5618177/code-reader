@@ -1,74 +1,48 @@
 // ================================
-// PageSettings Component Styles - CSS Module
-// 页面设置组件样式模块
+// PageSettings 页面设置浮层样式
+// 不加遮罩，便于边调整边观察编辑区效果
 // ================================
 
 @use '../../styles/variables' as *;
 
 // ================================
-// 遮罩层
+// 面板（固定在窗口右下角、编辑器底栏上方）
 // ================================
 
-.pageSettingsOverlay {
+.panel {
   position: fixed;
-  inset: 0;
-  background: var(--overlay-bg);
-  backdrop-filter: blur(4px);
-  z-index: $z-modal;
+  right: var(--spacing-4);
+  bottom: var(--spacing-12);
+  z-index: $z-popover;
+  width: 300px;
+  max-width: calc(100vw - var(--spacing-8));
+  max-height: calc(100vh - var(--spacing-16));
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: var(--spacing-4);
-  animation: fadeIn 0.15s ease-out;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-// ================================
-// 面板
-// ================================
-
-.pageSettingsPanel {
-  width: 320px;
-  max-width: 100%;
-  max-height: calc(100vh - var(--spacing-8));
+  flex-direction: column;
   background: var(--bg-primary);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xl);
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
-  animation: slideIn 0.2s ease-out;
+  animation: slideIn 0.15s ease-out;
 }
 
 @keyframes slideIn {
   from {
     opacity: 0;
-    transform: translateX(20px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
 
-// ================================
-// 头部
-// ================================
-
-.pageSettingsHeader {
+.header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--spacing-4);
+  padding: var(--spacing-3) var(--spacing-4);
   border-bottom: 1px solid var(--border-primary);
   flex-shrink: 0;
 
@@ -83,11 +57,11 @@
 .closeBtn {
   @include button-reset;
   @include flex-center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  transition: all $transition-fast;
+  transition: $transition-colors;
 
   &:hover {
     background: var(--bg-hover);
@@ -95,47 +69,31 @@
   }
 }
 
-// ================================
-// 内容区
-// ================================
-
-.pageSettingsContent {
+.content {
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-4);
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-6);
+  gap: var(--spacing-5);
 }
 
-// ================================
-// 设置区块
-// ================================
-
-.settingsSection {
+.section {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-3);
 }
 
 .sectionTitle {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   font-weight: $font-weight-medium;
   color: var(--text-secondary);
   margin: 0;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
-
-  svg {
-    opacity: 0.7;
-  }
 }
 
 // ================================
-// 背景选项
+// 纸张背景选项
 // ================================
 
 .backgroundOptions {
@@ -149,22 +107,56 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2);
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-1);
   border-radius: var(--radius-md);
-  transition: all $transition-fast;
+  transition: $transition-colors;
 
   &:hover {
     background: var(--bg-hover);
   }
 }
 
-.backgroundOptionActive {
-  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+.preview {
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-secondary);
+  transition: border-color $transition-fast;
+}
 
-  .backgroundPreview {
+.previewLines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 7px,
+    var(--text-muted) 7px,
+    var(--text-muted) 8px
+  );
+}
+
+.previewGrid {
+  background-image:
+    repeating-linear-gradient(to bottom, transparent 0, transparent 7px, var(--text-muted) 7px, var(--text-muted) 8px),
+    repeating-linear-gradient(to right, transparent 0, transparent 7px, var(--text-muted) 7px, var(--text-muted) 8px);
+}
+
+.previewDots {
+  background-image: radial-gradient(circle, var(--text-muted) 1px, transparent 1.5px);
+  background-size: 8px 8px;
+}
+
+.backgroundLabel {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.backgroundOptionActive {
+  background: var(--accent-primary-alpha);
+
+  .preview {
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 30%, transparent);
   }
 
   .backgroundLabel {
@@ -172,283 +164,133 @@
   }
 }
 
-.backgroundPreview {
-  width: 48px;
-  height: 48px;
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-tertiary);
-  transition: all $transition-fast;
-  overflow: hidden;
-  position: relative;
-}
-
-.bgLines {
-  background-image: repeating-linear-gradient(
-    transparent,
-    transparent 7px,
-    var(--border-secondary) 7px,
-    var(--border-secondary) 8px
-  );
-}
-
-.bgGrid {
-  background-image:
-    linear-gradient(var(--border-secondary) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border-secondary) 1px, transparent 1px);
-  background-size: 8px 8px;
-}
-
-.bgDots {
-  background-image: radial-gradient(
-    circle,
-    var(--border-secondary) 1px,
-    transparent 1px
-  );
-  background-size: 6px 6px;
-}
-
-.backgroundLabel {
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  transition: color $transition-fast;
-}
-
 // ================================
-// 宽度选项
+// 分段选择（页宽、字体）
 // ================================
 
-.widthOptions {
+.segmented {
   display: flex;
-  gap: var(--spacing-2);
+  gap: var(--spacing-1);
+  padding: var(--spacing-1);
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
-  padding: var(--spacing-1);
 }
 
-.widthOption {
+.segment {
   @include button-reset;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--spacing-1);
   flex: 1;
-  padding: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-2);
   border-radius: var(--radius-sm);
-  font-size: var(--font-size-xs);
+  font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  transition: all $transition-fast;
+  transition: $transition-colors;
 
   &:hover {
     color: var(--text-primary);
   }
+
+  &[data-font='serif'] {
+    font-family: $font-serif;
+  }
 }
 
-.widthOptionActive {
+.segmentActive {
   background: var(--bg-primary);
   color: var(--accent-primary);
   box-shadow: var(--shadow-sm);
 }
 
 // ================================
-// 滑块控制
+// 滑块
 // ================================
 
-.sliderControl {
-  display: flex;
-  flex-direction: column;
+.sliderRow {
+  display: grid;
+  grid-template-columns: 56px 1fr 72px;
+  align-items: center;
   gap: var(--spacing-2);
 }
 
-.sliderLabel {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
+.rowLabel {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-
-  svg {
-    opacity: 0.7;
-  }
 }
 
-.sliderWrapper {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-3);
-}
-
-.sliderInput {
-  flex: 1;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--bg-tertiary);
-  border-radius: 2px;
-  outline: none;
-
-  &::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    background: var(--accent-primary);
-    border-radius: 50%;
-    cursor: pointer;
-    transition: transform $transition-fast;
-
-    &:hover {
-      transform: scale(1.1);
-    }
-  }
-
-  &::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    background: var(--accent-primary);
-    border-radius: 50%;
-    cursor: pointer;
-    border: none;
-  }
+.slider {
+  width: 100%;
+  accent-color: var(--accent-primary);
 }
 
 .sliderValue {
-  min-width: 48px;
   font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
 // ================================
-// 表单控制（Select）
+// 开关（打字机模式）
 // ================================
 
-.formControl {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-2);
-}
-
-.formLabel {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-}
-
-.formSelect {
-  width: 100%;
-  padding: var(--spacing-2) var(--spacing-3);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  color: var(--text-primary);
-  cursor: pointer;
-  outline: none;
-  transition: all $transition-fast;
-
-  &:hover {
-    border-color: var(--border-secondary);
-  }
-
-  &:focus {
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-primary) 20%, transparent);
-  }
-
-  option {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-  }
-}
-
-// ================================
-// 开关控制
-// ================================
-
-.toggleControl {
+.switchRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-3);
-  padding: var(--spacing-3);
-  background: var(--bg-secondary);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: background $transition-fast;
-
-  &:hover {
-    background: var(--bg-tertiary);
-  }
 }
 
-.toggleInfo {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--spacing-2);
-  flex: 1;
-
-  > svg {
-    margin-top: 2px;
-    color: var(--text-tertiary);
-    flex-shrink: 0;
-  }
-}
-
-.toggleTextWrapper {
+.switchInfo {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
-.toggleLabel {
+.switchLabel {
   font-size: var(--font-size-sm);
   color: var(--text-primary);
 }
 
-.toggleDescription {
+.switchHint {
   font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
-.toggleCheckbox {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.toggleSwitch {
+.switch {
+  @include button-reset;
   position: relative;
-  width: 36px;
-  height: 20px;
-  background: var(--bg-tertiary);
-  border-radius: 10px;
   flex-shrink: 0;
-  transition: background $transition-fast;
+  width: 34px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  transition: $transition-colors;
 
-  &::after {
-    content: '';
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 16px;
-    height: 16px;
-    background: var(--text-secondary);
-    border-radius: 50%;
-    transition: all $transition-fast;
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
   }
 }
 
-.toggleSwitchChecked {
-  background: var(--accent-primary);
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform $transition-fast;
+}
 
-  &::after {
-    left: 18px;
-    background: white;
+.switchOn {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+
+  .switchKnob {
+    background: var(--text-on-accent);
+    transform: translateX(14px);
   }
 }
 
@@ -456,10 +298,10 @@
 // 底部
 // ================================
 
-.pageSettingsFooter {
+.footer {
   display: flex;
-  justify-content: center;
-  padding: var(--spacing-3) var(--spacing-4);
+  justify-content: flex-end;
+  padding: var(--spacing-2) var(--spacing-4);
   border-top: 1px solid var(--border-primary);
   flex-shrink: 0;
 }
@@ -468,49 +310,12 @@
   @include button-reset;
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
-  padding: var(--spacing-2) var(--spacing-4);
+  padding: var(--spacing-1) var(--spacing-3);
   border-radius: var(--radius-md);
-  transition: all $transition-fast;
+  transition: $transition-colors;
 
   &:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
-  }
-}
-
-// ================================
-// 亮色主题调整
-// ================================
-
-:global([data-theme='light']) {
-  .pageSettingsPanel {
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-  }
-
-  .backgroundPreview {
-    background: var(--bg-tertiary);
-  }
-
-  .bgLines {
-    background-image: repeating-linear-gradient(
-      transparent,
-      transparent 7px,
-      var(--border-primary) 7px,
-      var(--border-primary) 8px
-    );
-  }
-
-  .bgGrid {
-    background-image:
-      linear-gradient(var(--border-primary) 1px, transparent 1px),
-      linear-gradient(90deg, var(--border-primary) 1px, transparent 1px);
-  }
-
-  .bgDots {
-    background-image: radial-gradient(
-      circle,
-      var(--border-primary) 1px,
-      transparent 1px
-    );
   }
 }

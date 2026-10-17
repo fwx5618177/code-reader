@@ -18,7 +18,11 @@ import WritingSidebar, { type CreateDocumentOptions } from './components/Writing
 import VersionHistory from './components/VersionHistory';
 import TitleInput from './components/TitleInput';
 import SplitEditor from './components/SplitEditor';
+import PageSettings from './components/PageSettings';
+import PageSurface from './components/PageSettings/PageSurface';
 import { useEditorTabs } from './hooks/useEditorTabs';
+import { usePageSettings } from './hooks/usePageSettings';
+import { PAGE_CONTENT_WIDTH_VALUES } from './lib/editor/page-settings';
 
 // Lazy load heavy editor components for better initial load performance
 const RichEditor = lazy(() => import('./components/RichEditor'));
@@ -85,7 +89,16 @@ import {
   useRelatedLinks,
 } from './lib/links';
 import { extractWikiLinks, parseWikiLinkInner } from './lib/markdown';
-import { ChevronDown, ChevronRight, Plus, PenTool, X, History, Link2 } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  PenTool,
+  X,
+  History,
+  Link2,
+  LayoutTemplate,
+} from 'lucide-react';
 import {
   AppMode,
   APP_MODE_CONFIGS,
@@ -127,6 +140,11 @@ const App: React.FC = () => {
 
   // 写作模式的反向链接面板
   const [showBacklinks, setShowBacklinks] = useState(true);
+
+  // 页面设置（纸张背景、页宽、正文排版）：写作与专注模式共用
+  const pageSettings = usePageSettings();
+  const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
+  const pageContentWidth = PAGE_CONTENT_WIDTH_VALUES[pageSettings.settings.contentWidth];
 
   // 轻提示（快速收集结果等）
   const [notice, setNotice] = useState<string | null>(null);
@@ -437,6 +455,8 @@ const App: React.FC = () => {
           dispatch({ type: 'TOGGLE_SEARCH', payload: false });
         } else if (appState.settingsOpen) {
           dispatch({ type: 'TOGGLE_SETTINGS', payload: false });
+        } else if (pageSettingsOpen) {
+          setPageSettingsOpen(false);
         } else if (isInFocusMode) {
           dispatch({ type: 'EXIT_FOCUS_MODE' });
         }
@@ -479,6 +499,7 @@ const App: React.FC = () => {
     appState.quickInputOpen,
     appState.searchOpen,
     appState.settingsOpen,
+    pageSettingsOpen,
     editorDirty,
     isInFocusMode,
   ]);
@@ -1183,6 +1204,26 @@ const App: React.FC = () => {
   const focusWordCount = docWordCount;
   const focusCharCount = docCharCount;
 
+  // 页面设置入口与浮层：写作模式与专注模式的底栏共用
+  const pageSettingsButton = (
+    <button
+      className={`footer-action-btn ${pageSettingsOpen ? 'active' : ''}`}
+      onClick={() => setPageSettingsOpen((open) => !open)}
+      title="页面设置（纸张、页宽、排版、打字机模式）"
+      aria-expanded={pageSettingsOpen}
+    >
+      <LayoutTemplate size={14} />
+    </button>
+  );
+  const pageSettingsPanel = pageSettingsOpen ? (
+    <PageSettings
+      settings={pageSettings.settings}
+      onChange={pageSettings.updateSettings}
+      onReset={pageSettings.resetSettings}
+      onClose={() => setPageSettingsOpen(false)}
+    />
+  ) : null;
+
   // Render main content based on mode
   const renderMainContent = () => {
     switch (appState.mode) {
@@ -1237,7 +1278,7 @@ const App: React.FC = () => {
 
         return (
           <div className="writing-content">
-            <div className="writing-body">
+            <PageSurface className="writing-body" settings={pageSettings.settings}>
             <SplitEditor tabs={editorTabs} documents={documentList} sessionDocument={currentDocument}>
             <div className="writing-editor-wrapper">
               {editorPending ? (
@@ -1260,8 +1301,8 @@ const App: React.FC = () => {
                       showWordCount: false,
                       showToolbar: false,
                       showBorder: false,
-                      typewriterMode: appState.writingFeature === 'typewriter',
-                      focusMode: false,
+                      typewriterMode: pageSettings.settings.typewriter,
+                      contentMaxWidth: pageContentWidth,
                       showTitle: true,
                       title: currentDocument.title,
                       titlePlaceholder: PLACEHOLDERS.TITLE,
@@ -1289,7 +1330,7 @@ const App: React.FC = () => {
                 onClose={() => setShowBacklinks(false)}
               />
             )}
-            </div>
+            </PageSurface>
             <EditorFooter
               hasDocument={editorTabs.activeDocId !== null && editorTabs.activeDocId === selectedDocId}
               charCount={focusCharCount}
@@ -1324,7 +1365,9 @@ const App: React.FC = () => {
                   <History size={14} />
                 </button>
               )}
+              {pageSettingsButton}
             </EditorFooter>
+            {pageSettingsPanel}
 
             {/* Version History Panel */}
             <VersionHistory
@@ -1357,7 +1400,7 @@ const App: React.FC = () => {
     return (
       <LinkResolverContext.Provider value={linkResolver}>
       <div className="app focus-mode">
-        <div className="focus-container">
+        <PageSurface className="focus-container" settings={pageSettings.settings}>
           {/* Minimal header with close button */}
           <div className="focus-header">
             <TitleInput
@@ -1395,9 +1438,9 @@ const App: React.FC = () => {
                     showWordCount: false,
                     showToolbar: false,
                     showBorder: false,
-                    focusMode: true,
+                    typewriterMode: pageSettings.settings.typewriter,
                     minHeight: '100%',
-                    contentMaxWidth: '720px',
+                    contentMaxWidth: pageContentWidth,
                     showTitle: false,
                   }}
                 />
@@ -1433,7 +1476,9 @@ const App: React.FC = () => {
                 <History size={14} />
               </button>
             )}
+            {pageSettingsButton}
           </EditorFooter>
+          {pageSettingsPanel}
 
           {/* Version History Panel in Focus Mode */}
           <VersionHistory
@@ -1446,7 +1491,7 @@ const App: React.FC = () => {
               reloadDocument();
             }}
           />
-        </div>
+        </PageSurface>
         {noticeBar}
       </div>
       </LinkResolverContext.Provider>

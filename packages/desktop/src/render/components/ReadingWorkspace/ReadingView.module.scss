@@ -5,7 +5,6 @@
 
 @use '../../styles/variables' as *;
 
-$serif-stack: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', Georgia, serif;
 $outline-width: 248px;
 
 // ================================
@@ -44,7 +43,7 @@ $outline-width: 248px;
   line-height: var(--reading-line-height);
 
   &[data-font='serif'] {
-    font-family: $serif-stack;
+    font-family: $font-serif;
   }
 }
 
@@ -226,7 +225,7 @@ $outline-width: 248px;
   color: var(--text-secondary);
 
   &[data-font='serif'] {
-    font-family: $serif-stack;
+    font-family: $font-serif;
   }
 
   &:hover {
