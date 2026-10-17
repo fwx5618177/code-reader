@@ -7,29 +7,31 @@
 import type { RunResult, SqlStatement } from '../types/electron';
 
 class DatabaseService {
-  private isInitialized = false;
+  /** 共享的初始化过程：所有查询都先等待它，调用方不必关心初始化顺序；失败后允许重试 */
+  private initialization: Promise<void> | null = null;
 
   /**
-   * Initialize database connection
+   * 确保主进程数据库已就绪（幂等，并发调用共用同一次初始化）
    */
-  async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-
-    try {
-      await window.electron.ipcRenderer.invoke('db:initialize');
-      this.isInitialized = true;
-      console.log('[DatabaseService] Initialized successfully');
-    } catch (error) {
-      console.error('[DatabaseService] Initialization failed:', error);
-      throw error;
+  initialize(): Promise<void> {
+    if (!this.initialization) {
+      this.initialization = window.electron.ipcRenderer.invoke('db:initialize').then(
+        () => console.log('[DatabaseService] Initialized successfully'),
+        (error: unknown) => {
+          this.initialization = null;
+          console.error('[DatabaseService] Initialization failed:', error);
+          throw error;
+        }
+      );
     }
+    return this.initialization;
   }
 
   /**
    * Execute a write query
    */
   async run(sql: string, params?: unknown[]): Promise<RunResult> {
-    this.ensureInitialized();
+    await this.initialize();
     const result = await window.electron.ipcRenderer.invoke('db:run', sql, params);
     return result as RunResult;
   }
@@ -38,8 +40,8 @@ class DatabaseService {
    * 在同一个事务中依次执行多条写语句：任一失败则全部回滚，不会留下半完成的状态
    */
   async transaction(statements: SqlStatement[]): Promise<RunResult[]> {
-    this.ensureInitialized();
     if (statements.length === 0) return [];
+    await this.initialize();
     const result = await window.electron.ipcRenderer.invoke('db:transaction', statements);
     return result as RunResult[];
   }
@@ -48,7 +50,7 @@ class DatabaseService {
    * Get a single row
    */
   async get<T>(sql: string, params?: unknown[]): Promise<T | undefined> {
-    this.ensureInitialized();
+    await this.initialize();
     const result = await window.electron.ipcRenderer.invoke('db:get', sql, params);
     return result as T | undefined;
   }
@@ -57,7 +59,7 @@ class DatabaseService {
    * Get all rows
    */
   async all<T>(sql: string, params?: unknown[]): Promise<T[]> {
-    this.ensureInitialized();
+    await this.initialize();
     const result = await window.electron.ipcRenderer.invoke('db:all', sql, params);
     return (result as T[]) || [];
   }
@@ -67,15 +69,9 @@ class DatabaseService {
    * This removes all documents, folders, tags, etc.
    */
   async clearAllData(): Promise<void> {
-    this.ensureInitialized();
+    await this.initialize();
     await window.electron.ipcRenderer.invoke('db:clearAllData');
     console.log('[DatabaseService] All data cleared');
-  }
-
-  private ensureInitialized(): void {
-    if (!this.isInitialized) {
-      throw new Error('Database not initialized. Call initialize() first.');
-    }
   }
 }
 
