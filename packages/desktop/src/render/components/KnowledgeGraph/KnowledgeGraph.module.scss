@@ -1,0 +1,333 @@
+// ================================
+// KnowledgeGraph 组件样式
+// 颜色全部来自 CSS 变量，节点颜色由 Canvas 在运行时读取同一组变量
+// ================================
+
+@use '../../styles/variables' as *;
+
+.graph {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+}
+
+// ================================
+// 工具栏
+// ================================
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex: 1 1 160px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--spacing-2);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  transition: $transition-colors;
+
+  &:focus-within {
+    border-color: var(--accent-primary);
+  }
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font: inherit;
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+// 分段按钮（深度 / 全局-局部）
+.segmented {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+}
+
+.segmentedLabel {
+  padding: 0 var(--spacing-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.segment {
+  @include button-reset;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &[aria-pressed='true'] {
+    background-color: var(--accent-primary-alpha);
+    color: var(--text-primary);
+  }
+}
+
+.iconButton {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &[aria-pressed='true'] {
+    background-color: var(--accent-primary-alpha);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 筛选开关
+// ================================
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1) var(--spacing-4);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  cursor: pointer;
+  user-select: none;
+
+  input {
+    margin: 0;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+  }
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 画布区域
+// ================================
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+// 画布宿主：背景色同时作为 Canvas 标签描边色（运行时读取）
+.canvasHost {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+
+  &[data-cursor='pointer'] {
+    cursor: pointer;
+  }
+
+  &[data-cursor='grabbing'] {
+    cursor: grabbing;
+  }
+}
+
+.empty {
+  @include flex-center;
+  position: absolute;
+  inset: 0;
+  padding: var(--spacing-6);
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+// ================================
+// 图例
+// ================================
+
+.legend {
+  position: absolute;
+  left: var(--spacing-3);
+  bottom: var(--spacing-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  list-style: none;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--font-size-xs);
+  pointer-events: none;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+// 与 graph-style.ts 中 COLOR_ROLES 的变量一一对应
+.swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  &[data-role='accent'] {
+    background-color: var(--accent-primary);
+  }
+  &[data-role='info'] {
+    background-color: var(--color-info);
+  }
+  &[data-role='success'] {
+    background-color: var(--color-success);
+  }
+  &[data-role='warning'] {
+    background-color: var(--color-warning);
+  }
+  &[data-role='secondary'] {
+    background-color: var(--accent-secondary);
+  }
+  &[data-role='muted'] {
+    background-color: var(--text-muted);
+  }
+  &[data-role='faint'] {
+    background-color: var(--text-faint);
+  }
+}
+
+.dashedLine {
+  width: 8px;
+  border-top: 1px dashed var(--text-secondary);
+  flex-shrink: 0;
+}
+
+// ================================
+// 底栏
+// ================================
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  height: 24px;
+  padding: 0 var(--spacing-3);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  flex-shrink: 0;
+}
+
+.hovered {
+  @include truncate;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.counts {
+  flex-shrink: 0;
+}
+
+// ================================
+// 紧凑模式（侧边栏）
+// ================================
+
+.compact {
+  background-color: var(--bg-secondary);
+  font-size: var(--font-size-xs);
+
+  .toolbar,
+  .filters {
+    gap: var(--spacing-1) var(--spacing-2);
+    padding: var(--spacing-1) var(--spacing-2);
+  }
+
+  .search {
+    flex-basis: 100px;
+    height: 24px;
+    background-color: var(--bg-primary);
+  }
+
+  .segmented {
+    background-color: var(--bg-primary);
+  }
+
+  .segment {
+    min-width: 20px;
+    height: 18px;
+    padding: 0 var(--spacing-1);
+  }
+
+  .canvasHost {
+    background-color: var(--bg-secondary);
+  }
+
+  .footer {
+    height: 20px;
+    padding: 0 var(--spacing-2);
+  }
+}
