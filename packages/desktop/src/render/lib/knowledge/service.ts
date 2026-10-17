@@ -6,6 +6,7 @@
 import type { QuickInputData } from '../../components/QuickInput';
 import { databaseService } from '../../services/database';
 import { settingsService } from '../../services/settingsService';
+import { workspaceService } from '../../services/workspaceService';
 import { aiConfigService } from '../../services/aiConfigService';
 import type { KnowledgeItem, KnowledgeItemType } from '../../types/knowledge';
 import { ensureExtension } from '../documents/file-types';
@@ -14,9 +15,10 @@ import { documentFormat } from '../reading/article';
 import { knowledgeRepository } from './repository';
 import { migrateLegacyKnowledgeStore } from './legacy-migration';
 import { extractDocumentText, type ExtractedDocument } from './document-text';
-import { clipErrorMessage, clipWebPage, normalizeWebUrl, type WebClip } from './web-clip';
+import { clipWebPage, normalizeWebUrl, type WebClip } from './web-clip';
 import { localizeClipImages, type LocalizedClip } from './clip-images';
 import { durationMetadata } from './recording-metadata';
+import { ipcErrorMessage } from '../utils/ipc-error';
 
 let readyPromise: Promise<void> | null = null;
 
@@ -107,13 +109,13 @@ function resolveTitle(
 }
 
 /**
- * 保存附件到数据目录 attachments/，返回绝对路径
+ * 保存附件到当前知识库的附件目录，返回绝对路径
  */
 async function saveAttachment(file: File): Promise<string> {
-  const settings = await settingsService.get();
-  await window.electron.ipcRenderer.invoke('create-directory', settings.attachmentsPath);
+  const { attachmentsPath } = await workspaceService.getCurrent();
+  await window.electron.ipcRenderer.invoke('create-directory', attachmentsPath);
   const safeName = file.name.replace(/[\\/:*?"<>|]/g, '_');
-  const path = `${settings.attachmentsPath}/${Date.now().toString(36)}-${safeName}`;
+  const path = `${attachmentsPath}/${Date.now().toString(36)}-${safeName}`;
   const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
   await window.electron.ipcRenderer.invoke('write-binary-file', path, bytes);
   return path;
@@ -169,7 +171,7 @@ async function clipUrl(input: string): Promise<{ clip: WebClip } | { error: stri
     return { clip: await clipWebPage(normalizeWebUrl(input)) };
   } catch (error) {
     console.error('[Knowledge] 网页剪藏失败:', error);
-    return { error: clipErrorMessage(error) };
+    return { error: ipcErrorMessage(error) };
   }
 }
 
@@ -197,8 +199,8 @@ async function extractAttachmentText(
  * 图片条目不提交 Agent 处理：它们只是剪藏正文的组成部分
  */
 async function saveClipImages(clip: WebClip, title: string, folderId?: string): Promise<LocalizedClip> {
-  const settings = await settingsService.get();
-  const localized = await localizeClipImages(clip.markdown, title, settings.attachmentsPath);
+  const { attachmentsPath } = await workspaceService.getCurrent();
+  const localized = await localizeClipImages(clip.markdown, title, attachmentsPath);
   for (const image of localized.images) {
     await knowledgeRepository.create({
       title: image.title,

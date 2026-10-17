@@ -294,6 +294,12 @@ export interface ISaveEngine {
   saveNow(): Promise<SaveResult>;
 
   /**
+   * 落盘：等待进行中的保存结束，若仍有未保存的更改则立即保存（不受自动保存开关影响）；
+   * 无需保存时返回 null
+   */
+  flush(): Promise<SaveResult | null>;
+
+  /**
    * 取消任何待处理的保存
    */
   cancelPendingSave(): void;

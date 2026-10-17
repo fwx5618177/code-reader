@@ -1,12 +1,13 @@
 // ================================
 // 应用设置服务
 // 设置保存在数据目录下的 settings.json（与历史版本使用同一文件，升级后设置不丢失）
+// 设置为应用级、所有知识库共享；知识库自身的数据路径见 workspaceService
 // ================================
 
 import type { AppSettings } from '../types/knowledge';
 
 const SETTINGS_FILENAME = 'settings.json';
-const ATTACHMENTS_DIR = 'attachments';
+
 /** 内置英语词典 */
 export const DEFAULT_SPELLCHECK_DICTIONARY = 'builtin:en_US';
 
@@ -15,7 +16,6 @@ function createDefaultSettings(dataPath: string): AppSettings {
     language: 'zh-CN',
     theme: 'dark',
     dataPath,
-    attachmentsPath: `${dataPath}/${ATTACHMENTS_DIR}`,
     enableAI: true,
     autoTranscribe: true,
     autoSummarize: true,
@@ -32,7 +32,7 @@ class SettingsService {
   private settings: AppSettings | null = null;
   private loading: Promise<AppSettings> | null = null;
 
-  /** 数据目录（主进程 userData） */
+  /** 应用数据目录（主进程 userData，settings.json 所在） */
   async getDataPath(): Promise<string> {
     return (await window.electron.ipcRenderer.invoke('get-data-path')) as string;
   }

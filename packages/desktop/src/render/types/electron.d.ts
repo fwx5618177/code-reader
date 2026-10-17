@@ -351,6 +351,37 @@ interface HybridSearchOptions extends SemanticSearchOptions {
 }
 
 // ================================
+// Workspace Types（与主进程 main/workspace 保持一致）
+// ================================
+
+/** 知识库颜色：对应主题中的颜色变量（accent → --accent-primary，info → --color-info …） */
+export type WorkspaceColor = 'accent' | 'info' | 'success' | 'warning' | 'error' | 'secondary';
+
+/** 知识库：独立的 SQLite 文件与附件/备份目录 */
+export interface WorkspaceInfo {
+  id: string;
+  name: string;
+  color: WorkspaceColor;
+  createdAt: string;
+  /** 从未打开过时为 null */
+  lastOpenedAt: string | null;
+  /** 默认知识库（沿用升级前的数据位置，不可删除） */
+  isDefault: boolean;
+  /** 当前打开的知识库 */
+  isCurrent: boolean;
+  rootPath: string;
+  dbPath: string;
+  attachmentsPath: string;
+  backupsPath: string;
+}
+
+/** 新建或编辑知识库时可修改的字段 */
+export interface WorkspaceInput {
+  name: string;
+  color: WorkspaceColor;
+}
+
+// ================================
 // Version History Types
 // ================================
 
@@ -535,6 +566,22 @@ interface ElectronAPI {
     onOpenSettings: (callback: () => void) => () => void;
     onOpenDocument: (callback: (id: string) => void) => () => void;
     setRecentDocuments: (documents: RecentDocument[]) => void;
+  };
+
+  /** 知识库：名称重复/为空等校验失败时主进程抛错；remove 弹出系统确认框，取消时 deleted 为 false；
+   *  switchTo 成功后主进程重新加载所有窗口 */
+  workspace: {
+    list: () => Promise<WorkspaceInfo[]>;
+    getCurrent: () => Promise<WorkspaceInfo>;
+    create: (input: WorkspaceInput) => Promise<WorkspaceInfo>;
+    update: (id: string, input: WorkspaceInput) => Promise<WorkspaceInfo>;
+    remove: (id: string) => Promise<{ deleted: boolean }>;
+    switchTo: (id: string) => Promise<void>;
+  };
+
+  /** 落盘：主进程切换知识库、关闭窗口、退出前调用 handler，其完成后自动回 ack；返回取消订阅函数 */
+  lifecycle: {
+    onFlushRequest: (handler: () => Promise<void>) => () => void;
   };
 }
 

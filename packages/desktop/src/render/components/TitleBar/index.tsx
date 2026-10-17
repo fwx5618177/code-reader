@@ -1,6 +1,6 @@
 // ================================
 // TitleBar 组件
-// 标题栏，包含模式标签、专注模式按钮和窗口控制
+// 标题栏，包含知识库选择器、模式标签、专注模式按钮和窗口控制
 // ================================
 
 import React, { useEffect, useState } from 'react';
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { AppMode, APP_MODE_CONFIGS } from '../../types/app-modes';
 import Tooltip from '../Tooltip';
+import WorkspaceSelector from '../WorkspaceSelector';
 import styles from './TitleBar.module.scss';
 
 // ================================
@@ -150,8 +151,9 @@ const TitleBar: React.FC<TitleBarProps> = ({
       {/* macOS 红绿灯占位区域 */}
       {isMac && <div className={styles.trafficLights} />}
 
-      {/* 左侧区域 - 搜索 */}
+      {/* 左侧区域 - 知识库选择与搜索 */}
       <div className={styles.left}>
+        <WorkspaceSelector />
         {onOpenSearch && (
           <Tooltip content="搜索" shortcut="⌘P" position="bottom">
             <button className={`${styles.button} ${styles.searchBtn}`} onClick={onOpenSearch}>

@@ -4,9 +4,8 @@
 // ================================
 
 import Database from 'better-sqlite3';
-import { app } from 'electron';
-import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
+import { mkdirSync } from 'fs';
 import { TASK_TYPES } from '../agent/task-types';
 import { ENTITY_TYPES } from '../agent/entity-types';
 
@@ -14,12 +13,6 @@ import { ENTITY_TYPES } from '../agent/entity-types';
 // Types
 // ================================
 
-export interface DatabaseConfig {
-  path: string;
-  walMode?: boolean;
-  foreignKeys?: boolean;
-  cacheSize?: number;
-}
 
 export interface FTSResult {
   id: string;
@@ -571,27 +564,29 @@ function buildLikeSnippet(fields: Array<string | null>, terms: string[]): string
 
 export class SQLiteService {
   private db: Database.Database | null = null;
-  private dbPath: string;
+  /** 当前知识库的数据库文件，由 open() 指定（见 main/workspace） */
+  private dbPath: string | null = null;
   private isInitialized = false;
 
-  constructor(config?: Partial<DatabaseConfig>) {
-    const userDataPath = app.getPath('userData');
-    const dbDir = join(userDataPath, 'data');
-
-    // Ensure data directory exists
-    if (!existsSync(dbDir)) {
-      mkdirSync(dbDir, { recursive: true });
-    }
-
-    this.dbPath = config?.path || join(dbDir, 'knowledge.db');
+  /**
+   * 关闭当前连接并打开指定的数据库文件（切换知识库），与启动时走同一条建表 + 迁移路径
+   */
+  open(dbPath: string): void {
+    this.close();
+    mkdirSync(dirname(dbPath), { recursive: true });
+    this.dbPath = dbPath;
+    this.initialize();
   }
 
   /**
-   * Initialize the database
+   * 打开 dbPath 指向的数据库（已打开时为空操作）
    */
   initialize(): void {
     if (this.isInitialized && this.db) {
       return;
+    }
+    if (!this.dbPath) {
+      throw new Error('Database path not set. Call open() first.');
     }
 
     try {

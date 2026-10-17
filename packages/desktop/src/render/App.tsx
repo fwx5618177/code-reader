@@ -95,6 +95,8 @@ import {
 } from './types/app-modes';
 import { aiConfigService } from './services/aiConfigService';
 import { pickRecentlyRead } from './lib/reading';
+import { registerFlush } from './services/flushRegistry';
+import { getEditorManager } from './lib/core';
 import './App.scss';
 
 const App: React.FC = () => {
@@ -862,6 +864,26 @@ const App: React.FC = () => {
     }
   }, [selectedDocId, currentDocument?.content]);
 
+  // 把微防抖中的最新内容交给编辑会话（定时器到期或落盘时调用）
+  const commitPendingUpdate = useCallback(() => {
+    if (!pendingUpdateRef.current) return;
+    clearTimeout(pendingUpdateRef.current);
+    pendingUpdateRef.current = null;
+    // Use ref to get latest updateLocal function
+    updateLocalRef.current({ content: lastContentRef.current });
+  }, []);
+
+  // 落盘（切换知识库、关闭窗口、退出前）：须先同步提交微防抖中的内容，再写回所有文档的待保存更改，
+  // 顺序不能交给并发执行的注册表，因此合并为一个回调
+  useEffect(
+    () =>
+      registerFlush(() => {
+        commitPendingUpdate();
+        return getEditorManager().flushAll();
+      }),
+    [commitPendingUpdate]
+  );
+
   // Stable editor change handler - never changes identity
   // Uses refs internally to always access latest values
   const handleEditorChange = useCallback((html: string) => {
@@ -880,12 +902,8 @@ const App: React.FC = () => {
 
     // Micro-debounce: batch rapid changes but stay responsive
     // 16ms is roughly one frame - imperceptible delay
-    pendingUpdateRef.current = setTimeout(() => {
-      pendingUpdateRef.current = null;
-      // Use ref to get latest updateLocal function
-      updateLocalRef.current({ content: html });
-    }, 16);
-  }, []); // Empty deps - uses refs for all external values
+    pendingUpdateRef.current = setTimeout(commitPendingUpdate, 16);
+  }, [commitPendingUpdate]); // 依赖恒定，其余外部值经 ref 读取
 
   // Cleanup pending updates on unmount
   useEffect(() => {

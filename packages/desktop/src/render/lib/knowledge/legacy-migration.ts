@@ -2,10 +2,12 @@
 // 旧版知识库数据迁移
 // 早期版本把知识条目、标签、文件夹保存在 knowledge-db.json，与 SQLite 中的
 // 写作文档和 Agent 任务互不相通。启动时一次性导入 SQLite，并把旧文件改名保留。
+// 旧文件只可能位于默认知识库根目录（userData），因此按当前知识库根目录查找，
+// 其他知识库中不存在该文件，不会误导入。
 // ================================
 
 import { databaseService, now } from '../../services/database';
-import { settingsService } from '../../services/settingsService';
+import { workspaceService } from '../../services/workspaceService';
 import type { Folder, KnowledgeItem, Tag } from '../../types/knowledge';
 import { knowledgeRepository } from './repository';
 
@@ -29,8 +31,8 @@ function toIso(value: unknown): string {
  * @returns 导入的条目数量（没有旧数据时为 0）
  */
 export async function migrateLegacyKnowledgeStore(): Promise<number> {
-  const dataPath = await settingsService.getDataPath();
-  const legacyPath = `${dataPath}/${LEGACY_FILENAME}`;
+  const { rootPath } = await workspaceService.getCurrent();
+  const legacyPath = `${rootPath}/${LEGACY_FILENAME}`;
   const exists = (await window.electron.ipcRenderer.invoke('path-exists', legacyPath)) as boolean;
   if (!exists) return 0;
 
@@ -97,7 +99,7 @@ export async function migrateLegacyKnowledgeStore(): Promise<number> {
     imported++;
   }
 
-  await window.electron.ipcRenderer.invoke('rename-path', legacyPath, `${dataPath}/${MIGRATED_FILENAME}`);
+  await window.electron.ipcRenderer.invoke('rename-path', legacyPath, `${rootPath}/${MIGRATED_FILENAME}`);
   console.info(`[Knowledge] 已从旧版 JSON 导入 ${imported} 个条目`);
   return imported;
 }

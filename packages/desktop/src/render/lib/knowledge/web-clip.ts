@@ -89,11 +89,3 @@ export async function clipWebPage(url: string): Promise<WebClip> {
   const page = await window.electron.web.fetchHtml(url);
   return extractArticle(page.html, page.url);
 }
-
-/**
- * 错误的可读描述：去掉 Electron IPC 附加的前缀
- */
-export function clipErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
-}

@@ -24,6 +24,7 @@ import {
   Palette,
   Keyboard,
   SpellCheck,
+  Library,
 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
 import { AIProviderType, LLM_PROVIDER_PRESETS } from '../../types/ai-providers';
@@ -39,13 +40,21 @@ import { settingsService } from '../../services/settingsService';
 import { ThemeSettings } from '../ThemeSettings';
 import { SettingSelect, SettingToggle } from './SettingControls';
 import { SpellCheckSettings } from './SpellCheckSettings';
+import { WorkspaceSettings } from './WorkspaceSettings';
 import styles from './SettingsPanel.module.scss';
 
 // ================================
 // 类型定义
 // ================================
 
-type SettingsTab = 'general' | 'ai' | 'transcription' | 'appearance' | 'editor' | 'shortcuts';
+type SettingsTab =
+  | 'general'
+  | 'workspaces'
+  | 'ai'
+  | 'transcription'
+  | 'appearance'
+  | 'editor'
+  | 'shortcuts';
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -145,6 +154,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
 
   const tabs: Array<{ id: SettingsTab; icon: React.ReactNode; label: string }> = [
     { id: 'general', icon: <Settings size={18} />, label: '通用' },
+    { id: 'workspaces', icon: <Library size={18} />, label: '知识库' },
     { id: 'ai', icon: <Brain size={18} />, label: 'AI 服务' },
     { id: 'transcription', icon: <Mic size={18} />, label: '语音转写' },
     { id: 'appearance', icon: <Palette size={18} />, label: '外观' },
@@ -226,6 +236,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
             )}
 
             {!isLoading && activeTab === 'general' && <GeneralSettingsTab />}
+
+            {!isLoading && activeTab === 'workspaces' && <WorkspaceSettings />}
 
             {!isLoading && activeTab === 'appearance' && <AppearanceSettingsTab />}
 
@@ -439,30 +451,6 @@ const TranscriptionSettingsTab: React.FC<TranscriptionSettingsTabProps> = ({
 const GeneralSettingsTab: React.FC = () => {
   return (
     <div className={styles.settingsTab}>
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>数据存储</h3>
-
-        <div className={styles.settingsList}>
-          <SettingInput
-            label="数据目录"
-            description="知识库数据的存储位置"
-            value="~/Library/Application Support/code-reader"
-            readOnly
-            action={
-              <button className={styles.inputAction}>
-                <ExternalLink size={14} />
-              </button>
-            }
-          />
-          <SettingInput
-            label="附件目录"
-            description="图片、音频等附件的存储位置"
-            value="~/Library/Application Support/code-reader/attachments"
-            readOnly
-          />
-        </div>
-      </div>
-
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>快速输入</h3>
 
@@ -1029,7 +1017,6 @@ interface SettingInputProps {
   description?: string;
   value: string;
   readOnly?: boolean;
-  action?: React.ReactNode;
   onChange?: (value: string) => void;
 }
 
@@ -1038,7 +1025,6 @@ const SettingInput: React.FC<SettingInputProps> = ({
   description,
   value,
   readOnly,
-  action,
   onChange,
 }) => (
   <div className={styles.settingItem}>
@@ -1054,7 +1040,6 @@ const SettingInput: React.FC<SettingInputProps> = ({
         readOnly={readOnly}
         onChange={(e) => onChange?.(e.target.value)}
       />
-      {action}
     </div>
   </div>
 );

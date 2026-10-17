@@ -3,7 +3,7 @@
 // ================================
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clipErrorMessage, clipWebPage, extractArticle, isSingleWebUrl, normalizeWebUrl } from '../web-clip';
+import { clipWebPage, extractArticle, isSingleWebUrl, normalizeWebUrl } from '../web-clip';
 
 const PARAGRAPH =
   '这是一段足够长的正文内容，用于让正文提取算法识别出文章主体。'.repeat(6) +
@@ -85,12 +85,5 @@ describe('clipWebPage', () => {
     expect(fetchHtml).toHaveBeenCalledWith('https://example.com/short');
     expect(clip.url).toBe('https://example.com/final/');
     expect(clip.markdown).toContain('https://example.com/final/next');
-  });
-
-  it('错误信息去掉 IPC 前缀', () => {
-    expect(clipErrorMessage(new Error("Error invoking remote method 'web:fetchHtml': Error: 请求超时"))).toBe(
-      '请求超时'
-    );
-    expect(clipErrorMessage('x')).toBe('x');
   });
 });

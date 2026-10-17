@@ -3,9 +3,10 @@
 // Bridge between renderer and main process database
 // ================================
 
-import { ipcMain, app } from 'electron';
+import { ipcMain } from 'electron';
 import { getSQLiteService, type FTSResult } from './sqlite';
 import { parseTransactionStatements } from './statements';
+import { getWorkspaceManager } from '../workspace/workspace-manager';
 import { join } from 'path';
 
 /**
@@ -190,7 +191,8 @@ export function registerDatabaseHandlers(): void {
    */
   ipcMain.handle('db:backup', async (_event, customPath?: string) => {
     try {
-      const backupDir = join(app.getPath('userData'), 'backups');
+      // 备份归属当前知识库
+      const backupDir = getWorkspaceManager().getCurrent().backupsPath;
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const backupPath = customPath || join(backupDir, `knowledge-backup-${timestamp}.db`);
 

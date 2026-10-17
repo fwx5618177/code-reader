@@ -107,6 +107,14 @@ const validChannels = [
   'spellcheck:addUserWord',
   'spellcheck:removeUserWord',
 
+  // 知识库（多库切换）
+  'workspace:list',
+  'workspace:getCurrent',
+  'workspace:create',
+  'workspace:update',
+  'workspace:remove',
+  'workspace:switch',
+
 ];
 
 // 用于接收事件的通道
@@ -327,6 +335,24 @@ contextBridge.exposeInMainWorld('electron', {
     onOpenDocument: (callback: (id: string) => void) => subscribe('tray:open-document', callback),
     setRecentDocuments: (documents: Array<{ id: string; title: string }>) =>
       ipcRenderer.send('tray:set-recent-documents', documents),
+  },
+
+  // 知识库：注册表与数据路径由主进程管理；切换成功后主进程重新加载所有窗口
+  workspace: {
+    list: () => ipcRenderer.invoke('workspace:list'),
+    getCurrent: () => ipcRenderer.invoke('workspace:getCurrent'),
+    create: (input: unknown) => ipcRenderer.invoke('workspace:create', input),
+    update: (id: string, input: unknown) => ipcRenderer.invoke('workspace:update', id, input),
+    remove: (id: string) => ipcRenderer.invoke('workspace:remove', id),
+    switchTo: (id: string) => ipcRenderer.invoke('workspace:switch', id),
+  },
+
+  // 落盘：主进程在切换知识库、关闭窗口、退出前请求写回防抖中的数据，handler 完成后自动回 ack
+  lifecycle: {
+    onFlushRequest: (handler: () => Promise<void>) =>
+      subscribe<string>('app:flush-request', (requestId) => {
+        void handler().finally(() => ipcRenderer.send('app:flush-ack', requestId));
+      }),
   },
 });
 

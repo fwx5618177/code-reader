@@ -305,10 +305,8 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
 
   // ======= 存储 =======
-  /** 数据存储路径 */
+  /** 应用数据目录（settings.json 所在）；知识库数据与附件路径由当前知识库决定 */
   dataPath: string;
-  /** 附件存储路径 */
-  attachmentsPath: string;
 
   // ======= AI =======
   /** 启用 AI 功能 */

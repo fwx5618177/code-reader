@@ -61,6 +61,7 @@ import {
 import { generateUUID } from '../../lib/utils/id';
 import { isWritingDocument } from '../../lib/documents/constants';
 import { bookProgress, EPUB_TARGET_ATTR } from '../../lib/reading/epub';
+import { registerFlush } from '../../services/flushRegistry';
 import type { KnowledgeItem } from '../../types/knowledge';
 import { useDismiss, useLatestRef, useReadingSettings } from './hooks';
 import { hydrateEmbedImages } from './embed-images';
@@ -332,17 +333,23 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     pendingProgressRef.current = null;
   }, []);
 
-  const flushProgress = useCallback(() => {
+  const flushProgress = useCallback(async (): Promise<void> => {
     const pending = pendingProgressRef.current;
     cancelPendingProgress();
     if (pending === null) return;
-    updateReading(progressPatch(readingRef.current, pending)).catch((error) =>
+    await updateReading(progressPatch(readingRef.current, pending)).catch((error) =>
       console.error('[Reading] 保存阅读进度失败:', error)
     );
   }, [cancelPendingProgress, updateReading]);
 
-  // 离开条目时保存尚未写回的进度
-  useEffect(() => flushProgress, [flushProgress]);
+  // 切换知识库、关闭窗口、退出前以及离开条目时，保存尚未写回的进度
+  useEffect(() => {
+    const unregister = registerFlush(flushProgress);
+    return () => {
+      unregister();
+      void flushProgress();
+    };
+  }, [flushProgress]);
 
   /** 当前滚动位置对应的整本书进度 */
   const currentProgress = useCallback((): number | null => {

@@ -91,8 +91,8 @@ export class SaveEngine implements ISaveEngine {
   private lastSavedContent: string | null = null;
   private lastSavedTitle: string | null = null;
 
-  // 并发控制
-  private isSavingInternal: boolean = false;
+  // 并发控制：进行中的保存（flush 需要等待它）
+  private inFlightSave: Promise<SaveResult> | null = null;
   private pendingSaveRequest: boolean = false;
 
   constructor(config: SaveEngineConfig) {
@@ -152,6 +152,17 @@ export class SaveEngine implements ISaveEngine {
 
     // 立即执行保存
     return this.performSave();
+  }
+
+  async flush(): Promise<SaveResult | null> {
+    // 进行中的保存拿到的可能是旧快照，等它结束后再判断是否仍有未保存的更改
+    while (this.inFlightSave) {
+      await this.inFlightSave;
+    }
+    if (this.destroyed || !this.contentProvider.hasUnsavedChanges()) {
+      return null;
+    }
+    return this.saveNow();
   }
 
   cancelPendingSave(): void {
@@ -260,12 +271,12 @@ export class SaveEngine implements ISaveEngine {
    * 执行实际的保存操作
    * 这是核心保存逻辑，拉取内容并执行保存
    */
-  private async performSave(): Promise<SaveResult> {
+  private performSave(): Promise<SaveResult> {
     // 防止并发保存
-    if (this.isSavingInternal) {
+    if (this.inFlightSave) {
       this.pendingSaveRequest = true;
       this.log('保存正在进行中，将请求加入队列');
-      return createFailedResult('保存正在进行中');
+      return Promise.resolve(createFailedResult('保存正在进行中'));
     }
 
     // 拉取当前内容快照
@@ -273,7 +284,7 @@ export class SaveEngine implements ISaveEngine {
 
     if (!snapshot) {
       this.log('没有要保存的内容（未加载文档）');
-      return createFailedResult('未加载文档');
+      return Promise.resolve(createFailedResult('未加载文档'));
     }
 
     // 使用 contentHash 检查是否有实际更改（比版本号更准确）
@@ -283,15 +294,37 @@ export class SaveEngine implements ISaveEngine {
     ) {
       this.log('内容哈希相同，无实际变更，跳过');
       this.emitEvent({ type: 'SAVE_SKIPPED', reason: '内容哈希相同，无实际变更' });
-      return createSuccessResult(snapshot.versionId, snapshot.contentHash, snapshot.documentId);
+      return Promise.resolve(
+        createSuccessResult(snapshot.versionId, snapshot.contentHash, snapshot.documentId)
+      );
     }
 
+    const save = this.executeSave(snapshot);
+    this.inFlightSave = save;
+    // 结束后异步清除（执行器同步抛错时 executeSave 也已同步结束，必须在赋值之后清除），
+    // 再处理保存期间排队的请求
+    const settle = () => {
+      this.inFlightSave = null;
+      if (this.pendingSaveRequest) {
+        this.pendingSaveRequest = false;
+        if (this.contentProvider.hasUnsavedChanges()) {
+          this.requestSave();
+        }
+      }
+    };
+    void save.then(settle, settle);
+    return save;
+  }
+
+  /**
+   * 执行一次已确认需要的保存（快照已取得）
+   */
+  private async executeSave(snapshot: ContentSnapshot): Promise<SaveResult> {
     // 判断是否可以使用增量保存
     const canUseIncremental = this.canPerformIncrementalSave(snapshot);
     const isIncremental = canUseIncremental && this.preferIncremental;
 
     // 标记为正在保存
-    this.isSavingInternal = true;
     this.updateState({ isSaving: true, isScheduled: false, error: null });
     this.emitEvent({
       type: 'SAVE_STARTED',
@@ -357,19 +390,6 @@ export class SaveEngine implements ISaveEngine {
       this.log('保存错误:', error);
 
       return result;
-    } finally {
-      this.isSavingInternal = false;
-
-      // 处理任何排队的保存请求
-      if (this.pendingSaveRequest) {
-        this.pendingSaveRequest = false;
-        // 使用微任务避免快速保存时的栈溢出
-        queueMicrotask(() => {
-          if (this.contentProvider.hasUnsavedChanges()) {
-            this.requestSave();
-          }
-        });
-      }
     }
   }
 

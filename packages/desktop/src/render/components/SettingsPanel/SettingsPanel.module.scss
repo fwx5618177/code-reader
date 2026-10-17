@@ -601,6 +601,32 @@
 }
 
 // ================================
+// 知识库
+// ================================
+
+.workspaceName {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-sm);
+}
+
+.workspacePath {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  word-break: break-all;
+  user-select: text;
+}
+
+.workspaceActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-shrink: 0;
+}
+
+// ================================
 // 开关
 // ================================
 
@@ -703,23 +729,6 @@
 
   &:read-only {
     background: var(--bg-quaternary);
-  }
-}
-
-.inputAction {
-  @include button-reset;
-  @include flex-center;
-  width: 32px;
-  height: 32px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  transition: all $transition-fast;
-
-  &:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
   }
 }
 

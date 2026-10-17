@@ -5,7 +5,8 @@ import { existsSync } from 'fs';
 import { readFile, stat, writeFile, mkdir, access, rename } from 'fs/promises';
 
 // Import services
-import { getSQLiteService } from './database/sqlite';
+import { getWorkspaceManager } from './workspace/workspace-manager';
+import { registerWorkspaceHandlers, cleanupWorkspaceHandlers } from './workspace/ipc-handlers';
 import { registerDatabaseHandlers, cleanupDatabaseHandlers } from './database/ipc-handlers';
 import { registerSearchHandlers, cleanupSearchHandlers } from './database/search-ipc-handlers';
 import { registerEntityHandlers, cleanupEntityHandlers } from './database/entity-ipc-handlers';
@@ -20,6 +21,12 @@ import {
 } from './agent/ipc-handlers';
 import { getAgentExecutor } from './agent/agent-executor';
 import { initializeTray } from './tray/tray-manager';
+import {
+  registerFlushHandlers,
+  cleanupFlushHandlers,
+  flushBeforeClose,
+  flushBeforeQuit,
+} from './flush/window-flush';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -224,6 +231,9 @@ function createWindow() {
   // 初始化系统托盘
   initializeTray(mainWindow);
 
+  // 须在托盘的 close 监听之后注册：只是隐藏到托盘时不落盘
+  flushBeforeClose(mainWindow);
+
   return mainWindow;
 }
 
@@ -280,6 +290,8 @@ function createChildWindow(mode: string): BrowserWindow {
   child.on('closed', () => {
     childWindows.delete(windowId);
   });
+
+  flushBeforeClose(child);
 
   return child;
 }
@@ -419,10 +431,10 @@ function setupIPC() {
   });
 
   // =====================================
-  // 知识库数据操作 (Phase 1)
+  // 应用数据目录
   // =====================================
 
-  // 获取知识库存储路径
+  // 应用级数据目录（settings.json 所在）；当前知识库的数据库与附件路径见 workspace:getCurrent
   ipcMain.handle('get-data-path', () => {
     return app.getPath('userData');
   });
@@ -464,6 +476,12 @@ function setupIPC() {
 
   // 拼写检查词典与用户词表
   registerSpellcheckHandlers(getPackageRoot());
+
+  // 知识库管理与切换
+  registerWorkspaceHandlers();
+
+  // 切换知识库、关闭窗口、退出前的落盘 ack
+  registerFlushHandlers();
 }
 
 // 初始化数据库和服务
@@ -471,9 +489,8 @@ async function initializeServices() {
   try {
     console.log('[Main] Initializing services...');
 
-    // Initialize SQLite database
-    const sqlite = getSQLiteService();
-    sqlite.initialize();
+    // 打开上次使用的知识库（建表 + 迁移）
+    getWorkspaceManager().openCurrent();
     console.log('[Main] Database initialized');
 
     // Start agent executor
@@ -501,6 +518,8 @@ async function cleanup() {
     cleanupEntityHandlers();
     cleanupAIHandlers();
     cleanupDatabaseHandlers();
+    cleanupWorkspaceHandlers();
+    cleanupFlushHandlers();
 
     console.log('[Main] Cleanup complete');
   } catch (error) {
@@ -528,7 +547,5 @@ app.on('window-all-closed', () => {
   }
 });
 
-// 应用退出前清理
-app.on('before-quit', async () => {
-  await cleanup();
-});
+// 应用退出前：所有窗口落盘后再清理资源并退出
+flushBeforeQuit(cleanup);

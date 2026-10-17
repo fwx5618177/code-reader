@@ -368,6 +368,21 @@ export class DocumentEditorManager {
   }
 
   /**
+   * 落盘：所有实例（包括已释放但仍在缓存中、防抖保存尚未触发的实例）立即写回未保存的更改。
+   * 任一文档保存失败时 reject，错误信息汇总全部失败的文档
+   */
+  async flushAll(): Promise<void> {
+    const instances = [...this.instances.values()].filter((instance) => !instance.isDestroyed);
+    const results = await Promise.all(instances.map((instance) => instance.saveEngine.flush()));
+    const failures = results.flatMap((result, index) =>
+      result && !result.success ? [`${instances[index].documentId}: ${result.error}`] : []
+    );
+    if (failures.length > 0) {
+      throw new Error(`文档保存失败 - ${failures.join('; ')}`);
+    }
+  }
+
+  /**
    * 销毁所有实例并清理管理器
    */
   destroy(): void {
