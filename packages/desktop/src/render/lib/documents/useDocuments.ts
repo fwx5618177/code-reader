@@ -26,6 +26,7 @@ import {
   ContentSnapshot,
 } from '../core';
 import { WritingIntegration, getWritingIntegration } from './writing-integration';
+import { stripMarkup } from '../markdown/extract';
 
 // ================================
 // 配置
@@ -101,7 +102,7 @@ export interface UseDocumentsReturn {
 
 function calculateWordCount(content: string): number {
   if (!content) return 0;
-  const text = content.replace(/<[^>]*>/g, '');
+  const text = stripMarkup(content);
   const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
   const englishWords = text
     .replace(/[\u4e00-\u9fa5]/g, ' ')
@@ -112,7 +113,7 @@ function calculateWordCount(content: string): number {
 
 function calculateCharCount(content: string): number {
   if (!content) return 0;
-  return content.replace(/<[^>]*>/g, '').replace(/\s/g, '').length;
+  return stripMarkup(content).replace(/\s/g, '').length;
 }
 
 // ================================

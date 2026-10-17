@@ -1,8 +1,10 @@
 // ================================
 // RichEditor 组件
-// 基于原生 ProseMirror + CodeMirror 集成实现代码块
-// 使用 lib/editor 中的模块化输入规则以提高可维护性
-// 集成编辑器内搜索功能
+// Typora 风格的 Markdown 所见即所得编辑器（原生 ProseMirror）
+// - 文档以 Markdown（.txt 为纯文本）存储，输入 Markdown 语法即时渲染
+// - 光标进入格式时显示对应标记；公式、代码块点击展开源码
+// - 分块：顺层块序列化缓存、视口外块跳过布局、代码高亮接近视口时执行
+// - 双向链接 [[ ]] 补全与跳转
 //
 // 性能优化:
 // - 使用 React.memo 防止不必要的重渲染
@@ -12,17 +14,26 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react';
 import { EditorState, Transaction, Plugin, PluginKey, TextSelection } from 'prosemirror-state';
-import { inputRules, InputRule } from 'prosemirror-inputrules';
 import { EditorView, Decoration, DecorationSet } from 'prosemirror-view';
-import { Schema, DOMParser, DOMSerializer } from 'prosemirror-model';
-import { schema as basicSchema } from 'prosemirror-schema-basic';
-import { addListNodes, splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-list';
+import type { Schema } from 'prosemirror-model';
+import { splitListItem, liftListItem, sinkListItem } from 'prosemirror-schema-list';
 import { history, undo, redo } from 'prosemirror-history';
 import { keymap } from 'prosemirror-keymap';
-import { baseKeymap, toggleMark, setBlockType, wrapIn } from 'prosemirror-commands';
+import { baseKeymap, toggleMark, setBlockType, wrapIn, chainCommands, exitCode } from 'prosemirror-commands';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { gapCursor } from 'prosemirror-gapcursor';
 import { createEditorPlugins } from '../../lib/editor';
+import {
+  markdownSchema,
+  parseContent,
+  serializeContent,
+  formatForFileType,
+  createLivePreviewPlugin,
+  createTableKeymap,
+  SlashCommandProvider,
+  WikiLinkCompletionProvider,
+  type ContentFormat,
+} from '../../lib/markdown';
 import {
   Bold,
   Italic,
@@ -49,12 +60,13 @@ import {
 } from 'lucide-react';
 import {
   createAutocompletePlugin,
-  MarkdownCompletionProvider,
   EmojiCompletionProvider,
   LaTeXCompletionProvider,
+  type CompletionProvider,
 } from '../../lib/editor/prosemirror-autocomplete';
 import { createCodeBlockView } from './CodeBlockView';
 import { createMathInlineView, createMathBlockView } from './MathNodeView';
+import { createListItemView } from './ListItemView';
 import { DocumentPreview } from './DocumentPreview';
 import { LatexEditor } from './LatexEditor';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
@@ -91,10 +103,10 @@ export interface EditorOptions {
 }
 
 export interface RichEditorProps {
-  /** Initial HTML content to display */
+  /** 初始内容（Markdown 或纯文本；旧版 HTML 内容会自动兼容读入） */
   initialContent?: string;
-  /** Called when content changes - parent is responsible for save logic */
-  onChange?: (html: string, text: string) => void;
+  /** 内容变化：第一个参数为序列化后的存储内容，第二个为纯文本 */
+  onChange?: (content: string, text: string) => void;
   /** Editor configuration options */
   options?: EditorOptions;
   /** Whether the editor is read-only */
@@ -105,6 +117,10 @@ export interface RichEditorProps {
   fileType?: 'markdown' | 'latex' | 'plain';
   /** 文件名（用于推断文件类型） */
   fileName?: string;
+  /** 可链接的文档标题（[[ 补全来源） */
+  linkTargets?: string[];
+  /** 点击双向链接 */
+  onWikiLinkClick?: (target: string) => void;
 }
 
 /**
@@ -149,8 +165,12 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
   if (prevProps.fileType !== nextProps.fileType) return false;
   if (prevProps.fileName !== nextProps.fileName) return false;
 
-  // Note: We DON'T compare onChange, onTitleChange, title, titlePlaceholder
-  // - onChange is captured in useRef
+  // 链接目标与链接点击回调变化频率很低，重渲染以更新 ref
+  if (prevProps.linkTargets !== nextProps.linkTargets) return false;
+  if (prevProps.onWikiLinkClick !== nextProps.onWikiLinkClick) return false;
+
+  // Note: We DON'T compare onChange, onTitleChange, title, titlePlaceholder, linkTargets, onWikiLinkClick
+  // - 回调与链接目标通过 ref 读取最新值
   // - title/onTitleChange are handled by the title input which manages its own state
 
   return true;
@@ -159,6 +179,12 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
 // ================================
 // Default Options
 // ================================
+
+/**
+ * 顶层块数量达到该值时启用分块渲染
+ * 分块渲染会给每个块加上绘制包含（裁剪溢出的阴影与描边），小文档没有必要付出这个代价
+ */
+const CHUNKED_RENDERING_MIN_BLOCKS = 150;
 
 const DEFAULT_OPTIONS: EditorOptions = {
   spellCheck: false,
@@ -194,184 +220,35 @@ interface SearchMatch {
 }
 
 // ================================
-// Schema with code blocks
-// ================================
-
-const createSchema = (): Schema => {
-  // 扩展基础 schema 添加列表节点和自定义代码块
-  const nodes = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block');
-
-  // 添加支持语言属性的代码块
-  const extendedNodes = nodes.update('code_block', {
-    content: 'text*',
-    marks: '',
-    group: 'block',
-    code: true,
-    defining: true,
-    isolating: true,
-    attrs: { language: { default: '' } },
-    parseDOM: [
-      {
-        tag: 'pre',
-        preserveWhitespace: 'full' as const,
-        getAttrs: (node: HTMLElement) => ({
-          language: node.getAttribute('data-language') || '',
-        }),
-      },
-    ],
-    toDOM(node) {
-      return [
-        'pre',
-        { 'data-language': node.attrs.language, class: styles.codeBlock },
-        ['code', 0],
-      ];
-    },
-  });
-
-  // 添加水平分割线
-  const withHr = extendedNodes.update('horizontal_rule', {
-    group: 'block',
-    parseDOM: [{ tag: 'hr' }],
-    toDOM() {
-      return ['hr'];
-    },
-  });
-
-  // 添加行内数学公式节点
-  const withMathInline = withHr.update('math_inline', {
-    group: 'inline',
-    inline: true,
-    atom: true,
-    attrs: { latex: { default: '' } },
-    parseDOM: [
-      {
-        tag: 'span[data-math-inline]',
-        getAttrs: (node: HTMLElement) => ({
-          latex: node.getAttribute('data-math-inline') || '',
-        }),
-      },
-    ],
-    toDOM(node) {
-      return ['span', { 'data-math-inline': node.attrs.latex, class: 'math-node-inline' }];
-    },
-  });
-
-  // 添加块级数学公式节点
-  const withMathBlock = withMathInline.update('math_block', {
-    group: 'block',
-    atom: true,
-    attrs: { latex: { default: '' } },
-    parseDOM: [
-      {
-        tag: 'div[data-math-block]',
-        getAttrs: (node: HTMLElement) => ({
-          latex: node.getAttribute('data-math-block') || '',
-        }),
-      },
-    ],
-    toDOM(node) {
-      return ['div', { 'data-math-block': node.attrs.latex, class: 'math-node-block' }];
-    },
-  });
-
-  return new Schema({
-    nodes: withMathBlock,
-    marks: basicSchema.spec.marks,
-  });
-};
-
-// ================================
-// 数学公式输入规则
-// ================================
-
-/**
- * 创建数学公式输入规则
- * 支持 $...$ 行内公式和 $$...$$ 块级公式
- *
- * 使用方式：
- * - 行内公式：输入 $x^2$ 后自动转换为渲染后的公式
- * - 块级公式：输入 $$\frac{a}{b}$$ 后自动转换为块级公式
- */
-const createMathInputRules = (schema: Schema) => {
-  const rules: InputRule[] = [];
-
-  // 块级公式规则: $$...$$ (优先匹配，避免被行内规则误匹配)
-  // 支持多行内容，在输入最后的 $$ 时触发
-  if (schema.nodes.math_block) {
-    const blockRule = new InputRule(
-      /\$\$([^$]+)\$\$$/,
-      (state: EditorState, match: RegExpMatchArray, start: number, end: number) => {
-        const latex = match[1];
-        if (!latex || !latex.trim()) return null;
-
-        const mathNode = schema.nodes.math_block.create({ latex: latex.trim() });
-        return state.tr.replaceWith(start, end, mathNode);
-      }
-    );
-    rules.push(blockRule);
-  }
-
-  // 行内公式规则: $...$ (非空内容，不含换行，以 $ 结尾)
-  // 使用负向前瞻确保不匹配 $$
-  if (schema.nodes.math_inline) {
-    const inlineRule = new InputRule(
-      /(?<!\$)\$([^\$\n]+)\$$/,
-      (state: EditorState, match: RegExpMatchArray, start: number, end: number) => {
-        const latex = match[1];
-        if (!latex || !latex.trim()) return null;
-
-        // 检查是否为块级公式的一部分（以 $$ 开头）
-        const textBefore = state.doc.textBetween(Math.max(0, start - 1), start);
-        if (textBefore === '$') return null;
-
-        const mathNode = schema.nodes.math_inline.create({ latex: latex.trim() });
-        return state.tr.replaceWith(start, end, mathNode);
-      }
-    );
-    rules.push(inlineRule);
-  }
-
-  return inputRules({ rules });
-};
-
-// ================================
 // Keymap
 // ================================
 
+/**
+ * 编辑快捷键
+ * - ⌘B / ⌘I / ⌘E / ⌘⇧X：粗体、斜体、行内代码、删除线
+ * - Shift-Enter：硬换行（Markdown 中以行尾反斜杠表示）
+ * - 列表：Enter 拆分，Tab / Shift-Tab 调整缩进
+ */
 const createKeymap = (schema: Schema) => {
-  const bindings: Record<string, ReturnType<typeof toggleMark>> = {};
+  const { marks, nodes } = schema;
+  const insertHardBreak = chainCommands(exitCode, (state, dispatch) => {
+    dispatch?.(state.tr.replaceSelectionWith(nodes.hard_break.create()).scrollIntoView());
+    return true;
+  });
 
-  // Bold
-  if (schema.marks.strong) {
-    bindings['Mod-b'] = toggleMark(schema.marks.strong);
-    bindings['Mod-B'] = toggleMark(schema.marks.strong);
-  }
-
-  // Italic
-  if (schema.marks.em) {
-    bindings['Mod-i'] = toggleMark(schema.marks.em);
-    bindings['Mod-I'] = toggleMark(schema.marks.em);
-  }
-
-  // Code
-  if (schema.marks.code) {
-    bindings['Mod-e'] = toggleMark(schema.marks.code);
-    bindings['Mod-E'] = toggleMark(schema.marks.code);
-  }
-
-  // Undo/Redo
-  bindings['Mod-z'] = undo;
-  bindings['Mod-y'] = redo;
-  bindings['Mod-Shift-z'] = redo;
-
-  // List item handling - Enter to split, Tab/Shift+Tab to indent/outdent
-  if (schema.nodes.list_item) {
-    bindings['Enter'] = splitListItem(schema.nodes.list_item);
-    bindings['Tab'] = sinkListItem(schema.nodes.list_item);
-    bindings['Shift-Tab'] = liftListItem(schema.nodes.list_item);
-  }
-
-  return keymap(bindings);
+  return keymap({
+    'Mod-b': toggleMark(marks.strong),
+    'Mod-i': toggleMark(marks.em),
+    'Mod-e': toggleMark(marks.code),
+    'Mod-Shift-x': toggleMark(marks.strike),
+    'Mod-z': undo,
+    'Mod-y': redo,
+    'Mod-Shift-z': redo,
+    'Shift-Enter': insertHardBreak,
+    Enter: splitListItem(nodes.list_item),
+    Tab: sinkListItem(nodes.list_item),
+    'Shift-Tab': liftListItem(nodes.list_item),
+  });
 };
 
 // ================================
@@ -665,11 +542,22 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   className = '',
   fileType,
   fileName,
+  linkTargets,
+  onWikiLinkClick,
 }) => {
   // Use refs for callbacks to avoid closure issues and unnecessary re-renders
   // This is critical for preventing cursor loss during auto-save
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+
+  const linkTargetsRef = useRef<string[]>(linkTargets ?? []);
+  linkTargetsRef.current = linkTargets ?? [];
+
+  const onWikiLinkClickRef = useRef(onWikiLinkClick);
+  onWikiLinkClickRef.current = onWikiLinkClick;
+
+  // 存储格式：.md 等为 Markdown，.txt 为纯文本
+  const format: ContentFormat = formatForFileType(fileType);
 
   const onTitleChangeRef = useRef(userOptions?.onTitleChange);
   onTitleChangeRef.current = userOptions?.onTitleChange;
@@ -727,7 +615,6 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   // Refs
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const editorViewRef = useRef<EditorView | null>(null);
-  const schemaRef = useRef<Schema | null>(null);
 
   // 搜索相关状态
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -752,7 +639,10 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>('normal');
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
-  const [htmlContent, setHtmlContent] = useState('');
+  /** 当前文档的存储内容（预览面板使用） */
+  const [sourceContent, setSourceContent] = useState('');
+  /** 大文档启用分块渲染（视口外的块跳过布局） */
+  const [chunked, setChunked] = useState(false);
 
   // 判断是否为 LaTeX 文件（根据文件类型、文件名和内容特征）
   const isTexFile = useMemo(() => {
@@ -787,35 +677,16 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     return false;
   }, [fileType, fileName, initialContent]);
 
-  // Initialize ProseMirror with CodeMirror integration
+  // Initialize ProseMirror
   // 注意：LaTeX 文件的渲染在 JSX 返回部分处理，不在这里提前返回
   useEffect(() => {
     if (!editorContainerRef.current || editorViewRef.current) return;
 
-    const schema = createSchema();
-    schemaRef.current = schema;
+    const schema = markdownSchema;
+    const isMarkdown = format === 'markdown';
 
-    // Parse initial content
-    const container = document.createElement('div');
-    container.innerHTML = initialContent || '<p></p>';
-    const doc = DOMParser.fromSchema(schema).parse(container);
-
-    // Create editor state
-    // Plugin order matters:
-    // 1. Editor plugins (input rules + code block Enter) - must come first to intercept input
-    // 2. Custom keymap (formatting shortcuts)
-    // 3. Base keymap (default editing commands)
-    // 4. History, cursors
-
-    const editorPlugins = createEditorPlugins(schema, {
-      headings: true,
-      blockquote: true,
-      bulletList: true,
-      orderedList: true,
-      codeBlock: true,
-      codeBlockEnter: true, // 启用 ```language + Enter
-      horizontalRule: true,
-    });
+    // 解析初始内容（旧版 HTML 内容兼容读入，下次保存时转为 Markdown）
+    const doc = parseContent(initialContent, format);
 
     // 创建搜索高亮插件
     const searchHighlightPlugin = new Plugin({
@@ -844,88 +715,84 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       },
     });
 
-    // 创建补全插件
+    // 补全：Markdown 文档支持斜杠命令与 [[ 双向链接；纯文本只保留 Emoji
+    const providers: CompletionProvider[] = [new EmojiCompletionProvider()];
+    if (isMarkdown) {
+      providers.unshift(
+        new SlashCommandProvider(schema),
+        new WikiLinkCompletionProvider(schema, () => linkTargetsRef.current),
+        new LaTeXCompletionProvider()
+      );
+    }
     const autocompletePlugin = createAutocompletePlugin({
-      providers: [
-        new MarkdownCompletionProvider(),
-        new EmojiCompletionProvider(),
-        new LaTeXCompletionProvider(),
-      ],
+      providers,
       maxResults: 10,
-      minTriggerLength: 1,
-      debounceMs: 100,
+      minTriggerLength: 0,
+      debounceMs: 80,
       container: editorContainerRef.current,
     });
 
-    // 创建 CodeMirror 代码块节点视图工厂
-    const codeBlockView = createCodeBlockView({
-      defaultLanguage: options.defaultCodeLanguage,
-      darkTheme: options.darkCodeTheme,
-      lineNumbers: options.showLineNumbers,
+    // 点击双向链接跳转
+    const wikiLinkClickPlugin = new Plugin({
+      props: {
+        handleClickOn(_view, _pos, node, _nodePos, event) {
+          if (node.type !== schema.nodes.wiki_link || !onWikiLinkClickRef.current) return false;
+          event.preventDefault();
+          onWikiLinkClickRef.current(node.attrs.target as string);
+          return true;
+        },
+      },
     });
 
-    // 创建数学公式 NodeView 工厂
-    const mathInlineView = createMathInlineView();
-    const mathBlockView = createMathBlockView();
+    // 插件顺序：输入规则与块级回车 → 表格/列表/格式快捷键 → 基础快捷键 → 历史与光标
+    const plugins: Plugin[] = [
+      ...(isMarkdown ? createEditorPlugins(schema) : []),
+      ...(isMarkdown ? [createTableKeymap(schema)] : []),
+      createKeymap(schema),
+      keymap(baseKeymap),
+      history(),
+      dropCursor(),
+      gapCursor(),
+      searchHighlightPlugin,
+      autocompletePlugin,
+      wikiLinkClickPlugin,
+    ];
+    if (isMarkdown) plugins.push(createLivePreviewPlugin(schema));
 
-    // 创建数学公式输入规则
-    const mathInputRules = createMathInputRules(schema);
+    const state = EditorState.create({ doc, plugins });
 
-    const state = EditorState.create({
-      doc,
-      plugins: [
-        ...editorPlugins,
-        mathInputRules, // 数学公式输入规则
-        createKeymap(schema),
-        keymap(baseKeymap),
-        history(),
-        dropCursor(),
-        gapCursor(),
-        searchHighlightPlugin, // 搜索高亮插件
-        autocompletePlugin, // 自动补全插件
-      ],
-    });
+    // 最近一次通知父组件的内容，避免重复通知
+    let lastNotified = serializeContent(doc, format);
 
-    // Track last notified content to avoid duplicate updates
-    let lastNotifiedHtml = '';
-
-    // 创建编辑器视图，集成 CodeMirror 代码块和数学公式渲染
     const view = new EditorView(editorContainerRef.current, {
       state,
       editable: () => !readOnly && editorMode !== 'preview',
       nodeViews: {
-        code_block: codeBlockView,
-        math_inline: mathInlineView,
-        math_block: mathBlockView,
+        code_block: createCodeBlockView({
+          defaultLanguage: options.defaultCodeLanguage,
+          darkTheme: options.darkCodeTheme,
+          lineNumbers: options.showLineNumbers,
+        }),
+        math_inline: createMathInlineView(),
+        math_block: createMathBlockView(),
+        list_item: createListItemView(),
       },
       dispatchTransaction(transaction: Transaction) {
         const newState = view.state.apply(transaction);
         view.updateState(newState);
+        if (!transaction.docChanged) return;
 
-        // 处理文档变更
-        if (transaction.docChanged) {
-          // 序列化内容
-          const fragment = document.createElement('div');
-          const serializer = DOMSerializer.fromSchema(schema);
-          fragment.appendChild(serializer.serializeFragment(newState.doc.content));
-          const html = fragment.innerHTML;
+        // 分块序列化：只有被修改的顶层块会重新序列化
+        const content = serializeContent(newState.doc, format);
+        if (content === lastNotified) return;
+        lastNotified = content;
 
-          // 内容未变化时跳过
-          if (html === lastNotifiedHtml) {
-            return;
-          }
-          lastNotifiedHtml = html;
-
-          const text = newState.doc.textContent;
-
-          // 更新本地状态
-          setHtmlContent(html);
-          setWordCount(countWords(text));
-          setCharCount(countChars(text));
-
-          // 使用 ref 通知父组件，避免闭包问题
-          onChangeRef.current?.(html, text);
-        }
+        const text = newState.doc.textContent;
+        setSourceContent(content);
+        setWordCount(countWords(text));
+        setCharCount(countChars(text));
+        setChunked(newState.doc.childCount >= CHUNKED_RENDERING_MIN_BLOCKS);
+        onChangeRef.current?.(content, text);
       },
       attributes: {
         class: styles.prosemirror,
@@ -935,26 +802,16 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
 
     editorViewRef.current = view;
 
-    // 注册编辑器到 EditorBridge，使插件系统可以访问
+    // 注册编辑器到 EditorBridge，使插件系统可以访问（内容为 Markdown / 纯文本）
     const editorInstance: EditorInstance = {
       getContent(): string {
-        if (!editorViewRef.current) return '';
-        const fragment = document.createElement('div');
-        const serializer = DOMSerializer.fromSchema(schema);
-        fragment.appendChild(serializer.serializeFragment(editorViewRef.current.state.doc.content));
-        return fragment.innerHTML;
+        return editorViewRef.current ? serializeContent(editorViewRef.current.state.doc, format) : '';
       },
       setContent(content: string): void {
-        if (!editorViewRef.current) return;
-        const container = document.createElement('div');
-        container.innerHTML = content;
-        const newDoc = DOMParser.fromSchema(schema).parse(container);
-        const tr = editorViewRef.current.state.tr.replaceWith(
-          0,
-          editorViewRef.current.state.doc.content.size,
-          newDoc.content
-        );
-        editorViewRef.current.dispatch(tr);
+        const current = editorViewRef.current;
+        if (!current) return;
+        const newDoc = parseContent(content, format);
+        current.dispatch(current.state.tr.replaceWith(0, current.state.doc.content.size, newDoc.content));
       },
       getSelection(): string {
         if (!editorViewRef.current) return '';
@@ -974,39 +831,22 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
         editorViewRef.current.dispatch(tr);
       },
       getCursorPosition(): { line: number; column: number } {
+        // 行号按顶层块计数，列号为块内文本偏移
         if (!editorViewRef.current) return { line: 1, column: 1 };
-        const { from } = editorViewRef.current.state.selection;
-        const doc = editorViewRef.current.state.doc;
-        let line = 1;
-        let column = 1;
-        let pos = 0;
-        doc.descendants((node, nodePos) => {
-          if (nodePos >= from) return false;
-          if (node.isText) {
-            const text = node.text || '';
-            for (let i = 0; i < text.length && pos + i < from; i++) {
-              if (text[i] === '\n') {
-                line++;
-                column = 1;
-              } else {
-                column++;
-              }
-            }
-            pos += text.length;
-          }
-          return true;
-        });
-        return { line, column };
+        const { $from } = editorViewRef.current.state.selection;
+        return { line: $from.index(0) + 1, column: $from.parentOffset + 1 };
       },
       setCursorPosition(line: number, column: number): void {
-        if (!editorViewRef.current) return;
-        // 简化实现：直接设置到文档开头 + 偏移
-        // 完整实现需要遍历文档计算行列对应的位置
-        const pos = Math.min(line + column - 2, editorViewRef.current.state.doc.content.size);
-        const tr = editorViewRef.current.state.tr.setSelection(
-          TextSelection.near(editorViewRef.current.state.doc.resolve(Math.max(0, pos)))
+        const current = editorViewRef.current;
+        if (!current) return;
+        const doc = current.state.doc;
+        const blockIndex = Math.min(Math.max(line - 1, 0), doc.childCount - 1);
+        let pos = 0;
+        for (let i = 0; i < blockIndex; i++) pos += doc.child(i).nodeSize;
+        const target = Math.min(pos + column, pos + doc.child(blockIndex).nodeSize - 1);
+        current.dispatch(
+          current.state.tr.setSelection(TextSelection.near(doc.resolve(Math.max(0, target))))
         );
-        editorViewRef.current.dispatch(tr);
       },
       focus(): void {
         editorViewRef.current?.focus();
@@ -1019,17 +859,12 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     const bridge = getEditorBridge();
     const editorDisposable = bridge.registerEditor(editorInstance);
 
-    // 初始化 HTML 内容和计数
-    const initialFragment = document.createElement('div');
-    const initialSerializer = DOMSerializer.fromSchema(schema);
-    initialFragment.appendChild(initialSerializer.serializeFragment(doc.content));
-    const initialHtml = initialFragment.innerHTML;
-    setHtmlContent(initialHtml);
-    lastNotifiedHtml = initialHtml;
-
+    // 初始化预览内容与计数
+    setSourceContent(lastNotified);
     const text = doc.textContent;
     setWordCount(countWords(text));
     setCharCount(countChars(text));
+    setChunked(doc.childCount >= CHUNKED_RENDERING_MIN_BLOCKS);
 
     // Cleanup
     return () => {
@@ -1063,59 +898,46 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     []
   );
 
-  const toggleBold = useCallback(() => {
-    if (schemaRef.current?.marks.strong) {
-      runCommand(toggleMark(schemaRef.current.marks.strong));
-    }
-  }, [runCommand]);
-
-  const toggleItalic = useCallback(() => {
-    if (schemaRef.current?.marks.em) {
-      runCommand(toggleMark(schemaRef.current.marks.em));
-    }
-  }, [runCommand]);
-
-  const toggleCode = useCallback(() => {
-    if (schemaRef.current?.marks.code) {
-      runCommand(toggleMark(schemaRef.current.marks.code));
-    }
-  }, [runCommand]);
-
-  const setHeading = useCallback(
-    (level: number) => {
-      if (schemaRef.current?.nodes.heading) {
-        runCommand(setBlockType(schemaRef.current.nodes.heading, { level }));
-      }
-    },
+  const toggleBold = useCallback(
+    () => runCommand(toggleMark(markdownSchema.marks.strong)),
     [runCommand]
   );
 
-  const toggleBlockquote = useCallback(() => {
-    if (schemaRef.current?.nodes.blockquote) {
-      runCommand(wrapIn(schemaRef.current.nodes.blockquote));
-    }
-  }, [runCommand]);
+  const toggleItalic = useCallback(
+    () => runCommand(toggleMark(markdownSchema.marks.em)),
+    [runCommand]
+  );
+
+  const toggleCode = useCallback(
+    () => runCommand(toggleMark(markdownSchema.marks.code)),
+    [runCommand]
+  );
+
+  const setHeading = useCallback(
+    (level: number) => runCommand(setBlockType(markdownSchema.nodes.heading, { level })),
+    [runCommand]
+  );
+
+  const toggleBlockquote = useCallback(
+    () => runCommand(wrapIn(markdownSchema.nodes.blockquote)),
+    [runCommand]
+  );
 
   const insertCodeBlock = useCallback(() => {
-    if (schemaRef.current?.nodes.code_block && editorViewRef.current) {
-      const view = editorViewRef.current;
-      const { state, dispatch } = view;
-      const codeBlock = schemaRef.current.nodes.code_block.create({
-        language: options.defaultCodeLanguage,
-      });
-      dispatch(state.tr.replaceSelectionWith(codeBlock));
-      view.focus();
-    }
+    const view = editorViewRef.current;
+    if (!view) return;
+    const codeBlock = markdownSchema.nodes.code_block.create({
+      language: options.defaultCodeLanguage,
+    });
+    view.dispatch(view.state.tr.replaceSelectionWith(codeBlock));
+    view.focus();
   }, [options.defaultCodeLanguage]);
 
   const insertHorizontalRule = useCallback(() => {
-    if (schemaRef.current?.nodes.horizontal_rule && editorViewRef.current) {
-      const view = editorViewRef.current;
-      const { state, dispatch } = view;
-      const hr = schemaRef.current.nodes.horizontal_rule.create();
-      dispatch(state.tr.replaceSelectionWith(hr));
-      view.focus();
-    }
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.dispatch(view.state.tr.replaceSelectionWith(markdownSchema.nodes.horizontal_rule.create()));
+    view.focus();
   }, []);
 
   const handleUndo = useCallback(() => runCommand(undo), [runCommand]);
@@ -1123,8 +945,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
 
   // Check if mark is active
   const isMarkActive = useCallback((markType: string): boolean => {
-    if (!editorViewRef.current || !schemaRef.current) return false;
-    const mark = schemaRef.current.marks[markType];
+    if (!editorViewRef.current) return false;
+    const mark = markdownSchema.marks[markType];
     if (!mark) return false;
 
     const { state } = editorViewRef.current;
@@ -1430,8 +1252,9 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     if (viewMode === 'focus') classes.push(styles.focusMode);
     if (readOnly) classes.push(styles.readOnly);
     if (options.showBorder) classes.push(styles.withBorder);
+    if (chunked) classes.push(styles.chunkedRendering);
     return classes.filter(Boolean).join(' ');
-  }, [className, editorMode, viewMode, readOnly, options.showBorder]);
+  }, [className, editorMode, viewMode, readOnly, options.showBorder, chunked]);
 
   return (
     <div
@@ -1633,9 +1456,9 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
             {(editorMode === 'split' || editorMode === 'preview') && (
               <div className={styles.preview}>
                 <DocumentPreview
-                  content={htmlContent}
-                  fileType={'markdown'}
-                  rawContent={undefined}
+                  content={sourceContent}
+                  format={format}
+                  onWikiLinkClick={onWikiLinkClick}
                 />
               </div>
             )}

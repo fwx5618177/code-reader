@@ -45,6 +45,7 @@ import {
   CodeMirrorAdapter,
   createDefaultProviders,
 } from '../../lib/autocomplete';
+import { whenNearViewport } from '../../lib/editor/lazy-visibility';
 
 // ================================
 // 类型定义
@@ -196,6 +197,10 @@ export class CodeBlockView {
   editContainer: HTMLElement;
   languageBar: HTMLElement;
 
+  /** 是否已接近视口（之前只渲染未高亮的纯文本，节省大文档首次渲染开销） */
+  private nearViewport = false;
+  private cancelVisibilityWatch: () => void;
+
   constructor(
     node: PMNode,
     view: PMEditorView,
@@ -240,8 +245,12 @@ export class CodeBlockView {
     // 绑定事件
     this.bindEvents();
 
-    // 初始渲染
+    // 初始渲染：先输出纯文本占位（高度与最终一致），接近视口时再高亮
     this.renderCode();
+    this.cancelVisibilityWatch = whenNearViewport(this.dom, () => {
+      this.nearViewport = true;
+      if (!this.isEditing) this.renderCode();
+    });
   }
 
   /**
@@ -267,6 +276,7 @@ export class CodeBlockView {
 
   /**
    * 创建语言选择器栏
+   * 完整的语言列表在首次打开时才创建，避免每个代码块都生成上百个 option
    */
   private createLanguageBar(): HTMLElement {
     const bar = document.createElement('div');
@@ -275,25 +285,31 @@ export class CodeBlockView {
     const select = document.createElement('select');
     select.className = 'code-block-language-select';
 
-    // 添加空选项
-    const emptyOption = document.createElement('option');
-    emptyOption.value = '';
-    emptyOption.textContent = '选择语言';
-    select.appendChild(emptyOption);
-
-    // 从注册表添加语言选项
-    const languages = getLanguageOptions();
-    for (const lang of languages) {
+    const addOption = (value: string, label: string) => {
       const option = document.createElement('option');
-      option.value = lang.value;
-      option.textContent = lang.label;
+      option.value = value;
+      option.textContent = label;
       select.appendChild(option);
-    }
+    };
 
-    // 设置初始值
-    const initialLang = this.node.attrs.language || '';
-    const langDef = getLanguageDefinition(initialLang);
-    select.value = langDef ? langDef.id : '';
+    addOption('', '选择语言');
+    const initialDef = getLanguageDefinition(this.node.attrs.language || '');
+    if (initialDef) addOption(initialDef.id, initialDef.name);
+    select.value = initialDef ? initialDef.id : '';
+
+    let populated = false;
+    const populate = () => {
+      if (populated) return;
+      populated = true;
+      const current = select.value;
+      select.length = 1;
+      for (const lang of getLanguageOptions()) {
+        addOption(lang.value, lang.label);
+      }
+      select.value = current;
+    };
+    select.addEventListener('pointerdown', populate);
+    select.addEventListener('focus', populate);
 
     // 处理语言变更
     select.addEventListener('change', () => {
@@ -310,7 +326,7 @@ export class CodeBlockView {
   }
 
   /**
-   * 渲染代码（使用 Prism.js 语法高亮）
+   * 渲染代码：接近视口前为未高亮的纯文本，之后使用 Prism.js 语法高亮
    */
   private renderCode(): void {
     const code = this.node.textContent;
@@ -321,8 +337,7 @@ export class CodeBlockView {
       return;
     }
 
-    // 使用 Prism 高亮代码
-    const highlightedCode = highlightCode(code, language);
+    const highlightedCode = this.nearViewport ? highlightCode(code, language) : escapeHtml(code);
 
     // 构建行号和代码内容
     const lines = code.split('\n');
@@ -698,6 +713,13 @@ export class CodeBlockView {
       const normalizedLang = langDef ? langDef.id : '';
 
       if (select.value !== normalizedLang) {
+        // 完整列表可能尚未生成，确保目标语言有对应选项
+        if (langDef && !Array.from(select.options).some((o) => o.value === langDef.id)) {
+          const option = document.createElement('option');
+          option.value = langDef.id;
+          option.textContent = langDef.name;
+          select.appendChild(option);
+        }
         select.value = normalizedLang;
 
         // 如果 CodeMirror 已创建，更新语言
@@ -760,6 +782,7 @@ export class CodeBlockView {
    * 清理资源
    */
   destroy(): void {
+    this.cancelVisibilityWatch();
     // 销毁补全适配器
     if (this.autocompleteAdapter) {
       this.autocompleteAdapter.destroy();

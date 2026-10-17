@@ -43,6 +43,11 @@ export interface CompletionItem {
   icon?: string;
   /** 过滤文本 */
   filterText?: string;
+  /**
+   * 结构化插入：提供时代替 insertText，由补全项自行替换 [from, to)（含触发字符与查询）
+   * 用于插入表格、公式块、双向链接等节点
+   */
+  apply?: (view: EditorView, from: number, to: number) => void;
 }
 
 /** 补全上下文 */
@@ -171,21 +176,26 @@ function getLineText(state: EditorState, pos: number): string {
   return $pos.parent.textContent;
 }
 
-/** 查找触发位置 */
+/**
+ * 查找触发位置：取离光标最近的触发符
+ * - 单字符触发符要求位于行首或空白之后（避免路径、网址中的 / : 误触发）
+ * - 多字符触发符（如 [[）本身足够明确，可出现在任意位置
+ */
 function findTriggerPosition(
   textBefore: string,
   triggers: string[]
 ): { trigger: string; from: number } | null {
+  let best: { trigger: string; from: number } | null = null;
   for (const trigger of triggers) {
     const lastIndex = textBefore.lastIndexOf(trigger);
-    if (lastIndex !== -1) {
-      // 检查触发字符前是否是空格或行首
-      if (lastIndex === 0 || /\s/.test(textBefore[lastIndex - 1]!)) {
-        return { trigger, from: lastIndex };
-      }
+    if (lastIndex === -1) continue;
+    const boundaryOk =
+      trigger.length > 1 || lastIndex === 0 || /\s/.test(textBefore[lastIndex - 1]!);
+    if (boundaryOk && (!best || lastIndex > best.from)) {
+      best = { trigger, from: lastIndex };
     }
   }
-  return null;
+  return best;
 }
 
 /** 提取查询文本 */
@@ -421,9 +431,11 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
     const actualTo = nodeStart + to;
 
     // 创建事务
-    const tr = state.tr.replaceWith(actualFrom, actualTo, state.schema.text(item.insertText));
-
-    dispatch(tr);
+    if (item.apply) {
+      item.apply(view, actualFrom, actualTo);
+    } else {
+      dispatch(state.tr.replaceWith(actualFrom, actualTo, state.schema.text(item.insertText)));
+    }
 
     // 调用回调
     options.onSelect?.(item, view);
@@ -661,169 +673,6 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
 // ================================
 // 内置补全提供者
 // ================================
-
-/** Markdown 语法补全提供者 */
-export class MarkdownCompletionProvider implements CompletionProvider {
-  readonly name = 'markdown';
-  readonly type: CompletionType = 'markdown';
-  readonly triggerCharacters = ['/'];
-
-  private items: CompletionItem[] = [
-    {
-      id: 'h1',
-      label: '标题 1',
-      insertText: '# ',
-      type: 'markdown',
-      detail: '一级标题',
-      priority: 100,
-    },
-    {
-      id: 'h2',
-      label: '标题 2',
-      insertText: '## ',
-      type: 'markdown',
-      detail: '二级标题',
-      priority: 99,
-    },
-    {
-      id: 'h3',
-      label: '标题 3',
-      insertText: '### ',
-      type: 'markdown',
-      detail: '三级标题',
-      priority: 98,
-    },
-    {
-      id: 'bold',
-      label: '粗体',
-      insertText: '**文本**',
-      type: 'markdown',
-      detail: '加粗文本',
-      priority: 90,
-    },
-    {
-      id: 'italic',
-      label: '斜体',
-      insertText: '*文本*',
-      type: 'markdown',
-      detail: '斜体文本',
-      priority: 89,
-    },
-    {
-      id: 'code',
-      label: '行内代码',
-      insertText: '`代码`',
-      type: 'markdown',
-      detail: '行内代码',
-      priority: 88,
-    },
-    {
-      id: 'codeblock',
-      label: '代码块',
-      insertText: '```\n\n```',
-      type: 'markdown',
-      detail: '代码块',
-      priority: 87,
-    },
-    {
-      id: 'link',
-      label: '链接',
-      insertText: '[文本](url)',
-      type: 'markdown',
-      detail: '超链接',
-      priority: 85,
-    },
-    {
-      id: 'image',
-      label: '图片',
-      insertText: '![alt](url)',
-      type: 'markdown',
-      detail: '插入图片',
-      priority: 84,
-    },
-    {
-      id: 'quote',
-      label: '引用',
-      insertText: '> ',
-      type: 'markdown',
-      detail: '引用块',
-      priority: 80,
-    },
-    {
-      id: 'ul',
-      label: '无序列表',
-      insertText: '- ',
-      type: 'markdown',
-      detail: '无序列表',
-      priority: 75,
-    },
-    {
-      id: 'ol',
-      label: '有序列表',
-      insertText: '1. ',
-      type: 'markdown',
-      detail: '有序列表',
-      priority: 74,
-    },
-    {
-      id: 'task',
-      label: '任务列表',
-      insertText: '- [ ] ',
-      type: 'markdown',
-      detail: '任务列表',
-      priority: 73,
-    },
-    {
-      id: 'table',
-      label: '表格',
-      insertText: '| 列1 | 列2 |\n|-----|-----|\n| 内容 | 内容 |',
-      type: 'markdown',
-      detail: '插入表格',
-      priority: 70,
-    },
-    {
-      id: 'hr',
-      label: '分割线',
-      insertText: '---\n',
-      type: 'markdown',
-      detail: '水平分割线',
-      priority: 60,
-    },
-    {
-      id: 'math',
-      label: '数学公式',
-      insertText: '$$\n\n$$',
-      type: 'markdown',
-      detail: 'LaTeX 公式块',
-      priority: 50,
-    },
-    {
-      id: 'mathinline',
-      label: '行内公式',
-      insertText: '$公式$',
-      type: 'markdown',
-      detail: '行内数学公式',
-      priority: 49,
-    },
-  ];
-
-  shouldActivate(context: CompletionContext): boolean {
-    return (
-      (context.trigger === '/' && context.from === 0) ||
-      (context.from > 0 && /\s/.test(context.textBefore[context.from - 1] || ''))
-    );
-  }
-
-  getCompletions(context: CompletionContext): CompletionItem[] {
-    const query = context.query.toLowerCase();
-    if (!query) return this.items;
-
-    return this.items.filter(
-      (item) =>
-        item.label.toLowerCase().includes(query) || item.detail?.toLowerCase().includes(query)
-    );
-  }
-}
 
 /** Emoji 补全提供者 */
 export class EmojiCompletionProvider implements CompletionProvider {
@@ -2006,7 +1855,7 @@ export class LaTeXCompletionProvider implements CompletionProvider {
   ];
 
   shouldActivate(context: CompletionContext): boolean {
-    return context.trigger === '\\';
+    return context.trigger === '\\' && context.query.length > 0;
   }
 
   getCompletions(context: CompletionContext): CompletionItem[] {
