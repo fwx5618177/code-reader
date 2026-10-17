@@ -10,8 +10,8 @@
 | 文本差分（Myers 等，按内容自动选择） | `@code-reader/diff-algorithm` `createDiffEngine`、`quickDiff` | 版本对比、增量保存、撤销重做快照 | `lib/writing`（`writing-service.ts`、`DiffViewer`）、`lib/core/delta/history-manager.ts`、`lib/core/save-engine`、`lib/documents/writing-integration.ts` |
 | 全文索引与搜索 | `@code-reader/search-service` | 写作文档全文搜索与建议 | `lib/writing` |
 | 补全服务 | `@code-reader/autocomplete-service` | CodeMirror 代码块补全（Markdown / Emoji / 代码片段 provider） | `components/RichEditor/CodeBlockView.ts` |
-| 文本存储（Piece Table / Rope） | `@code-reader/text-buffer` | LaTeX 编辑缓冲区，按规模选择结构 | `lib/latex` |
-| 增量语法解析 | `@code-reader/syntax-parser` | LaTeX 增量解析 | `lib/latex` |
+| 文本存储（Piece Table / Rope） | `@code-reader/text-buffer` | LaTeX 编辑缓冲区，按规模选择结构 | `lib/latex/latex-document.ts` |
+| 增量语法解析 | `@code-reader/syntax-parser` | LaTeX 增量解析 | `lib/latex/incremental-engine.ts` |
 
 ## 2. desktop 内的业务算法
 

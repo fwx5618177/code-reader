@@ -46,7 +46,8 @@ import {
   type DocumentChange,
   type SourceMapEntry,
 } from '../../lib/latex/latex-document';
-import { getIncrementalEngine, getMathWorkerService } from '../../lib/latex';
+import { getIncrementalEngine } from '../../lib/latex/incremental-engine';
+import { getMathWorkerService } from '../../lib/latex/math-worker-service';
 import { createSourceMapFromAST } from '../../lib/latex/source-map-generator';
 import { RenderPipeline } from '../../lib/latex/render-pipeline';
 import { HeightMap, createHeightMap } from '../../lib/latex/height-map';

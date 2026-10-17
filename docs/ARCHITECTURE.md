@@ -145,6 +145,12 @@ LatexRenderer（renderer.ts）→ 块级元素带 data-block-id / data-source-st
 预览 DOM ── 测量 → HeightMap / RealHeightMap ── 双向滚动同步
 ```
 
+`lib/latex` 不设汇总入口（无 `index.ts`），调用方按模块路径直接导入。`LatexEditor.tsx` 直接使用的模块：`codemirror-latex`、`latex-document`、`incremental-engine`（`getIncrementalEngine`，后台解析 Worker 为 `worker.ts`）、`math-worker-service`（`getMathWorkerService`，Worker 为 `math-worker.ts`）、`source-map-generator`、`height-map`（含 `measureDOMBlocks`）、`real-height-map`（`measureBlockElements`）、`render-pipeline`（帧预算由 `frame-scheduler` 提供）。增量引擎内部依赖 `parser`、`renderer`（数学环境由 `math-env-handler` 处理）、`ast-cache-manager`、`chunk-pool`，类型统一在 `types.ts`。
+
+`parse-worker-service` / `parse-worker`、`pipeline-integration`、`scroll-sync`、`streaming-pipeline` 只被 `hooks/useLatexPipeline.ts`、`hooks/useScrollSync.ts` 引用，而这两个 hook 不在应用入口（`main.tsx`）的导入图中，属于待处理的未接入代码。
+
+接入现状（待接通，不能据此删除增量能力）：`LatexEditor` 调用 `engine.parseAndRender(content)` 时未传入 `LatexDocument` 的变更列表，由引擎自行比较内容；`RealHeightMap` 会在渲染后做 DOM 测量，但分栏滚动同步目前按滚动比例换算，尚未查询 `HeightMap` / `RealHeightMap`；`renderPipelineRef` 只声明和销毁，未创建 `RenderPipeline` 实例。
+
 LatexEditor 中的关键阈值（`LatexEditor.tsx`）：
 
 | 常量 | 值 | 作用 |
@@ -194,7 +200,7 @@ onChange(markdown) → useDocuments 自动保存 → 保存后同步 [[ ]] 到 l
 
 | 问题 | 根因 | 最终方案 |
 |------|------|----------|
-| 大文件编辑 OOM（V8 “Committing semi space failed”，堆约 4GB 时崩溃） | AST 与内容在 IncrementalLatexEngine、LatexEngine、IncrementalLatexParser 中被重复缓存 3 份以上；LRU 过大（1000 节点 + 500 渲染结果）；每个 AST 节点保存完整 `raw` 字符串；分块解析的中间结果没有及时释放 | `ASTCacheManager` 单例统一缓存（最多 3 个 AST、200 个节点），节点只存 `(start, end)` 偏移，按需从源文本切片；不活跃 AST 降级为 WeakRef；引擎本地缓存降为 200 节点 / 100 渲染结果、TTL 1 分钟；按内存压力等级（LOW/MEDIUM/HIGH/CRITICAL）清理缓存 |
+| 大文件编辑 OOM（V8 “Committing semi space failed”，堆约 4GB 时崩溃） | AST 与内容在 IncrementalLatexEngine、LatexEngine、IncrementalLatexParser 中被重复缓存 3 份以上；LRU 过大（1000 节点 + 500 渲染结果）；每个 AST 节点保存完整 `raw` 字符串；分块解析的中间结果没有及时释放 | `ASTCacheManager` 单例统一缓存（最多 3 个 AST、200 个节点），节点只存 `(start, end)` 偏移，按需从源文本切片；不活跃 AST 降级为 WeakRef；引擎本地缓存降为 200 节点 / 100 渲染结果、TTL 1 分钟；按内存压力等级（LOW/MEDIUM/HIGH/CRITICAL）清理缓存；基础 `LatexEngine` 已删除，只保留 IncrementalLatexEngine 一条链路 |
 | 源码与预览位置映射不准 | Source Map 用“行数 × 24px”估算渲染高度，数学块严重失真；渲染器未输出 `data-block-id`，`measureDOMBlocks()` 找不到元素返回空数组，测量回写实际无效 | 渲染器为段落、章节、数学块、数学环境、列表、环境输出 `data-block-id` 与源码偏移；渲染后 DOM 测量回写 HeightMap / RealHeightMap，ResizeObserver 持续更新；同步优先用已测量块的真实位置 |
 | 左侧源码滚动时被自动拉回 | 一：锁定时间太短（50ms），source → preview → source 形成循环。二（真正根因）：渲染更新 `innerHTML` 引起浏览器调整预览滚动位置并触发 `onScroll`，而渲染锁定只在 `handleScroll` 入口检查，`setTimeout` 延迟回调执行时锁定已解除，于是反向驱动了源码滚动 | 锁定时长加到 200ms；渲染期间单独锁定（500ms）；用 ref 保存锁定状态并在延迟回调内部再次检查；滚动比例变化低于阈值时忽略 |
 | 矩阵 / 对齐公式显示成带边框的表格 | 自研渲染器用 `<table class="math-matrix-table">` 等实现矩阵、cases、aligned、gathered，而 `.latexPreviewContent` 的通用 `table` 样式没有排除这些类 | 通用表格选择器加 `:not(.math-*-table)` 排除；数学表格强制无边框、透明背景 |
@@ -224,4 +230,4 @@ pnpm --filter @code-reader/format-parser benchmark
 pnpm --filter @code-reader/fuzzy-match-algorithm benchmark
 ```
 
-渲染进程另有运行时监控：`lib/latex/performance-monitor.ts`、`lib/writing/performance-monitor.ts`，写作服务基准为 `lib/writing/benchmark.ts`（`runQuickBenchmark` / `runFullBenchmark`）。
+渲染进程另有运行时监控 `lib/writing/performance-monitor.ts`，写作服务基准为 `lib/writing/benchmark.ts`（`runQuickBenchmark` / `runFullBenchmark`）。
