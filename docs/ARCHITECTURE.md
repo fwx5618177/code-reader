@@ -10,15 +10,17 @@
 │  components/  UI 组件（每个组件配套 *.module.scss）            │
 │  lib/         业务模块：latex / math / markdown / writing /    │
 │               documents / core / file-system / folders /      │
-│               autocomplete / editor / plugins / algorithms /  │
-│               knowledge / links / reading / agent             │
+│               editor / editor-tabs / plugins / spellcheck /   │
+│               knowledge / links / reading / agent / entities  │
 │  theme/ services/ contexts/ hooks/ types/                     │
 ├──────────────────────────── IPC（preload 白名单通道）─────────┤
 │ 主进程 packages/desktop/src/main（Electron）                   │
-│  database/  better-sqlite3、FTS5 搜索、语义搜索、版本历史       │
+│  database/  better-sqlite3、FTS5 搜索、语义搜索、版本历史、实体图谱 │
 │  ai/        AI Provider 服务（OpenAI / Anthropic SDK 等）       │
 │  agent/     后台 Agent 任务执行器                              │
-│  tray/      托盘                                              │
+│  web/       网页与图片抓取（剪藏）                           │
+│  spellcheck/ 拼写检查词典与个人词典                         │
+│  tray/      托盘（含最近打开）                               │
 ├──────────────────────────────────────────────────────────────┤
 │ 可复用子包 packages/*（与 UI 无关的算法与服务）                 │
 │  text-buffer  syntax-parser  format-parser  diff-algorithm    │
@@ -27,7 +29,7 @@
 └──────────────────────────────────────────────────────────────┘
 ```
 
-依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 内部 `lib/autocomplete`、`lib/plugins` 是对 `@code-reader/autocomplete-service`、`@code-reader/plugin-system` 的再导出与本地补充；`lib/core/delta` 是 `@code-reader/diff-algorithm` 的业务封装；`lib/latex` 依赖 `@code-reader/syntax-parser` 与 `@code-reader/text-buffer`。
+依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/plugins` 是 `@code-reader/plugin-system` 的编辑器桥接与本地补充；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；`lib/latex` 依赖 `@code-reader/syntax-parser` 与 `@code-reader/text-buffer`。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
 
 ## 2. 主进程
 
@@ -35,33 +37,42 @@
 |------|------|------|
 | SQLite | `main/database/sqlite.ts` | better-sqlite3，WAL 模式；数据库位于 `app.getPath('userData')/data/knowledge.db` |
 | 全文搜索 | `sqlite.ts`、`search-ipc-handlers.ts` | FTS5 虚拟表 `items_fts`（title / content / summary / transcript），分词器 `trigram`（支持中文子串）；少于 3 个字符的查询词退化为 LIKE 扫描 |
-| 语义搜索 | `semantic-search.ts`、`embedding-vector.ts` | 调用 AI 服务生成查询向量，与 `embeddings` 表比对；混合检索在语义不可用时退化为全文 |
+| 语义搜索 | `semantic-search.ts`、`embedding-vector.ts` | 调用 AI 服务生成查询向量，与 `item_embedding_chunks` 中的分段向量比对，条目得分取最相近的一段（相似条目以源条目各段归一化均值作查询向量）；只为入选的前 N 个条目读取元数据与正文；混合检索在语义不可用时退化为全文 |
 | 版本历史 | `version-history.ts`、`version-ipc-handlers.ts` | `document_versions` 表；IPC 通道 `version:*` |
 | AI 服务 | `main/ai/ai-service.ts`、`provider-config.ts` | 多 Provider（openai / anthropic / deepseek / moonshot / zhipu / ollama）：对话、向量、总结、提取标签、转写。配置只存主进程 `userData/config/ai-config.json`，渲染进程经 `ai:getConfig` 等 IPC 读写（拿不到明文 Key）；旧版渲染进程配置由 `legacy-config.ts` 启动时迁移 |
-| Agent 执行器 | `main/agent/agent-executor.ts` | 后台任务：transcribe / summarize / extract-tags / generate-embedding / find-related。同一条目的任务按优先级串行（转写先于摘要），不同条目并发；失败按 `next_attempt_at` 延迟重试；维护条目状态 processing → ready / error；推送 `agent:progress` / `agent:taskCompleted` / `agent:taskFailed` / `agent:itemStatusChanged` |
+| Agent 执行器 | `main/agent/agent-executor.ts` | 后台任务：transcribe / summarize / extract-tags / generate-embedding / find-related / categorize / extract-entities（类型定义在 `task-types.ts`，`agent_tasks.type` 的 CHECK 约束由同一份列表生成）。每个任务分计算与 `commit` 两段，`commit` 与任务完成状态在同一事务中写入。同一条目的任务按优先级串行（转写先于摘要），不同条目并发；`target_item_id` 为空表示整库任务（整库归类）；失败按 `next_attempt_at` 延迟重试；维护条目状态 processing → ready / error；推送 `agent:progress` / `agent:taskCompleted` / `agent:taskFailed` / `agent:itemStatusChanged`。自动归类（`categorize*.ts`）校验模型 JSON 后在一个事务里新建文件夹、移动条目、补充与合并标签，写入前复核涉及的数据，变化则回滚重试；实体抽取（`entities.ts`、`extract-entities-task.ts`）分段抽取后合并，整体替换条目的实体关联并清理孤立实体。长文不截断：摘要 / 标签超过 `LONG_TEXT_CHUNK_CHARS` 时按段落切分做 map-reduce（`long-text.ts`：逐段摘要、必要时多轮归并后汇总；各段标签按规范化名称去重、置信度按段数平均），短文仍是单次请求；语义索引把摘要 + 正文 + 转写切成 `EMBEDDING_CHUNK_CHARS` 的片段（每段前加标题），按 `EMBEDDING_BATCH_SIZE` 分批请求 embedding（`embedding-chunks.ts`），写回时整体替换该条目的分段；`reindexEmbeddings` 为缺失、过期或早于 v6 迁移的索引批量重建；各段进度经 `agent:progress` 推送 |
+| 事务写入 | `main/database/statements.ts`、`ipc-handlers.ts` | `db:transaction` 在一个 better-sqlite3 事务中执行一组语句（校验条数与类型，禁止 BEGIN / COMMIT / ATTACH / VACUUM 等）；标签合并、条目标签更新、文件夹删除与排序使用 |
+| 实体图谱 | `main/database/entity-ipc-handlers.ts` | `entities:getGraph` 读取 `entities` / `item_entities` 供图谱实体层使用 |
+| 问答流式生成 | `main/ai/ipc-handlers.ts` | `ai:chatStream` 按 streamId 推送 `ai:chatChunk`；每个 streamId 持有 AbortController，`ai:chatStreamCancel` 中止 OpenAI / Anthropic 请求 |
+| 网页剪藏 | `main/web/ipc-handlers.ts` | `net.fetch` 抓取网页 HTML（仅 http/https、超时、只接受 HTML、识别编码，超过上限拒绝而不截断），以及剪藏图片下载（只接受 `image/*`、单张上限、并发 4）；渲染进程 CSP 不允许外部连接，因此由主进程请求 |
+| 拼写词典 | `main/spellcheck/ipc-handlers.ts` | 列出 / 读取 / 导入（`.dic`+`.aff` 或 `.oxt`）/ 删除词典，个人词典的读取、添加与删除（串行写入）。Chromium 自带拼写检查保持关闭，由渲染进程的自研引擎检查 |
+| 托盘 | `main/tray/tray-manager.ts`、`recent-menu.ts` | 渲染进程经 `tray:setRecent` 发送最近文档（校验、去重、最多 10 条，非 macOS 转义 `&`），点击后发回 `tray:open-document` |
 | 窗口 | `main/index.ts` | 主窗口与按模式打开的子窗口（`createChildWindow`）；文件 IPC（含 `read-binary-file`、`rename-path`） |
 
-主要数据表：`knowledge_items`、`tags`、`item_tags`、`folders`、`projects`、`links`、`agent_tasks`、`app_settings`、`ai_providers`、`embeddings`、`document_versions`、`schema_version`。代码阅读时期的 Git 表与 `git-service.ts` 已删除；已有数据库中残留的 `git_*` 表不再被读写。
+主要数据表：`knowledge_items`、`tags`（含 `color`）、`item_tags`、`folders`、`projects`、`links`、`agent_tasks`、`app_settings`、`ai_providers`、`item_embedding_chunks`、`entities`、`item_entities`、`document_versions`、`schema_version`。schema v5 重建 `agent_tasks`（CHECK 约束加入 categorize / extract-entities，`target_item_id` 允许为空）并新建实体表（`entities.normalized_name` 唯一，`item_entities` 级联删除）；schema v6 把旧的单向量表 `embeddings` 迁入 `item_embedding_chunks`（主键 `(item_id, chunk_index)`，向量为 Float32 小端 BLOB，条目删除时级联删除），旧向量作为第 0 段保留，条目重新处理后替换为覆盖全文的分段；全新建库与迁移共用同一份建表语句。代码阅读时期的 Git 表与 `git-service.ts` 已删除；已有数据库中残留的 `git_*` 表不再被读写。
 
 ## 3. 渲染进程模块
 
 | 模块 | 职责 |
 |------|------|
 | `components/RichEditor` | 唯一编辑器入口：ProseMirror 文档编辑 + CodeMirror 代码块（`CodeBlockView`）+ 数学节点（`MathNodeView`，展开源码与实时预览）+ 任务项（`ListItemView`）；`.tex` 文件切换为 `LatexEditor`（源码 / 渲染 / 分栏） |
-| `lib/markdown` | Markdown 文档模型（schema）、markdown-it 解析（含 `$` 公式、`[[ ]]`、任务列表、中文软换行扩展）、按顶层块缓存的序列化、Typora 式实时预览插件、斜杠命令与 `[[` 补全、表格键盘操作、HTML 渲染（预览 / 阅读共用） |
+| `lib/markdown` | Markdown 文档模型（schema）、markdown-it 解析（含 `$` 公式、`[[ ]]` / `[[笔记#标题|别名]]` / `![[ ]]` 嵌入（`wiki-link.ts`）、任务列表、中文软换行扩展）、按顶层块缓存的序列化、Typora 式实时预览插件、斜杠命令与 `[[` / `[[笔记#` 补全、表格行列命令与快捷键（`table-commands.ts`、`table-keymap.ts`）、HTML 渲染（预览 / 阅读共用，嵌入按深度上限与已访问集合防循环） |
 | `lib/latex` | LaTeX 文档模型、增量引擎、渲染器、Worker、高度映射与滚动同步（见第 6 节） |
 | `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax）：TeX 原子间距、显示/行内样式、按内容高度伸缩的分隔符、严格模式校验 |
-| `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`）、快速收集与附件保存、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、`useKnowledgeBase` |
-| `lib/agent` | Agent 事件订阅与条目处理活动（`useAgentActivity`）、知识库问答（混合检索 + 引用，经 `ai:chatStream` 流式生成，增量以 `ai:chatChunk` 事件按 streamId 推送） |
-| `lib/links` | 双向链接索引（按条目更新时间增量解析）、反向链接、未解析链接、图谱数据、Barnes–Hut 力导向布局、`links` 表同步 |
-| `lib/reading` | 阅读状态（书架、进度、高亮，存于条目 `metadata.reading`）、排版设置、摘录生成 |
-| `lib/documents` | 文档 CRUD、文件类型（markdown / latex / plain）、`useDocuments`；`versions/` 为版本历史（reducer + service + `useVersions`） |
-| `lib/core` | 版本化编辑基础：EditorModel（versionId + contentHash）、拉取式 SaveEngine、撤销重做、IndexedDB 离线存储、操作日志与同步接口（仅类型） |
-| `lib/writing` | 写作服务：全文索引、搜索建议、差分（Worker 池）、索引持久化（IndexedDB）、性能监控，以及 SearchBox / DiffViewer 组件 |
-| `lib/file-system`、`lib/folders` | 写作文件树模型、拖拽、文件夹（知识库与写作共用 `folders` 表） |
-| `lib/autocomplete`、`lib/editor` | 补全服务接入 CodeMirror / ProseMirror（补全项可通过 `apply` 做结构化插入），语言注册表，ProseMirror 输入规则与块级回车转换，视口懒渲染（`lazy-visibility.ts`） |
+| `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`，标签重命名 / 合并 / 颜色）、快速收集与附件保存、PDF / EPUB 正文提取（`document-text.ts`）、网页剪藏（`web-clip.ts`：Readability 提取正文后经 ProseMirror schema 转 Markdown；`clip-images.ts`：图片下载为图片条目并改写为 `![[ ]]`）、条目打开方式（`open-target.ts`：写作文档 → 写作，文档附件 → 阅读，其余 → 知识库）、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、`useKnowledgeBase` |
+| `lib/agent` | Agent 事件订阅与条目处理活动（`useAgentActivity`）、整库动作（自动归类、提取全部实体、重建语义索引，`actions.ts`）与变更记录、知识库问答（混合检索 + 引用，经 `ai:chatStream` 流式生成，可经 `ai:chatStreamCancel` 停止） |
+| `lib/entities` | 实体图谱数据（实体节点 + 条目节点）与 `useEntityGraph` |
+| `lib/links` | 双向链接索引（按条目更新时间增量解析，标题引用与嵌入计入目标笔记）、反向链接、未解析链接、图谱数据、Barnes–Hut 力导向布局、嵌入解析（`embed.ts`）、重命名时改写指向旧名的链接（`rename.ts`）、`links` 表同步 |
+| `lib/reading` | 阅读状态（书架、进度、高亮，存于条目 `metadata.reading`，PDF 高亮记录页码）、跨文本节点高亮定位、PDF（pdfjs-dist，按需加载，页面懒渲染 + 文字层 + 书签目录）、EPUB（jszip 解析 container / OPF / spine / 目录）、HTML 白名单净化（`sanitize-html.ts`）、排版设置、摘录生成 |
+| `lib/documents` | 文档 CRUD、文件类型（markdown / latex / plain）、`useDocuments`、托盘最近文档选取（`recent.ts`）；`versions/` 为版本历史（reducer + service + `useVersions`，每篇保留最近 50 个版本，`getVersionBefore` 供“对比上一版”按需读取） |
+| `lib/editor-tabs` | 写作标签页与分栏的纯状态逻辑（打开 / 关闭 / 重开 / 排序 / 跨窗格移动 / 清理已删除文档）与 localStorage 持久化；`hooks/useEditorTabs.ts` 连接 `useDocuments`。同一时刻只有聚焦窗格是可编辑的 RichEditor（编辑器桥接为单例），另一窗格为只读预览，点击即切换为可编辑 |
+| `lib/spellcheck` | 自研 Hunspell 拼写检查：词缀解析与查词、建议、分词跳过规则、Worker 协议，ProseMirror 插件只检查可见且有变化的块；`services/spellcheckService.ts` 管理 Worker、词典热切换与个人词典 |
+| `lib/core` | 版本化编辑基础：EditorModel（versionId + contentHash）、拉取式 SaveEngine、撤销重做（`delta/history-manager.ts`，差分直接引用 `@code-reader/diff-algorithm`）、IndexedDB 离线存储、操作日志与同步接口（仅类型） |
+| `lib/writing` | 写作服务：全文索引、搜索建议、差分（Worker 池）、索引持久化（IndexedDB）、性能监控，以及 SearchBox / DiffViewer 组件（DiffViewer 用于版本对比，`diff-lines.ts` 把字符级差分重建为行） |
+| `lib/file-system`、`lib/folders` | 写作文件树模型、拖拽、文件夹（知识库与写作共用 `folders` 表；`moveFolder` 校验循环与同名，删除时子文件夹上移一级） |
+| `lib/editor` | 语言注册表、ProseMirror 输入规则与块级回车转换、视口懒渲染（`lazy-visibility.ts`）、块拖拽手柄与块菜单（`block-handle.ts`、`block-commands.ts`、`popup-menu.ts`） |
 | `lib/plugins` | 插件系统再导出与编辑器桥接（桥接内容为 Markdown 文本） |
-| `services/` | `database.ts`（渲染侧 SQL 通道）、`settingsService.ts`（`settings.json`）、`aiConfigService.ts`（主进程 AI 配置的客户端） |
+| `services/` | `database.ts`（渲染侧 SQL 通道，含 `transaction`）、`settingsService.ts`（`settings.json`）、`aiConfigService.ts`（主进程 AI 配置的客户端）、`spellcheckService.ts` |
 | `theme/` | ThemeProvider：light / dark / system，强调色，字体，写入 CSS 变量 |
 
 ## 4. 存储与版本
@@ -71,10 +82,12 @@
 | 知识条目（含写作文档，type=note）、标签、文件夹、链接、Agent 任务 | 主进程 SQLite，知识库 / 写作 / 阅读 / Agent 共用同一份数据。早期的 `knowledge-db.json` 在启动时迁移并改名为 `.legacy.json` |
 | 写作文档正文 | `.md` 存标准 Markdown，`.txt` 存原文，`.tex` 存 LaTeX 源码；旧版 HTML 内容读入时兼容、保存时转为 Markdown |
 | 双向链接 | 笔记正文中的 `[[ ]]` 是唯一事实来源；渲染进程内存索引计算反链（含未创建的目标），文档保存时把已解析的引用同步到 `links` 表（type=reference）；Agent 的语义关联写入 type=ai-suggested |
-| 附件（录音、图片、文件） | `userData/attachments/`，数据库只存路径与元数据；渲染进程经 `read-binary-file` 转 Blob URL 预览（CSP 不放开 file:） |
+| 附件（录音、图片、文件、剪藏图片） | `userData/attachments/`，数据库只存路径与元数据；渲染进程经 `read-binary-file` 转 Blob URL 预览（CSP 不放开 file:） |
+| 拼写检查词典 | 内置 en_US（Hunspell `.dic` / `.aff` + LICENSE）在 `packages/desktop/assets/dictionaries/`，经 electron-builder `extraResources` 打包；用户导入的词典与个人词典（`user-words.txt`）在 `userData/spellcheck/` |
+| 写作标签页与分栏 | localStorage `writing-editor-tabs` |
 | 应用设置 | `userData/settings.json`（`settingsService`） |
 | AI 服务商配置 | `userData/config/ai-config.json`（仅主进程读写） |
-| 文档版本快照 | SQLite `document_versions`；渲染侧 `useDocuments` 每 5 分钟（`VERSION_INTERVAL_MS = 300000`）自动创建一次版本，另可手动创建、预览、恢复、清理 |
+| 文档版本快照 | SQLite `document_versions`；渲染侧 `useDocuments` 每 5 分钟（`VERSION_INTERVAL_MS = 300000`）自动创建一次版本，另可手动创建、预览、对比（当前 / 上一版）、恢复；每次新增版本后自动只保留最近 50 个 |
 | 编辑中文档的离线状态、待同步操作 | 渲染侧 IndexedDB（`lib/core/storage`） |
 | 写作搜索索引 | IndexedDB（`lib/writing/index-storage.ts`），变更后自动持久化，启动时加载 |
 | LaTeX 编辑中文本 | `@code-reader/text-buffer`：`selectBufferType` 默认 Piece Table，超过 10MB 选 Rope |
@@ -83,7 +96,7 @@
 
 - 文本内容进 SQLite 并做版本历史；录音、图片、PDF 等媒体放文件系统，数据库只存元数据与校验和。大二进制不进 Git、不进数据库。
 - 原始文件永久保留，转写与总结作为派生字段和索引。
-- 版本保留策略：近期全部保留，更早的按日 / 周 / 月抽样保留。
+- 版本保留策略：近期全部保留，更早的按日 / 周 / 月抽样保留（当前实现为固定保留最近 50 个）。
 - 同步：文本用 CRDT 解决冲突，媒体按时间戳保留并重命名冲突文件，标签等元数据取并集。
 
 ## 5. UI 架构
@@ -93,13 +106,13 @@
 | TitleBar | 窗口控制、模式标签（knowledge / writing / reading）、搜索入口、进入专注模式 |
 | Ribbon | 左侧图标栏：随当前模式变化的导航按钮、快速操作、设置入口 |
 | Sidebar | 当前模式的导航：知识库为智能文件夹 + 我的文件夹（`VirtualFolders`），写作为 WritingSidebar 文件树（可选文件类型新建），阅读为书架（`ReadingShelf`） |
-| MainContent | 知识库 `KnowledgeWorkspace`（条目 / 图谱 / 问答 + 详情面板）；写作 RichEditor + `BacklinksPanel`；阅读 `ReadingView` |
+| MainContent | 知识库 `KnowledgeWorkspace`（条目 / 图谱（笔记链接 / 实体两层）/ 问答 + 详情面板 + 标签管理）；写作 `EditorTabs` + `SplitEditor`（RichEditor / 只读预览）+ `BacklinksPanel`；阅读 `ReadingView`（文章、PDF、EPUB） |
 | EditorFooter | 字数、保存状态、反向链接面板开关、版本历史按钮 |
 | AgentActivity | 右下角浮窗，任意模式下显示 Agent 处理进度 |
 
-App 层的跨模式导航：`openItem`（笔记进写作、其他进知识库）、`openWikiTarget`（解析 `[[ ]]`，目标不存在时新建文档）。编辑器已处理的按键（`defaultPrevented`）不再触发全局快捷键。
+App 层的跨模式导航：条目按 `lib/knowledge/open-target.ts` 决定进入的模式（写作文档进写作、文档附件进阅读、其余进知识库），`openWikiTarget` 解析 `[[ ]]`（含标题片段，目标不存在时新建文档）。编辑器已处理的按键（`defaultPrevented`）不再触发全局快捷键。
 
-快捷键（`App.tsx`）：⌘N 快速输入（文本）、⌘⇧R 快速输入（录音）、⌘P 搜索、⌘, 设置、⌘B 侧边栏、⌘S 保存、⌘1/2/3 切换模式、⌘⇧F 专注模式、Esc 退出专注或关闭弹窗。
+快捷键（`App.tsx`）：⌘N 快速输入（文本）、⌘⇧R 快速输入（录音）、⌘P 搜索（写作文档 + 知识条目）、⌘, 设置、⌘B 侧边栏、⌘S 保存、⌘1/2/3 切换模式、⌘⇧F 专注模式、Esc 退出专注或关闭弹窗。写作标签页（`useEditorTabs.ts`）：⌘W 关闭、⌘⇧T 重开、⌃Tab / ⌃⇧Tab 切换、⌘\ 分栏。
 
 样式约定（详见 `packages/desktop/src/render/styles/DESIGN_SYSTEM.md`）：
 
