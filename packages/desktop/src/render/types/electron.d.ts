@@ -252,7 +252,7 @@ interface SemanticSearchOptions {
   includeDeleted?: boolean;
 }
 
-interface HybridSearchResult extends SemanticSearchResult {
+export interface HybridSearchResult extends SemanticSearchResult {
   ftsScore?: number;
   combinedScore: number;
 }

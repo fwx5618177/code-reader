@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import Layout from './components/Layout';
 import QuickInput, { QuickInputData } from './components/QuickInput';
-import SearchPanel, { SearchResult } from './components/SearchPanel';
+import SearchPanel from './components/SearchPanel';
 import SettingsPanel from './components/SettingsPanel';
 import EditorFooter from './components/EditorFooter';
 import WelcomeGuide, { wasWelcomeGuideDismissed } from './components/WelcomeGuide';
@@ -414,25 +414,6 @@ const App: React.FC = () => {
   const handleModeChange = useCallback((mode: AppMode) => {
     dispatch({ type: 'SET_MODE', payload: mode });
   }, []);
-
-  // 搜索结果选择处理
-  const handleSearchResultSelect = useCallback(
-    (result: SearchResult) => {
-      // 根据结果类型导航到对应位置
-      if (result.type === 'note' || result.type === 'document') {
-        // 切换到写作模式并选择文档
-        dispatch({ type: 'SET_MODE', payload: 'writing' });
-        selectDocument(result.id);
-      } else {
-        // 其他类型（录音、图片、代码片段、网页等）在知识库中打开
-        dispatch({ type: 'SET_MODE', payload: 'knowledge' });
-        setSelectedKnowledgeItemId(result.id);
-      }
-      // 关闭搜索面板
-      dispatch({ type: 'TOGGLE_SEARCH' });
-    },
-    [selectDocument]
-  );
 
   // 侧边栏文件夹：用户文件夹 + 条目数
   const virtualFolders = useMemo<VirtualFolder[]>(() => {
@@ -1093,7 +1074,8 @@ const App: React.FC = () => {
       <SearchPanel
         isOpen={appState.searchOpen}
         onClose={() => dispatch({ type: 'TOGGLE_SEARCH', payload: false })}
-        onResultSelect={handleSearchResultSelect}
+        onOpenDocument={openInWriting}
+        onOpenKnowledgeItem={openInKnowledge}
       />
 
       {/* Settings Panel */}

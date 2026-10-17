@@ -1,267 +1,281 @@
 // ================================
-// Search Panel Component
-// Full-text search with filters and results
+// 全局搜索（⌘P）
+// 同时搜索写作文档（内存全文索引）与知识库条目（混合检索），按组展示
+// 输入防抖；只采用最新一次查询的结果，过期响应直接丢弃
 // ================================
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import {
-  Search,
-  X,
-  Filter,
-  Clock,
-  FileText,
-  Mic,
-  Image,
-  Code,
-  Globe,
-  Bookmark,
-  Tag,
-  Folder,
-  Calendar,
-  ArrowUp,
-  ArrowDown,
-} from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Clock, Filter, Search, X } from 'lucide-react';
 import { useWritingService } from '../../lib/writing';
+import type { KnowledgeItemType } from '../../types/knowledge';
+import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
+import {
+  mergeSearchResults,
+  splitHighlights,
+  type SearchGroupKey,
+  type SearchGroups,
+  type SearchHit,
+} from './search-results';
 import styles from './SearchPanel.module.scss';
-
-// ================================
-// Types
-// ================================
-
-export interface SearchResult {
-  id: string;
-  title: string;
-  type: 'note' | 'audio' | 'image' | 'code' | 'webpage' | 'document' | 'bookmark';
-  content: string;
-  highlights: string[];
-  tags: string[];
-  folder?: string;
-  createdAt: Date;
-  updatedAt: Date;
-  score: number;
-}
-
-export interface SearchFilter {
-  types: string[];
-  tags: string[];
-  folders: string[];
-  dateRange?: {
-    start: Date;
-    end: Date;
-  };
-  favoritesOnly: boolean;
-}
 
 interface SearchPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  onResultSelect?: (result: SearchResult) => void;
+  /** 在写作模式中打开文档 */
+  onOpenDocument: (id: string) => void;
+  /** 在知识库中打开条目 */
+  onOpenKnowledgeItem: (id: string) => void;
 }
 
-// ================================
-// Type Icons
-// ================================
+/** 输入停顿多久后发起搜索（毫秒） */
+const SEARCH_DEBOUNCE_MS = 300;
+/** 每一路搜索的结果上限 */
+const RESULT_LIMIT = 30;
+/** 保留的最近搜索词数 */
+const HISTORY_LIMIT = 10;
 
-const TYPE_ICONS: Record<string, React.ReactNode> = {
-  note: <FileText size={14} />,
-  audio: <Mic size={14} />,
-  image: <Image size={14} />,
-  code: <Code size={14} />,
-  webpage: <Globe size={14} />,
-  document: <FileText size={14} />,
-  bookmark: <Bookmark size={14} />,
-};
+const EMPTY_GROUPS: SearchGroups = { documents: [], knowledge: [] };
 
-const TYPE_LABELS: Record<string, string> = {
-  note: '笔记',
-  audio: '音频',
-  image: '图片',
-  code: '代码',
-  webpage: '网页',
-  document: '文档',
-  bookmark: '书签',
-};
+const GROUPS: Array<{ key: SearchGroupKey; label: string }> = [
+  { key: 'documents', label: '写作文档' },
+  { key: 'knowledge', label: '知识条目' },
+];
 
-// ================================
-// Search Panel Component
-// ================================
+const ITEM_TYPES = Object.keys(ITEM_TYPE_LABELS) as KnowledgeItemType[];
 
-const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onResultSelect }) => {
+const Snippet: React.FC<{ snippet: string }> = ({ snippet }) => (
+  <div className={styles.resultHighlight}>
+    {splitHighlights(snippet).map((segment, index) =>
+      segment.highlight ? (
+        <mark key={index}>{segment.text}</mark>
+      ) : (
+        <React.Fragment key={index}>{segment.text}</React.Fragment>
+      )
+    )}
+  </div>
+);
+
+const SearchPanel: React.FC<SearchPanelProps> = ({
+  isOpen,
+  onClose,
+  onOpenDocument,
+  onOpenKnowledgeItem,
+}) => {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [groups, setGroups] = useState<SearchGroups>(EMPTY_GROUPS);
   const [isLoading, setIsLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<KnowledgeItemType[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
-  const [filters, setFilters] = useState<SearchFilter>({
-    types: [],
-    tags: [],
-    folders: [],
-    favoritesOnly: false,
-  });
 
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  // 每次查询递增，响应返回时与最新值比较以丢弃过期结果
+  const requestSeqRef = useRef(0);
 
-  // Focus input when opened
+  const { search: searchDocuments } = useWritingService();
+
+  // 打开时聚焦并选中输入框
   useEffect(() => {
-    if (isOpen && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
+    if (isOpen) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
     }
   }, [isOpen]);
 
-  // Reset selected index when results change
+  // 防抖搜索
+  useEffect(() => {
+    const seq = ++requestSeqRef.current;
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setGroups(EMPTY_GROUPS);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    const timer = setTimeout(() => {
+      void Promise.allSettled([
+        searchDocuments(trimmed, { limit: RESULT_LIMIT, fuzzy: true, highlight: true }),
+        window.electron.search.hybrid(trimmed, { limit: RESULT_LIMIT }),
+      ]).then(([writing, hybrid]) => {
+        if (seq !== requestSeqRef.current) return;
+        if (writing.status === 'rejected') console.error('[Search] 写作文档搜索失败:', writing.reason);
+        if (hybrid.status === 'rejected') console.error('[Search] 知识库搜索失败:', hybrid.reason);
+        setGroups(
+          mergeSearchResults(
+            writing.status === 'fulfilled' ? writing.value : [],
+            hybrid.status === 'fulfilled' ? hybrid.value : []
+          )
+        );
+        setIsLoading(false);
+      });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, searchDocuments]);
+
+  // 按类型筛选后的分组，以及键盘导航用的扁平列表
+  const visibleGroups = useMemo(() => {
+    const keep = (hit: SearchHit) => typeFilter.length === 0 || typeFilter.includes(hit.type);
+    return GROUPS.map(({ key, label }) => ({ key, label, hits: groups[key].filter(keep) })).filter(
+      (group) => group.hits.length > 0
+    );
+  }, [groups, typeFilter]);
+  const flatHits = useMemo(() => visibleGroups.flatMap((group) => group.hits), [visibleGroups]);
+
   useEffect(() => {
     setSelectedIndex(0);
-  }, [results]);
+  }, [flatHits]);
 
-  // Scroll selected item into view
+  // 选中项滚动到可见区域
   useEffect(() => {
-    if (resultsRef.current && results.length > 0) {
-      const selectedItem = resultsRef.current.querySelector('.search-result-item.selected');
-      if (selectedItem) {
-        selectedItem.scrollIntoView({ block: 'nearest' });
-      }
+    resultsRef.current
+      ?.querySelector('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex, flatHits]);
+
+  const openHit = useCallback(
+    (hit: SearchHit) => {
+      const term = query.trim();
+      setSearchHistory((prev) => [term, ...prev.filter((t) => t !== term)].slice(0, HISTORY_LIMIT));
+      if (hit.group === 'documents') onOpenDocument(hit.id);
+      else onOpenKnowledgeItem(hit.id);
+      onClose();
+    },
+    [query, onOpenDocument, onOpenKnowledgeItem, onClose]
+  );
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.min(prev + 1, flatHits.length - 1));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.max(prev - 1, 0));
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (flatHits[selectedIndex]) openHit(flatHits[selectedIndex]);
+        break;
+      case 'Escape':
+        e.preventDefault();
+        onClose();
+        break;
     }
-  }, [selectedIndex, results]);
-
-  // ================================
-  // Writing Service
-  // ================================
-
-  const { search: searchService, isInitialized: serviceInitialized } = useWritingService();
-
-  // ================================
-  // Search Handler
-  // ================================
-
-  const performSearch = useCallback(
-    async (searchQuery: string) => {
-      if (!searchQuery.trim()) {
-        setResults([]);
-        return;
-      }
-
-      setIsLoading(true);
-
-      try {
-        // 使用 WritingService 进行真实搜索
-        if (serviceInitialized) {
-          const searchResults = await searchService(searchQuery, {
-            limit: 50,
-            fuzzy: true,
-            highlight: true,
-          });
-
-          // 将搜索结果转换为 SearchResult 格式
-          const formattedResults: SearchResult[] = searchResults.map((result) => ({
-            id: result.id,
-            title: result.title || '无标题',
-            type: 'note' as const, // 默认类型，可以根据实际数据调整
-            content: result.snippet || '',
-            // 将 SearchHighlight[] 转换为 string[]，使用 snippet 字段
-            highlights: result.highlights?.map((h) => h.snippet || '') || [],
-            tags: [], // DocumentSearchResult 没有 tags 字段
-            folder: undefined, // DocumentSearchResult 没有 folderId 字段
-            createdAt: new Date(), // DocumentSearchResult 没有时间字段
-            updatedAt: new Date(),
-            score: result.score || 0,
-          }));
-
-          // 应用本地过滤器
-          let filteredResults = formattedResults;
-          if (filters.types.length > 0) {
-            filteredResults = filteredResults.filter((r) => filters.types.includes(r.type));
-          }
-          if (filters.tags.length > 0) {
-            filteredResults = filteredResults.filter((r) =>
-              r.tags.some((t) => filters.tags.includes(t))
-            );
-          }
-
-          setResults(filteredResults);
-        } else {
-          // 服务未初始化时显示空结果
-          setResults([]);
-        }
-
-        // 添加到搜索历史
-        if (!searchHistory.includes(searchQuery)) {
-          setSearchHistory((prev) => [searchQuery, ...prev].slice(0, 10));
-        }
-      } catch (error) {
-        console.error('搜索失败:', error);
-        setResults([]);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [filters, searchHistory, searchService, serviceInitialized]
-  );
-
-  // Debounced search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      performSearch(query);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query, performSearch]);
-
-  // ================================
-  // Keyboard Navigation
-  // ================================
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      switch (e.key) {
-        case 'ArrowDown':
-          e.preventDefault();
-          setSelectedIndex((prev) => Math.min(prev + 1, results.length - 1));
-          break;
-        case 'ArrowUp':
-          e.preventDefault();
-          setSelectedIndex((prev) => Math.max(prev - 1, 0));
-          break;
-        case 'Enter':
-          e.preventDefault();
-          if (results[selectedIndex] && onResultSelect) {
-            onResultSelect(results[selectedIndex]);
-            onClose();
-          }
-          break;
-        case 'Escape':
-          e.preventDefault();
-          onClose();
-          break;
-      }
-    },
-    [results, selectedIndex, onResultSelect, onClose]
-  );
-
-  // ================================
-  // Filter Toggle
-  // ================================
-
-  const toggleTypeFilter = (type: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      types: prev.types.includes(type)
-        ? prev.types.filter((t) => t !== type)
-        : [...prev.types, type],
-    }));
   };
 
-  // ================================
-  // Render
-  // ================================
+  const toggleTypeFilter = (type: KnowledgeItemType) => {
+    setTypeFilter((prev) => (prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]));
+  };
 
   if (!isOpen) return null;
+
+  const renderResults = () => {
+    if (isLoading && flatHits.length === 0) {
+      return (
+        <div className={styles.searchLoading}>
+          <div className={styles.loadingSpinner} />
+          <span>搜索中...</span>
+        </div>
+      );
+    }
+
+    if (!query.trim()) {
+      return (
+        <div className={styles.searchEmpty}>
+          {searchHistory.length > 0 ? (
+            <>
+              <div className={styles.sectionTitle}>
+                <Clock size={14} />
+                <span>最近搜索</span>
+              </div>
+              <div className={styles.historyList}>
+                {searchHistory.map((term) => (
+                  <button key={term} type="button" className={styles.historyItem} onClick={() => setQuery(term)}>
+                    <Clock size={14} />
+                    <span>{term}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className={styles.emptyState}>
+              <Search size={32} />
+              <p>输入关键词开始搜索</p>
+              <span className={styles.hintText}>同时搜索写作文档与知识库条目</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (flatHits.length === 0) {
+      return (
+        <div className={styles.searchEmpty}>
+          <div className={styles.emptyState}>
+            <Search size={32} />
+            <p>未找到匹配结果</p>
+            <span className={styles.hintText}>
+              {typeFilter.length > 0 ? '尝试清除类型筛选' : '尝试使用其他关键词'}
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    let offset = 0;
+    return (
+      <div className={styles.resultsList} role="listbox" aria-label="搜索结果">
+        {visibleGroups.map((group) => {
+          const start = offset;
+          offset += group.hits.length;
+          return (
+            <div key={group.key} role="group" aria-label={group.label}>
+              <div className={styles.resultsHeader}>
+                {group.label}
+                <span className={styles.groupCount}>{group.hits.length}</span>
+              </div>
+              {group.hits.map((hit, i) => {
+                const index = start + i;
+                const Icon = ITEM_TYPE_ICONS[hit.type];
+                const selected = index === selectedIndex;
+                return (
+                  <div
+                    key={hit.id}
+                    role="option"
+                    aria-selected={selected}
+                    className={`${styles.resultItem} ${selected ? styles.resultItemSelected : ''}`}
+                    onClick={() => openHit(hit)}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                  >
+                    <div className={styles.resultIcon}>
+                      <Icon size={14} />
+                    </div>
+                    <div className={styles.resultContent}>
+                      <div className={styles.resultTitle}>{hit.title}</div>
+                      {hit.snippet && <Snippet snippet={hit.snippet} />}
+                      {hit.group === 'knowledge' && (
+                        <div className={styles.resultMeta}>
+                          <span className={styles.metaItem}>{ITEM_TYPE_LABELS[hit.type]}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.searchPanel} onClick={(e) => e.stopPropagation()}>
-        {/* Search Header */}
         <div className={styles.searchHeader}>
           <div className={styles.searchInputWrapper}>
             <Search className={styles.searchIcon} size={18} />
@@ -269,26 +283,27 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onResultSele
               ref={inputRef}
               type="text"
               className={styles.searchInput}
-              placeholder="搜索笔记、文档、音频..."
+              placeholder="搜索写作文档与知识库..."
+              aria-label="搜索"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
             />
             {query && (
-              <button className={styles.clearBtn} onClick={() => setQuery('')}>
+              <button type="button" className={styles.clearBtn} aria-label="清空" onClick={() => setQuery('')}>
                 <X size={14} />
               </button>
             )}
             <button
-              className={`${styles.filterBtn} ${showFilters ? styles.filterBtnActive : ''}`}
+              type="button"
+              className={`${styles.filterBtn} ${showFilters || typeFilter.length > 0 ? styles.filterBtnActive : ''}`}
               onClick={() => setShowFilters(!showFilters)}
-              title="筛选"
+              title="按类型筛选"
             >
               <Filter size={16} />
             </button>
           </div>
 
-          {/* Keyboard hints */}
           <div className={styles.keyboardHints}>
             <span className={styles.hint}>
               <ArrowUp size={12} />
@@ -296,7 +311,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onResultSele
               导航
             </span>
             <span className={styles.hint}>
-              <kbd>↵</kbd> 选择
+              <kbd>↵</kbd> 打开
             </span>
             <span className={styles.hint}>
               <kbd>esc</kbd> 关闭
@@ -304,155 +319,42 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onResultSele
           </div>
         </div>
 
-        {/* Filters */}
         {showFilters && (
           <div className={styles.searchFilters}>
             <div className={styles.filterSection}>
               <label className={styles.filterLabel}>类型</label>
               <div className={styles.filterChips}>
-                {Object.entries(TYPE_LABELS).map(([type, label]) => (
-                  <button
-                    key={type}
-                    className={`${styles.filterChip} ${filters.types.includes(type) ? styles.filterChipActive : ''}`}
-                    onClick={() => toggleTypeFilter(type)}
-                  >
-                    {TYPE_ICONS[type]}
-                    <span>{label}</span>
-                  </button>
-                ))}
+                {ITEM_TYPES.map((type) => {
+                  const Icon = ITEM_TYPE_ICONS[type];
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      className={`${styles.filterChip} ${typeFilter.includes(type) ? styles.filterChipActive : ''}`}
+                      onClick={() => toggleTypeFilter(type)}
+                    >
+                      <Icon size={14} />
+                      <span>{ITEM_TYPE_LABELS[type]}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            <div className={styles.filterSection}>
-              <label className={styles.filterLabel}>时间范围</label>
-              <div className={styles.filterChips}>
-                <button className={styles.filterChip}>
-                  <Calendar size={14} />
-                  <span>今天</span>
-                </button>
-                <button className={styles.filterChip}>
-                  <Calendar size={14} />
-                  <span>本周</span>
-                </button>
-                <button className={styles.filterChip}>
-                  <Calendar size={14} />
-                  <span>本月</span>
+            {typeFilter.length > 0 && (
+              <div className={styles.filterActions}>
+                <button type="button" className={styles.clearFiltersBtn} onClick={() => setTypeFilter([])}>
+                  清除筛选
                 </button>
               </div>
-            </div>
-
-            <div className={styles.filterActions}>
-              <button
-                className={styles.clearFiltersBtn}
-                onClick={() =>
-                  setFilters({ types: [], tags: [], folders: [], favoritesOnly: false })
-                }
-              >
-                清除筛选
-              </button>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Results */}
         <div className={styles.searchResults} ref={resultsRef}>
-          {isLoading ? (
-            <div className={styles.searchLoading}>
-              <div className={styles.loadingSpinner} />
-              <span>搜索中...</span>
-            </div>
-          ) : query === '' ? (
-            // Show search history when no query
-            <div className={styles.searchEmpty}>
-              {searchHistory.length > 0 ? (
-                <>
-                  <div className={styles.sectionTitle}>
-                    <Clock size={14} />
-                    <span>最近搜索</span>
-                  </div>
-                  <div className={styles.historyList}>
-                    {searchHistory.map((term, index) => (
-                      <button
-                        key={index}
-                        className={styles.historyItem}
-                        onClick={() => setQuery(term)}
-                      >
-                        <Clock size={14} />
-                        <span>{term}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className={styles.emptyState}>
-                  <Search size={32} />
-                  <p>输入关键词开始搜索</p>
-                  <span className={styles.hintText}>支持全文搜索、标签、文件夹等</span>
-                </div>
-              )}
-            </div>
-          ) : results.length === 0 ? (
-            <div className={styles.searchEmpty}>
-              <div className={styles.emptyState}>
-                <Search size={32} />
-                <p>未找到匹配结果</p>
-                <span className={styles.hintText}>尝试使用其他关键词</span>
-              </div>
-            </div>
-          ) : (
-            <div className={styles.resultsList}>
-              <div className={styles.resultsHeader}>
-                <span>找到 {results.length} 个结果</span>
-              </div>
-              {results.map((result, index) => (
-                <div
-                  key={result.id}
-                  className={`${styles.resultItem} ${index === selectedIndex ? styles.resultItemSelected : ''}`}
-                  onClick={() => {
-                    if (onResultSelect) {
-                      onResultSelect(result);
-                      onClose();
-                    }
-                  }}
-                  onMouseEnter={() => setSelectedIndex(index)}
-                >
-                  <div className={styles.resultIcon}>{TYPE_ICONS[result.type]}</div>
-                  <div className={styles.resultContent}>
-                    <div className={styles.resultTitle}>{result.title}</div>
-                    <div
-                      className={styles.resultHighlight}
-                      dangerouslySetInnerHTML={{
-                        __html: result.highlights[0] || result.content,
-                      }}
-                    />
-                    <div className={styles.resultMeta}>
-                      {result.folder && (
-                        <span className={styles.metaItem}>
-                          <Folder size={12} />
-                          {result.folder}
-                        </span>
-                      )}
-                      {result.tags.length > 0 && (
-                        <span className={styles.metaItem}>
-                          <Tag size={12} />
-                          {result.tags.slice(0, 2).join(', ')}
-                        </span>
-                      )}
-                      <span className={`${styles.metaItem} ${styles.metaItemDate}`}>
-                        {new Date(result.createdAt).toLocaleDateString('zh-CN')}
-                      </span>
-                    </div>
-                  </div>
-                  <div className={styles.resultScore}>
-                    <span>{Math.round(result.score * 100)}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {renderResults()}
         </div>
 
-        {/* Footer */}
         <div className={styles.searchFooter}>
           <span className={styles.footerHint}>
             提示: 使用 <kbd>Cmd+P</kbd> 快速打开搜索
