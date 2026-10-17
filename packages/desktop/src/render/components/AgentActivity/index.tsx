@@ -1,5 +1,5 @@
 // ================================
-// AI 任务浮窗：右下角显示 Agent 正在处理的条目（或整个知识库）与各任务进度，以及自动归类的改动记录
+// AI 任务浮窗：右下角显示 Agent 正在处理的条目（或整个知识库）与各任务进度，以及自动归类生成的待审阅建议记录
 // 没有活动且没有记录时不渲染；条目较多时使用虚拟列表
 // ================================
 
@@ -17,6 +17,8 @@ export interface AgentActivityPanelProps {
   /** 条目 ID → 标题（条目不在当前数据中时返回 undefined） */
   resolveTitle: (itemId: string) => string | undefined;
   onOpenItem: (itemId: string) => void;
+  /** 打开知识库的「待审阅归类」面板 */
+  onReviewCategorization: () => void;
 }
 
 /** 与样式中 .itemButton / .row 的尺寸一致 */
@@ -90,7 +92,7 @@ function ActivityRow({
   );
 }
 
-const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, onOpenItem }) => {
+const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, onOpenItem, onReviewCategorization }) => {
   const activities = useAgentActivity();
   const records = useChangeRecords();
   const [expanded, setExpanded] = useState(false);
@@ -155,7 +157,12 @@ const AgentActivityPanel: React.FC<AgentActivityPanelProps> = ({ resolveTitle, o
         </button>
       </header>
       {records.length > 0 && (
-        <ChangeRecordList records={records} resolveTitle={resolveTitle} onOpenItem={onOpenItem} />
+        <ChangeRecordList
+          records={records}
+          resolveTitle={resolveTitle}
+          onOpenItem={onOpenItem}
+          onReview={onReviewCategorization}
+        />
       )}
       {activities.length > 0 && (
         <List

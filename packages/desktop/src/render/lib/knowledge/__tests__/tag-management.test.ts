@@ -45,7 +45,7 @@ describe('knowledgeRepository 标签管理', () => {
   });
 
   describe('mergeTags', () => {
-    it('在一个事务中把源标签的条目关联转到目标标签，删除源标签并重算使用次数', async () => {
+    it('在一个事务中把源标签的条目关联转到目标标签，记录别名，删除源标签并重算使用次数', async () => {
       await knowledgeRepository.mergeTags(['a', 'b'], 'target');
 
       expect(db.run).not.toHaveBeenCalled();
@@ -54,6 +54,10 @@ describe('knowledgeRepository 标签管理', () => {
         [
           'INSERT OR IGNORE INTO item_tags (item_id, tag_id) SELECT item_id, ? FROM item_tags WHERE tag_id IN (?,?)',
           ['target', 'a', 'b'],
+        ],
+        [
+          "UPDATE tags SET aliases = ( SELECT json_group_array(alias) FROM ( SELECT j.value AS alias FROM tags t, json_each(CASE WHEN json_valid(t.aliases) THEN t.aliases ELSE '[]' END) j WHERE t.id IN (?,?,?) AND j.type = 'text' UNION SELECT name FROM tags WHERE id IN (?,?) ) WHERE alias != (SELECT name FROM tags WHERE id = ?) ) WHERE id = ?",
+          ['target', 'a', 'b', 'a', 'b', 'target', 'target'],
         ],
         ['DELETE FROM item_tags WHERE tag_id IN (?,?)', ['a', 'b']],
         ['DELETE FROM tags WHERE id IN (?,?)', ['a', 'b']],
@@ -68,7 +72,7 @@ describe('knowledgeRepository 标签管理', () => {
       await knowledgeRepository.mergeTags(['a', 'target', 'a'], 'target');
       const [statements] = transactionCalls();
       expect(statements[0][1]).toEqual(['target', 'a']);
-      expect(statements[2]).toEqual(['DELETE FROM tags WHERE id IN (?)', ['a']]);
+      expect(statements[3]).toEqual(['DELETE FROM tags WHERE id IN (?)', ['a']]);
     });
 
     it('没有需要合并的源标签时不访问数据库', async () => {

@@ -40,6 +40,7 @@ import InputDialog, { ConfirmDialog } from './components/InputDialog';
 import KnowledgeWorkspace from './components/KnowledgeWorkspace';
 import { EMPTY_FILTERS, type ItemFilters } from './components/KnowledgeWorkspace/filtering';
 import AgentActivityPanel from './components/AgentActivity';
+import { categorizationReview } from './lib/categorization/reviewStore';
 import BacklinksPanel from './components/BacklinksPanel';
 import {
   CalendarPanel,
@@ -713,6 +714,12 @@ const App: React.FC = () => {
   const openInKnowledge = useCallback((itemId: string) => {
     dispatch({ type: 'SET_MODE', payload: 'knowledge' });
     setSelectedKnowledgeItemId(itemId);
+  }, []);
+
+  /** 切换到知识库并打开「待审阅归类」面板 */
+  const reviewCategorization = useCallback(() => {
+    dispatch({ type: 'SET_MODE', payload: 'knowledge' });
+    categorizationReview.open();
   }, []);
 
   /** 在阅读模式中打开条目（PDF / EPUB / 网页剪藏等） */
@@ -1624,7 +1631,11 @@ const App: React.FC = () => {
       />
 
       {/* AI 后台任务进度（任意模式可见） */}
-      <AgentActivityPanel resolveTitle={resolveItemTitle} onOpenItem={openInKnowledge} />
+      <AgentActivityPanel
+        resolveTitle={resolveItemTitle}
+        onOpenItem={openInKnowledge}
+        onReviewCategorization={reviewCategorization}
+      />
 
       {/* 知识库文件夹重命名 / 删除 */}
       <InputDialog

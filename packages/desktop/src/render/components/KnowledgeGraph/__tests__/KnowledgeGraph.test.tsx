@@ -183,7 +183,7 @@ describe('KnowledgeGraph', () => {
     expect(onOpenItem).toHaveBeenCalledWith('c');
   });
 
-  it('实体图层：加载实体图谱，可只看共享实体，点击实体列出相关条目', async () => {
+  it('实体图谱：显示实体与关系，可叠加来源条目、只看共享实体，点击实体列出关系与相关条目', async () => {
     const getGraph = vi.fn().mockResolvedValue({
       entities: [
         { id: 'e1', name: 'OpenAI', type: 'organization', itemCount: 2 },
@@ -198,6 +198,23 @@ describe('KnowledgeGraph', () => {
         { id: 'a', title: 'A', type: 'note' },
         { id: 'b', title: 'B.md', type: 'note' },
       ],
+      relations: [
+        {
+          id: 'r1',
+          sourceEntityId: 'e2',
+          sourceName: '张三',
+          sourceType: 'person',
+          targetEntityId: 'e1',
+          targetName: 'OpenAI',
+          targetType: 'organization',
+          type: 'member-of',
+          label: '任职于',
+          evidence: '张三在 OpenAI 工作',
+          confidence: 0.8,
+          itemId: 'b',
+          itemTitle: 'B.md',
+        },
+      ],
     });
     vi.stubGlobal('electron', { entities: { getGraph } });
     const onOpenItem = vi.fn();
@@ -205,15 +222,22 @@ describe('KnowledgeGraph', () => {
       <KnowledgeGraph index={index} related={related} mode="global" onOpenItem={onOpenItem} />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '实体' }));
-    await screen.findByText('4 个节点 · 3 条连线');
+    fireEvent.click(screen.getByRole('button', { name: '实体图谱' }));
+    // 默认只显示实体及实体关系
+    await screen.findByText('2 个节点 · 1 条连线');
     expect(getGraph).toHaveBeenCalledTimes(1);
     expect(screen.queryByLabelText('显示 AI 关联')).toBeNull();
+    expect(screen.getByText('实体关系')).toBeTruthy();
+    expect(screen.queryByText('条目提及')).toBeNull();
+
+    fireEvent.click(screen.getByLabelText('显示来源条目'));
+    expect(counts()).toBe('4 个节点 · 4 条连线');
+    expect(screen.getByText('条目提及')).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText('只显示关联多个条目的实体'));
     expect(counts()).toBe('3 个节点 · 2 条连线');
 
-    // 定位到实体节点并点击：侧栏按提及次数列出相关条目
+    // 定位到实体节点并点击：侧栏列出关系（含证据与来源）与按提及次数排序的相关条目
     const input = screen.getByPlaceholderText('搜索节点，Enter 定位');
     fireEvent.change(input, { target: { value: 'openai' } });
     fireEvent.keyDown(input, { key: 'Enter' });
@@ -228,15 +252,24 @@ describe('KnowledgeGraph', () => {
 
     const panel = screen.getByLabelText('实体「OpenAI」');
     expect(panel.textContent).toContain('组织');
+    expect(panel.textContent).toContain('1 条关系');
+    expect(panel.textContent).toContain('任职于');
+    expect(panel.textContent).toContain('张三在 OpenAI 工作');
     expect(panel.textContent).toContain('出现在 2 个条目中');
-    const entries = panel.querySelectorAll('li button');
-    expect(Array.from(entries, (entry) => entry.textContent)).toEqual(['B4 次', 'A1 次']);
+    const entries = screen.getAllByRole('button', { name: /\d 次$/ });
+    expect(entries.map((entry) => entry.textContent)).toEqual(['B4 次', 'A1 次']);
     fireEvent.click(entries[0]);
     expect(onOpenItem).toHaveBeenCalledWith('b');
+
+    // 来源条目跳转；点击关系另一端的实体切换侧栏
+    fireEvent.click(screen.getByTitle('打开「B」'));
+    expect(onOpenItem).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '张三' }));
+    expect(screen.getByLabelText('实体「张三」')).toBeTruthy();
   });
 
   it('紧凑模式没有实体图层', () => {
     render(<KnowledgeGraph index={index} related={related} mode="global" compact onOpenItem={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: '实体' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '实体图谱' })).toBeNull();
   });
 });

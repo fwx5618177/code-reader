@@ -329,7 +329,8 @@ class KnowledgeRepository {
   }
 
   /**
-   * 合并标签：源标签关联的条目改为关联目标标签，随后删除源标签并重算目标标签使用次数
+   * 合并标签：源标签关联的条目改为关联目标标签，源标签名称及其别名记入目标标签的 aliases
+   * （自动归类把别名视为该标签，避免再次建议已合并的旧名称），随后删除源标签并重算目标标签使用次数
    * 源标签物理删除：tags.name 有唯一约束，软删除会占用名称，导致之后无法再创建同名标签
    * 全部步骤在同一个事务中执行，中途失败不会丢失关联
    */
@@ -342,6 +343,19 @@ class KnowledgeRepository {
         sql: `INSERT OR IGNORE INTO item_tags (item_id, tag_id)
               SELECT item_id, ? FROM item_tags WHERE tag_id IN (${placeholders})`,
         params: [targetId, ...sources],
+      },
+      {
+        // 别名为 JSON 字符串数组；非法内容视为空，合并后去重且不含目标自身名称
+        sql: `UPDATE tags SET aliases = (
+                SELECT json_group_array(alias) FROM (
+                  SELECT j.value AS alias
+                  FROM tags t, json_each(CASE WHEN json_valid(t.aliases) THEN t.aliases ELSE '[]' END) j
+                  WHERE t.id IN (?,${placeholders}) AND j.type = 'text'
+                  UNION
+                  SELECT name FROM tags WHERE id IN (${placeholders})
+                ) WHERE alias != (SELECT name FROM tags WHERE id = ?)
+              ) WHERE id = ?`,
+        params: [targetId, ...sources, ...sources, targetId, targetId],
       },
       { sql: `DELETE FROM item_tags WHERE tag_id IN (${placeholders})`, params: sources },
       { sql: `DELETE FROM tags WHERE id IN (${placeholders})`, params: sources },

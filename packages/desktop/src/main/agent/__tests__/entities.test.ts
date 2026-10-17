@@ -4,11 +4,19 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  ENTITY_SYSTEM_PROMPT,
   cleanEntityName,
   mergeEntityChunks,
+  mergeRelations,
   normalizeEntityName,
   parseEntityResponse,
+  parseRelationResponse,
+  relationKey,
+  type ExtractedEntity,
+  type ExtractedRelation,
 } from '../entities';
+import { parseConfidence } from '../json-output';
+import { RELATION_TYPES } from '../relation-types';
 import { chunkText } from '../text-chunks';
 
 describe('实体名规范化', () => {
@@ -68,6 +76,123 @@ describe('mergeEntityChunks', () => {
       { name: 'X', type: 'other', mentions: 1 },
     ]);
     expect(mergeEntityChunks([])).toEqual([]);
+  });
+});
+
+describe('parseConfidence', () => {
+  it('数字或数字字符串截取到 [0, 1]，其余返回 null', () => {
+    expect(parseConfidence(0.7)).toBe(0.7);
+    expect(parseConfidence('0.9')).toBe(0.9);
+    expect(parseConfidence(3)).toBe(1);
+    expect(parseConfidence(-1)).toBe(0);
+    expect(parseConfidence('高')).toBeNull();
+    expect(parseConfidence('')).toBeNull();
+    expect(parseConfidence(undefined)).toBeNull();
+    expect(parseConfidence(Number.NaN)).toBeNull();
+  });
+});
+
+describe('parseRelationResponse', () => {
+  const entities: ExtractedEntity[] = [
+    { name: 'OpenAI', type: 'organization', mentions: 2 },
+    { name: '张三', type: 'person', mentions: 1 },
+    { name: 'GPT-4', type: 'work', mentions: 1 },
+  ];
+  const chunk = '张三在  OpenAI 工作。\nOpenAI 发布了 GPT-4。';
+
+  it('提示词要求输出 relations 并列出全部关系类型', () => {
+    expect(ENTITY_SYSTEM_PROMPT).toContain('"relations"');
+    for (const type of RELATION_TYPES) expect(ENTITY_SYSTEM_PROMPT).toContain(type);
+  });
+
+  it('端点必须在本次实体集合内（按规范化名称），丢弃自环与无效条目', () => {
+    const relations = parseRelationResponse(
+      {
+        relations: [
+          { source: '《张三》', target: 'openai', type: 'member-of', label: '任职于', evidence: '张三在 OpenAI 工作。', confidence: 0.9 },
+          { source: 'OpenAI', target: '微软', type: 'related-to' },
+          { source: 'OpenAI', target: 'OPENAI', type: 'uses' },
+          { source: 'OpenAI' },
+          'garbage',
+        ],
+      },
+      entities,
+      chunk
+    );
+    expect(relations).toEqual([
+      {
+        source: '张三',
+        target: 'OpenAI',
+        type: 'member-of',
+        label: '任职于',
+        // 证据按规范化后的空白匹配正文
+        evidence: '张三在 OpenAI 工作。',
+        confidence: 0.9,
+      },
+    ]);
+  });
+
+  it('未知类型归为 related-to 并按名称排序端点；编造的证据与过长标签丢弃，置信度默认 0.5', () => {
+    const [relation] = parseRelationResponse(
+      {
+        relations: [
+          { source: 'OpenAI', target: 'GPT-4', type: 'Founded', label: '很长'.repeat(20), evidence: 'OpenAI 收购了 GPT-4' },
+        ],
+      },
+      entities,
+      chunk
+    );
+    expect(relation).toEqual({
+      source: 'GPT-4',
+      target: 'OpenAI',
+      type: 'related-to',
+      label: null,
+      evidence: null,
+      confidence: 0.5,
+    });
+  });
+
+  it('过长的证据截断', () => {
+    const sentence = `OpenAI 发布了 GPT-4${'，并做了很多事'.repeat(40)}`;
+    const [relation] = parseRelationResponse(
+      { relations: [{ source: 'OpenAI', target: 'GPT-4', type: 'created', evidence: sentence }] },
+      entities,
+      sentence
+    );
+    expect(relation.evidence).toHaveLength(200);
+    expect(relation.evidence!.endsWith('…')).toBe(true);
+  });
+
+  it('缺少 relations 视为没有关系，不是数组时抛错', () => {
+    expect(parseRelationResponse({ entities: [] }, entities, chunk)).toEqual([]);
+    expect(() => parseRelationResponse({ relations: {} }, entities, chunk)).toThrow('relations');
+  });
+});
+
+describe('mergeRelations', () => {
+  const relation = (overrides: Partial<ExtractedRelation>): ExtractedRelation => ({
+    source: 'OpenAI',
+    target: 'GPT-4',
+    type: 'created',
+    label: null,
+    evidence: null,
+    confidence: 0.5,
+    ...overrides,
+  });
+
+  it('按 (source, target, type) 去重（名称大小写不敏感），保留置信度最高者并保持首次出现顺序', () => {
+    const merged = mergeRelations([
+      [relation({ confidence: 0.6, label: '发布' }), relation({ type: 'uses' })],
+      [relation({ source: 'openai', confidence: 0.9, evidence: 'OpenAI 发布了 GPT-4' })],
+      [relation({ confidence: 0.9, label: '同分不替换' }), relation({ source: 'GPT-4', target: 'OpenAI' })],
+    ]);
+    expect(merged).toEqual([
+      relation({ source: 'openai', confidence: 0.9, evidence: 'OpenAI 发布了 GPT-4' }),
+      relation({ type: 'uses' }),
+      // 有方向的关系：反向是另一条关系
+      relation({ source: 'GPT-4', target: 'OpenAI' }),
+    ]);
+    expect(relationKey(relation({ source: '《OpenAI》' }))).toBe(relationKey(relation({})));
   });
 });
 

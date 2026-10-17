@@ -45,7 +45,7 @@ export interface ItemActivity {
   updatedAt: number;
 }
 
-/** 自动归类等结构性变更的记录，保留到用户关闭 */
+/** 自动归类生成建议的记录，保留到用户关闭 */
 export interface ChangeRecord extends ChangeDescription {
   taskId: string;
   /** 为 null 表示整库任务 */
@@ -61,7 +61,7 @@ class AgentActivityStore {
   private snapshot: ItemActivity[] = [];
   private records: ChangeRecord[] = [];
   private readonly listeners = new Set<() => void>();
-  private readonly itemListeners = new Set<(itemId: string | null) => void>();
+  private readonly itemListeners = new Set<(itemId: string) => void>();
   private readonly completedListeners = new Set<(event: TaskCompletedEvent) => void>();
   private attached = false;
 
@@ -100,8 +100,8 @@ class AgentActivityStore {
         ];
         this.publish();
       }
-      // 归类会新建文件夹、合并标签，影响条目之外的数据，按整库变化通知
-      this.notifyItem(event.type === 'categorize' ? null : event.targetItemId);
+      // 库级任务（整库归类）只生成待审阅建议，不修改条目；接受建议时由审阅面板刷新知识库
+      if (event.targetItemId !== null) this.notifyItem(event.targetItemId);
       for (const listener of this.completedListeners) listener(event);
     });
 
@@ -138,10 +138,9 @@ class AgentActivityStore {
   getRecords = (): ChangeRecord[] => this.records;
 
   /**
-   * 知识库数据被 Agent 更新时回调：itemId 为条目 ID 时只影响该条目（摘要、标签、状态），
-   * 为 null 时影响多个条目或文件夹 / 标签（自动归类），需要整体刷新
+   * 知识库条目被 Agent 更新时回调（摘要、标签、状态）
    */
-  onItemChanged(listener: (itemId: string | null) => void): () => void {
+  onItemChanged(listener: (itemId: string) => void): () => void {
     this.itemListeners.add(listener);
     return () => this.itemListeners.delete(listener);
   }
@@ -231,7 +230,7 @@ class AgentActivityStore {
     for (const listener of this.listeners) listener();
   }
 
-  private notifyItem(itemId: string | null): void {
+  private notifyItem(itemId: string): void {
     for (const listener of this.itemListeners) listener(itemId);
   }
 }

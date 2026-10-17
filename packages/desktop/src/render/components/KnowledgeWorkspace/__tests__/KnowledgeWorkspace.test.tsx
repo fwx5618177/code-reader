@@ -14,6 +14,7 @@ import { EMPTY_FILTERS } from '../filtering';
 
 vi.mock('../../../lib/agent/agentStore', () => ({
   useAgentActivity: () => [],
+  agentActivity: { onTaskCompleted: () => () => undefined },
   TASK_LABELS: {},
 }));
 vi.mock('../../../lib/knowledge/service', () => ({ requestProcessing: vi.fn() }));
@@ -138,7 +139,10 @@ describe('KnowledgeWorkspace', () => {
     );
     Object.defineProperty(window, 'electron', {
       configurable: true,
-      value: { search: { findSimilar: vi.fn(() => Promise.resolve([])) } },
+      value: {
+        search: { findSimilar: vi.fn(() => Promise.resolve([])) },
+        entities: { getItemRelations: vi.fn(() => Promise.resolve([])) },
+      },
     });
   });
 

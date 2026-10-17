@@ -1,5 +1,5 @@
 // ================================
-// 数据库结构测试（纯 SQL 文本部分）：v5 / v6 迁移与全新建库共用同一份建表定义
+// 数据库结构测试（纯 SQL 文本部分）：v5 / v6 / v7 迁移与全新建库共用同一份建表定义
 // better-sqlite3 是为 Electron 编译的原生模块，测试中以 mock 替代，只检查生成的 SQL
 // ================================
 
@@ -11,6 +11,7 @@ vi.mock('better-sqlite3', () => ({ default: class {} }));
 import { CREATE_TABLES_SQL, MIGRATIONS, SCHEMA_VERSION } from '../sqlite';
 import { TASK_TYPES } from '../../agent/task-types';
 import { ENTITY_TYPES } from '../../agent/entity-types';
+import { RELATION_TYPES } from '../../agent/relation-types';
 
 /** 执行迁移并收集其执行的 SQL */
 function migrationSql(version: number): string {
@@ -25,7 +26,7 @@ const compact = (sql: string) => sql.replace(/\s+/g, ' ');
 
 describe('schema', () => {
   it('版本号与最后一个迁移一致', () => {
-    expect(SCHEMA_VERSION).toBe(6);
+    expect(SCHEMA_VERSION).toBe(7);
     expect(MIGRATIONS[MIGRATIONS.length - 1].version).toBe(SCHEMA_VERSION);
   });
 
@@ -87,5 +88,20 @@ describe('schema', () => {
       'SELECT item_id, 0, model, dimensions, vector, created_at FROM embeddings WHERE item_id IN (SELECT id FROM knowledge_items)'
     );
     expect(sql.indexOf('DROP TABLE embeddings')).toBeGreaterThan(sql.indexOf('INSERT OR IGNORE INTO item_embedding_chunks'));
+  });
+
+  it('v7 迁移：实体关系表与归类提议表的每条建表 / 索引语句都与全新建库相同', () => {
+    const sql = compact(migrationSql(7));
+    const fresh = compact(CREATE_TABLES_SQL);
+    const statements = sql.split(';').map((statement) => statement.trim()).filter(Boolean);
+    expect(statements).toHaveLength(10);
+    for (const statement of statements) expect(fresh).toContain(`${statement};`);
+    for (const type of RELATION_TYPES) expect(sql).toContain(`'${type}'`);
+    expect(sql).toContain('UNIQUE (item_id, source_entity_id, target_entity_id, relation_type)');
+    expect(sql).toContain('FOREIGN KEY (source_entity_id) REFERENCES entities(id) ON DELETE CASCADE');
+    expect(sql).toContain('FOREIGN KEY (target_entity_id) REFERENCES entities(id) ON DELETE CASCADE');
+    expect(sql).toContain("CHECK (status IN ('pending', 'accepted', 'rejected'))");
+    expect(sql).toContain("ON categorization_proposals(item_id) WHERE status = 'pending' AND kind = 'item'");
+    expect(sql).toContain("ON categorization_proposals(source_tag_id) WHERE status = 'pending' AND kind = 'tag-merge'");
   });
 });

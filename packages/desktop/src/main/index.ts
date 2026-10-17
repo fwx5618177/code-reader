@@ -10,6 +10,10 @@ import { registerWorkspaceHandlers, cleanupWorkspaceHandlers } from './workspace
 import { registerDatabaseHandlers, cleanupDatabaseHandlers } from './database/ipc-handlers';
 import { registerSearchHandlers, cleanupSearchHandlers } from './database/search-ipc-handlers';
 import { registerEntityHandlers, cleanupEntityHandlers } from './database/entity-ipc-handlers';
+import {
+  registerCategorizationHandlers,
+  cleanupCategorizationHandlers,
+} from './database/categorization-ipc-handlers';
 import { registerVersionHistoryHandlers } from './database/version-ipc-handlers';
 import { registerWebHandlers } from './web/ipc-handlers';
 import { registerSpellcheckHandlers } from './spellcheck/ipc-handlers';
@@ -475,6 +479,9 @@ function setupIPC() {
   // 实体图谱查询
   registerEntityHandlers();
 
+  // 自动归类待审阅提议
+  registerCategorizationHandlers();
+
   // Version history and Git handlers
   registerVersionHistoryHandlers();
 
@@ -529,6 +536,7 @@ async function cleanup() {
     // Cleanup handlers
     cleanupSearchHandlers();
     cleanupEntityHandlers();
+    cleanupCategorizationHandlers();
     cleanupAIHandlers();
     cleanupDatabaseHandlers();
     cleanupWorkspaceHandlers();

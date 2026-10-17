@@ -1,9 +1,9 @@
 // ================================
-// AI 整理记录：自动归类实际做出的改动（新建文件夹、移动条目、添加 / 合并标签），保留到用户关闭
+// AI 整理记录：自动归类生成的待审阅建议摘要，保留到用户关闭；有建议时提供「去审阅」入口
 // ================================
 
 import React from 'react';
-import { FolderTree, X } from 'lucide-react';
+import { ClipboardCheck, FolderTree, X } from 'lucide-react';
 import { agentActivity, type ChangeRecord } from '../../lib/agent/agentStore';
 import { displayTitle } from '../../lib/links/link-index';
 import styles from './AgentActivity.module.scss';
@@ -12,9 +12,11 @@ export interface ChangeRecordListProps {
   records: ChangeRecord[];
   resolveTitle: (itemId: string) => string | undefined;
   onOpenItem: (itemId: string) => void;
+  /** 打开知识库中的「待审阅归类」面板 */
+  onReview: () => void;
 }
 
-export const ChangeRecordList: React.FC<ChangeRecordListProps> = ({ records, resolveTitle, onOpenItem }) => (
+export const ChangeRecordList: React.FC<ChangeRecordListProps> = ({ records, resolveTitle, onOpenItem, onReview }) => (
   <ul className={styles.records} aria-label="AI 整理记录">
     {records.map((record) => {
       const itemTitle = record.itemId
@@ -46,12 +48,11 @@ export const ChangeRecordList: React.FC<ChangeRecordListProps> = ({ records, res
             </button>
           </div>
           <p className={styles.recordSummary}>{record.summary}</p>
-          {record.details.length > 0 && (
-            <ul className={styles.recordDetails}>
-              {record.details.map((line, index) => (
-                <li key={index}>{line}</li>
-              ))}
-            </ul>
+          {record.pendingReview > 0 && (
+            <button type="button" className={styles.reviewLink} onClick={onReview}>
+              <ClipboardCheck size={12} />
+              去审阅
+            </button>
           )}
         </li>
       );

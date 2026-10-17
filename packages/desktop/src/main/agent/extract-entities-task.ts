@@ -1,7 +1,7 @@
 // ================================
 // 实体抽取任务（extract-entities）
-// 计算阶段：长文按段落切分 → 逐段请求模型 → 校验并合并各段结果
-// 写回阶段：在任务完成的同一事务中替换条目的实体关联，并清理不再被引用的实体
+// 计算阶段：长文按段落切分 → 逐段请求模型 → 校验并合并各段的实体与关系
+// 写回阶段：在任务完成的同一事务中替换条目的实体关联与以该条目为来源的关系，并清理不再被引用的实体
 // ================================
 
 import { getSQLiteService } from '../database/sqlite';
@@ -14,10 +14,13 @@ import {
   ENTITY_CHUNK_CHARS,
   ENTITY_SYSTEM_PROMPT,
   mergeEntityChunks,
+  mergeRelations,
   normalizeEntityName,
   parseEntityResponse,
+  parseRelationResponse,
   type ExtractEntitiesResult,
   type ExtractedEntity,
+  type ExtractedRelation,
 } from './entities';
 
 export async function runExtractEntities(itemId: string, report: ReportProgress): Promise<TaskOutput> {
@@ -38,7 +41,8 @@ export async function runExtractEntities(itemId: string, report: ReportProgress)
   if (!text) throw new Error('No content for entity extraction');
 
   const chunks = chunkText(text, ENTITY_CHUNK_CHARS);
-  const results: ExtractedEntity[][] = [];
+  const entityChunks: ExtractedEntity[][] = [];
+  const relationChunks: ExtractedRelation[][] = [];
   for (const [index, chunk] of chunks.entries()) {
     report(5 + Math.round((index / chunks.length) * 80), `抽取实体（${index + 1}/${chunks.length}）...`);
     const response = await getAIService().chatCompletion({
@@ -48,24 +52,34 @@ export async function runExtractEntities(itemId: string, report: ReportProgress)
       ],
       temperature: 0.2,
     });
-    results.push(parseEntityResponse(parseJsonObject(response.content)));
+    const json = parseJsonObject(response.content);
+    const chunkEntities = parseEntityResponse(json);
+    entityChunks.push(chunkEntities);
+    // 关系只在同一片段的实体之间成立，证据需出现在该片段中
+    relationChunks.push(parseRelationResponse(json, chunkEntities, chunk));
   }
 
-  const entities = mergeEntityChunks(results);
-  const result: ExtractEntitiesResult = { chunkCount: chunks.length, entities };
-  return { result, commit: () => replaceItemEntities(itemId, entities) };
+  const entities = mergeEntityChunks(entityChunks);
+  const relations = mergeRelations(relationChunks);
+  const result: ExtractEntitiesResult = { chunkCount: chunks.length, entities, relations };
+  return { result, commit: () => replaceItemEntities(itemId, entities, relations) };
 }
 
-/** 替换条目的实体关联：实体按规范化名称复用，原类型为 other 时更新为更具体的类型 */
-function replaceItemEntities(itemId: string, entities: ExtractedEntity[]): void {
+/**
+ * 替换条目的实体关联与以该条目为来源的关系：实体按规范化名称复用，原类型为 other 时更新为更具体的类型；
+ * 关系端点均来自本次实体集合，已由 mergeRelations 去重
+ */
+function replaceItemEntities(itemId: string, entities: ExtractedEntity[], relations: ExtractedRelation[]): void {
   const sqlite = getSQLiteService();
   const now = new Date().toISOString();
 
   const previousIds = sqlite
     .all<{ entity_id: string }>(`SELECT entity_id FROM item_entities WHERE item_id = ?`, [itemId])
     .map((row) => row.entity_id);
+  sqlite.run(`DELETE FROM entity_relations WHERE item_id = ?`, [itemId]);
   sqlite.run(`DELETE FROM item_entities WHERE item_id = ?`, [itemId]);
 
+  const entityIdByKey = new Map<string, string>();
   for (const entity of entities) {
     const normalized = normalizeEntityName(entity.name);
     sqlite.run(
@@ -77,9 +91,29 @@ function replaceItemEntities(itemId: string, entities: ExtractedEntity[]): void 
       [generateId(), entity.name, entity.type, normalized, now, now]
     );
     const row = sqlite.get<{ id: string }>(`SELECT id FROM entities WHERE normalized_name = ?`, [normalized])!;
+    entityIdByKey.set(normalized, row.id);
     sqlite.run(
       `INSERT INTO item_entities (item_id, entity_id, mention_count, created_at) VALUES (?, ?, ?, ?)`,
       [itemId, row.id, entity.mentions, now]
+    );
+  }
+
+  for (const relation of relations) {
+    sqlite.run(
+      `INSERT INTO entity_relations
+         (id, source_entity_id, target_entity_id, relation_type, label, item_id, evidence, confidence, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        generateId(),
+        entityIdByKey.get(normalizeEntityName(relation.source))!,
+        entityIdByKey.get(normalizeEntityName(relation.target))!,
+        relation.type,
+        relation.label,
+        itemId,
+        relation.evidence,
+        relation.confidence,
+        now,
+      ]
     );
   }
 

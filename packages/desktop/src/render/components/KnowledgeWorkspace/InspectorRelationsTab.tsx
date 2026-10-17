@@ -1,5 +1,5 @@
 // ================================
-// 详情面板「关联」：反向链接、出链、AI 相似条目、局部图谱
+// 详情面板「关联」：反向链接、出链、AI 相似条目、实体关系、局部图谱
 // ================================
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -11,7 +11,9 @@ import {
   type LinkIndex,
   type RelatedLink,
 } from '../../lib/links/link-index';
+import { useItemEntityRelations } from '../../lib/entities/useItemEntityRelations';
 import KnowledgeGraph from '../KnowledgeGraph';
+import { EntityRelationList } from '../EntityRelations/EntityRelationList';
 import { ITEM_TYPE_ICONS } from '../ReadingWorkspace/item-type';
 import styles from './Inspector.module.scss';
 
@@ -113,6 +115,7 @@ export const InspectorRelationsTab: React.FC<InspectorRelationsTabProps> = ({
   }, [linkIndex, item]);
 
   const similar = useSimilarItems(item, itemsById);
+  const entityRelations = useItemEntityRelations(item.id);
 
   return (
     <div className={styles.tabBody}>
@@ -209,6 +212,29 @@ export const InspectorRelationsTab: React.FC<InspectorRelationsTabProps> = ({
               ))}
             </ul>
           ))}
+      </section>
+
+      <section className={styles.section}>
+        <h4 className={styles.sectionTitle}>
+          实体关系
+          {entityRelations.data && <span className={styles.sectionCount}>{entityRelations.data.length}</span>}
+        </h4>
+        {entityRelations.error ? (
+          <p className={styles.hint} data-kind="error">
+            <AlertCircle size={13} />
+            加载失败：{entityRelations.error}
+          </p>
+        ) : !entityRelations.data ? (
+          <p className={styles.emptyText}>
+            <Loader2 size={12} className={styles.spin} /> 正在加载…
+          </p>
+        ) : entityRelations.data.length === 0 ? (
+          <p className={styles.emptyText}>
+            还没有实体关系。在「AI 解读」中提取实体时会一并抽取实体之间的关系。
+          </p>
+        ) : (
+          <EntityRelationList relations={entityRelations.data} currentItemId={item.id} onOpenItem={onSelectItem} />
+        )}
       </section>
 
       <section className={styles.section}>

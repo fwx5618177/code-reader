@@ -8,6 +8,7 @@ import { dirname } from 'path';
 import { mkdirSync } from 'fs';
 import { TASK_TYPES } from '../agent/task-types';
 import { ENTITY_TYPES } from '../agent/entity-types';
+import { RELATION_TYPES } from '../agent/relation-types';
 
 // ================================
 // Types
@@ -31,7 +32,7 @@ export interface RunResult {
 // Schema Definitions
 // ================================
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /** 字符串常量列表 → SQL 的 IN 列表（取值均为代码内常量，不含引号） */
 const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
@@ -145,6 +146,75 @@ CREATE TABLE IF NOT EXISTS item_embedding_chunks (
   PRIMARY KEY (item_id, chunk_index),
   FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
 );
+`;
+
+/**
+ * 实体关系：由实体抽取任务从条目正文中得出，item_id 为来源条目（重新抽取时整体替换该条目的关系）；
+ * 同一来源条目内 (source, target, type) 唯一。全新数据库与 v7 迁移共用
+ */
+const ENTITY_RELATIONS_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS entity_relations (
+  id TEXT PRIMARY KEY,
+  source_entity_id TEXT NOT NULL,
+  target_entity_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL CHECK (relation_type IN (${sqlList(RELATION_TYPES)})),
+  label TEXT,
+  item_id TEXT NOT NULL,
+  evidence TEXT,
+  confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (source_entity_id != target_entity_id),
+  UNIQUE (item_id, source_entity_id, target_entity_id, relation_type),
+  FOREIGN KEY (source_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_relations_source ON entity_relations(source_entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_relations_target ON entity_relations(target_entity_id);
+`;
+
+/**
+ * 自动归类提议：归类任务只写入待审阅的提议，用户逐条接受后才修改知识库。
+ * - kind = 'item'：条目移入 folder_id（已有文件夹）或新建名为 folder_name 的顶层文件夹（folder_id 为空时），
+ *   两者皆空表示不移动；tags 为要追加的标签名（JSON 数组）。folder_id 不设外键，接受时校验文件夹仍存在
+ * - kind = 'tag-merge'：把 source_tag_id 合并到 target_tag_id
+ * 每个条目 / 每个源标签最多一条待审阅提议。全新数据库与 v7 迁移共用
+ */
+const CATEGORIZATION_PROPOSALS_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS categorization_proposals (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('item', 'tag-merge')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+  item_id TEXT,
+  folder_id TEXT,
+  folder_name TEXT,
+  tags TEXT NOT NULL DEFAULT '[]',
+  source_tag_id TEXT,
+  target_tag_id TEXT,
+  reason TEXT,
+  confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_at TEXT,
+  CHECK (
+    (kind = 'item' AND item_id IS NOT NULL AND source_tag_id IS NULL AND target_tag_id IS NULL)
+    OR (kind = 'tag-merge' AND item_id IS NULL AND source_tag_id IS NOT NULL AND target_tag_id IS NOT NULL
+        AND source_tag_id != target_tag_id)
+  ),
+  CHECK ((status = 'pending') = (reviewed_at IS NULL)),
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE,
+  FOREIGN KEY (source_tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_status ON categorization_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_source_tag ON categorization_proposals(source_tag_id);
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_target_tag ON categorization_proposals(target_tag_id);
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_item ON categorization_proposals(item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_categorization_proposals_pending_item
+  ON categorization_proposals(item_id) WHERE status = 'pending' AND kind = 'item';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_categorization_proposals_pending_merge
+  ON categorization_proposals(source_tag_id) WHERE status = 'pending' AND kind = 'tag-merge';
 `;
 
 export const CREATE_TABLES_SQL = `
@@ -279,6 +349,10 @@ ${agentTasksTableSql('agent_tasks')}
 
 -- Entity graph tables
 ${ENTITY_TABLES_SQL}
+${ENTITY_RELATIONS_TABLE_SQL}
+
+-- Categorization proposals awaiting review
+${CATEGORIZATION_PROPOSALS_TABLE_SQL}
 
 -- App Settings table
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -498,6 +572,14 @@ export const MIGRATIONS: Migration[] = [
           WHERE item_id IN (SELECT id FROM knowledge_items);
         DROP TABLE embeddings;
       `);
+    },
+  },
+  {
+    version: 7,
+    description: '新增实体关系表 entity_relations 与自动归类待审阅提议表 categorization_proposals',
+    up: (db) => {
+      db.exec(ENTITY_RELATIONS_TABLE_SQL);
+      db.exec(CATEGORIZATION_PROPOSALS_TABLE_SQL);
     },
   },
 ];

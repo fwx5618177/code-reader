@@ -37,6 +37,8 @@ import { EmptyScope, LoadError, NoMatches, Onboarding, StreamSkeleton } from './
 import { Inspector } from './Inspector';
 import { AskPanel } from './AskPanel';
 import { TagManager } from './TagManager';
+import { CategorizationReview } from './CategorizationReview';
+import { categorizationReview, useCategorizationReview } from '../../lib/categorization/reviewStore';
 import { useAskConversation } from './useAskConversation';
 import styles from './KnowledgeWorkspace.module.scss';
 
@@ -95,6 +97,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   const conversation = useAskConversation();
   const activityByItem = useActivityByItem();
   const categorizing = useLibraryTaskRunning();
+  const review = useCategorizationReview();
 
   useEffect(() => savePrefs(prefs), [prefs]);
   const updatePrefs = useCallback(
@@ -244,6 +247,8 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
         onQuickCapture={onQuickCapture}
         onManageTags={() => setTagManagerOpen(true)}
         categorizing={categorizing}
+        pendingReviewCount={review.proposals.length}
+        onOpenReview={() => categorizationReview.open()}
         onOpenSettings={onOpenSettings}
       />
 
@@ -294,6 +299,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
       </div>
 
       {tagManagerOpen && <TagManager kb={kb} onClose={() => setTagManagerOpen(false)} />}
+      {review.open && <CategorizationReview kb={kb} onSelectItem={onSelectItem} />}
     </div>
   );
 };

@@ -75,6 +75,11 @@ const validChannels = [
 
   // 实体图谱
   'entities:getGraph',
+  'entities:getItemRelations',
+
+  // 自动归类待审阅提议
+  'categorization:listPending',
+  'categorization:review',
 
   // 语义搜索
   'search:semantic',
@@ -296,6 +301,13 @@ contextBridge.exposeInMainWorld('electron', {
   // 实体图谱便捷方法
   entities: {
     getGraph: () => ipcRenderer.invoke('entities:getGraph'),
+    getItemRelations: (itemId: string) => ipcRenderer.invoke('entities:getItemRelations', itemId),
+  },
+
+  // 自动归类待审阅提议便捷方法
+  categorization: {
+    listPending: () => ipcRenderer.invoke('categorization:listPending'),
+    review: (decisions: unknown) => ipcRenderer.invoke('categorization:review', decisions),
   },
 
   // 语义搜索便捷方法

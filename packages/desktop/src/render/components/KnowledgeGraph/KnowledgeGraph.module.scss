@@ -293,8 +293,14 @@
   flex-shrink: 0;
 }
 
+.solidLine {
+  width: 8px;
+  border-top: 1px solid var(--text-secondary);
+  flex-shrink: 0;
+}
+
 // ================================
-// 实体详情侧栏：点击实体节点后列出相关条目
+// 实体详情侧栏：点击实体节点后列出实体关系与相关条目
 // ================================
 
 .entityPanel {
@@ -305,7 +311,7 @@
   bottom: var(--spacing-3);
   display: flex;
   flex-direction: column;
-  width: 240px;
+  width: 280px;
   max-width: calc(100% - 2 * var(--spacing-3));
   overflow: hidden;
 }
@@ -332,20 +338,24 @@
   font-size: var(--font-size-xs);
 }
 
+.entityBody {
+  @include scrollbar;
+  flex: 1;
+  min-height: 0;
+  padding: 0 var(--spacing-1) var(--spacing-2);
+  overflow-y: auto;
+}
+
 .entityCount {
   margin: 0;
-  padding: var(--spacing-2) var(--spacing-3) var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-2) var(--spacing-1);
   color: var(--text-muted);
   font-size: var(--font-size-xs);
 }
 
 .entityItems {
-  @include scrollbar;
-  flex: 1;
-  min-height: 0;
   margin: 0;
-  padding: 0 var(--spacing-1) var(--spacing-2);
-  overflow-y: auto;
+  padding: 0;
   list-style: none;
 }
 

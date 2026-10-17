@@ -121,7 +121,7 @@ export const InspectorAiTab: React.FC<InspectorAiTabProps> = ({ item, activity, 
           type="button"
           className={styles.button}
           disabled={processing || submitting}
-          title="由 AI 选择文件夹并补充规范化的标签，改动会记录在 AI 任务浮窗中"
+          title="由 AI 建议文件夹与规范化的标签，建议需在「待审阅归类」中接受后才会应用"
           onClick={() => void submit(() => requestItemTask(item, { categorize: true }))}
         >
           <FolderTree size={13} />
@@ -131,7 +131,7 @@ export const InspectorAiTab: React.FC<InspectorAiTabProps> = ({ item, activity, 
           type="button"
           className={styles.button}
           disabled={processing || submitting || !hasText}
-          title={hasText ? '抽取人物、组织、概念等实体，完成后可在「图谱 → 实体」中查看' : '条目没有可分析的文本'}
+          title={hasText ? '抽取人物、组织、概念等实体及其关系，完成后可在「关联 → 实体关系」与「图谱 → 实体图谱」中查看' : '条目没有可分析的文本'}
           onClick={() => void submit(() => requestItemTask(item, { extractEntities: true }))}
         >
           <Network size={13} />

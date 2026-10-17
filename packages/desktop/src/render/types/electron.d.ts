@@ -254,14 +254,60 @@ export interface ProcessItemOptions {
   categorize?: boolean;
 }
 
-/** categorize 任务结果：实际生效的变更 */
+/** categorize 任务结果：只生成待审阅的提议，不直接修改知识库 */
 export interface CategorizeResult {
   scope: 'item' | 'library';
   analyzedCount: number;
-  createdFolders: string[];
-  moves: Array<{ itemId: string; title: string; folder: string }>;
-  tagAdditions: Array<{ itemId: string; title: string; tags: string[] }>;
-  tagMerges: Array<{ from: string; into: string }>;
+  /** 新生成的条目归类提议数（移动文件夹 / 追加标签） */
+  itemProposals: number;
+  /** 新生成的标签合并提议数 */
+  tagMergeProposals: number;
+}
+
+interface CategorizationProposalBase {
+  id: string;
+  reason: string | null;
+  /** 0-1；模型未给出时为 null */
+  confidence: number | null;
+  createdAt: string;
+}
+
+/** 条目归类提议：移入文件夹并追加标签 */
+export interface ItemCategorizationProposal extends CategorizationProposalBase {
+  kind: 'item';
+  itemId: string;
+  itemTitle: string;
+  /** 已有的目标文件夹；为空且 folderName 非空表示新建顶层文件夹，两者皆空表示不移动 */
+  folderId: string | null;
+  /** 已有文件夹的路径，或要新建的文件夹名称 */
+  folderName: string | null;
+  /** 要追加的标签名（不移除条目已有标签） */
+  tags: string[];
+}
+
+/** 标签合并提议：把源标签合并到目标标签 */
+export interface TagMergeCategorizationProposal extends CategorizationProposalBase {
+  kind: 'tag-merge';
+  sourceTagId: string;
+  sourceTagName: string;
+  targetTagId: string;
+  targetTagName: string;
+}
+
+export type CategorizationProposal = ItemCategorizationProposal | TagMergeCategorizationProposal;
+
+/** 实际应用的条目归类（用户修改目标后接受时与提议不同） */
+export interface AppliedItemCategorization {
+  folderId: string | null;
+  folderName: string | null;
+  tags: string[];
+}
+
+/** 审阅决定：applied 只用于接受条目提议，缺省时视为按原提议应用 */
+export interface CategorizationReviewDecision {
+  id: string;
+  status: 'accepted' | 'rejected';
+  applied?: AppliedItemCategorization;
 }
 
 export type EntityType =
@@ -274,17 +320,54 @@ export type EntityType =
   | 'technology'
   | 'other';
 
+/** 实体关系类型（与主进程 relation-types.ts 一致）；related-to 无方向 */
+export type RelationType =
+  | 'part-of'
+  | 'member-of'
+  | 'created'
+  | 'located-in'
+  | 'uses'
+  | 'influences'
+  | 'related-to';
+
 /** extract-entities 任务结果 */
 export interface ExtractEntitiesResult {
   chunkCount: number;
   entities: Array<{ name: string; type: EntityType; mentions: number }>;
+  relations: Array<{
+    source: string;
+    target: string;
+    type: RelationType;
+    label: string | null;
+    evidence: string | null;
+    confidence: number;
+  }>;
 }
 
-/** 实体图谱数据（仅包含未删除条目及其关联的实体） */
+/** 实体间的一条关系：itemId 为抽取出该关系的来源条目（未删除） */
+export interface EntityRelation {
+  id: string;
+  sourceEntityId: string;
+  sourceName: string;
+  sourceType: EntityType;
+  targetEntityId: string;
+  targetName: string;
+  targetType: EntityType;
+  type: RelationType;
+  label: string | null;
+  /** 来源条目中支持该关系的原文片段 */
+  evidence: string | null;
+  confidence: number;
+  itemId: string;
+  itemTitle: string;
+}
+
+/** 实体图谱数据（仅包含未删除条目及其关联的实体与关系） */
 export interface EntityGraphData {
   entities: Array<{ id: string; name: string; type: EntityType; itemCount: number }>;
   links: Array<{ itemId: string; entityId: string; mentionCount: number }>;
   items: Array<{ id: string; title: string; type: KnowledgeItemType }>;
+  relations: EntityRelation[];
 }
 
 // ================================
@@ -565,6 +648,15 @@ interface ElectronAPI {
 
   entities: {
     getGraph: () => Promise<EntityGraphData>;
+    /** 与条目提及的实体相关的关系（来源可为任意条目，本条目抽取的在前） */
+    getItemRelations: (itemId: string) => Promise<EntityRelation[]>;
+  };
+
+  categorization: {
+    /** 待审阅的归类提议（条目未删除），标签合并在前 */
+    listPending: () => Promise<CategorizationProposal[]>;
+    /** 记录审阅结果；只更新仍待审阅的提议，已审阅的提议会报错 */
+    review: (decisions: CategorizationReviewDecision[]) => Promise<void>;
   };
 
   search: {

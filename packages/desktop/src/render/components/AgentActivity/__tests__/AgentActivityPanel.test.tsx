@@ -1,5 +1,5 @@
 // ================================
-// AI 任务浮窗测试：无活动时隐藏、折叠徽标、展开后的任务进度与打开条目、整库任务与归类记录
+// AI 任务浮窗测试：无活动时隐藏、折叠徽标、展开后的任务进度与打开条目、整库任务与归类记录（去审阅）
 // ================================
 
 import React from 'react';
@@ -56,12 +56,12 @@ describe('AgentActivityPanel', () => {
 
   it('没有活动时不渲染', () => {
     state.activities = [];
-    const { container } = render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={vi.fn()} />);
+    const { container } = render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={vi.fn()} onReviewCategorization={vi.fn()} />);
     expect(container.childElementCount).toBe(0);
   });
 
   it('默认折叠，显示汇总状态与条目数徽标', () => {
-    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={vi.fn()} />);
+    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={vi.fn()} onReviewCategorization={vi.fn()} />);
     const pill = screen.getByRole('button', { name: /AI 处理中/ });
     expect(pill.textContent).toContain('2');
     expect(screen.queryByText('生成摘要')).toBeNull();
@@ -69,7 +69,7 @@ describe('AgentActivityPanel', () => {
 
   it('展开后列出条目、任务进度与错误，点击条目打开', () => {
     const onOpenItem = vi.fn();
-    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} />);
+    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} onReviewCategorization={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /AI 处理中/ }));
 
     expect(screen.getByText('会议录音')).toBeTruthy();
@@ -94,15 +94,16 @@ describe('AgentActivityPanel', () => {
         tasks: [{ taskId: 'lib', type: 'categorize', status: 'processing', progress: 30, message: '分析条目' }],
       },
     ];
-    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} />);
+    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} onReviewCategorization={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /AI 处理中/ }));
     expect(screen.getByText('整个知识库')).toBeTruthy();
     expect(screen.getByText('自动归类')).toBeTruthy();
     expect(screen.queryByTitle(/打开/)).toBeNull();
   });
 
-  it('没有活动时仍显示归类记录，可打开条目与关闭记录', () => {
+  it('没有活动时仍显示归类记录，可打开条目、去审阅与关闭记录', () => {
     const onOpenItem = vi.fn();
+    const onReview = vi.fn();
     const dismissed: string[] = [];
     state.dismissRecord = (taskId) => {
       dismissed.push(taskId);
@@ -113,20 +114,26 @@ describe('AgentActivityPanel', () => {
         taskId: 'r1',
         itemId: 'a',
         createdAt: Date.now(),
-        summary: '整理了该条目：移动 1 个条目',
-        details: ['「会议录音」 移入「工作」'],
+        summary: '分析了该条目：生成 1 条归类建议，待审阅',
+        pendingReview: 1,
       },
-      { taskId: 'r2', itemId: null, createdAt: Date.now(), summary: '整理了 3 个条目，没有需要调整的地方', details: [] },
+      { taskId: 'r2', itemId: null, createdAt: Date.now(), summary: '分析了 3 个条目，没有需要调整的地方', pendingReview: 0 },
     ];
-    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} />);
+    render(<AgentActivityPanel resolveTitle={resolveTitle} onOpenItem={onOpenItem} onReviewCategorization={onReview} />);
     const pill = screen.getByRole('button', { name: /AI 整理记录/ });
     expect(pill.textContent).toContain('2');
     fireEvent.click(pill);
 
-    expect(screen.getByText('「会议录音」 移入「工作」')).toBeTruthy();
+    expect(screen.getByText('分析了该条目：生成 1 条归类建议，待审阅')).toBeTruthy();
     expect(screen.getByText('整库自动归类')).toBeTruthy();
     fireEvent.click(screen.getByTitle('打开「会议录音」'));
     expect(onOpenItem).toHaveBeenCalledWith('a');
+
+    // 只有生成了建议的记录显示「去审阅」
+    const reviewLinks = screen.getAllByRole('button', { name: '去审阅' });
+    expect(reviewLinks).toHaveLength(1);
+    fireEvent.click(reviewLinks[0]);
+    expect(onReview).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getAllByTitle('关闭记录')[1]);
     expect(dismissed).toEqual(['r2']);

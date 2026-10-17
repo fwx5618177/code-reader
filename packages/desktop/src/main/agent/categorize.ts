@@ -1,9 +1,9 @@
 // ================================
-// 自动归类：提示词、模型输出校验、多段结果合并、标签合并规划、写回计划
+// 自动归类：提示词、模型输出校验、多段结果合并、标签合并规划、待审阅提议计划
 // 纯函数模块（不访问数据库与 AI），由 categorize-task.ts 组合使用
 // ================================
 
-import { isRecord, normalizeText } from './json-output';
+import { isRecord, normalizeText, parseConfidence } from './json-output';
 import { chunkText } from './text-chunks';
 
 /** 每个条目最多建议的标签数 */
@@ -14,6 +14,10 @@ export const SEGMENT_CHARS = 6000;
 export const BATCH_CHARS = 12000;
 /** 标签合并分析时单次请求的标签名总长度上限 */
 export const TAG_BATCH_CHARS = 4000;
+/** 归类理由长度上限 */
+const MAX_REASON_LENGTH = 120;
+/** 比较键相同的标签确定性合并时的理由 */
+export const SAME_KEY_MERGE_REASON = '写法仅大小写、空白或符号不同';
 
 // ================================
 // 名称规范化
@@ -108,7 +112,8 @@ export function buildCategorizeSystemPrompt(folderPaths: string[], tagNames: str
 1. folder 优先使用已有文件夹（原样填写名称或路径）；都不合适时给出一个简短的新文件夹名称（2-8 个字，不要包含 /）；无法判断时填 null
 2. tags 给出 1-${MAX_TAGS_PER_ITEM} 个标签，优先复用已有标签的原始写法；新标签简短（1-3 个词），不要带 #
 3. 同一条目被拆成多段时（标注了“第 x/y 段”），每段都按整篇条目的主题判断
-4. 只返回 JSON：{"items": [{"id": "条目编号", "folder": "文件夹名称或 null", "tags": ["标签"]}]}`;
+4. reason 用一句话说明归类依据（不超过 40 字），confidence 为 0-1 之间的置信度
+5. 只返回 JSON：{"items": [{"id": "条目编号", "folder": "文件夹名称或 null", "tags": ["标签"], "reason": "归类依据", "confidence": 0.8}]}`;
 }
 
 export function buildCategorizeUserPrompt(segments: PromptSegment[]): string {
@@ -126,16 +131,25 @@ export const TAG_MERGE_SYSTEM_PROMPT = `你是知识库标签整理助手。下�
 1. 只合并确实同义的标签，含义有差别的不要合并
 2. into 必须是列表中已有的标签，选择最规范、最常用的写法
 3. 没有需要合并的标签时返回空数组
-4. 只返回 JSON：{"merges": [{"into": "保留的标签", "from": ["被合并的标签"]}]}`;
+4. reason 用一句话说明为何同义，confidence 为 0-1 之间的置信度
+5. 只返回 JSON：{"merges": [{"into": "保留的标签", "from": ["被合并的标签"], "reason": "同义依据", "confidence": 0.9}]}`;
 
 // ================================
 // 输出校验
 // ================================
 
+/** 模型给出的理由：规范化空白并限制长度，缺失时为 null */
+function parseReason(value: unknown): string | null {
+  const reason = typeof value === 'string' ? normalizeText(value) : '';
+  return reason ? reason.slice(0, MAX_REASON_LENGTH) : null;
+}
+
 export interface ItemProposal {
   itemId: string;
   folder: string | null;
   tags: string[];
+  reason: string | null;
+  confidence: number | null;
 }
 
 /** 标签列表规范化：去空、去重（按比较键）、限制数量 */
@@ -177,6 +191,8 @@ export function parseCategorizeResponse(
       itemId,
       folder: folder && folder.toLowerCase() !== 'null' ? folder : null,
       tags: normalizeTagList(entry.tags),
+      reason: parseReason(entry.reason),
+      confidence: parseConfidence(entry.confidence),
     });
   }
   if (refToItemId.size > 0 && proposals.length === 0) {
@@ -199,25 +215,41 @@ function rankByKey(values: string[], key: (value: string) => string): string[] {
     .map((group) => group.value);
 }
 
+/** 同一条目各片段合并后的建议 */
+export interface MergedItemProposal {
+  folder: string | null;
+  tags: string[];
+  reason: string | null;
+  confidence: number | null;
+}
+
 /**
- * 合并同一条目多个片段的建议：文件夹取得票最多者，标签按出现频次取前 MAX_TAGS_PER_ITEM 个
+ * 合并同一条目多个片段的建议：文件夹取得票最多者，标签按出现频次取前 MAX_TAGS_PER_ITEM 个；
+ * 置信度取各片段的平均值，理由取置信度最高且给出了理由的片段
  */
-export function mergeItemProposals(proposals: ItemProposal[]): Map<string, { folder: string | null; tags: string[] }> {
+export function mergeItemProposals(proposals: ItemProposal[]): Map<string, MergedItemProposal> {
   const byItem = new Map<string, ItemProposal[]>();
   for (const proposal of proposals) {
     const list = byItem.get(proposal.itemId);
     if (list) list.push(proposal);
     else byItem.set(proposal.itemId, [proposal]);
   }
-  const merged = new Map<string, { folder: string | null; tags: string[] }>();
+  const merged = new Map<string, MergedItemProposal>();
   for (const [itemId, list] of byItem) {
     const folders = list.flatMap((p) => (p.folder ? [p.folder] : []));
+    const confidences = list.flatMap((p) => (p.confidence === null ? [] : [p.confidence]));
+    const reasoned = list
+      .filter((p) => p.reason !== null)
+      .reduce<ItemProposal | null>((best, p) => (!best || (p.confidence ?? 0) > (best.confidence ?? 0) ? p : best), null);
     merged.set(itemId, {
       folder: rankByKey(folders, folderKey)[0] ?? null,
       tags: rankByKey(
         list.flatMap((p) => p.tags),
         tagKey
       ).slice(0, MAX_TAGS_PER_ITEM),
+      reason: reasoned?.reason ?? null,
+      confidence:
+        confidences.length > 0 ? confidences.reduce((sum, value) => sum + value, 0) / confidences.length : null,
     });
   }
   return merged;
@@ -226,6 +258,8 @@ export function mergeItemProposals(proposals: ItemProposal[]): Map<string, { fol
 export interface TagMergeProposal {
   into: string;
   from: string[];
+  reason: string | null;
+  confidence: number | null;
 }
 
 /** 校验模型返回的标签合并建议；结构不符时抛出错误 */
@@ -238,7 +272,9 @@ export function parseTagMergeResponse(json: Record<string, unknown>): TagMergePr
     if (!isRecord(entry) || typeof entry.into !== 'string') continue;
     const into = normalizeTagName(entry.into);
     const from = normalizeTagList(entry.from, Number.POSITIVE_INFINITY);
-    if (into && from.length > 0) proposals.push({ into, from });
+    if (into && from.length > 0) {
+      proposals.push({ into, from, reason: parseReason(entry.reason), confidence: parseConfidence(entry.confidence) });
+    }
   }
   return proposals;
 }
@@ -255,46 +291,28 @@ export interface TagRef {
   aliases: string[];
 }
 
-/** 解析 tags.aliases 列；非法内容视为没有别名 */
-export function parseAliases(raw: string | null): string[] {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((alias): alias is string => typeof alias === 'string') : [];
-  } catch {
-    return [];
-  }
-}
 
-/** 合并后目标标签的别名：原有别名 + 源标签名称及其别名（按比较键去重，不含目标自身名称） */
-export function mergeAliases(targetName: string, targetAliases: string[], source: { name: string; aliases: string[] }): string[] {
-  const seen = new Set([tagKey(targetName)]);
-  const result: string[] = [];
-  for (const alias of [...targetAliases, source.name, ...source.aliases]) {
-    const key = tagKey(alias);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    result.push(alias);
-  }
-  return result;
-}
-
+/** 一次标签合并：源标签并入目标标签（目标为合并链的最终标签） */
 export interface TagMergeStep {
   sourceId: string;
   sourceName: string;
   targetId: string;
   targetName: string;
+  reason: string | null;
+  confidence: number | null;
 }
 
 /**
  * 规划标签合并：
- * 1. 比较键相同的标签（大小写、全半角、空白、#、连字符差异）确定性合并到使用次数最多的一个；
- * 2. 模型建议只在已有标签之间生效，未知名称忽略；
- * 合并用并查集维护，链式建议（A→B、B→C）压平为直接指向最终目标，成环的建议自然被丢弃
+ * 1. 比较键相同的标签（大小写、全半角、空白、#、连字符差异）确定性合并到使用次数最多的一个（置信度 1）；
+ * 2. 模型建议只在已有标签之间生效，未知名称忽略，理由与置信度取自该建议；
+ * 合并用并查集维护，链式建议（A→B、B→C）压平为直接指向最终目标，成环的建议自然被丢弃。
+ * 每个源标签的理由来自它被并入时的那次合并
  */
 export function planTagMerges(tags: TagRef[], proposals: TagMergeProposal[]): TagMergeStep[] {
   const byId = new Map(tags.map((tag) => [tag.id, tag]));
   const parent = new Map<string, string>();
+  const evidence = new Map<string, { reason: string | null; confidence: number | null }>();
   const find = (id: string): string => {
     let root = id;
     while (parent.has(root)) root = parent.get(root)!;
@@ -307,10 +325,12 @@ export function planTagMerges(tags: TagRef[], proposals: TagMergeProposal[]): Ta
     }
     return root;
   };
-  const union = (sourceId: string, targetId: string) => {
+  const union = (sourceId: string, targetId: string, why: { reason: string | null; confidence: number | null }) => {
     const source = find(sourceId);
     const target = find(targetId);
-    if (source !== target) parent.set(source, target);
+    if (source === target) return;
+    parent.set(source, target);
+    evidence.set(source, why);
   };
 
   const byKey = new Map<string, TagRef[]>();
@@ -325,7 +345,7 @@ export function planTagMerges(tags: TagRef[], proposals: TagMergeProposal[]): Ta
     if (group.length < 2) continue;
     const target = group.reduce((best, tag) => (tag.usageCount > best.usageCount ? tag : best));
     for (const tag of group) {
-      if (tag !== target) union(tag.id, target.id);
+      if (tag !== target) union(tag.id, target.id, { reason: SAME_KEY_MERGE_REASON, confidence: 1 });
     }
   }
 
@@ -334,7 +354,7 @@ export function planTagMerges(tags: TagRef[], proposals: TagMergeProposal[]): Ta
     if (!target) continue;
     for (const name of proposal.from) {
       const source = byKey.get(tagKey(name))?.[0];
-      if (source) union(source.id, target.id);
+      if (source) union(source.id, target.id, { reason: proposal.reason, confidence: proposal.confidence });
     }
   }
 
@@ -343,13 +363,19 @@ export function planTagMerges(tags: TagRef[], proposals: TagMergeProposal[]): Ta
     const rootId = find(tag.id);
     if (rootId === tag.id) continue;
     const root = byId.get(rootId)!;
-    steps.push({ sourceId: tag.id, sourceName: tag.name, targetId: root.id, targetName: root.name });
+    steps.push({
+      sourceId: tag.id,
+      sourceName: tag.name,
+      targetId: root.id,
+      targetName: root.name,
+      ...evidence.get(tag.id)!,
+    });
   }
   return steps;
 }
 
 // ================================
-// 写回计划
+// 待审阅提议计划
 // ================================
 
 export interface FolderRef {
@@ -366,18 +392,23 @@ export interface CategorizeItemState {
   tagIds: string[];
 }
 
-/** 计划中的标签：id 为空表示需要新建 */
-export interface PlannedTag {
-  id: string | null;
-  name: string;
+/** 一个条目的归类提议（只包含确实需要改动的部分） */
+export interface ItemPlan {
+  itemId: string;
+  title: string;
+  /** 目标为已有文件夹时的 ID；为空且 folderName 非空表示新建顶层文件夹 */
+  folderId: string | null;
+  /** 已有文件夹的路径或新文件夹名称；为空表示不移动 */
+  folderName: string | null;
+  /** 要追加的标签名（复用已有标签时为其正式名称） */
+  tags: string[];
+  reason: string | null;
+  confidence: number | null;
 }
 
 export interface CategorizePlan {
   merges: TagMergeStep[];
-  /** 需要新建的顶层文件夹名称 */
-  newFolders: string[];
-  moves: Array<{ itemId: string; title: string; folderId: string | null; folderName: string }>;
-  tagAdditions: Array<{ itemId: string; title: string; tags: PlannedTag[] }>;
+  items: ItemPlan[];
 }
 
 /** 构建文件夹路径（父文件夹缺失时以自身为顶层） */
@@ -398,15 +429,16 @@ export function buildFolderPaths(folders: Array<{ id: string; name: string; pare
 }
 
 /**
- * 把合并后的建议转为写回计划：
- * - 文件夹按路径、再按名称匹配已有文件夹，匹配不到则新建顶层文件夹；已在目标文件夹中的条目不移动
- * - 标签按比较键匹配已有标签（并跟随合并结果），只追加条目尚未拥有的标签，不移除用户已有标签
+ * 把合并后的建议转为待审阅的提议计划：
+ * - 文件夹按路径、再按名称匹配已有文件夹，匹配不到则提议新建顶层文件夹；已在目标文件夹中的条目不提议移动
+ * - 标签按比较键匹配已有标签（含别名，并跟随合并结果），只提议追加条目尚未拥有的标签
+ * - 既不移动也不追加标签的条目不产生提议
  */
 export function buildCategorizePlan(input: {
   items: CategorizeItemState[];
   folders: FolderRef[];
   tags: TagRef[];
-  proposals: ReadonlyMap<string, { folder: string | null; tags: string[] }>;
+  proposals: ReadonlyMap<string, MergedItemProposal>;
   merges: TagMergeStep[];
 }): CategorizePlan {
   const mergedInto = new Map(input.merges.map((step) => [step.sourceId, step.targetId]));
@@ -433,68 +465,62 @@ export function buildCategorizePlan(input: {
     if (!folderByKey.has(folderKey(folder.name))) folderByKey.set(folderKey(folder.name), folder);
   }
 
-  const newFolders = new Map<string, string>();
-  const plan: CategorizePlan = { merges: input.merges, newFolders: [], moves: [], tagAdditions: [] };
-
+  const items: ItemPlan[] = [];
   for (const item of input.items) {
     const proposal = input.proposals.get(item.id);
     if (!proposal) continue;
 
+    let folderId: string | null = null;
+    let folderName: string | null = null;
     if (proposal.folder) {
-      const key = folderKey(proposal.folder);
-      const existing = folderByKey.get(key);
-      if (existing) {
-        if (existing.id !== item.folderId) {
-          plan.moves.push({ itemId: item.id, title: item.title, folderId: existing.id, folderName: existing.path });
-        }
-      } else {
-        if (!newFolders.has(key)) newFolders.set(key, proposal.folder);
-        plan.moves.push({ itemId: item.id, title: item.title, folderId: null, folderName: newFolders.get(key)! });
+      const existing = folderByKey.get(folderKey(proposal.folder));
+      if (!existing) {
+        folderName = proposal.folder;
+      } else if (existing.id !== item.folderId) {
+        folderId = existing.id;
+        folderName = existing.path;
       }
     }
 
     const owned = new Set(item.tagIds.map(finalTagId));
     const addedKeys = new Set<string>();
-    const additions: PlannedTag[] = [];
+    const tags: string[] = [];
     for (const name of proposal.tags) {
       const key = tagKey(name);
       if (addedKeys.has(key)) continue;
       addedKeys.add(key);
       const existing = tagByKey.get(key);
       if (existing && owned.has(existing.id)) continue;
-      additions.push(existing ? { id: existing.id, name: existing.name } : { id: null, name });
+      tags.push(existing ? existing.name : name);
     }
-    if (additions.length > 0) plan.tagAdditions.push({ itemId: item.id, title: item.title, tags: additions });
+
+    if (folderName !== null || tags.length > 0) {
+      items.push({
+        itemId: item.id,
+        title: item.title,
+        folderId,
+        folderName,
+        tags,
+        reason: proposal.reason,
+        confidence: proposal.confidence,
+      });
+    }
   }
 
-  plan.newFolders = [...newFolders.values()];
-  return plan;
+  return { merges: input.merges, items };
 }
 
 // ================================
-// 任务结果（记录实际生效的变更，供 AgentActivity 展示）
+// 任务结果（供 AgentActivity 展示，引导用户去审阅）
 // ================================
 
 export interface CategorizeResult {
   scope: 'item' | 'library';
   analyzedCount: number;
-  createdFolders: string[];
-  moves: Array<{ itemId: string; title: string; folder: string }>;
-  tagAdditions: Array<{ itemId: string; title: string; tags: string[] }>;
-  tagMerges: Array<{ from: string; into: string }>;
+  itemProposals: number;
+  tagMergeProposals: number;
 }
 
 export function planToResult(scope: CategorizeResult['scope'], analyzedCount: number, plan: CategorizePlan): CategorizeResult {
-  return {
-    scope,
-    analyzedCount,
-    createdFolders: plan.newFolders,
-    moves: plan.moves.map(({ itemId, title, folderName }) => ({ itemId, title, folder: folderName })),
-    tagAdditions: plan.tagAdditions.map(({ itemId, title, tags }) => ({
-      itemId,
-      title,
-      tags: tags.map((tag) => tag.name),
-    })),
-    tagMerges: plan.merges.map((step) => ({ from: step.sourceName, into: step.targetName })),
-  };
+  return { scope, analyzedCount, itemProposals: plan.items.length, tagMergeProposals: plan.merges.length };
 }

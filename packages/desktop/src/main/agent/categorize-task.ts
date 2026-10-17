@@ -1,7 +1,8 @@
 // ================================
 // 自动归类任务（categorize）
-// 计算阶段：读取条目 / 文件夹 / 标签 → 分批请求模型 → 校验合并 → 生成写回计划
-// 写回阶段：在任务完成的同一事务中合并标签、新建文件夹、移动条目、追加标签
+// 计算阶段：读取条目 / 文件夹 / 标签 → 分批请求模型 → 校验合并 → 生成提议计划
+// 写回阶段：在任务完成的同一事务中把提议写入 categorization_proposals（待审阅），不修改条目、文件夹与标签；
+// 用户在「待审阅归类」中逐条接受后才应用
 // targetItemId 为空时对整个知识库归类，并额外分析近似重复的标签
 // ================================
 
@@ -9,7 +10,7 @@ import { getSQLiteService } from '../database/sqlite';
 import { getAIService } from '../ai/ai-service';
 import type { ReportProgress, TaskOutput } from './agent-executor';
 import { generateId } from './id';
-import { parseJsonObject } from './json-output';
+import { parseJsonObject, parseJsonStringArray } from './json-output';
 import {
   BATCH_CHARS,
   TAG_BATCH_CHARS,
@@ -20,10 +21,7 @@ import {
   buildCategorizeUserPrompt,
   buildFolderPaths,
   buildSegments,
-  folderKey,
-  mergeAliases,
   mergeItemProposals,
-  parseAliases,
   parseCategorizeResponse,
   parseTagMergeResponse,
   planTagMerges,
@@ -36,6 +34,8 @@ import {
   type TagRef,
 } from './categorize';
 
+/** 已审阅的提议保留天数，之后在下一次归类时清理 */
+const REVIEWED_RETENTION_DAYS = 30;
 
 interface ItemRow {
   id: string;
@@ -44,11 +44,6 @@ interface ItemRow {
   summary: string | null;
   content: string | null;
   transcript: string | null;
-}
-
-/** 写回时发现知识库已被修改：抛出后任务按失败重试，重新基于最新数据分析 */
-function libraryChanged(detail: string): Error {
-  return new Error(`知识库在归类期间发生了变化（${detail}），将重新分析`);
 }
 
 function loadTags(): TagRef[] {
@@ -60,7 +55,7 @@ function loadTags(): TagRef[] {
       id: row.id,
       name: row.name,
       usageCount: row.usage_count,
-      aliases: parseAliases(row.aliases),
+      aliases: parseJsonStringArray(row.aliases),
     }));
 }
 
@@ -172,121 +167,62 @@ export async function runCategorize(targetItemId: string | null, report: ReportP
     merges,
   });
 
-  report(90, '整理归类结果...');
+  report(90, '整理归类建议...');
   return {
     result: planToResult(scope, items.length, plan),
-    commit: () => applyCategorizePlan(plan, tags),
+    commit: () => saveProposals(targetItemId, plan),
   };
 }
 
 /**
- * 写回归类计划（在任务完成事务内执行）。计划基于计算开始时的快照，
- * 写回前逐项确认引用的标签、文件夹、条目仍然有效，否则抛错使整个事务回滚并重试
+ * 保存待审阅提议（在任务完成事务内执行）：新一轮分析取代同范围内尚未审阅的提议
+ * （单条目归类只替换该条目的，整库归类替换全部）；计算期间被删除的条目 / 标签对应的提议直接跳过。
+ * 同时清理审阅时间超过保留期的历史提议
  */
-function applyCategorizePlan(plan: CategorizePlan, tags: TagRef[]): void {
+function saveProposals(targetItemId: string | null, plan: CategorizePlan): void {
   const sqlite = getSQLiteService();
   const now = new Date().toISOString();
-  const tagById = new Map(tags.map((tag) => [tag.id, tag]));
-  const aliasesById = new Map(tags.map((tag) => [tag.id, tag.aliases]));
-  const tagExists = (id: string) =>
-    sqlite.get(`SELECT 1 FROM tags WHERE id = ? AND is_deleted = 0`, [id]) !== undefined;
 
-  // 1. 合并标签：条目改挂目标标签，源标签物理删除（tags.name 唯一约束包含软删除行，软删除会占用名称）
-  for (const step of plan.merges) {
-    if (!tagExists(step.sourceId) || !tagExists(step.targetId)) {
-      throw libraryChanged(`标签「${step.sourceName}」或「${step.targetName}」已不存在`);
-    }
-    sqlite.run(
-      `INSERT OR IGNORE INTO item_tags (item_id, tag_id, created_at)
-       SELECT item_id, ?, ? FROM item_tags WHERE tag_id = ?`,
-      [step.targetId, now, step.sourceId]
-    );
-    sqlite.run(`DELETE FROM item_tags WHERE tag_id = ?`, [step.sourceId]);
-    sqlite.run(`DELETE FROM tags WHERE id = ?`, [step.sourceId]);
-    const aliases = mergeAliases(step.targetName, aliasesById.get(step.targetId) ?? [], {
-      name: step.sourceName,
-      aliases: tagById.get(step.sourceId)?.aliases ?? [],
-    });
-    aliasesById.set(step.targetId, aliases);
-    sqlite.run(
-      `UPDATE tags SET aliases = ?, usage_count = (SELECT COUNT(*) FROM item_tags WHERE tag_id = ?), updated_at = ?
-       WHERE id = ?`,
-      [JSON.stringify(aliases), step.targetId, now, step.targetId]
-    );
+  if (targetItemId === null) {
+    sqlite.run(`DELETE FROM categorization_proposals WHERE status = 'pending'`);
+  } else {
+    sqlite.run(`DELETE FROM categorization_proposals WHERE status = 'pending' AND kind = 'item' AND item_id = ?`, [
+      targetItemId,
+    ]);
   }
+  sqlite.run(
+    `DELETE FROM categorization_proposals
+     WHERE status != 'pending' AND julianday(reviewed_at) < julianday('now', ?)`,
+    [`-${REVIEWED_RETENTION_DAYS} days`]
+  );
 
-  // 2. 新建顶层文件夹
-  const existingFolderKeys = new Set(loadFolders().flatMap((folder) => [folderKey(folder.path), folderKey(folder.name)]));
-  const createdFolderIds = new Map<string, string>();
-  for (const name of plan.newFolders) {
-    if (existingFolderKeys.has(folderKey(name))) throw libraryChanged(`文件夹「${name}」已被创建`);
-    const id = generateId();
+  for (const item of plan.items) {
     sqlite.run(
-      `INSERT INTO folders (id, name, type, parent_id, sort_order, is_deleted, created_at, updated_at)
-       VALUES (?, ?, 'manual', NULL,
-               (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM folders
-                WHERE parent_id IS NULL AND is_deleted = 0 AND type = 'manual'),
-               0, ?, ?)`,
-      [id, name, now, now]
-    );
-    createdFolderIds.set(folderKey(name), id);
-  }
-
-  // 3. 移动条目
-  for (const move of plan.moves) {
-    const folderId = move.folderId ?? createdFolderIds.get(folderKey(move.folderName));
-    if (
-      !folderId ||
-      sqlite.get(`SELECT 1 FROM folders WHERE id = ? AND is_deleted = 0`, [folderId]) === undefined
-    ) {
-      throw libraryChanged(`文件夹「${move.folderName}」已不存在`);
-    }
-    const updated = sqlite.run(
-      `UPDATE knowledge_items SET folder_id = ?, updated_at = ? WHERE id = ? AND is_deleted = 0`,
-      [folderId, now, move.itemId]
-    );
-    if (updated.changes === 0) throw libraryChanged(`条目「${move.title}」已被删除`);
-  }
-
-  // 4. 追加标签（只增不删，保留用户已有标签）
-  const createdTagIds = new Map<string, string>();
-  const resolveNewTag = (name: string): string => {
-    const key = tagKey(name);
-    const created = createdTagIds.get(key);
-    if (created) return created;
-    const row = sqlite.get<{ id: string; is_deleted: number }>(`SELECT id, is_deleted FROM tags WHERE name = ?`, [name]);
-    let id: string;
-    if (row) {
-      id = row.id;
-      if (row.is_deleted) {
-        sqlite.run(`UPDATE tags SET is_deleted = 0, deleted_at = NULL, usage_count = 0, updated_at = ? WHERE id = ?`, [
-          now,
-          id,
-        ]);
-      }
-    } else {
-      id = generateId();
-      sqlite.run(
-        `INSERT INTO tags (id, name, usage_count, is_auto_generated, created_at, updated_at) VALUES (?, ?, 0, 1, ?, ?)`,
-        [id, name, now, now]
-      );
-    }
-    createdTagIds.set(key, id);
-    return id;
-  };
-
-  for (const addition of plan.tagAdditions) {
-    for (const tag of addition.tags) {
-      if (tag.id !== null && !tagExists(tag.id)) throw libraryChanged(`标签「${tag.name}」已不存在`);
-      const tagId = tag.id ?? resolveNewTag(tag.name);
-      const linked = sqlite.run(`INSERT OR IGNORE INTO item_tags (item_id, tag_id, created_at) VALUES (?, ?, ?)`, [
-        addition.itemId,
-        tagId,
+      `INSERT INTO categorization_proposals
+         (id, kind, item_id, folder_id, folder_name, tags, reason, confidence, created_at)
+       SELECT ?, 'item', ?, ?, ?, ?, ?, ?, ?
+       WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND is_deleted = 0)`,
+      [
+        generateId(),
+        item.itemId,
+        item.folderId,
+        item.folderName,
+        JSON.stringify(item.tags),
+        item.reason,
+        item.confidence,
         now,
-      ]);
-      if (linked.changes > 0) {
-        sqlite.run(`UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?`, [now, tagId]);
-      }
-    }
+        item.itemId,
+      ]
+    );
+  }
+
+  for (const merge of plan.merges) {
+    sqlite.run(
+      `INSERT INTO categorization_proposals
+         (id, kind, source_tag_id, target_tag_id, reason, confidence, created_at)
+       SELECT ?, 'tag-merge', ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM tags WHERE id IN (?, ?) AND is_deleted = 0) = 2`,
+      [generateId(), merge.sourceId, merge.targetId, merge.reason, merge.confidence, now, merge.sourceId, merge.targetId]
+    );
   }
 }

@@ -4,6 +4,7 @@
 
 import React from 'react';
 import {
+  ClipboardCheck,
   FolderTree,
   LayoutGrid,
   List as ListIcon,
@@ -66,6 +67,10 @@ export interface ToolbarProps {
   onManageTags: () => void;
   /** 整库自动归类正在执行 */
   categorizing: boolean;
+  /** 待审阅的归类建议数；大于 0 时显示「待审阅」入口 */
+  pendingReviewCount: number;
+  /** 打开待审阅归类面板 */
+  onOpenReview: () => void;
   /** 打开设置（AI 不可用时引导配置） */
   onOpenSettings: () => void;
 }
@@ -86,6 +91,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onQuickCapture,
   onManageTags,
   categorizing,
+  pendingReviewCount,
+  onOpenReview,
   onOpenSettings,
 }) => {
   const isItems = view === 'items';
@@ -162,11 +169,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           label="自动归类"
           icon={FolderTree}
           confirmTitle="自动归类整个知识库"
-          confirmMessage="AI 将为所有条目选择文件夹（必要时新建）、补充规范化的标签，并合并近似重复的标签。已有标签不会被移除，所有改动会记录在右下角的 AI 任务中。"
+          confirmMessage="AI 将为所有条目建议文件夹（必要时新建）、补充规范化的标签，并找出近似重复的标签。建议不会直接应用，完成后在「待审阅」中逐条接受或拒绝；未审阅的旧建议会被新结果取代。"
           busy={categorizing}
           run={requestCategorizeLibrary}
           onOpenSettings={onOpenSettings}
         />
+
+        {pendingReviewCount > 0 && (
+          <button
+            type="button"
+            className={styles.control}
+            data-active="true"
+            title="审阅 AI 归类建议"
+            onClick={onOpenReview}
+          >
+            <ClipboardCheck size={13} />
+            待审阅
+            <span className={styles.controlBadge}>{pendingReviewCount}</span>
+          </button>
+        )}
 
         <button type="button" className={styles.primaryButton} onClick={onQuickCapture}>
           <Plus size={14} />
