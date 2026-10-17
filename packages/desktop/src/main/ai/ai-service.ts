@@ -49,6 +49,8 @@ export interface ChatCompletionResponse {
     totalTokens: number;
   };
   finishReason?: string;
+  /** 流式对话被调用方停止；此时 content 为停止前已生成的部分 */
+  aborted?: boolean;
 }
 
 export interface EmbeddingRequest {
@@ -465,15 +467,27 @@ export class AIService {
 
   /**
    * 流式对话：每收到一段文本调用 onDelta，结束后返回完整结果
+   * signal 中止后不视为失败，返回已生成的部分并标记 aborted
    */
   async chatCompletionStream(
     request: ChatCompletionRequest,
-    onDelta: (delta: string) => void
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
   ): Promise<ChatCompletionResponse> {
     const { provider, model } = this.resolveChatTarget(request);
-    return provider.type === 'anthropic'
-      ? this.anthropicChatCompletionStream(provider, request, model, onDelta)
-      : this.openaiChatCompletionStream(provider, request, model, onDelta);
+    let partial = '';
+    const emit = (delta: string) => {
+      partial += delta;
+      onDelta(delta);
+    };
+    try {
+      return provider.type === 'anthropic'
+        ? await this.anthropicChatCompletionStream(provider, request, model, emit, signal)
+        : await this.openaiChatCompletionStream(provider, request, model, emit, signal);
+    } catch (error) {
+      if (signal?.aborted) return { id: '', content: partial, model, aborted: true };
+      throw error;
+    }
   }
 
   /** 解析本次对话使用的服务商与模型；除 anthropic 外均走 OpenAI 兼容接口 */
@@ -537,17 +551,21 @@ export class AIService {
     provider: AIProviderConfig,
     request: ChatCompletionRequest,
     model: string,
-    onDelta: (delta: string) => void
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
   ): Promise<ChatCompletionResponse> {
     const client = this.getOpenAIClient(provider);
 
-    const stream = await client.chat.completions.create({
-      model,
-      messages: this.openaiMessages(request),
-      temperature: request.temperature ?? 0.7,
-      max_tokens: request.maxTokens,
-      stream: true,
-    });
+    const stream = await client.chat.completions.create(
+      {
+        model,
+        messages: this.openaiMessages(request),
+        temperature: request.temperature ?? 0.7,
+        max_tokens: request.maxTokens,
+        stream: true,
+      },
+      { signal }
+    );
 
     let id = '';
     let responseModel = model;
@@ -611,10 +629,11 @@ export class AIService {
     provider: AIProviderConfig,
     request: ChatCompletionRequest,
     model: string,
-    onDelta: (delta: string) => void
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
   ): Promise<ChatCompletionResponse> {
     const client = this.getAnthropicClient(provider);
-    const stream = client.messages.stream(this.anthropicRequest(request, model));
+    const stream = client.messages.stream(this.anthropicRequest(request, model), { signal });
     stream.on('text', onDelta);
     return this.toAnthropicResponse(await stream.finalMessage());
   }

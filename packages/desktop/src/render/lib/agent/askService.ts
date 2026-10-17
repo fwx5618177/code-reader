@@ -20,6 +20,8 @@ export interface AnswerSource {
 export interface AskResult {
   answer: string;
   sources: AnswerSource[];
+  /** 被调用方停止：answer 为停止前已生成的部分（可能为空） */
+  stopped: boolean;
 }
 
 export interface AskHandlers {
@@ -69,11 +71,13 @@ async function retrieve(question: string): Promise<KnowledgeItem[]> {
  * 向知识库提问，回答以流式生成
  * @param history 之前的问答轮次（用于追问）
  * @param handlers 来源与增量文本回调
+ * @param signal 中止后停止生成，以已生成的部分正常返回（stopped 为 true）
  */
 export async function askKnowledgeBase(
   question: string,
   history: ChatMessage[] = [],
-  handlers: AskHandlers = {}
+  handlers: AskHandlers = {},
+  signal?: AbortSignal
 ): Promise<AskResult> {
   const items = await retrieve(question);
   const sources: AnswerSource[] = items.map((item, i) => ({
@@ -82,6 +86,9 @@ export async function askKnowledgeBase(
     title: displayTitle(item.title),
     type: item.type,
   }));
+
+  // 检索期间已停止：不再请求模型
+  if (signal?.aborted) return { answer: '', sources, stopped: true };
 
   const context =
     items.length > 0
@@ -92,7 +99,7 @@ export async function askKnowledgeBase(
 
   handlers.onSources?.(sources);
 
-  const response = await window.electron.ai.chatStream(
+  const stream = window.electron.ai.chatStream(
     {
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -103,6 +110,12 @@ export async function askKnowledgeBase(
     },
     (delta) => handlers.onDelta?.(delta)
   );
-
-  return { answer: response.content, sources };
+  const cancel = () => void stream.cancel();
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const response = await stream.result;
+    return { answer: response.content, sources, stopped: response.aborted === true };
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+  }
 }

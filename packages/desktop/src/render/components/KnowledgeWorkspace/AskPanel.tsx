@@ -1,10 +1,11 @@
 // ================================
 // 知识库问答：基于知识库内容回答问题，回答中的 [n] 引用可点击定位到来源条目
+// 生成中可停止，已生成的部分保留并标记为“已停止”
 // 回答按纯文本解析为 React 节点渲染，不使用 innerHTML
 // ================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowUp, Bot, RefreshCw, Settings } from 'lucide-react';
+import { AlertCircle, ArrowUp, Bot, RefreshCw, Settings, Square } from 'lucide-react';
 import aiConfigService from '../../services/aiConfigService';
 import type { AnswerSource } from '../../lib/agent/askService';
 import { displayTitle } from '../../lib/links/link-index';
@@ -105,13 +106,23 @@ const Turn: React.FC<{
               <span />
             </span>
           )}
-          {(turn.status === 'done' || (streaming && hasText)) && (
+          {/* 停止时尚未生成内容则不渲染空回答 */}
+          {(turn.status === 'done' ? hasText || !turn.stopped : streaming && hasText) && (
             <Answer
               answer={turn.answer ?? ''}
               sources={turn.sources ?? []}
               streaming={streaming}
               onSelectItem={onSelectItem}
             />
+          )}
+          {turn.status === 'done' && turn.stopped && (
+            <div className={styles.stopped}>
+              <span>{hasText ? '已停止生成' : '已停止，未生成内容'}</span>
+              <button type="button" className={styles.retry} onClick={() => onRetry(turn.id)}>
+                <RefreshCw size={12} />
+                重新生成
+              </button>
+            </div>
           )}
           {turn.status === 'error' && (
             <div className={styles.error} role="alert">
@@ -136,7 +147,7 @@ export interface AskPanelProps {
 }
 
 export const AskPanel: React.FC<AskPanelProps> = ({ conversation, onSelectItem, onOpenSettings }) => {
-  const { turns, pending, ask, retry } = conversation;
+  const { turns, pending, ask, retry, stop } = conversation;
   const [provider, recheck] = useProviderState();
   const [input, setInput] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -202,16 +213,23 @@ export const AskPanel: React.FC<AskPanelProps> = ({ conversation, onSelectItem, 
                 }
               }}
             />
-            <button
-              type="button"
-              className={styles.send}
-              title="发送"
-              aria-label="发送"
-              disabled={provider !== 'ready' || pending || !input.trim()}
-              onClick={submit}
-            >
-              <ArrowUp size={16} />
-            </button>
+            {pending ? (
+              <button type="button" className={styles.stop} title="停止生成" aria-label="停止生成" onClick={stop}>
+                <Square size={12} fill="currentColor" />
+                停止
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={styles.send}
+                title="发送"
+                aria-label="发送"
+                disabled={provider !== 'ready' || !input.trim()}
+                onClick={submit}
+              >
+                <ArrowUp size={16} />
+              </button>
+            )}
           </div>
         )}
       </div>

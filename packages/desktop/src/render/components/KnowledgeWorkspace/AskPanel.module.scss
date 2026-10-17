@@ -259,6 +259,14 @@
   }
 }
 
+.stopped {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
 .retry {
   @include button-reset;
   display: inline-flex;
@@ -338,6 +346,26 @@
   &:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+}
+
+.stop {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 var(--spacing-3);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
   }
 }
 

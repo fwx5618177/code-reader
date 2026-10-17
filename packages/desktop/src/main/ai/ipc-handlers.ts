@@ -15,6 +15,14 @@ import {
 import type { AIProviderInput, AIProviderUpdate } from './provider-config';
 
 /**
+ * 进行中的流式对话，用于停止生成
+ * streamId 只在发起窗口内唯一，因此以「窗口 id + streamId」作为键
+ */
+const activeStreams = new Map<string, AbortController>();
+
+const streamKey = (senderId: number, streamId: string) => `${senderId}:${streamId}`;
+
+/**
  * Register all AI-related IPC handlers
  */
 export function registerAIHandlers(): void {
@@ -148,24 +156,41 @@ export function registerAIHandlers(): void {
 
   /**
    * 流式对话：增量文本通过 ai:chatChunk 事件（带 streamId）推送给发起请求的窗口，
-   * invoke 本身在生成结束后返回完整结果，失败时以 invoke 拒绝的形式传回错误
+   * invoke 本身在生成结束后返回完整结果，失败时以 invoke 拒绝的形式传回错误；
+   * 被 ai:chatStreamCancel 停止时正常返回已生成的部分（aborted 为 true）
    */
   ipcMain.handle(
     'ai:chatStream',
     async (event, streamId: string, request: ChatCompletionRequest) => {
+      const key = streamKey(event.sender.id, streamId);
+      const controller = new AbortController();
+      activeStreams.set(key, controller);
       try {
-        return await aiService.chatCompletionStream(request, (delta) => {
-          // 窗口在生成中途关闭时不再推送
-          if (!event.sender.isDestroyed()) {
-            event.sender.send('ai:chatChunk', { streamId, delta });
-          }
-        });
+        return await aiService.chatCompletionStream(
+          request,
+          (delta) => {
+            // 窗口在生成中途关闭时不再推送
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('ai:chatChunk', { streamId, delta });
+            }
+          },
+          controller.signal
+        );
       } catch (error) {
         console.error('[AI:IPC] Chat stream error:', error);
         throw error;
+      } finally {
+        activeStreams.delete(key);
       }
     }
   );
+
+  /**
+   * 停止流式对话；对话已结束时无作用
+   */
+  ipcMain.handle('ai:chatStreamCancel', (event, streamId: string) => {
+    activeStreams.get(streamKey(event.sender.id, streamId))?.abort();
+  });
 
   /**
    * Create embeddings
@@ -233,6 +258,7 @@ export function cleanupAIHandlers(): void {
     'ai:testConnection',
     'ai:chatCompletion',
     'ai:chatStream',
+    'ai:chatStreamCancel',
     'ai:createEmbeddings',
     'ai:summarize',
     'ai:extractTags',

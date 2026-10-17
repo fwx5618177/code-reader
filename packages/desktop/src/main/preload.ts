@@ -52,6 +52,7 @@ const validChannels = [
   'ai:testConnection',
   'ai:chatCompletion',
   'ai:chatStream',
+  'ai:chatStreamCancel',
   'ai:createEmbeddings',
   'ai:summarize',
   'ai:extractTags',
@@ -197,7 +198,7 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('ai:setDefaultTranscriptionProvider', id),
     testConnection: (providerId: string) => ipcRenderer.invoke('ai:testConnection', providerId),
     chatCompletion: (request: unknown) => ipcRenderer.invoke('ai:chatCompletion', request),
-    chatStream: async (request: unknown, onDelta: (delta: string) => void) => {
+    chatStream: (request: unknown, onDelta: (delta: string) => void) => {
       const streamId = `chat-${++chatStreamSeq}`;
       const unsubscribe = subscribe<{ streamId: string; delta: string }>(
         'ai:chatChunk',
@@ -205,12 +206,11 @@ contextBridge.exposeInMainWorld('electron', {
           if (chunk.streamId === streamId) onDelta(chunk.delta);
         }
       );
-      try {
-        // 主进程先发送增量事件再返回结果，同一通道保序，返回时增量已全部送达
-        return await ipcRenderer.invoke('ai:chatStream', streamId, request);
-      } finally {
-        unsubscribe();
-      }
+      // 主进程先发送增量事件再返回结果，同一通道保序，返回时增量已全部送达
+      const result = ipcRenderer.invoke('ai:chatStream', streamId, request).finally(unsubscribe);
+      // AbortSignal 无法穿过 contextBridge，改为返回停止函数
+      const cancel = () => ipcRenderer.invoke('ai:chatStreamCancel', streamId);
+      return { result, cancel };
     },
     createEmbeddings: (request: unknown) => ipcRenderer.invoke('ai:createEmbeddings', request),
     summarize: (request: unknown) => ipcRenderer.invoke('ai:summarize', request),

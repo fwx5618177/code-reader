@@ -91,6 +91,16 @@ interface ChatCompletionResponse {
     totalTokens: number;
   };
   finishReason?: string;
+  /** 流式对话被停止；此时 content 为停止前已生成的部分 */
+  aborted?: boolean;
+}
+
+/** 进行中的流式对话 */
+export interface ChatStreamHandle {
+  /** 生成结束（或被停止）后的完整结果 */
+  result: Promise<ChatCompletionResponse>;
+  /** 停止生成；result 以已生成的部分正常返回 */
+  cancel: () => Promise<void>;
 }
 
 interface EmbeddingRequest {
@@ -350,11 +360,11 @@ interface ElectronAPI {
     setDefaultTranscriptionProvider: (id: string) => Promise<{ success: boolean }>;
     testConnection: (providerId: string) => Promise<TestConnectionResult>;
     chatCompletion: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
-    /** 流式对话：生成过程中逐段回调 onDelta，结束后返回完整结果 */
+    /** 流式对话：生成过程中逐段回调 onDelta，可通过返回的 cancel 停止 */
     chatStream: (
       request: ChatCompletionRequest,
       onDelta: (delta: string) => void
-    ) => Promise<ChatCompletionResponse>;
+    ) => ChatStreamHandle;
     createEmbeddings: (request: EmbeddingRequest) => Promise<EmbeddingResponse>;
     summarize: (request: SummarizeRequest) => Promise<SummarizeResponse>;
     extractTags: (request: ExtractTagsRequest) => Promise<ExtractTagsResponse>;
