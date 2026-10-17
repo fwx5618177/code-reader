@@ -18,6 +18,29 @@ export function isAIProviderType(value: unknown): value is AIProviderType {
   return typeof value === 'string' && (AI_PROVIDER_TYPES as readonly string[]).includes(value);
 }
 
+/** Ollama 的 OpenAI 兼容接口地址（原生 /api 接口与 OpenAI 协议不兼容） */
+export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434/v1';
+
+/** 本地服务商不校验密钥，其余服务商必须配置 API Key */
+export function providerRequiresApiKey(type: AIProviderType): boolean {
+  return type !== 'ollama';
+}
+
+/**
+ * 规范化服务商地址，写入配置与加载已有配置时调用：
+ * Ollama 未填地址时使用本机默认地址，旧预设写入的原生接口 .../api 改写为 OpenAI 兼容的 .../v1；
+ * 其他服务商原样返回（未填则由 SDK 使用官方地址）
+ */
+export function normalizeProviderBaseUrl(
+  type: AIProviderType,
+  baseUrl: string | undefined
+): string | undefined {
+  if (type !== 'ollama') return baseUrl;
+  if (!baseUrl) return OLLAMA_DEFAULT_BASE_URL;
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  return trimmed.endsWith('/api') ? `${trimmed.slice(0, -'/api'.length)}/v1` : trimmed;
+}
+
 export interface AIProviderConfig {
   id: string;
   type: AIProviderType;
@@ -46,7 +69,11 @@ export type AIProviderInput = Omit<AIProviderConfig, 'id'>;
 export type AIProviderUpdate = Partial<Omit<AIProviderConfig, 'id' | 'type'>>;
 
 /** 暴露给渲染进程的服务商视图，不包含密钥本身 */
-export type AIProviderView = Omit<AIProviderConfig, 'apiKey'> & { hasApiKey: boolean };
+export type AIProviderView = Omit<AIProviderConfig, 'apiKey'> & {
+  hasApiKey: boolean;
+  /** 为 false 时未配置密钥也可使用（本地服务商） */
+  requiresApiKey: boolean;
+};
 
 /** 渲染进程读取的配置快照，默认服务商均为主进程实际会使用的生效值 */
 export interface AIConfigSnapshot {

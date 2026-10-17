@@ -333,7 +333,7 @@ export const LLM_PROVIDER_PRESETS: ProviderPreset<AIProviderType, ModelConfig>[]
     name: 'Ollama (Local)',
     description: '本地运行的 LLM (Llama, Mistral 等)',
     icon: 'ollama',
-    defaultBaseUrl: 'http://localhost:11434/api',
+    defaultBaseUrl: 'http://localhost:11434/v1',
     docsUrl: 'https://ollama.ai/docs',
     availableModels: [],
     requiredFields: ['baseUrl'],

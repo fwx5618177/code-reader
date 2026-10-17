@@ -13,6 +13,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from '
 import { readLegacyAIConfig } from './legacy-config';
 import {
   isAIProviderType,
+  normalizeProviderBaseUrl,
+  providerRequiresApiKey,
   type AIConfigSnapshot,
   type AIProviderConfig,
   type AIProviderInput,
@@ -136,6 +138,15 @@ function requireName(name: string | undefined): string {
   return normalized;
 }
 
+/** 无需密钥的服务商仍要给 OpenAI SDK 一个非空值，否则 SDK 会在构造时报错 */
+const LOCAL_API_KEY_PLACEHOLDER = 'local';
+
+function assertApiKey(provider: AIProviderConfig): void {
+  if (providerRequiresApiKey(provider.type) && !provider.apiKey) {
+    throw new Error(`No API key configured for provider: ${provider.name}`);
+  }
+}
+
 class AIConfigManager {
   private configPath: string;
   private config: AIConfigFile;
@@ -151,6 +162,23 @@ class AIConfigManager {
     this.configPath = join(configDir, 'ai-config.json');
     this.config = this.loadConfig();
     this.importLegacyConfig(userDataPath);
+    this.normalizeStoredBaseUrls();
+  }
+
+  /**
+   * 修正已保存的服务商地址（如旧版 Ollama 预设的 /api 地址），有变化时写回
+   */
+  private normalizeStoredBaseUrls(): void {
+    let changed = false;
+    this.config.providers = this.config.providers.map((provider) => {
+      const baseUrl = normalizeProviderBaseUrl(provider.type, provider.baseUrl);
+      if (baseUrl === provider.baseUrl) return provider;
+      changed = true;
+      return { ...provider, baseUrl };
+    });
+    if (changed) {
+      this.saveConfig();
+    }
   }
 
   /**
@@ -251,7 +279,7 @@ class AIConfigManager {
       id: randomUUID(),
       type: input.type,
       name: requireName(input.name),
-      baseUrl: normalizeOptional(input.baseUrl),
+      baseUrl: normalizeProviderBaseUrl(input.type, normalizeOptional(input.baseUrl)),
       apiKey: normalizeOptional(input.apiKey),
       isEnabled: input.isEnabled,
       defaultModel: normalizeOptional(input.defaultModel),
@@ -280,7 +308,7 @@ class AIConfigManager {
       name: updates.name === undefined ? current.name : requireName(updates.name),
       apiKey: normalizeOptional(updates.apiKey) ?? current.apiKey,
       isEnabled: updates.isEnabled ?? current.isEnabled,
-      baseUrl: optional('baseUrl'),
+      baseUrl: normalizeProviderBaseUrl(current.type, optional('baseUrl')),
       defaultModel: optional('defaultModel'),
       embeddingModel: optional('embeddingModel'),
       transcriptionModel: optional('transcriptionModel'),
@@ -338,7 +366,7 @@ class AIConfigManager {
 }
 
 function toProviderView({ apiKey, ...rest }: AIProviderConfig): AIProviderView {
-  return { ...rest, hasApiKey: Boolean(apiKey) };
+  return { ...rest, hasApiKey: Boolean(apiKey), requiresApiKey: providerRequiresApiKey(rest.type) };
 }
 
 // ================================
@@ -405,7 +433,7 @@ export class AIService {
     let client = this.openaiClients.get(provider.id);
     if (!client) {
       client = new OpenAI({
-        apiKey: provider.apiKey,
+        apiKey: provider.apiKey ?? LOCAL_API_KEY_PLACEHOLDER,
         baseURL: provider.baseUrl,
       });
       this.openaiClients.set(provider.id, client);
@@ -438,9 +466,7 @@ export class AIService {
       throw new Error('No AI provider configured');
     }
 
-    if (!provider.apiKey) {
-      throw new Error(`No API key configured for provider: ${provider.name}`);
-    }
+    assertApiKey(provider);
 
     const model = request.model || provider.defaultModel;
     if (!model) {
@@ -543,9 +569,7 @@ export class AIService {
       throw new Error('No embedding provider configured');
     }
 
-    if (!provider.apiKey) {
-      throw new Error(`No API key configured for provider: ${provider.name}`);
-    }
+    assertApiKey(provider);
 
     const model = request.model || provider.embeddingModel || 'text-embedding-3-small';
 
@@ -678,9 +702,7 @@ export class AIService {
       throw new Error('No transcription provider configured');
     }
 
-    if (!provider.apiKey) {
-      throw new Error(`No API key configured for provider: ${provider.name}`);
-    }
+    assertApiKey(provider);
 
     if (!provider.transcriptionModel) {
       throw new Error(`No transcription model configured for provider: ${provider.name}`);
@@ -719,10 +741,6 @@ export class AIService {
     const provider = this.configManager.getProvider(providerId);
     if (!provider) {
       return { success: false, error: 'Provider not found' };
-    }
-
-    if (!provider.apiKey) {
-      return { success: false, error: 'No API key configured' };
     }
 
     const startTime = Date.now();

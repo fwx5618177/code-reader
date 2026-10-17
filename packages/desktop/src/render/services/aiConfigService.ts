@@ -119,11 +119,13 @@ class AIConfigService {
   }
 
   /**
-   * 是否存在可用的对话服务商（已启用的默认服务商且已配置密钥）
+   * 是否存在可用的对话服务商（已启用的默认服务商，且已配置密钥或无需密钥）
    */
   async hasUsableProvider(): Promise<boolean> {
     const { providers, defaultProviderId } = await this.refresh();
-    return providers.some((p) => p.id === defaultProviderId && p.hasApiKey);
+    return providers.some(
+      (p) => p.id === defaultProviderId && (p.hasApiKey || !p.requiresApiKey)
+    );
   }
 
   /**

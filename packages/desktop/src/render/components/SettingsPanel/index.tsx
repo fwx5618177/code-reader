@@ -683,7 +683,13 @@ const ProviderCard: React.FC<ProviderCardProps> = ({
                 className={`${styles.detailInput} ${styles.apiKeyInput}`}
                 value={draft.apiKey}
                 onChange={(e) => updateDraft('apiKey', e.target.value)}
-                placeholder={provider.hasApiKey ? '已保存，留空保持不变' : '未设置'}
+                placeholder={
+                  provider.hasApiKey
+                    ? '已保存，留空保持不变'
+                    : provider.requiresApiKey
+                      ? '未设置'
+                      : '本地服务无需密钥'
+                }
                 autoComplete="off"
               />
               <button
@@ -814,6 +820,7 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ onClose, onSuccess 
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const selectedPresetData = LLM_PROVIDER_PRESETS.find((p) => p.type === selectedPreset);
+  const apiKeyRequired = selectedPresetData?.requiredFields.includes('apiKey') ?? true;
 
   const handleSelectPreset = (type: AIProviderType) => {
     const defaults = aiConfigService.getProviderDefaults(type);
@@ -827,7 +834,7 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ onClose, onSuccess 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPreset || !apiKey) return;
+    if (!selectedPreset || (apiKeyRequired && !apiKey)) return;
 
     setIsSubmitting(true);
     setSubmitError(null);
@@ -903,7 +910,8 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ onClose, onSuccess 
 
                 <div className={styles.formGroup}>
                   <label htmlFor="api-key" className={styles.formLabel}>
-                    API Key <span className={styles.formRequired}>*</span>
+                    API Key{' '}
+                    {apiKeyRequired ? <span className={styles.formRequired}>*</span> : '(可选)'}
                   </label>
                   <input
                     id="api-key"
@@ -911,11 +919,11 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ onClose, onSuccess 
                     className={styles.formInput}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="输入 API Key"
+                    placeholder={apiKeyRequired ? '输入 API Key' : '本地服务无需密钥'}
                     autoComplete="off"
-                    required
+                    required={apiKeyRequired}
                   />
-                  {selectedPresetData?.docsUrl && (
+                  {apiKeyRequired && selectedPresetData?.docsUrl && (
                     <a
                       href={selectedPresetData.docsUrl}
                       target="_blank"
@@ -938,7 +946,11 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ onClose, onSuccess 
                   id="chat-model"
                   label="对话模型"
                   value={defaultModel}
-                  placeholder="用于摘要、标签与问答"
+                  placeholder={
+                    selectedPreset === 'ollama'
+                      ? '本地已拉取的模型名，如 qwen2.5:7b'
+                      : '用于摘要、标签与问答'
+                  }
                   onChange={setDefaultModel}
                 />
                 <FormField
@@ -966,7 +978,7 @@ const AddProviderModal: React.FC<AddProviderModalProps> = ({ onClose, onSuccess 
             <button
               type="submit"
               className={styles.submitBtn}
-              disabled={!selectedPreset || !apiKey || isSubmitting}
+              disabled={!selectedPreset || (apiKeyRequired && !apiKey) || isSubmitting}
             >
               <Save size={14} />
               <span>{isSubmitting ? '保存中...' : '保存'}</span>

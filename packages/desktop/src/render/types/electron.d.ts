@@ -54,8 +54,11 @@ type AIProviderInput = Omit<AIProviderConfig, 'id'>;
 /** 字段缺省表示不变；apiKey 为空保留原密钥；baseUrl/模型为空字符串表示清除 */
 type AIProviderUpdate = Partial<Omit<AIProviderConfig, 'id' | 'type'>>;
 
-/** 渲染进程可见的服务商视图，不含密钥 */
-type AIProviderView = Omit<AIProviderConfig, 'apiKey'> & { hasApiKey: boolean };
+/** 渲染进程可见的服务商视图，不含密钥；requiresApiKey 为 false 时无密钥也可用（本地服务商） */
+type AIProviderView = Omit<AIProviderConfig, 'apiKey'> & {
+  hasApiKey: boolean;
+  requiresApiKey: boolean;
+};
 
 /** 配置快照，默认服务商为主进程实际生效的值 */
 interface AIConfigSnapshot {

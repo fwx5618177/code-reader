@@ -258,6 +258,8 @@ Markdown 文档没有“编辑 / 预览”的割裂：你输入的语法会立�
 
 没有配置服务商时，所有内容照常保存，只是没有自动整理；知识库与问答界面会提示你去配置。API Key 只保存在本机。
 
+**使用本地模型（Ollama）**：安装 [Ollama](https://ollama.com) 并拉取模型（如 `ollama pull qwen2.5:7b`、向量模型 `ollama pull nomic-embed-text`），在添加服务商时选择 Ollama，API Key 留空，对话模型填拉取的模型名。地址默认是 `http://localhost:11434/v1`（Ollama 的 OpenAI 兼容接口），旧版本保存的 `.../api` 地址会自动改正。Ollama 不提供转写接口。
+
 ---
 
 ## 8. 双向链接与知识图谱
