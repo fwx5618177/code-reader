@@ -13,7 +13,8 @@ const HISTORY_TURNS = 6;
 export interface AskTurn {
   id: string;
   question: string;
-  status: 'pending' | 'done' | 'error';
+  /** pending：检索中；streaming：回答生成中（answer 为已收到的部分） */
+  status: 'pending' | 'streaming' | 'done' | 'error';
   answer?: string;
   sources?: AnswerSource[];
   error?: string;
@@ -51,11 +52,37 @@ export function useAskConversation(): AskConversation {
 
   const run = useCallback(
     (id: string, question: string, history: ChatMessage[]) => {
-      askKnowledgeBase(question, history)
-        .then(({ answer, sources }) => patch(id, { status: 'done', answer, sources }))
-        .catch((error: unknown) =>
-          patch(id, { status: 'error', error: error instanceof Error ? error.message : String(error) })
-        );
+      // 增量按帧合并后再写入状态，避免每个 token 触发一次渲染
+      let partial = '';
+      let frame = 0;
+      const flush = () => {
+        frame = 0;
+        patch(id, { answer: partial });
+      };
+      const cancelFlush = () => {
+        if (frame) cancelAnimationFrame(frame);
+        frame = 0;
+      };
+
+      askKnowledgeBase(question, history, {
+        onSources: (sources) => patch(id, { status: 'streaming', sources, answer: '' }),
+        onDelta: (delta) => {
+          partial += delta;
+          if (!frame) frame = requestAnimationFrame(flush);
+        },
+      })
+        .then(({ answer, sources }) => {
+          cancelFlush();
+          patch(id, { status: 'done', answer, sources });
+        })
+        .catch((error: unknown) => {
+          cancelFlush();
+          patch(id, {
+            status: 'error',
+            answer: undefined,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
     },
     [patch]
   );
@@ -80,5 +107,10 @@ export function useAskConversation(): AskConversation {
     [patch, run]
   );
 
-  return { turns, pending: turns.some((turn) => turn.status === 'pending'), ask, retry };
+  return {
+    turns,
+    pending: turns.some((turn) => turn.status === 'pending' || turn.status === 'streaming'),
+    ask,
+    retry,
+  };
 }

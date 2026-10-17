@@ -147,6 +147,27 @@ export function registerAIHandlers(): void {
   });
 
   /**
+   * 流式对话：增量文本通过 ai:chatChunk 事件（带 streamId）推送给发起请求的窗口，
+   * invoke 本身在生成结束后返回完整结果，失败时以 invoke 拒绝的形式传回错误
+   */
+  ipcMain.handle(
+    'ai:chatStream',
+    async (event, streamId: string, request: ChatCompletionRequest) => {
+      try {
+        return await aiService.chatCompletionStream(request, (delta) => {
+          // 窗口在生成中途关闭时不再推送
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('ai:chatChunk', { streamId, delta });
+          }
+        });
+      } catch (error) {
+        console.error('[AI:IPC] Chat stream error:', error);
+        throw error;
+      }
+    }
+  );
+
+  /**
    * Create embeddings
    */
   ipcMain.handle('ai:createEmbeddings', async (_event, request: EmbeddingRequest) => {
@@ -211,6 +232,7 @@ export function cleanupAIHandlers(): void {
     'ai:setDefaultTranscriptionProvider',
     'ai:testConnection',
     'ai:chatCompletion',
+    'ai:chatStream',
     'ai:createEmbeddings',
     'ai:summarize',
     'ai:extractTags',

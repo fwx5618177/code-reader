@@ -51,6 +51,7 @@ const validChannels = [
   'ai:setDefaultTranscriptionProvider',
   'ai:testConnection',
   'ai:chatCompletion',
+  'ai:chatStream',
   'ai:createEmbeddings',
   'ai:summarize',
   'ai:extractTags',
@@ -93,7 +94,11 @@ const eventChannels = [
   'agent:taskCompleted',
   'agent:taskFailed',
   'agent:itemStatusChanged',
+  'ai:chatChunk',
 ];
+
+/** 流式对话序号；事件只发往发起请求的窗口，窗口内唯一即可 */
+let chatStreamSeq = 0;
 
 /**
  * 订阅主进程推送的事件，返回取消订阅函数
@@ -188,6 +193,21 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('ai:setDefaultTranscriptionProvider', id),
     testConnection: (providerId: string) => ipcRenderer.invoke('ai:testConnection', providerId),
     chatCompletion: (request: unknown) => ipcRenderer.invoke('ai:chatCompletion', request),
+    chatStream: async (request: unknown, onDelta: (delta: string) => void) => {
+      const streamId = `chat-${++chatStreamSeq}`;
+      const unsubscribe = subscribe<{ streamId: string; delta: string }>(
+        'ai:chatChunk',
+        (chunk) => {
+          if (chunk.streamId === streamId) onDelta(chunk.delta);
+        }
+      );
+      try {
+        // 主进程先发送增量事件再返回结果，同一通道保序，返回时增量已全部送达
+        return await ipcRenderer.invoke('ai:chatStream', streamId, request);
+      } finally {
+        unsubscribe();
+      }
+    },
     createEmbeddings: (request: unknown) => ipcRenderer.invoke('ai:createEmbeddings', request),
     summarize: (request: unknown) => ipcRenderer.invoke('ai:summarize', request),
     extractTags: (request: unknown) => ipcRenderer.invoke('ai:extractTags', request),

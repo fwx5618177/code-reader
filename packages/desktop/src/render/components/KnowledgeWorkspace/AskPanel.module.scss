@@ -18,6 +18,12 @@
   }
 }
 
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .panel {
   display: flex;
   flex-direction: column;
@@ -145,6 +151,17 @@
     background-color: var(--accent-primary);
     color: var(--text-on-accent);
   }
+}
+
+// 生成中的闪烁光标
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  background-color: var(--accent-primary);
+  vertical-align: -0.15em;
+  animation: caret-blink 1s steps(1) infinite;
 }
 
 .sources {

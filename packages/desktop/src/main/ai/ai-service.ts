@@ -37,7 +37,6 @@ export interface ChatCompletionRequest {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
-  stream?: boolean;
 }
 
 export interface ChatCompletionResponse {
@@ -458,6 +457,30 @@ export class AIService {
   // ================================
 
   async chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { provider, model } = this.resolveChatTarget(request);
+    return provider.type === 'anthropic'
+      ? this.anthropicChatCompletion(provider, request, model)
+      : this.openaiChatCompletion(provider, request, model);
+  }
+
+  /**
+   * 流式对话：每收到一段文本调用 onDelta，结束后返回完整结果
+   */
+  async chatCompletionStream(
+    request: ChatCompletionRequest,
+    onDelta: (delta: string) => void
+  ): Promise<ChatCompletionResponse> {
+    const { provider, model } = this.resolveChatTarget(request);
+    return provider.type === 'anthropic'
+      ? this.anthropicChatCompletionStream(provider, request, model, onDelta)
+      : this.openaiChatCompletionStream(provider, request, model, onDelta);
+  }
+
+  /** 解析本次对话使用的服务商与模型；除 anthropic 外均走 OpenAI 兼容接口 */
+  private resolveChatTarget(request: ChatCompletionRequest): {
+    provider: AIProviderConfig;
+    model: string;
+  } {
     const provider = request.providerId
       ? this.configManager.getProvider(request.providerId)
       : this.configManager.getDefaultProvider();
@@ -472,18 +495,11 @@ export class AIService {
     if (!model) {
       throw new Error('No model specified');
     }
+    return { provider, model };
+  }
 
-    switch (provider.type) {
-      case 'anthropic':
-        return this.anthropicChatCompletion(provider, request, model);
-      case 'openai':
-      case 'deepseek':
-      case 'moonshot':
-      case 'zhipu':
-      case 'ollama':
-      default:
-        return this.openaiChatCompletion(provider, request, model);
-    }
+  private openaiMessages(request: ChatCompletionRequest) {
+    return request.messages.map((m) => ({ role: m.role, content: m.content }));
   }
 
   private async openaiChatCompletion(
@@ -495,10 +511,7 @@ export class AIService {
 
     const response = await client.chat.completions.create({
       model,
-      messages: request.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      messages: this.openaiMessages(request),
       temperature: request.temperature ?? 0.7,
       max_tokens: request.maxTokens,
     });
@@ -520,27 +533,55 @@ export class AIService {
     };
   }
 
-  private async anthropicChatCompletion(
+  private async openaiChatCompletionStream(
     provider: AIProviderConfig,
     request: ChatCompletionRequest,
-    model: string
+    model: string,
+    onDelta: (delta: string) => void
   ): Promise<ChatCompletionResponse> {
-    const client = this.getAnthropicClient(provider);
+    const client = this.getOpenAIClient(provider);
 
-    // Separate system message from other messages
+    const stream = await client.chat.completions.create({
+      model,
+      messages: this.openaiMessages(request),
+      temperature: request.temperature ?? 0.7,
+      max_tokens: request.maxTokens,
+      stream: true,
+    });
+
+    let id = '';
+    let responseModel = model;
+    let content = '';
+    let finishReason: string | undefined;
+    for await (const chunk of stream) {
+      id = chunk.id || id;
+      responseModel = chunk.model || responseModel;
+      const choice = chunk.choices[0];
+      const delta = choice?.delta?.content;
+      if (delta) {
+        content += delta;
+        onDelta(delta);
+      }
+      finishReason = choice?.finish_reason || finishReason;
+    }
+
+    return { id, content, model: responseModel, finishReason };
+  }
+
+  private anthropicRequest(request: ChatCompletionRequest, model: string) {
+    // system 消息在 Anthropic 接口中是独立参数
     const systemMessage = request.messages.find((m) => m.role === 'system');
-    const otherMessages = request.messages.filter((m) => m.role !== 'system');
-
-    const response = await client.messages.create({
+    return {
       model,
       max_tokens: request.maxTokens || 4096,
       system: systemMessage?.content,
-      messages: otherMessages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
-    });
+      messages: request.messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    };
+  }
 
+  private toAnthropicResponse(response: Anthropic.Message): ChatCompletionResponse {
     const textContent = response.content.find((c) => c.type === 'text');
 
     return {
@@ -554,6 +595,28 @@ export class AIService {
       },
       finishReason: response.stop_reason || undefined,
     };
+  }
+
+  private async anthropicChatCompletion(
+    provider: AIProviderConfig,
+    request: ChatCompletionRequest,
+    model: string
+  ): Promise<ChatCompletionResponse> {
+    const client = this.getAnthropicClient(provider);
+    const response = await client.messages.create(this.anthropicRequest(request, model));
+    return this.toAnthropicResponse(response);
+  }
+
+  private async anthropicChatCompletionStream(
+    provider: AIProviderConfig,
+    request: ChatCompletionRequest,
+    model: string,
+    onDelta: (delta: string) => void
+  ): Promise<ChatCompletionResponse> {
+    const client = this.getAnthropicClient(provider);
+    const stream = client.messages.stream(this.anthropicRequest(request, model));
+    stream.on('text', onDelta);
+    return this.toAnthropicResponse(await stream.finalMessage());
   }
 
   // ================================

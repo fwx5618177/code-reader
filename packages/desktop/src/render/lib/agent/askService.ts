@@ -22,6 +22,13 @@ export interface AskResult {
   sources: AnswerSource[];
 }
 
+export interface AskHandlers {
+  /** 检索完成、开始生成回答时回调来源列表 */
+  onSources?: (sources: AnswerSource[]) => void;
+  /** 回答的增量文本 */
+  onDelta?: (delta: string) => void;
+}
+
 /** 召回条目数 */
 const RETRIEVE_LIMIT = 6;
 
@@ -59,12 +66,14 @@ async function retrieve(question: string): Promise<KnowledgeItem[]> {
 }
 
 /**
- * 向知识库提问
+ * 向知识库提问，回答以流式生成
  * @param history 之前的问答轮次（用于追问）
+ * @param handlers 来源与增量文本回调
  */
 export async function askKnowledgeBase(
   question: string,
-  history: ChatMessage[] = []
+  history: ChatMessage[] = [],
+  handlers: AskHandlers = {}
 ): Promise<AskResult> {
   const items = await retrieve(question);
   const sources: AnswerSource[] = items.map((item, i) => ({
@@ -81,14 +90,19 @@ export async function askKnowledgeBase(
           .join('\n\n')
       : '（没有检索到相关资料）';
 
-  const response = await window.electron.ai.chatCompletion({
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...history,
-      { role: 'user', content: `资料：\n${context}\n\n问题：${question}` },
-    ],
-    temperature: 0.3,
-  });
+  handlers.onSources?.(sources);
+
+  const response = await window.electron.ai.chatStream(
+    {
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...history,
+        { role: 'user', content: `资料：\n${context}\n\n问题：${question}` },
+      ],
+      temperature: 0.3,
+    },
+    (delta) => handlers.onDelta?.(delta)
+  );
 
   return { answer: response.content, sources };
 }

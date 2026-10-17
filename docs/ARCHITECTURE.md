@@ -52,7 +52,7 @@
 | `lib/latex` | LaTeX 文档模型、增量引擎、渲染器、Worker、高度映射与滚动同步（见第 6 节） |
 | `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax）：TeX 原子间距、显示/行内样式、按内容高度伸缩的分隔符、严格模式校验 |
 | `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`）、快速收集与附件保存、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、`useKnowledgeBase` |
-| `lib/agent` | Agent 事件订阅与条目处理活动（`useAgentActivity`）、知识库问答（混合检索 + 引用） |
+| `lib/agent` | Agent 事件订阅与条目处理活动（`useAgentActivity`）、知识库问答（混合检索 + 引用，经 `ai:chatStream` 流式生成，增量以 `ai:chatChunk` 事件按 streamId 推送） |
 | `lib/links` | 双向链接索引（按条目更新时间增量解析）、反向链接、未解析链接、图谱数据、Barnes–Hut 力导向布局、`links` 表同步 |
 | `lib/reading` | 阅读状态（书架、进度、高亮，存于条目 `metadata.reading`）、排版设置、摘录生成 |
 | `lib/documents` | 文档 CRUD、文件类型（markdown / latex / plain）、`useDocuments`；`versions/` 为版本历史（reducer + service + `useVersions`） |

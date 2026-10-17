@@ -79,7 +79,6 @@ interface ChatCompletionRequest {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
-  stream?: boolean;
 }
 
 interface ChatCompletionResponse {
@@ -351,6 +350,11 @@ interface ElectronAPI {
     setDefaultTranscriptionProvider: (id: string) => Promise<{ success: boolean }>;
     testConnection: (providerId: string) => Promise<TestConnectionResult>;
     chatCompletion: (request: ChatCompletionRequest) => Promise<ChatCompletionResponse>;
+    /** 流式对话：生成过程中逐段回调 onDelta，结束后返回完整结果 */
+    chatStream: (
+      request: ChatCompletionRequest,
+      onDelta: (delta: string) => void
+    ) => Promise<ChatCompletionResponse>;
     createEmbeddings: (request: EmbeddingRequest) => Promise<EmbeddingResponse>;
     summarize: (request: SummarizeRequest) => Promise<SummarizeResponse>;
     extractTags: (request: ExtractTagsRequest) => Promise<ExtractTagsResponse>;

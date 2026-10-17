@@ -39,11 +39,13 @@ const sourceTitle = (source: AnswerSource) => displayTitle(source.title) || '未
 const Answer: React.FC<{
   answer: string;
   sources: AnswerSource[];
+  /** 生成中：末尾显示光标，来源列表待完成后再显示 */
+  streaming: boolean;
   onSelectItem: (id: string) => void;
-}> = ({ answer, sources, onSelectItem }) => (
+}> = ({ answer, sources, streaming, onSelectItem }) => (
   <>
-    <div className={styles.answer}>
-      {parseAnswer(answer, sources).map((paragraph, p) => (
+    <div className={styles.answer} aria-busy={streaming}>
+      {parseAnswer(answer, sources).map((paragraph, p, paragraphs) => (
         <p key={p}>
           {paragraph.map((segment, s) =>
             segment.kind === 'text' ? (
@@ -60,10 +62,11 @@ const Answer: React.FC<{
               </button>
             )
           )}
+          {streaming && p === paragraphs.length - 1 && <span className={styles.caret} />}
         </p>
       ))}
     </div>
-    {sources.length > 0 && (
+    {!streaming && sources.length > 0 && (
       <ol className={styles.sources} aria-label="来源">
         {sources.map((source) => {
           const Icon = ITEM_TYPE_ICONS[source.type];
@@ -86,36 +89,45 @@ const Turn: React.FC<{
   turn: AskTurn;
   onRetry: (id: string) => void;
   onSelectItem: (id: string) => void;
-}> = ({ turn, onRetry, onSelectItem }) => (
-  <>
-    <div className={styles.question}>{turn.question}</div>
-    <div className={styles.reply}>
-      <Bot size={16} className={styles.avatar} />
-      <div className={styles.replyBody}>
-        {turn.status === 'pending' && (
-          <span className={styles.typing} aria-label="正在思考">
-            <span />
-            <span />
-            <span />
-          </span>
-        )}
-        {turn.status === 'done' && turn.answer !== undefined && (
-          <Answer answer={turn.answer} sources={turn.sources ?? []} onSelectItem={onSelectItem} />
-        )}
-        {turn.status === 'error' && (
-          <div className={styles.error} role="alert">
-            <AlertCircle size={13} />
-            <span>回答失败：{turn.error}</span>
-            <button type="button" className={styles.retry} onClick={() => onRetry(turn.id)}>
-              <RefreshCw size={12} />
-              重试
-            </button>
-          </div>
-        )}
+}> = ({ turn, onRetry, onSelectItem }) => {
+  const streaming = turn.status === 'streaming';
+  const hasText = Boolean(turn.answer);
+  return (
+    <>
+      <div className={styles.question}>{turn.question}</div>
+      <div className={styles.reply}>
+        <Bot size={16} className={styles.avatar} />
+        <div className={styles.replyBody}>
+          {(turn.status === 'pending' || (streaming && !hasText)) && (
+            <span className={styles.typing} aria-label="正在思考">
+              <span />
+              <span />
+              <span />
+            </span>
+          )}
+          {(turn.status === 'done' || (streaming && hasText)) && (
+            <Answer
+              answer={turn.answer ?? ''}
+              sources={turn.sources ?? []}
+              streaming={streaming}
+              onSelectItem={onSelectItem}
+            />
+          )}
+          {turn.status === 'error' && (
+            <div className={styles.error} role="alert">
+              <AlertCircle size={13} />
+              <span>回答失败：{turn.error}</span>
+              <button type="button" className={styles.retry} onClick={() => onRetry(turn.id)}>
+                <RefreshCw size={12} />
+                重试
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
-  </>
-);
+    </>
+  );
+};
 
 export interface AskPanelProps {
   conversation: AskConversation;
@@ -129,7 +141,7 @@ export const AskPanel: React.FC<AskPanelProps> = ({ conversation, onSelectItem, 
   const [input, setInput] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
 
-  // 新消息或回答到达时滚动到底部
+  // 新消息或回答增量到达时滚动到底部
   useEffect(() => {
     const el = messagesRef.current;
     if (el) el.scrollTop = el.scrollHeight;
