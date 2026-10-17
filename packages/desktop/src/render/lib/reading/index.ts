@@ -49,5 +49,6 @@ export {
   applyHighlightMarks,
   clearHighlightMarks,
   findHighlightMark,
+  selectedText,
   HIGHLIGHT_ID_ATTR,
 } from './highlight-dom';

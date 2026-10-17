@@ -72,6 +72,30 @@ describe('getReadingState', () => {
   it('非有限数值的进度被忽略', () => {
     expect(getReadingState(makeItem({ metadata: { reading: { progress: NaN } } }))).toEqual({});
   });
+
+  it('高亮页码必须是不小于 1 的整数', () => {
+    const createdAt = '2026-10-01T00:00:00.000Z';
+    const state = getReadingState(
+      makeItem({
+        metadata: {
+          reading: {
+            highlights: [
+              { id: 'p3', text: '第三页', createdAt, page: 3 },
+              { id: 'p0', text: '零', createdAt, page: 0 },
+              { id: 'pf', text: '小数', createdAt, page: 1.5 },
+              { id: 'ps', text: '字符串', createdAt, page: '2' },
+            ],
+          },
+        },
+      })
+    );
+    expect(state.highlights).toEqual([
+      { id: 'p3', text: '第三页', createdAt, page: 3 },
+      { id: 'p0', text: '零', createdAt },
+      { id: 'pf', text: '小数', createdAt },
+      { id: 'ps', text: '字符串', createdAt },
+    ]);
+  });
 });
 
 describe('patchReadingState / withReadingState', () => {
@@ -233,6 +257,16 @@ describe('buildExcerptMarkdown', () => {
     expect(buildExcerptMarkdown({ quote: '  原文  ', note: '   ', source: { title: '笔记.txt' } })).toBe(
       '> 原文\n\n来源：[[笔记]]\n'
     );
+  });
+
+  it('PDF 摘录在来源后注明页码', () => {
+    expect(
+      buildExcerptMarkdown({
+        quote: '原文',
+        source: { title: '论文.pdf', sourceUrl: 'https://example.com/p.pdf' },
+        page: 12,
+      })
+    ).toBe('> 原文\n\n来源：[[论文.pdf]] · 第 12 页 · [原文链接](https://example.com/p.pdf)\n');
   });
 });
 

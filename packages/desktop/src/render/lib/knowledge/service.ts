@@ -15,6 +15,7 @@ import { knowledgeRepository } from './repository';
 import { migrateLegacyKnowledgeStore } from './legacy-migration';
 import { extractDocumentText, type ExtractedDocument } from './document-text';
 import { clipErrorMessage, clipWebPage, normalizeWebUrl, type WebClip } from './web-clip';
+import { localizeClipImages, type LocalizedClip } from './clip-images';
 
 let readyPromise: Promise<void> | null = null;
 
@@ -191,8 +192,29 @@ async function extractAttachmentText(
 }
 
 /**
+ * 剪藏正文中的图片保存到附件目录，每张创建为同一文件夹下的图片条目（正文以 ![[标题]] 嵌入）。
+ * 图片条目不提交 Agent 处理：它们只是剪藏正文的组成部分
+ */
+async function saveClipImages(clip: WebClip, title: string, folderId?: string): Promise<LocalizedClip> {
+  const settings = await settingsService.get();
+  const localized = await localizeClipImages(clip.markdown, title, settings.attachmentsPath);
+  for (const image of localized.images) {
+    await knowledgeRepository.create({
+      title: image.title,
+      type: 'image',
+      filePath: image.filePath,
+      fileSize: image.size,
+      mimeType: image.mimeType,
+      sourceUrl: image.url,
+      folderId,
+    });
+  }
+  return localized;
+}
+
+/**
  * 快速收集：保存附件、写入条目与标签，并提交 Agent 处理。
- * 网址默认剪藏正文（失败时保存为书签），PDF / EPUB 提取全文写入正文。
+ * 网址默认剪藏正文（失败时保存为书签）并把正文图片保存到本地，PDF / EPUB 提取全文写入正文。
  */
 export async function captureQuickInput(data: QuickInputData): Promise<CaptureResult> {
   await ensureKnowledgeReady();
@@ -207,12 +229,13 @@ export async function captureQuickInput(data: QuickInputData): Promise<CaptureRe
     : { extracted: null, warning: undefined };
   const title = resolveTitle(data, type, attachment, webClip?.title ?? extracted?.title);
   const userText = data.type === 'url' ? '' : data.content;
+  const clipContent = webClip ? await saveClipImages(webClip, title, data.folderId) : null;
 
   const item = await knowledgeRepository.create({
     // 文本笔记同时是写作文档，使用 .md 文件名以便在写作模式中打开
     title: type === 'note' ? ensureExtension(title, 'markdown') : title,
     type,
-    content: webClip?.markdown ?? ([userText, extracted?.text].filter(Boolean).join('\n\n') || undefined),
+    content: clipContent?.markdown ?? ([userText, extracted?.text].filter(Boolean).join('\n\n') || undefined),
     sourceUrl: webClip?.url ?? data.sourceUrl,
     folderId: data.folderId,
     filePath,
@@ -237,6 +260,9 @@ export async function captureQuickInput(data: QuickInputData): Promise<CaptureRe
   const processing = await requestProcessing(item);
   const clipWarning =
     clipped && 'error' in clipped ? `网页剪藏失败（${clipped.error}），已保存为书签` : undefined;
-  const warning = clipWarning ?? extractWarning;
+  const imageWarning = clipContent?.failed
+    ? `网页已剪藏，但有 ${clipContent.failed} 张图片下载失败，已保留原始链接`
+    : undefined;
+  const warning = clipWarning ?? imageWarning ?? extractWarning;
   return { item, processing, ...(warning ? { warning } : {}) };
 }

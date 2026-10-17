@@ -2,6 +2,7 @@
 // 阅读视图
 // 舒适排版的正文阅读：目录与滚动联动、阅读进度自动保存与恢复、
 // 选中文字高亮或摘录到知识库、AI 导读与附件内嵌预览。
+// PDF 在应用内分页阅读：目录来自文档书签，高亮按页保存并在该页渲染后标记。
 //
 // 阅读状态（metadata.reading）在视图打开期间以本地状态为准：
 // 每次写回都基于最新的条目元数据合并，只替换 reading 键。
@@ -54,17 +55,20 @@ import {
   type ReadingState,
 } from '../../lib/reading';
 import { generateUUID } from '../../lib/utils/id';
+import { isWritingDocument } from '../../lib/documents/constants';
 import { bookProgress, EPUB_TARGET_ATTR } from '../../lib/reading/epub';
 import type { KnowledgeItem } from '../../types/knowledge';
 import { useDismiss, useLatestRef, useReadingSettings } from './hooks';
 import { hydrateEmbedImages } from './embed-images';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from './item-type';
-import { ReadingAttachment } from './ReadingAttachment';
+import { PdfAttachment, ReadingAttachment } from './ReadingAttachment';
+import type { PdfTextSelection } from './PdfReader';
 import { ReadingOutline } from './ReadingOutline';
 import { ReadingSettingsPanel } from './ReadingSettingsPanel';
 import { SelectionToolbar, type SelectionAnchor } from './SelectionToolbar';
 import { openExternal } from './system';
 import { isEpubChapterView, useEpubReader, type EpubScrollTarget } from './useEpubReader';
+import { usePdfReader } from './usePdfReader';
 import styles from './ReadingView.module.scss';
 
 /** 新建摘录笔记的输入 */
@@ -196,6 +200,8 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     getReadingStatus(readingRef.current) === 'reading' ? readingRef.current.progress ?? 0 : 0
   );
   const epubRef = useLatestRef(epub);
+  const pdf = usePdfReader(attachmentKind === 'pdf' ? item.filePath : undefined);
+  const { readerRef: pdfReaderRef } = pdf;
   const rendered: RenderedDocument | null = epub.view ?? markdownRendered;
   const showTranscript = item.type === 'audio' && !!item.transcript;
   const showGuide = !!item.summary || (item.keyPoints?.length ?? 0) > 0;
@@ -351,11 +357,25 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
 
   // ---------- 高亮与摘录 ----------
 
+  /** 在选区（视口坐标）上方显示工具栏，位置换算为相对正文内容容器 */
+  const showSelectionToolbar = useCallback((rect: DOMRect, text: string, page?: number) => {
+    const contentEl = contentRef.current;
+    if (!contentEl) return;
+    const base = contentEl.getBoundingClientRect();
+    const center = rect.left + rect.width / 2 - base.left;
+    setSelectionAnchor({
+      text,
+      page,
+      top: rect.top - base.top,
+      bottom: rect.bottom - base.top,
+      left: Math.min(Math.max(center, TOOLBAR_HALF_WIDTH), base.width - TOOLBAR_HALF_WIDTH),
+    });
+  }, []);
+
   const handleSelectionEnd = useCallback(() => {
     const articleEl = articleRef.current;
-    const contentEl = contentRef.current;
     const selection = window.getSelection();
-    if (!articleEl || !contentEl || !selection || selection.isCollapsed || selection.rangeCount === 0) {
+    if (!articleEl || !selection || selection.isCollapsed || selection.rangeCount === 0) {
       setSelectionAnchor(null);
       return;
     }
@@ -365,16 +385,16 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
       setSelectionAnchor(null);
       return;
     }
-    const rect = range.getBoundingClientRect();
-    const base = contentEl.getBoundingClientRect();
-    const center = rect.left + rect.width / 2 - base.left;
-    setSelectionAnchor({
-      text,
-      top: rect.top - base.top,
-      bottom: rect.bottom - base.top,
-      left: Math.min(Math.max(center, TOOLBAR_HALF_WIDTH), base.width - TOOLBAR_HALF_WIDTH),
-    });
-  }, []);
+    showSelectionToolbar(range.getBoundingClientRect(), text);
+  }, [showSelectionToolbar]);
+
+  const handlePdfTextSelect = useCallback(
+    (selection: PdfTextSelection | null) => {
+      if (selection) showSelectionToolbar(selection.rect, selection.text, selection.page);
+      else setSelectionAnchor(null);
+    },
+    [showSelectionToolbar]
+  );
 
   const dismissSelection = useCallback(() => setSelectionAnchor(null), []);
 
@@ -392,7 +412,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   );
 
   const createExcerpt = useCallback(
-    async (quote: string, note: string, tags: string[]) => {
+    async ({ text: quote, page }: SelectionAnchor, note: string, tags: string[]) => {
       const current = itemRef.current;
       const trimmedNote = note.trim();
       const excerptItemId = await onCreateExcerpt({
@@ -401,12 +421,14 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
           quote,
           note: trimmedNote,
           source: { title: current.title, sourceUrl: current.sourceUrl },
+          page,
         }),
         sourceItemId: current.id,
         tags,
       });
       await addHighlight({
         text: quote,
+        page,
         excerptItemId,
         ...(trimmedNote ? { note: trimmedNote } : {}),
       });
@@ -424,10 +446,25 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     [updateReading]
   );
 
-  const scrollToHighlight = useCallback((id: string) => {
-    const articleEl = articleRef.current;
-    if (articleEl) findHighlightMark(articleEl, id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, []);
+  // PDF 高亮按页定位（所在页可能尚未渲染），其他正文直接查找标记
+  const scrollToHighlight = useCallback(
+    (id: string) => {
+      const page = readingRef.current.highlights?.find((highlight) => highlight.id === id)?.page;
+      if (page !== undefined) {
+        pdfReaderRef.current?.scrollToHighlight(id, page);
+        return;
+      }
+      const articleEl = articleRef.current;
+      if (articleEl) findHighlightMark(articleEl, id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+    [pdfReaderRef]
+  );
+
+  // PDF 高亮只在所在页渲染时才有标记，带页码即可跳转
+  const pdfHighlightIds = useMemo<ReadonlySet<string>>(
+    () => new Set(highlights.filter((highlight) => highlight.page !== undefined).map((highlight) => highlight.id)),
+    [highlights]
+  );
 
   // ---------- 正文链接 ----------
 
@@ -467,6 +504,15 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   const TypeIcon = ITEM_TYPE_ICONS[item.type];
   const hasBody = !!rendered || !!attachmentKind || !!sourceUrl || showTranscript || showGuide;
 
+  // 侧栏的目录来源：EPUB 目录、PDF 书签或正文标题；没有可阅读正文时不显示侧栏
+  const outline = epub.view
+    ? { headings: epub.toc, activeId: epub.activeTocId, open: epub.openTocEntry, located: locatedHighlightIds }
+    : pdf.file.document
+      ? { headings: pdf.toc, activeId: pdf.activeTocId, open: pdf.openTocEntry, located: pdfHighlightIds }
+      : rendered
+        ? { headings: rendered.headings, activeId: activeHeadingId, open: scrollToHeading, located: locatedHighlightIds }
+        : null;
+
   return (
     <div className={styles.view}>
       <header className={styles.header}>
@@ -495,7 +541,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
         </div>
 
         <div className={styles.actions}>
-          {rendered && (
+          {outline && (
             <button
               className={`${styles.iconButton} ${outlineOpen ? styles.iconButtonActive : ''}`}
               onClick={() => setOutlineOpen((open) => !open)}
@@ -534,7 +580,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
           >
             <Star size={16} />
           </button>
-          {item.type === 'note' && onOpenInWriting && (
+          {isWritingDocument(item) && onOpenInWriting && (
             <button className={styles.iconButton} onClick={() => onOpenInWriting(item.id)} title="在写作中打开">
               <PenLine size={16} />
             </button>
@@ -575,14 +621,27 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
               </CollapsibleSection>
             )}
 
-            {attachmentKind && attachmentKind !== 'epub' && item.filePath && (
-              <ReadingAttachment
+            {attachmentKind === 'pdf' && item.filePath ? (
+              <PdfAttachment
+                ref={pdfReaderRef}
                 filePath={item.filePath}
-                mimeType={item.mimeType}
-                kind={attachmentKind}
-                title={displayTitle(item.title)}
+                state={pdf.file}
                 onLayout={restoreScroll}
+                highlights={highlights}
+                onPageChange={pdf.setCurrentPage}
+                onTextSelect={handlePdfTextSelect}
               />
+            ) : (
+              attachmentKind &&
+              attachmentKind !== 'epub' &&
+              item.filePath && (
+                <ReadingAttachment
+                  filePath={item.filePath}
+                  mimeType={item.mimeType}
+                  kind={attachmentKind}
+                  title={displayTitle(item.title)}
+                />
+              )
             )}
 
             {showTranscript && (
@@ -632,21 +691,21 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
             {selectionAnchor && (
               <SelectionToolbar
                 anchor={selectionAnchor}
-                onHighlight={() => addHighlight({ text: selectionAnchor.text })}
-                onExcerpt={(note, tags) => createExcerpt(selectionAnchor.text, note, tags)}
+                onHighlight={() => addHighlight({ text: selectionAnchor.text, page: selectionAnchor.page })}
+                onExcerpt={(note, tags) => createExcerpt(selectionAnchor, note, tags)}
                 onDismiss={dismissSelection}
               />
             )}
           </div>
         </div>
 
-        {rendered && outlineOpen && (
+        {outline && outlineOpen && (
           <ReadingOutline
-            headings={epub.view ? epub.toc : rendered.headings}
-            activeHeadingId={epub.view ? epub.activeTocId : activeHeadingId}
-            onHeadingClick={epub.view ? epub.openTocEntry : scrollToHeading}
+            headings={outline.headings}
+            activeHeadingId={outline.activeId}
+            onHeadingClick={outline.open}
             highlights={highlights}
-            locatedHighlightIds={locatedHighlightIds}
+            locatedHighlightIds={outline.located}
             onHighlightClick={scrollToHighlight}
             onHighlightDelete={deleteHighlight}
           />

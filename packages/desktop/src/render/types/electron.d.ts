@@ -327,6 +327,11 @@ export interface FetchedHtml {
   html: string;
 }
 
+/** 网页剪藏：单张图片的下载结果（url 为请求时的地址） */
+export type ImageDownloadResult =
+  | { url: string; filePath: string; mimeType: string; size: number }
+  | { url: string; error: string };
+
 /** 拼写检查词典；id 形如 builtin:en_US（内置）或 user:de_DE（导入） */
 export interface SpellcheckDictionaryInfo {
   id: string;
@@ -502,9 +507,11 @@ interface ElectronAPI {
     shouldAutoSave: (itemId: string, minIntervalMs?: number) => Promise<boolean>;
   };
 
-  /** 网页剪藏：经主进程抓取 http/https 网页的 HTML（超时或过大时拒绝） */
+  /** 网页剪藏：经主进程抓取 http/https 网页的 HTML（超时或过大时拒绝）；
+   *  下载正文图片到目录（只接受 image/*，过大的图片拒绝），结果按输入顺序返回 */
   web: {
     fetchHtml: (url: string) => Promise<FetchedHtml>;
+    downloadImages: (urls: string[], directory: string) => Promise<ImageDownloadResult[]>;
   };
 
   /** 拼写检查：列出/读取/导入（弹出文件选择框，取消时返回空数组）/删除词典，读写用户词表 */

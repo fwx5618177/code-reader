@@ -8,7 +8,10 @@
 import type { KnowledgeItem, KnowledgeItemType } from '../../types/knowledge';
 import { displayTitle } from '../links/link-index';
 
-/** 一条高亮（摘录到知识库的高亮会记录新条目 ID） */
+/**
+ * 一条高亮（摘录到知识库的高亮会记录新条目 ID）。
+ * 与其他阅读状态一起保存在条目 metadata（JSON 列）中，新增字段无需改动表结构
+ */
 export interface ReadingHighlight {
   id: string;
   /** 高亮的原文 */
@@ -19,6 +22,8 @@ export interface ReadingHighlight {
   createdAt: string;
   /** 摘录生成的知识条目 ID */
   excerptItemId?: string;
+  /** PDF 高亮所在页码（从 1 开始）：原文只在该页的文本层中定位 */
+  page?: number;
 }
 
 /** metadata.reading 的结构 */
@@ -91,6 +96,9 @@ function parseHighlight(value: unknown): ReadingHighlight | null {
   if (note) highlight.note = note;
   const excerptItemId = nonEmptyString(value.excerptItemId);
   if (excerptItemId) highlight.excerptItemId = excerptItemId;
+  if (typeof value.page === 'number' && Number.isInteger(value.page) && value.page >= 1) {
+    highlight.page = value.page;
+  }
   return highlight;
 }
 
@@ -255,15 +263,17 @@ export interface ExcerptInput {
   /** 用户批注 */
   note?: string;
   source: ExcerptSource;
+  /** 原文所在页码（PDF） */
+  page?: number;
 }
 
 /** 摘录标题中引用原文的最大字符数 */
 const EXCERPT_TITLE_LENGTH = 20;
 
 /**
- * 摘录笔记的 Markdown：原文引用块 + 可选批注 + 来源双向链接（及原始链接）
+ * 摘录笔记的 Markdown：原文引用块 + 可选批注 + 来源双向链接（及页码、原始链接）
  */
-export function buildExcerptMarkdown({ quote, note, source }: ExcerptInput): string {
+export function buildExcerptMarkdown({ quote, note, source, page }: ExcerptInput): string {
   const quoteBlock = quote
     .replace(/\r\n?/g, '\n')
     .trim()
@@ -272,6 +282,7 @@ export function buildExcerptMarkdown({ quote, note, source }: ExcerptInput): str
     .join('\n');
 
   let sourceLine = `来源：[[${displayTitle(source.title)}]]`;
+  if (page) sourceLine += ` · 第 ${page} 页`;
   if (source.sourceUrl) sourceLine += ` · [原文链接](${source.sourceUrl})`;
 
   const blocks = [quoteBlock];

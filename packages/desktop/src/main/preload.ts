@@ -95,6 +95,7 @@ const validChannels = [
 
   // 网页剪藏
   'web:fetchHtml',
+  'web:downloadImages',
 
   // 拼写检查
   'spellcheck:listDictionaries',
@@ -296,9 +297,11 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('version:should-auto-save', itemId, minIntervalMs),
   },
 
-  // 网页剪藏：由主进程抓取 HTML
+  // 网页剪藏：由主进程抓取 HTML、下载正文图片
   web: {
     fetchHtml: (url: string) => ipcRenderer.invoke('web:fetchHtml', url),
+    downloadImages: (urls: string[], directory: string) =>
+      ipcRenderer.invoke('web:downloadImages', urls, directory),
   },
 
   // 拼写检查：词典文件与用户词表由主进程管理

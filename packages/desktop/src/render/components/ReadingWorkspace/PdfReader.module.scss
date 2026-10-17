@@ -124,6 +124,13 @@
     background: transparent;
   }
 
+  // 高亮标记：文字保持透明（画布上已绘制），只显示底色；不加内边距，避免改变文本片段宽度
+  .highlightMark {
+    color: transparent;
+    background-color: var(--accent-primary-alpha);
+    border-radius: 2px;
+  }
+
   :global(.endOfContent) {
     display: block;
     position: absolute;

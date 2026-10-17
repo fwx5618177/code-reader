@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { documentFormat, resolveArticle, resolveAttachmentKind, sourceHost } from '../article';
-import { applyHighlightMarks, clearHighlightMarks, findHighlightMark } from '../highlight-dom';
+import { applyHighlightMarks, clearHighlightMarks, findHighlightMark, selectedText } from '../highlight-dom';
 
 describe('resolveArticle', () => {
   it('空内容没有正文', () => {
@@ -144,5 +144,36 @@ describe('highlight-dom', () => {
     expect(root.querySelector('p')?.childNodes).toHaveLength(1);
 
     expect(applyHighlightMarks(root, [{ id: 'h3', text: '文字，其中' }], 'hl')).toEqual(new Set(['h3']));
+  });
+
+  describe('selectedText', () => {
+    /** 与 PDF 文本层相同的结构：绝对定位的文字片段 + 行尾 <br> */
+    const TEXT_LAYER = '<span>Hello </span><span>world</span><br role="presentation"><span>next   line</span>';
+
+    function select(root: HTMLElement, start: [number, number], end: [number, number]): Range {
+      const range = document.createRange();
+      range.setStart(root.children[start[0]].firstChild!, start[1]);
+      range.setEnd(root.children[end[0]].firstChild!, end[1]);
+      return range;
+    }
+
+    it('返回选区覆盖的归一化文本：跨节点拼接，换行与连续空白折叠为空格', () => {
+      const root = render(TEXT_LAYER);
+      expect(selectedText(root, select(root, [0, 2], [3, 6]))).toBe('llo world next');
+    });
+
+    it('返回的文本可以被重新定位为高亮', () => {
+      const root = render(TEXT_LAYER);
+      const text = selectedText(root, select(root, [1, 0], [3, 4]));
+      expect(text).toBe('world next');
+      applyHighlightMarks(root, [{ id: 'h1', text }], 'hl');
+      expect(Array.from(root.querySelectorAll('mark')).map((mark) => mark.textContent)).toEqual(['world', 'next']);
+    });
+
+    it('选区不在 root 中时返回空字符串', () => {
+      const root = render(TEXT_LAYER);
+      const other = render('<span>其他</span>');
+      expect(selectedText(root, select(other, [0, 0], [0, 2]))).toBe('');
+    });
   });
 });

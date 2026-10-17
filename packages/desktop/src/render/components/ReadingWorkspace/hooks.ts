@@ -134,12 +134,14 @@ export interface PdfDocumentState {
 }
 
 /**
- * 打开本地 PDF 并读取全部页面尺寸（用于预先占位、按需渲染），卸载或文件变化时释放文档
+ * 打开本地 PDF 并读取全部页面尺寸（用于预先占位、按需渲染），卸载或文件变化时释放文档。
+ * filePath 为 undefined 时不加载（非 PDF 条目）
  */
-export function usePdfDocument(filePath: string): PdfDocumentState {
+export function usePdfDocument(filePath: string | undefined): PdfDocumentState {
   const [state, setState] = useState<PdfDocumentState>({ document: null, error: false });
 
   useEffect(() => {
+    if (!filePath) return;
     let cancelled = false;
     let opened: PDFDocumentProxy | null = null;
     setState({ document: null, error: false });

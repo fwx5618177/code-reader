@@ -135,7 +135,7 @@ export function clearHighlightMarks(root: HTMLElement): void {
  */
 export function applyHighlightMarks(
   root: HTMLElement,
-  highlights: Pick<ReadingHighlight, 'id' | 'text'>[],
+  highlights: ReadonlyArray<Pick<ReadingHighlight, 'id' | 'text'>>,
   className: string
 ): Set<string> {
   const applied = new Set<string>();
@@ -154,4 +154,26 @@ export function applyHighlightMarks(
  */
 export function findHighlightMark(root: HTMLElement, id: string): HTMLElement | null {
   return highlightMarks(root).find((mark) => mark.getAttribute(HIGHLIGHT_ID_ATTR) === id) ?? null;
+}
+
+/**
+ * 选区在 root 内覆盖的归一化文本。
+ * 与高亮定位使用同一套文本索引，保存的原文一定能被重新定位；
+ * 用于绝对定位的 PDF 文本层：浏览器的 Selection.toString() 可能在各个绝对定位的文本片段之间插入换行，与索引不一致。
+ */
+export function selectedText(root: HTMLElement, range: Range): string {
+  // comparePoint 在节点与选区不在同一棵树时会抛错，先排除与 root 无交集的选区
+  if (!range.intersectsNode(root)) return '';
+  const { text, positions } = buildTextIndex(root);
+  let first = -1;
+  let last = -1;
+  positions.forEach((position, index) => {
+    if (!position) return;
+    // 字符完整落在选区内：起点不早于选区起点、终点不晚于选区终点
+    if (range.comparePoint(position.node, position.offset) < 0) return;
+    if (range.comparePoint(position.node, position.offset + 1) > 0) return;
+    if (first < 0) first = index;
+    last = index;
+  });
+  return first < 0 ? '' : text.slice(first, last + 1).trim();
 }

@@ -11,6 +11,8 @@ import styles from './ReadingView.module.scss';
 /** 选区位置（相对正文内容容器） */
 export interface SelectionAnchor {
   text: string;
+  /** 选区所在的 PDF 页码（从 1 开始）；正文选区没有页码 */
+  page?: number;
   top: number;
   bottom: number;
   /** 选区水平中点 */

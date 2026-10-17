@@ -1,5 +1,5 @@
 // ================================
-// 阅读侧栏：目录（滚动联动高亮当前章节）与高亮列表
+// 阅读侧栏：目录（滚动联动高亮当前章节）与高亮列表；没有目录时只显示高亮
 // ================================
 
 import React, { useMemo, useState } from 'react';
@@ -30,7 +30,10 @@ export const ReadingOutline: React.FC<ReadingOutlineProps> = ({
   onHighlightClick,
   onHighlightDelete,
 }) => {
-  const [tab, setTab] = useState<OutlineTab>(headings.length > 0 ? 'toc' : 'highlights');
+  // 未手动切换时优先显示目录；目录可能在侧栏出现后才加载完成（PDF 书签）
+  const [chosenTab, setChosenTab] = useState<OutlineTab | null>(null);
+  const hasToc = headings.length > 0;
+  const tab: OutlineTab = hasToc ? chosenTab ?? 'toc' : 'highlights';
 
   // 目录缩进以文档中最高的标题级别为基准
   const minLevel = useMemo(
@@ -41,19 +44,21 @@ export const ReadingOutline: React.FC<ReadingOutlineProps> = ({
   return (
     <aside className={styles.outline}>
       <div className={styles.outlineTabs} role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === 'toc'}
-          className={`${styles.outlineTab} ${tab === 'toc' ? styles.outlineTabActive : ''}`}
-          onClick={() => setTab('toc')}
-        >
-          目录
-        </button>
+        {hasToc && (
+          <button
+            role="tab"
+            aria-selected={tab === 'toc'}
+            className={`${styles.outlineTab} ${tab === 'toc' ? styles.outlineTabActive : ''}`}
+            onClick={() => setChosenTab('toc')}
+          >
+            目录
+          </button>
+        )}
         <button
           role="tab"
           aria-selected={tab === 'highlights'}
           className={`${styles.outlineTab} ${tab === 'highlights' ? styles.outlineTabActive : ''}`}
-          onClick={() => setTab('highlights')}
+          onClick={() => setChosenTab('highlights')}
         >
           高亮
           {highlights.length > 0 && <span className={styles.outlineCount}>{highlights.length}</span>}
@@ -62,23 +67,19 @@ export const ReadingOutline: React.FC<ReadingOutlineProps> = ({
 
       <div className={styles.outlineBody}>
         {tab === 'toc' ? (
-          headings.length === 0 ? (
-            <div className={styles.outlineEmpty}>正文没有标题</div>
-          ) : (
-            <nav>
-              {headings.map((heading) => (
-                <button
-                  key={heading.id}
-                  className={`${styles.tocItem} ${heading.id === activeHeadingId ? styles.tocItemActive : ''}`}
-                  data-depth={heading.level - minLevel}
-                  onClick={() => onHeadingClick(heading.id)}
-                  title={heading.text}
-                >
-                  {heading.text}
-                </button>
-              ))}
-            </nav>
-          )
+          <nav>
+            {headings.map((heading) => (
+              <button
+                key={heading.id}
+                className={`${styles.tocItem} ${heading.id === activeHeadingId ? styles.tocItemActive : ''}`}
+                data-depth={heading.level - minLevel}
+                onClick={() => onHeadingClick(heading.id)}
+                title={heading.text}
+              >
+                {heading.text}
+              </button>
+            ))}
+          </nav>
         ) : highlights.length === 0 ? (
           <div className={styles.outlineEmpty}>选中正文文字即可高亮或摘录</div>
         ) : (
@@ -97,6 +98,7 @@ export const ReadingOutline: React.FC<ReadingOutlineProps> = ({
                 {highlight.note && <div className={styles.highlightNote}>{highlight.note}</div>}
                 <div className={styles.highlightMeta}>
                   <span>{formatRelativeTime(highlight.createdAt)}</span>
+                  {highlight.page !== undefined && <span>第 {highlight.page} 页</span>}
                   {highlight.excerptItemId && (
                     <span className={styles.highlightBadge}>
                       <Quote size={10} />

@@ -3,11 +3,11 @@
 // EPUB 在阅读模式中按章节阅读，其他文件提供“在文件夹中显示”
 // ================================
 
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { FileText, FolderOpen } from 'lucide-react';
 import type { AttachmentKind } from '../../lib/reading';
-import { useBlobUrl, usePdfDocument } from './hooks';
-import { PdfReader } from './PdfReader';
+import { useBlobUrl, usePdfDocument, type PdfDocumentState } from './hooks';
+import { PdfReader, type PdfReaderHandle, type PdfReaderProps } from './PdfReader';
 import { showInFolder } from './system';
 import styles from './ReadingView.module.scss';
 
@@ -17,8 +17,6 @@ export interface ReadingAttachmentProps {
   kind: AttachmentKind;
   /** 图片替代文本 */
   title: string;
-  /** PDF 页面占位完成时调用（用于恢复阅读位置） */
-  onLayout?: () => void;
 }
 
 function fileName(filePath: string): string {
@@ -56,12 +54,28 @@ const MediaAttachment: React.FC<ReadingAttachmentProps> = ({ filePath, mimeType,
   }
 };
 
-const PdfAttachment: React.FC<{ filePath: string; onLayout?: () => void }> = ({ filePath, onLayout }) => {
-  const { document, error } = usePdfDocument(filePath);
+export interface PdfAttachmentProps extends Omit<PdfReaderProps, 'document'> {
+  filePath: string;
+  /** 由调用方打开的文档（阅读视图需要同时读取目录） */
+  state: PdfDocumentState;
+}
 
-  if (error) return <FileCard filePath={filePath} message="无法打开 PDF，文件可能已损坏、加密或被移动" />;
-  if (!document) return <div className={styles.mediaLoading}>正在打开 PDF…</div>;
-  return <PdfReader document={document} onLayout={onLayout} />;
+/**
+ * PDF 附件：加载中、打开失败与阅读器三种状态
+ */
+export const PdfAttachment = forwardRef<PdfReaderHandle, PdfAttachmentProps>(function PdfAttachment(
+  { filePath, state, ...readerProps },
+  ref
+) {
+  if (state.error) return <FileCard filePath={filePath} message="无法打开 PDF，文件可能已损坏、加密或被移动" />;
+  if (!state.document) return <div className={styles.mediaLoading}>正在打开 PDF…</div>;
+  return <PdfReader ref={ref} document={state.document} {...readerProps} />;
+});
+
+/** 仅预览的 PDF（详情面板）：自行打开文档 */
+const PdfPreview: React.FC<{ filePath: string }> = ({ filePath }) => {
+  const state = usePdfDocument(filePath);
+  return <PdfAttachment filePath={filePath} state={state} />;
 };
 
 export const ReadingAttachment: React.FC<ReadingAttachmentProps> = (props) => {
@@ -81,7 +95,7 @@ export const ReadingAttachment: React.FC<ReadingAttachmentProps> = (props) => {
         />
       );
     case 'pdf':
-      return <PdfAttachment filePath={props.filePath} onLayout={props.onLayout} />;
+      return <PdfPreview filePath={props.filePath} />;
     default:
       return (
         <div className={styles.media}>

@@ -1,6 +1,6 @@
 // ================================
 // PDF 支持
-// 按需加载 pdf.js（及其 Worker），提供文档打开与全文提取。
+// 按需加载 pdf.js（及其 Worker），提供文档打开、目录读取与全文提取。
 //
 // 渲染进程的生产页面运行在 file:// 下且 CSP 为 connect-src 'self'，无法 fetch 本地资源，
 // 因此 Worker 以 Blob URL 创建，CMap 与标准字体以内联 data URL 按需加载并在主线程解码。
@@ -94,6 +94,60 @@ export async function openPdf(data: Uint8Array): Promise<PDFDocumentProxy> {
     StandardFontDataFactory: InlineStandardFontDataFactory,
     isEvalSupported: false,
   }).promise;
+}
+
+/** PDF 目录（书签）中的一项，按文档中的先后顺序展开为扁平列表 */
+export interface PdfOutlineEntry {
+  title: string;
+  /** 层级，顶层为 0 */
+  depth: number;
+  /** 跳转目标页码（从 1 开始） */
+  page: number;
+}
+
+/** 读取目录所需的文档接口 */
+type OutlineSource = Pick<PDFDocumentProxy, 'numPages' | 'getOutline' | 'getDestination' | 'getPageIndex'>;
+
+type OutlineNode = NonNullable<Awaited<ReturnType<PDFDocumentProxy['getOutline']>>>[number];
+
+/**
+ * 目录项跳转目标 → 页码：命名目标先查出显式目标，显式目标首项为页面引用或页面序号（从 0 开始）。
+ * 外部链接等没有页面目标的项返回 null
+ */
+async function destinationPage(pdf: OutlineSource, dest: OutlineNode['dest']): Promise<number | null> {
+  const explicit = typeof dest === 'string' ? await pdf.getDestination(dest) : dest;
+  const target: unknown = Array.isArray(explicit) ? explicit[0] : null;
+  let index: number | null = null;
+  if (typeof target === 'number' && Number.isInteger(target)) index = target;
+  else if (target && typeof target === 'object') index = await pdf.getPageIndex(target as { num: number; gen: number });
+  return index !== null && index >= 0 && index < pdf.numPages ? index + 1 : null;
+}
+
+/**
+ * 读取 PDF 目录；没有页面目标或目标无法解析的项被跳过（其子项保留）
+ */
+export async function loadPdfOutline(pdf: OutlineSource): Promise<PdfOutlineEntry[]> {
+  const flat: Array<{ title: string; depth: number; dest: OutlineNode['dest'] }> = [];
+  const visit = (nodes: OutlineNode[], depth: number) => {
+    for (const node of nodes) {
+      flat.push({ title: node.title.replace(/\s+/g, ' ').trim(), depth, dest: node.dest });
+      visit(node.items, depth + 1);
+    }
+  };
+  visit((await pdf.getOutline()) ?? [], 0);
+
+  const pages = await Promise.all(
+    flat.map(({ dest }) =>
+      destinationPage(pdf, dest).catch((error: unknown) => {
+        console.warn('[Reading] 无法解析 PDF 目录项的跳转目标:', error);
+        return null;
+      })
+    )
+  );
+  return flat.flatMap(({ title, depth }, index) => {
+    const page = pages[index];
+    return title && page !== null ? [{ title, depth, page }] : [];
+  });
 }
 
 /** 单页文本：按 pdf.js 的行尾标记换行 */
