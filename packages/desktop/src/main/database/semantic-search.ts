@@ -274,11 +274,12 @@ export class SemanticSearchService {
       }
 
       // Merge FTS results
-      const maxFtsRank = Math.max(...ftsResults.map((r) => Math.abs(r.rank)), 1);
+      // 全文结果已按相关度排序（bm25 越小越相关；短词回退的 LIKE 扫描 rank 恒为 0 但顺序有意义），
+      // 因此按名次归一化：第一名为 1，依次递减
+      const ftsWeight = 1 - semanticWeight;
 
-      for (const ftsResult of ftsResults) {
-        const normalizedFtsScore = 1 - Math.abs(ftsResult.rank) / maxFtsRank; // Normalize to 0-1
-        const ftsWeight = 1 - semanticWeight;
+      ftsResults.forEach((ftsResult, position) => {
+        const normalizedFtsScore = 1 - position / ftsResults.length;
 
         if (resultMap.has(ftsResult.id)) {
           // Merge with existing semantic result
@@ -301,7 +302,7 @@ export class SemanticSearchService {
             createdAt: '',
           });
         }
-      }
+      });
 
       // Sort by combined score and limit
       const results = Array.from(resultMap.values());
