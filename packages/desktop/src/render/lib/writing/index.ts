@@ -127,36 +127,6 @@ export {
 export type { BenchmarkConfig, BenchmarkResult, BenchmarkReport } from './benchmark';
 
 // ================================
-// UI Components
-// ================================
-
-export { SearchBox } from './components/SearchBox';
-export type { SearchBoxProps, SearchBoxHandle } from './components/SearchBox';
-
-export { DiffViewer } from './components/DiffViewer';
-export type { DiffViewerProps, DiffViewerHandle, DiffViewMode } from './components/DiffViewer';
-
-// ================================
-// Hooks
-// ================================
-
-export { useSearchHighlight, SEARCH_HIGHLIGHT_STYLES } from './hooks/useSearchHighlight';
-export type {
-  HighlightRange,
-  SearchHighlightOptions,
-  UseSearchHighlightReturn,
-} from './hooks/useSearchHighlight';
-
-export { useEditorSearch } from './hooks/useEditorSearch';
-export type {
-  EditorSearchMode,
-  EditorSearchMatch,
-  GlobalSearchResult,
-  UseEditorSearchConfig,
-  UseEditorSearchReturn,
-} from './hooks/useEditorSearch';
-
-// ================================
 // Worker (Complete Implementation)
 // ================================
 

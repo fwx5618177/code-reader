@@ -12,7 +12,7 @@
 │               documents / core / file-system / folders /      │
 │               editor / editor-tabs / plugins / spellcheck /   │
 │               knowledge / links / reading / agent / entities  │
-│  theme/ services/ contexts/ hooks/ types/                     │
+│  theme/ services/ hooks/ types/                               │
 ├──────────────────────────── IPC（preload 白名单通道）─────────┤
 │ 主进程 packages/desktop/src/main（Electron）                   │
 │  database/  better-sqlite3、FTS5 搜索、语义搜索、版本历史、实体图谱 │
@@ -68,7 +68,7 @@
 | `lib/editor-tabs` | 写作标签页与分栏的纯状态逻辑（打开 / 关闭 / 重开 / 排序 / 跨窗格移动 / 清理已删除文档）与 localStorage 持久化；`hooks/useEditorTabs.ts` 连接 `useDocuments`。同一时刻只有聚焦窗格是可编辑的 RichEditor（编辑器桥接为单例），另一窗格为只读预览，点击即切换为可编辑 |
 | `lib/spellcheck` | 自研 Hunspell 拼写检查：词缀解析与查词、建议、分词跳过规则、Worker 协议，ProseMirror 插件只检查可见且有变化的块；`services/spellcheckService.ts` 管理 Worker、词典热切换与个人词典 |
 | `lib/core` | 版本化编辑基础：EditorModel（versionId + contentHash）、拉取式 SaveEngine、撤销重做（`delta/history-manager.ts`，差分直接引用 `@code-reader/diff-algorithm`）、IndexedDB 离线存储、操作日志与同步接口（仅类型） |
-| `lib/writing` | 写作服务：全文索引、搜索建议、差分（Worker 池）、索引持久化（IndexedDB）、性能监控，以及 SearchBox / DiffViewer 组件（DiffViewer 用于版本对比，`diff-lines.ts` 把字符级差分重建为行） |
+| `lib/writing` | 写作服务：全文索引、搜索建议、差分（Worker 池）、索引持久化（IndexedDB）、性能监控，以及 DiffViewer 组件（用于版本对比，`diff-lines.ts` 把字符级差分重建为行） |
 | `lib/file-system`、`lib/folders` | 写作文件树模型、拖拽、文件夹（知识库与写作共用 `folders` 表；`moveFolder` 校验循环与同名，删除时子文件夹上移一级） |
 | `lib/editor` | 语言注册表、ProseMirror 输入规则与块级回车转换、视口懒渲染（`lazy-visibility.ts`）、块拖拽手柄与块菜单（`block-handle.ts`、`block-commands.ts`、`popup-menu.ts`） |
 | `lib/plugins` | 插件系统再导出与编辑器桥接（桥接内容为 Markdown 文本） |
