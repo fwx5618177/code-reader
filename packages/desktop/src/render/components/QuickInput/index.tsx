@@ -39,6 +39,11 @@ export interface QuickInputData {
   tags?: string[];
   folderId?: string;
   attachments?: File[];
+  /**
+   * 本弹窗录制的音频附件及其已知时长（毫秒）：
+   * MediaRecorder 生成的 WebM 不含时长，保存时写入条目 metadata
+   */
+  recordingDurationsMs?: ReadonlyMap<File, number>;
   sourceUrl?: string;
 }
 
@@ -96,6 +101,8 @@ const QuickInput: React.FC<QuickInputProps> = ({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  /** 已录制的音频附件 → 录音时长（毫秒） */
+  const [recordingDurations, setRecordingDurations] = useState<ReadonlyMap<File, number>>(new Map());
   /** 录音中的麦克风音频流，用于绘制实时波形；停止录音后为 null */
   const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -182,6 +189,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
     setTags([]);
     setTagInput('');
     setAttachments([]);
+    setRecordingDurations(new Map());
     setIsRecording(false);
     setRecordingStream(null);
     setRecordingTime(0);
@@ -209,6 +217,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
         title: title.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
+        recordingDurationsMs: recordingDurations.size > 0 ? recordingDurations : undefined,
         sourceUrl: inputType === 'url' ? content.trim() : undefined,
       };
 
@@ -246,13 +255,14 @@ const QuickInput: React.FC<QuickInputProps> = ({
       mediaRecorder.onstop = () => {
         // 录音已被丢弃（弹窗关闭）：音轨已在 discardRecording 中关闭，不再生成附件
         if (session !== recordingSessionRef.current) return;
-        const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
+        const durationMs = Date.now() - startedAt;
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, {
           type: 'audio/webm',
         });
         setAttachments((prev) => [...prev, audioFile]);
-        setContent(`[语音录音 ${formatTime(durationSeconds)}]`);
+        setRecordingDurations((prev) => new Map(prev).set(audioFile, durationMs));
+        setContent(`[语音录音 ${formatTime(Math.round(durationMs / 1000))}]`);
 
         // 停止所有音轨
         stream.getTracks().forEach((track) => track.stop());

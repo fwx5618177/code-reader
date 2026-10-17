@@ -138,8 +138,8 @@ export interface RichEditorProps {
   linkTargets?: string[];
   /** 点击双向链接（参数为 目标#标题 形式的引用） */
   onWikiLinkClick?: (target: string) => void;
-  /** 滚动到指定标题（每个请求对象只执行一次） */
-  revealHeading?: { heading: string } | null;
+  /** 滚动到指定标题（occurrence 为同名标题中的第几个，从 0 计，默认第一个；每个请求对象只执行一次） */
+  revealHeading?: { heading: string; occurrence?: number } | null;
 }
 
 /**
@@ -554,8 +554,8 @@ const StatusBar: React.FC<StatusBarProps> = ({ wordCount, charCount }) => (
 // ================================
 
 /** 选中文档中的标题并滚动到视口顶部；找不到标题时不做任何事 */
-function revealHeadingInView(view: EditorView, heading: string): void {
-  const pos = findHeadingInDoc(view.state.doc, heading);
+function revealHeadingInView(view: EditorView, heading: string, occurrence = 0): void {
+  const pos = findHeadingInDoc(view.state.doc, heading, occurrence);
   if (pos === null) return;
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + 1)));
   view.focus();
@@ -995,7 +995,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     if (!view || !revealHeading || revealedHeadingRequests.has(revealHeading)) return;
     const frame = requestAnimationFrame(() => {
       revealedHeadingRequests.add(revealHeading);
-      revealHeadingInView(view, revealHeading.heading);
+      revealHeadingInView(view, revealHeading.heading, revealHeading.occurrence);
     });
     return () => cancelAnimationFrame(frame);
   }, [revealHeading]);

@@ -47,6 +47,7 @@ export {
   formatWikiLink,
   wikiLinkRef,
   wikiLinkRefOf,
+  headingOccurrence,
   type WikiLinkParts,
 } from './wiki-link';
 export { createLivePreviewPlugin, livePreviewKey } from './live-preview';

@@ -9,10 +9,12 @@
 // ================================
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BookMinus,
   BookOpen,
   BookPlus,
+  Bookmark,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -34,6 +36,7 @@ import {
   type RenderedDocument,
 } from '../../lib/markdown';
 import {
+  addBookmark,
   applyHighlightMarks,
   buildExcerptMarkdown,
   buildExcerptTitle,
@@ -51,6 +54,7 @@ import {
   resolveAttachmentKind,
   sourceHost,
   withReadingState,
+  type ReadingBookmark,
   type ReadingHighlight,
   type ReadingState,
 } from '../../lib/reading';
@@ -63,7 +67,12 @@ import { hydrateEmbedImages } from './embed-images';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from './item-type';
 import { PdfAttachment, ReadingAttachment } from './ReadingAttachment';
 import type { PdfTextSelection } from './PdfReader';
-import { ReadingOutline } from './ReadingOutline';
+import {
+  ReadingOutline,
+  ReadingSidebarNav,
+  type ReadingNavProps,
+  type ReadingSidebarPanel,
+} from './ReadingOutline';
 import { ReadingSettingsPanel } from './ReadingSettingsPanel';
 import { SelectionToolbar, type SelectionAnchor } from './SelectionToolbar';
 import { openExternal } from './system';
@@ -90,6 +99,10 @@ export interface ReadingViewProps {
   onOpenInWriting?: (itemId: string) => void;
   /** 点击正文中的 [[双向链接]] */
   onWikiLinkClick?: (target: string) => void;
+  /** 应用侧栏当前显示的阅读导航面板；设置且有挂载点时导航渲染到侧栏，视图内侧栏隐藏 */
+  navPanel?: ReadingSidebarPanel | null;
+  /** 应用侧栏中的导航挂载点 */
+  navTarget?: HTMLElement | null;
 }
 
 /** 进度变化小于该值时不保存（也忽略恢复滚动位置引起的滚动事件） */
@@ -99,6 +112,7 @@ const PROGRESS_SAVE_DELAY = 1500;
 /** 选区工具栏宽度的一半，用于水平方向限位 */
 const TOOLBAR_HALF_WIDTH = 160;
 const NO_HIGHLIGHTS: ReadingHighlight[] = [];
+const NO_BOOKMARKS: ReadingBookmark[] = [];
 
 /** EPUB 章节写入后滚动到目标元素或章节内比例位置 */
 function scrollToEpubTarget(scroller: HTMLElement, articleEl: HTMLElement, target: EpubScrollTarget): void {
@@ -145,6 +159,8 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   onCreateExcerpt,
   onOpenInWriting,
   onWikiLinkClick,
+  navPanel,
+  navTarget,
 }) => {
   const { settings, updateSettings, resetSettings } = useReadingSettings();
   const itemRef = useLatestRef(item);
@@ -178,6 +194,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   // 书架归属同样以本地阅读状态为准
   const onShelf = isOnShelf({ type: item.type, metadata: withReadingState(undefined, reading) });
   const highlights = reading.highlights ?? NO_HIGHLIGHTS;
+  const bookmarks = reading.bookmarks ?? NO_BOOKMARKS;
 
   // ---------- 正文 ----------
 
@@ -327,14 +344,20 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   // 离开条目时保存尚未写回的进度
   useEffect(() => flushProgress, [flushProgress]);
 
-  const handleScroll = useCallback(() => {
+  /** 当前滚动位置对应的整本书进度 */
+  const currentProgress = useCallback((): number | null => {
     const scroller = scrollerRef.current;
-    if (!scroller) return;
+    if (!scroller) return null;
     const max = scroller.scrollHeight - scroller.clientHeight;
     const ratio = max > 0 ? scroller.scrollTop / max : 1;
     // EPUB 的滚动比例只是当前章节内的位置，换算为整本书的进度
     const { view, chapterCount } = epubRef.current;
-    const progress = view ? bookProgress(view.chapterIndex, chapterCount, ratio) : ratio;
+    return view ? bookProgress(view.chapterIndex, chapterCount, ratio) : ratio;
+  }, [epubRef]);
+
+  const handleScroll = useCallback(() => {
+    const progress = currentProgress();
+    if (progress === null) return;
     setProgressBar(progress);
 
     if (Math.abs(progress - (readingRef.current.progress ?? 0)) < PROGRESS_EPSILON) {
@@ -344,7 +367,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     pendingProgressRef.current = progress;
     window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(flushProgress, PROGRESS_SAVE_DELAY);
-  }, [cancelPendingProgress, epubRef, flushProgress, setProgressBar]);
+  }, [cancelPendingProgress, currentProgress, flushProgress, setProgressBar]);
 
   const toggleFinished = useCallback(() => {
     cancelPendingProgress();
@@ -466,6 +489,35 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     [highlights]
   );
 
+  // ---------- 书签 ----------
+
+  /** PDF 按页跳转，EPUB 按整本书进度切换章节，其他正文按滚动比例 */
+  const openBookmark = useCallback(
+    (bookmark: ReadingBookmark) => {
+      if (bookmark.page !== undefined && pdfReaderRef.current) {
+        pdfReaderRef.current.scrollToPage(bookmark.page);
+        return;
+      }
+      if (epubRef.current.view) {
+        epubRef.current.goToProgress(bookmark.progress);
+        return;
+      }
+      const scroller = scrollerRef.current;
+      if (scroller) scroller.scrollTop = bookmark.progress * (scroller.scrollHeight - scroller.clientHeight);
+    },
+    [pdfReaderRef, epubRef]
+  );
+
+  const deleteBookmark = useCallback(
+    (id: string) => {
+      const remaining = (readingRef.current.bookmarks ?? []).filter((bookmark) => bookmark.id !== id);
+      updateReading({ bookmarks: remaining.length > 0 ? remaining : undefined }).catch((error) =>
+        console.error('[Reading] 删除书签失败:', error)
+      );
+    },
+    [updateReading]
+  );
+
   // ---------- 正文链接 ----------
 
   const handleArticleClick = useCallback(
@@ -512,6 +564,41 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
       : rendered
         ? { headings: rendered.headings, activeId: activeHeadingId, open: scrollToHeading, located: locatedHighlightIds }
         : null;
+  const navProps: ReadingNavProps | null = outline && {
+    headings: outline.headings,
+    activeHeadingId: outline.activeId,
+    onHeadingClick: outline.open,
+    bookmarks,
+    onBookmarkClick: openBookmark,
+    onBookmarkDelete: deleteBookmark,
+    highlights,
+    locatedHighlightIds: outline.located,
+    onHighlightClick: scrollToHighlight,
+    onHighlightDelete: deleteHighlight,
+  };
+  // 应用侧栏显示章节 / 书签时，导航渲染到侧栏，不再重复显示视图内侧栏
+  const sidebarNavActive = !!navPanel && !!navTarget;
+
+  /** 在当前位置添加书签：名称取页码与当前章节，都没有时取进度百分比 */
+  const addCurrentBookmark = () => {
+    const progress = currentProgress();
+    if (progress === null || !outline) return;
+    const page = pdf.file.document ? pdf.currentPage : undefined;
+    const chapter = outline.headings.find((heading) => heading.id === outline.activeId)?.text;
+    const label =
+      [page !== undefined ? `第 ${page} 页` : null, chapter].filter(Boolean).join(' · ') ||
+      `${Math.round(progress * 100)}% 处`;
+    const bookmark: ReadingBookmark = {
+      id: generateUUID(),
+      createdAt: new Date().toISOString(),
+      label,
+      progress,
+      ...(page !== undefined ? { page } : {}),
+    };
+    updateReading({ bookmarks: addBookmark(readingRef.current.bookmarks, bookmark) }).catch((error) =>
+      console.error('[Reading] 添加书签失败:', error)
+    );
+  };
 
   return (
     <div className={styles.view}>
@@ -542,6 +629,11 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
 
         <div className={styles.actions}>
           {outline && (
+            <button className={styles.iconButton} onClick={addCurrentBookmark} title="在当前位置添加书签">
+              <Bookmark size={16} />
+            </button>
+          )}
+          {outline && !sidebarNavActive && (
             <button
               className={`${styles.iconButton} ${outlineOpen ? styles.iconButtonActive : ''}`}
               onClick={() => setOutlineOpen((open) => !open)}
@@ -699,18 +791,19 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
           </div>
         </div>
 
-        {outline && outlineOpen && (
-          <ReadingOutline
-            headings={outline.headings}
-            activeHeadingId={outline.activeId}
-            onHeadingClick={outline.open}
-            highlights={highlights}
-            locatedHighlightIds={outline.located}
-            onHighlightClick={scrollToHighlight}
-            onHighlightDelete={deleteHighlight}
-          />
-        )}
+        {navProps && outlineOpen && !sidebarNavActive && <ReadingOutline {...navProps} />}
       </div>
+
+      {navPanel &&
+        navTarget &&
+        createPortal(
+          navProps ? (
+            <ReadingSidebarNav panel={navPanel} {...navProps} />
+          ) : (
+            <div className={styles.outlineEmpty}>此条目没有可导航的正文</div>
+          ),
+          navTarget
+        )}
     </div>
   );
 };

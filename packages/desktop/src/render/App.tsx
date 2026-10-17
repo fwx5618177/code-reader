@@ -34,8 +34,23 @@ const EditorLoadingFallback: React.FC = () => (
 import VirtualFolders, { VirtualFolder } from './components/VirtualFolders';
 import InputDialog, { ConfirmDialog } from './components/InputDialog';
 import KnowledgeWorkspace from './components/KnowledgeWorkspace';
+import { EMPTY_FILTERS, type ItemFilters } from './components/KnowledgeWorkspace/filtering';
 import AgentActivityPanel from './components/AgentActivity';
 import BacklinksPanel from './components/BacklinksPanel';
+import {
+  CalendarPanel,
+  DocumentTags,
+  GraphPanel,
+  PanelEmpty,
+  RecordingsPanel,
+  SidebarItemList,
+  SidebarSearch,
+  TagCloud,
+  WritingOutline,
+  describeReading,
+  describeUpdated,
+  diaryTitle,
+} from './components/SidebarPanels';
 import {
   ReadingShelf,
   ReadingView,
@@ -50,7 +65,7 @@ import {
   type DocumentTypeId,
 } from './lib/documents';
 import { ensureExtension } from './lib/documents/file-types';
-import { pickRecentDocuments } from './lib/documents/recent';
+import { pickRecentDocuments, sortByRecentUpdate } from './lib/documents/recent';
 import { isWritingDocument } from './lib/documents/constants';
 import { itemOpenTarget } from './lib/knowledge/open-target';
 import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
@@ -71,8 +86,15 @@ import {
 } from './lib/links';
 import { extractWikiLinks, parseWikiLinkInner } from './lib/markdown';
 import { ChevronDown, ChevronRight, Plus, PenTool, X, History, Link2 } from 'lucide-react';
-import { AppMode, APP_MODE_CONFIGS, appReducer, DEFAULT_APP_STATE } from './types/app-modes';
+import {
+  AppMode,
+  APP_MODE_CONFIGS,
+  appReducer,
+  DEFAULT_APP_STATE,
+  getActiveSidebarPanel,
+} from './types/app-modes';
 import { aiConfigService } from './services/aiConfigService';
+import { pickRecentlyRead } from './lib/reading';
 import './App.scss';
 
 const App: React.FC = () => {
@@ -93,9 +115,13 @@ const App: React.FC = () => {
   // 知识库侧边栏选中的范围（智能文件夹或用户文件夹）与选中的条目
   const [selectedFolderId, setSelectedFolderId] = useState<string>('all');
   const [selectedKnowledgeItemId, setSelectedKnowledgeItemId] = useState<string | undefined>();
+  // 知识库条目流筛选：工具栏与侧栏标签云共同修改
+  const [knowledgeFilters, setKnowledgeFilters] = useState<ItemFilters>(EMPTY_FILTERS);
 
   // 阅读模式选中的条目
   const [readingItemId, setReadingItemId] = useState<string | undefined>();
+  // 侧栏「章节」「书签」面板的挂载点：阅读视图把导航渲染到这里
+  const [readingNavTarget, setReadingNavTarget] = useState<HTMLDivElement | null>(null);
 
   // 写作模式的反向链接面板
   const [showBacklinks, setShowBacklinks] = useState(true);
@@ -708,8 +734,12 @@ const App: React.FC = () => {
     [createDocument, kb.refreshItem]
   );
 
-  /** 通过 [[文档#标题]] 打开写作文档后要定位的标题 */
-  const [headingRequest, setHeadingRequest] = useState<{ docId: string; heading: string } | null>(null);
+  /** 通过 [[文档#标题]] 或大纲打开写作文档后要定位的标题（occurrence 为同名标题序号） */
+  const [headingRequest, setHeadingRequest] = useState<{
+    docId: string;
+    heading: string;
+    occurrence?: number;
+  } | null>(null);
 
   /** 点击 [[双向链接]]（目标#标题）：目标存在则打开并定位标题，否则创建 */
   const openWikiTarget = useCallback(
@@ -867,61 +897,268 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // Get sidebar title based on mode
-  const getSidebarTitle = () => {
-    switch (appState.mode) {
-      case 'reading':
-        return '书库';
-      case 'knowledge':
-        return '知识库';
-      case 'writing':
-        return '文档';
+  // ================================
+  // 侧栏：Ribbon 导航按钮选择面板，每个模式各自记住活动面板
+  // ================================
+
+  const activeSidebarPanel = getActiveSidebarPanel(appState);
+
+  const recentItems = useMemo(() => sortByRecentUpdate(kb.items), [kb.items]);
+  const writingItems = useMemo(
+    () => kb.items.filter((item) => isWritingDocument(item) && !item.isDeleted),
+    [kb.items]
+  );
+  const recentWritingItems = useMemo(() => sortByRecentUpdate(writingItems), [writingItems]);
+  const recentlyReadItems = useMemo(() => pickRecentlyRead(kb.items), [kb.items]);
+  const shelfIds = useMemo(() => new Set(shelfItems.map((item) => item.id)), [shelfItems]);
+  const isShelfHit = useCallback((hit: { id: string }) => shelfIds.has(hit.id), [shelfIds]);
+
+  /** 标签云：切换某个标签是否参与知识库条目流筛选 */
+  const toggleKnowledgeTag = useCallback((tagId: string) => {
+    setKnowledgeFilters((prev) => ({
+      ...prev,
+      tagIds: prev.tagIds.includes(tagId)
+        ? prev.tagIds.filter((id) => id !== tagId)
+        : [...prev.tagIds, tagId],
+    }));
+  }, []);
+  const clearKnowledgeTags = useCallback(
+    () => setKnowledgeFilters((prev) => ({ ...prev, tagIds: [] })),
+    []
+  );
+
+  /** 创建某天的日记：写作笔记「日记 YYYY-MM-DD.md」，打上「日记」标签并在写作模式中打开 */
+  const createDiary = useCallback(
+    async (date: Date) => {
+      dispatch({ type: 'SET_MODE', payload: 'writing' });
+      const heading = date.toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long',
+      });
+      const document = await createDocument({ title: diaryTitle(date), content: `# ${heading}\n\n` });
+      if (!document) {
+        setNotice('创建日记失败');
+        return;
+      }
+      try {
+        await kb.setItemTags(document.id, ['日记']);
+      } catch (error) {
+        console.error('为日记添加标签失败:', error);
+        setNotice('日记已创建，但添加「日记」标签失败');
+      }
+    },
+    [createDocument, kb.setItemTags]
+  );
+
+  /** 写作大纲：在编辑器中定位到当前文档的第 occurrence 个同名标题 */
+  const revealWritingHeading = useCallback(
+    (heading: string, occurrence: number) => {
+      if (selectedDocId) setHeadingRequest({ docId: selectedDocId, heading, occurrence });
+    },
+    [selectedDocId]
+  );
+
+  /** 侧栏请求在知识库工作区中显示某条目详情（工作区选中条目并重新打开已关闭的详情面板） */
+  const [knowledgeDetailsRequest, setKnowledgeDetailsRequest] = useState<{ id: string } | null>(null);
+  const openKnowledgeDetails = useCallback((id: string) => setKnowledgeDetailsRequest({ id }), []);
+
+  /** 侧栏「章节」「书签」面板由阅读视图渲染到挂载点 */
+  const readingNavPanel =
+    activeSidebarPanel.id === 'chapters' || activeSidebarPanel.id === 'bookmarks'
+      ? activeSidebarPanel.id
+      : null;
+
+  const renderKnowledgeSidebar = () => {
+    switch (activeSidebarPanel.id) {
+      case 'search':
+        return (
+          <SidebarSearch
+            placeholder="搜索知识库与写作文档"
+            selectedId={selectedKnowledgeItemId}
+            onOpenItem={setSelectedKnowledgeItemId}
+          />
+        );
+      case 'tags':
+        return (
+          <TagCloud
+            tags={kb.tags}
+            selectedTagIds={knowledgeFilters.tagIds}
+            onToggleTag={toggleKnowledgeTag}
+            onClearTags={clearKnowledgeTags}
+          />
+        );
+      case 'recordings':
+        return (
+          <RecordingsPanel
+            items={kb.items}
+            selectedItemId={selectedKnowledgeItemId}
+            onOpenDetails={openKnowledgeDetails}
+            onRename={handleRenameItem}
+            onDelete={kb.removeItem}
+            onError={setNotice}
+          />
+        );
+      case 'graph':
+        return (
+          <GraphPanel
+            index={linkIndex}
+            related={relatedLinks}
+            focusId={selectedKnowledgeItemId}
+            onOpenItem={setSelectedKnowledgeItemId}
+            onCreateNote={(title) => void createNoteFromLink(title)}
+            onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
+          />
+        );
+      case 'calendar':
+        return (
+          <CalendarPanel
+            items={kb.items}
+            selectedItemId={selectedKnowledgeItemId}
+            onOpenItem={setSelectedKnowledgeItemId}
+            onOpenDiary={openInWriting}
+            onCreateDiary={(date) => void createDiary(date)}
+          />
+        );
+      case 'recent':
+        return (
+          <SidebarItemList
+            items={recentItems}
+            selectedId={selectedKnowledgeItemId}
+            onOpen={setSelectedKnowledgeItemId}
+            describe={describeUpdated}
+            emptyText="知识库还没有条目"
+            ariaLabel="最近更新的条目"
+          />
+        );
+      default:
+        return (
+          <VirtualFolders
+            folders={virtualFolders}
+            items={kb.items}
+            selectedFolderId={selectedFolderId}
+            onFolderSelect={handleFolderSelect}
+            onCreateFolder={() => handleCreateFolder(null)}
+            onCreateSubfolder={handleCreateFolder}
+            onEditFolder={handleEditFolder}
+            onDeleteFolder={handleDeleteFolder}
+            onDropItem={handleDropItemOnFolder}
+            onMoveFolder={handleMoveFolder}
+            canMoveFolder={canMoveFolder}
+          />
+        );
     }
   };
 
-  // Render sidebar content based on mode and active panel
+  const renderReadingSidebar = () => {
+    switch (activeSidebarPanel.id) {
+      case 'chapters':
+      case 'bookmarks':
+        return readingItem ? (
+          <div ref={setReadingNavTarget} />
+        ) : (
+          <PanelEmpty>先在书库中选择要阅读的内容</PanelEmpty>
+        );
+      case 'search':
+        return (
+          <SidebarSearch
+            placeholder="搜索书库内容"
+            filterHit={isShelfHit}
+            selectedId={readingItemId}
+            onOpenItem={setReadingItemId}
+          />
+        );
+      case 'recent':
+        return (
+          <SidebarItemList
+            items={recentlyReadItems}
+            selectedId={readingItemId}
+            onOpen={setReadingItemId}
+            describe={describeReading}
+            emptyText="还没有阅读记录"
+            ariaLabel="最近阅读"
+          />
+        );
+      default:
+        return (
+          <ReadingShelf items={shelfItems} selectedId={readingItemId} onSelect={setReadingItemId} />
+        );
+    }
+  };
+
+  const renderWritingSidebar = () => {
+    switch (activeSidebarPanel.id) {
+      case 'outline':
+        if (!currentDocument) return <PanelEmpty>打开一个文档查看大纲</PanelEmpty>;
+        return getFileTypeId(currentDocument.title) === 'markdown' ? (
+          <WritingOutline content={currentDocument.content} onSelectHeading={revealWritingHeading} />
+        ) : (
+          <PanelEmpty>大纲仅支持 Markdown 文档</PanelEmpty>
+        );
+      case 'references': {
+        const currentItem = writingItems.find((item) => item.id === selectedDocId);
+        return currentItem ? (
+          <BacklinksPanel
+            item={currentItem}
+            items={kb.items}
+            linkIndex={linkIndex}
+            related={relatedLinks}
+            onOpenItem={openItem}
+            onCreateNote={(title) => void createNoteFromLink(title)}
+          />
+        ) : (
+          <PanelEmpty>打开一个文档查看反向链接与出链</PanelEmpty>
+        );
+      }
+      case 'tags':
+        return (
+          <DocumentTags
+            documents={writingItems}
+            tags={kb.tags}
+            selectedDocId={editorTabs.activeDocId}
+            onOpenDocument={selectDocument}
+          />
+        );
+      case 'recent':
+        return (
+          <SidebarItemList
+            items={recentWritingItems}
+            selectedId={editorTabs.activeDocId}
+            onOpen={selectDocument}
+            describe={describeUpdated}
+            emptyText="还没有写作文档"
+            ariaLabel="最近编辑的文档"
+          />
+        );
+      default:
+        return (
+          <WritingSidebar
+            documents={documentList}
+            selectedDocId={editorTabs.activeDocId}
+            documentsLoading={documentsLoading}
+            isCollapsed={writingSidebarCollapsed}
+            onToggleCollapse={() => setWritingSidebarCollapsed(!writingSidebarCollapsed)}
+            onSelectDocument={selectDocument}
+            onCreateDocument={createNewDocument}
+            onDeleteDocument={deleteDocument}
+            onOpenHelp={handleOpenWelcomeGuide}
+            onMoveDocument={handleMoveDocument}
+            onRenameDocument={handleRenameItem}
+          />
+        );
+    }
+  };
+
   const renderSidebarContent = () => {
-    if (appState.mode === 'knowledge') {
-      // Show virtual folders for knowledge mode
-      return (
-        <VirtualFolders
-          folders={virtualFolders}
-          items={kb.items}
-          selectedFolderId={selectedFolderId}
-          onFolderSelect={handleFolderSelect}
-          onCreateFolder={() => handleCreateFolder(null)}
-          onCreateSubfolder={handleCreateFolder}
-          onEditFolder={handleEditFolder}
-          onDeleteFolder={handleDeleteFolder}
-          onDropItem={handleDropItemOnFolder}
-          onMoveFolder={handleMoveFolder}
-          canMoveFolder={canMoveFolder}
-        />
-      );
+    switch (appState.mode) {
+      case 'knowledge':
+        return renderKnowledgeSidebar();
+      case 'reading':
+        return renderReadingSidebar();
+      case 'writing':
+        return renderWritingSidebar();
     }
-
-    if (appState.mode === 'reading') {
-      return (
-        <ReadingShelf items={shelfItems} selectedId={readingItemId} onSelect={setReadingItemId} />
-      );
-    }
-
-    // 写作模式：使用统一树结构的 WritingSidebar
-    return (
-        <WritingSidebar
-          documents={documentList}
-          selectedDocId={editorTabs.activeDocId}
-          documentsLoading={documentsLoading}
-          isCollapsed={writingSidebarCollapsed}
-          onToggleCollapse={() => setWritingSidebarCollapsed(!writingSidebarCollapsed)}
-          onSelectDocument={selectDocument}
-          onCreateDocument={createNewDocument}
-          onDeleteDocument={deleteDocument}
-          onOpenHelp={handleOpenWelcomeGuide}
-          onMoveDocument={handleMoveDocument}
-          onRenameDocument={handleRenameItem}
-        />
-    );
   };
 
   // Word count calculations - now from useDocuments hook
@@ -941,6 +1178,8 @@ const App: React.FC = () => {
               onCreateExcerpt={handleCreateExcerpt}
               onOpenInWriting={openInWriting}
               onWikiLinkClick={openWikiTarget}
+              navPanel={readingNavPanel}
+              navTarget={readingNavTarget}
             />
           </div>
         );
@@ -961,6 +1200,9 @@ const App: React.FC = () => {
               onRenameItem={handleRenameItem}
               onQuickCapture={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
               onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
+              filters={knowledgeFilters}
+              onFiltersChange={setKnowledgeFilters}
+              detailsRequest={knowledgeDetailsRequest}
             />
           </div>
         );
@@ -1204,6 +1446,8 @@ const App: React.FC = () => {
       onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
       onEnterFocusMode={() => dispatch({ type: 'ENTER_FOCUS_MODE' })}
       isInFocusMode={isInFocusMode}
+      activePanel={appState.sidebarVisible ? activeSidebarPanel.id : null}
+      onPanelChange={(panel) => dispatch({ type: 'TOGGLE_SIDEBAR_PANEL', payload: panel })}
     >
       <div className="app-content">
         {/* Sidebar */}
@@ -1218,7 +1462,7 @@ const App: React.FC = () => {
                 <span className="section-toggle">
                   {explorerExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 </span>
-                <span className="section-title">{getSidebarTitle()}</span>
+                <span className="section-title">{activeSidebarPanel.label}</span>
               </div>
 
               {explorerExpanded && (

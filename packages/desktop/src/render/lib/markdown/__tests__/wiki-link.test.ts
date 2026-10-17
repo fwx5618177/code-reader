@@ -13,6 +13,7 @@ import {
   extractWikiLinks,
   findHeadingInDoc,
   formatWikiLink,
+  headingOccurrence,
   markdownSchema,
   MAX_EMBED_DEPTH,
   parseMarkdown,
@@ -160,6 +161,22 @@ describe('标题提取与章节', () => {
     expect(doc.nodeAt(pos)!.textContent).toBe('第二个');
     expect(doc.nodeAt(findHeadingInDoc(doc, '引用标题')!)!.type).toBe(markdownSchema.nodes.heading);
     expect(findHeadingInDoc(doc, '没有')).toBeNull();
+  });
+
+  it('同名标题按序号定位，序号与匹配规则（忽略大小写与空白）一致', () => {
+    const markdown = '## Intro\n\n段落\n\n## 其他\n\n## intro\n\n> ## INTRO\n';
+    const headings = extractHeadings(markdown);
+    expect(headings.map((_, index) => headingOccurrence(headings, index))).toEqual([0, 0, 1, 2]);
+    const doc = parseMarkdown(markdown);
+    const headingPositions: number[] = [];
+    doc.descendants((node, pos) => {
+      if (node.type.name === 'heading') headingPositions.push(pos);
+      return true;
+    });
+    expect(findHeadingInDoc(doc, 'Intro')).toBe(headingPositions[0]);
+    expect(findHeadingInDoc(doc, 'Intro', 1)).toBe(headingPositions[2]);
+    expect(findHeadingInDoc(doc, 'Intro', 2)).toBe(headingPositions[3]);
+    expect(findHeadingInDoc(doc, 'Intro', 3)).toBeNull();
   });
 });
 

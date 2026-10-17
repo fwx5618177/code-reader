@@ -16,6 +16,7 @@ import { migrateLegacyKnowledgeStore } from './legacy-migration';
 import { extractDocumentText, type ExtractedDocument } from './document-text';
 import { clipErrorMessage, clipWebPage, normalizeWebUrl, type WebClip } from './web-clip';
 import { localizeClipImages, type LocalizedClip } from './clip-images';
+import { durationMetadata } from './recording-metadata';
 
 let readyPromise: Promise<void> | null = null;
 
@@ -230,6 +231,17 @@ export async function captureQuickInput(data: QuickInputData): Promise<CaptureRe
   const title = resolveTitle(data, type, attachment, webClip?.title ?? extracted?.title);
   const userText = data.type === 'url' ? '' : data.content;
   const clipContent = webClip ? await saveClipImages(webClip, title, data.folderId) : null;
+  const metadata = {
+    ...(webClip && {
+      webClip: {
+        excerpt: webClip.excerpt,
+        byline: webClip.byline,
+        siteName: webClip.siteName,
+        clippedAt: new Date().toISOString(),
+      },
+    }),
+    ...durationMetadata(attachment && data.recordingDurationsMs?.get(attachment)),
+  };
 
   const item = await knowledgeRepository.create({
     // 文本笔记同时是写作文档，使用 .md 文件名以便在写作模式中打开
@@ -241,16 +253,7 @@ export async function captureQuickInput(data: QuickInputData): Promise<CaptureRe
     filePath,
     fileSize: attachment?.size,
     mimeType: attachment?.type || undefined,
-    metadata: webClip
-      ? {
-          webClip: {
-            excerpt: webClip.excerpt,
-            byline: webClip.byline,
-            siteName: webClip.siteName,
-            clippedAt: new Date().toISOString(),
-          },
-        }
-      : undefined,
+    metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
   });
 
   if (data.tags && data.tags.length > 0) {

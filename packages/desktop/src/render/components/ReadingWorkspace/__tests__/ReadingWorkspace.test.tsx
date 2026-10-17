@@ -134,6 +134,30 @@ describe('ReadingView', () => {
     expect(props.onWikiLinkClick).toHaveBeenCalledWith('另一篇');
   });
 
+  it('添加书签写回阅读状态；应用侧栏挂载时导航渲染到侧栏并隐藏视图内侧栏', () => {
+    const props = handlers();
+    const item = makeItem({ content: '# 第一章\n\n正文' });
+    const navTarget = document.createElement('div');
+    document.body.append(navTarget);
+    onTestFinished(() => navTarget.remove());
+
+    const { rerender } = render(<ReadingView item={item} {...props} />);
+    // jsdom 中滚动区域没有高度，进度视为读到末尾
+    fireEvent.click(screen.getByTitle('在当前位置添加书签'));
+    const [, input] = props.onUpdateItem.mock.calls.at(-1)!;
+    expect(input.metadata.reading.bookmarks).toEqual([
+      expect.objectContaining({ progress: 1, label: '100% 处' }),
+    ]);
+
+    rerender(<ReadingView item={item} {...props} navPanel="bookmarks" navTarget={navTarget} />);
+    expect(screen.queryByRole('tablist')).toBeNull();
+    expect(navTarget.textContent).toContain('100% 处');
+    expect(navTarget.textContent).toContain('选中正文文字即可高亮或摘录');
+
+    rerender(<ReadingView item={item} {...props} navPanel="chapters" navTarget={navTarget} />);
+    expect(navTarget.querySelector('nav')?.textContent).toBe('第一章');
+  });
+
   it('标题链接回传 目标#标题，[[#标题]] 在正文内跳转，![[嵌入]] 展开为引用内容', () => {
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
@@ -319,6 +343,9 @@ describe('ReadingOutline', () => {
     const props = {
       activeHeadingId: null,
       onHeadingClick,
+      bookmarks: [],
+      onBookmarkClick: vi.fn(),
+      onBookmarkDelete: vi.fn(),
       highlights: [highlight],
       locatedHighlightIds: new Set(['h1']),
       onHighlightClick,
@@ -335,5 +362,30 @@ describe('ReadingOutline', () => {
     expect(screen.getByRole('tab', { name: '目录' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByRole('button', { name: '第一章' }));
     expect(onHeadingClick).toHaveBeenCalledWith('pdf-outline-0');
+  });
+
+  it('书签标签页列出书签，点击跳转、可删除', () => {
+    const bookmark = { id: 'b1', label: '第 2 页', createdAt: '2026-10-01T00:00:00.000Z', progress: 0.5, page: 2 };
+    const onBookmarkClick = vi.fn();
+    const onBookmarkDelete = vi.fn();
+    render(
+      <ReadingOutline
+        headings={[]}
+        activeHeadingId={null}
+        onHeadingClick={vi.fn()}
+        bookmarks={[bookmark]}
+        onBookmarkClick={onBookmarkClick}
+        onBookmarkDelete={onBookmarkDelete}
+        highlights={[]}
+        locatedHighlightIds={new Set()}
+        onHighlightClick={vi.fn()}
+        onHighlightDelete={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole('tab', { name: /书签/ }));
+    fireEvent.click(screen.getByRole('button', { name: '第 2 页' }));
+    expect(onBookmarkClick).toHaveBeenCalledWith(bookmark);
+    fireEvent.click(screen.getByRole('button', { name: '删除书签' }));
+    expect(onBookmarkDelete).toHaveBeenCalledWith('b1');
   });
 });

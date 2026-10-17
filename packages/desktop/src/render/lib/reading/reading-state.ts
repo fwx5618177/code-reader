@@ -26,6 +26,19 @@ export interface ReadingHighlight {
   page?: number;
 }
 
+/** 一个书签：记录添加时的阅读位置 */
+export interface ReadingBookmark {
+  id: string;
+  /** 创建时间（ISO） */
+  createdAt: string;
+  /** 展示名称（章节标题或页码等） */
+  label: string;
+  /** 添加时的全书进度 0-1，用于排序与非 PDF 的跳转 */
+  progress: number;
+  /** PDF 书签所在页码（从 1 开始） */
+  page?: number;
+}
+
 /** metadata.reading 的结构 */
 export interface ReadingState {
   /** 显式加入（true）或移出（false）书架；未设置时按类型决定 */
@@ -37,6 +50,8 @@ export interface ReadingState {
   /** 读完时间（ISO） */
   finishedAt?: string;
   highlights?: ReadingHighlight[];
+  /** 书签，按进度升序 */
+  bookmarks?: ReadingBookmark[];
 }
 
 /** 阅读状态 */
@@ -84,6 +99,11 @@ function clampProgress(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+function isPage(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
+
 function parseHighlight(value: unknown): ReadingHighlight | null {
   if (!isRecord(value)) return null;
   const id = nonEmptyString(value.id);
@@ -124,6 +144,12 @@ export function getReadingState(item: Pick<KnowledgeItem, 'metadata'>): ReadingS
       .filter((highlight): highlight is ReadingHighlight => highlight !== null);
     if (highlights.length > 0) state.highlights = highlights;
   }
+  if (Array.isArray(raw.bookmarks)) {
+    const bookmarks = raw.bookmarks
+      .map(parseBookmark)
+      .filter((bookmark): bookmark is ReadingBookmark => bookmark !== null);
+    if (bookmarks.length > 0) state.bookmarks = bookmarks;
+  }
   return state;
 }
 
@@ -140,6 +166,19 @@ export function patchReadingState(state: ReadingState, patch: Partial<ReadingSta
     if (next[key] === undefined) delete next[key];
   }
   return next as ReadingState;
+}
+
+function parseBookmark(value: unknown): ReadingBookmark | null {
+  if (!isRecord(value)) return null;
+  const id = nonEmptyString(value.id);
+  const label = nonEmptyString(value.label);
+  const createdAt = isoDate(value.createdAt);
+  if (!id || !label || !createdAt) return null;
+  if (typeof value.progress !== 'number' || !Number.isFinite(value.progress)) return null;
+
+  const bookmark: ReadingBookmark = { id, label, createdAt, progress: clampProgress(value.progress) };
+  if (isPage(value.page)) bookmark.page = value.page;
+  return bookmark;
 }
 
 /**
@@ -248,6 +287,16 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
   return date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/**
+ * 添加书签并保持按进度升序（进度相同时先添加的在前）
+ */
+export function addBookmark(
+  bookmarks: readonly ReadingBookmark[] | undefined,
+  bookmark: ReadingBookmark
+): ReadingBookmark[] {
+  return [...(bookmarks ?? []), bookmark].sort((a, b) => a.progress - b.progress);
+}
+
 // ================================
 // 摘录
 // ================================
@@ -269,6 +318,13 @@ export interface ExcerptInput {
 
 /** 摘录标题中引用原文的最大字符数 */
 const EXCERPT_TITLE_LENGTH = 20;
+
+/**
+ * 最近阅读：只保留有阅读记录的条目，按最后阅读时间倒序
+ */
+export function pickRecentlyRead(items: KnowledgeItem[]): KnowledgeItem[] {
+  return sortShelfItems(items.filter((item) => lastReadTime(item) > -Infinity));
+}
 
 /**
  * 摘录笔记的 Markdown：原文引用块 + 可选批注 + 来源双向链接（及页码、原始链接）

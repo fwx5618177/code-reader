@@ -98,6 +98,10 @@ describe('QuickInput 录音', () => {
     fireEvent.click(screen.getByText('保存'));
     await flush();
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: '[语音录音 01:05]' }));
+    // 录音附件的已知时长随提交一并传出，保存时写入条目 metadata
+    const [{ attachments, recordingDurationsMs }] = onSubmit.mock.calls[0];
+    expect(attachments).toHaveLength(1);
+    expect(recordingDurationsMs.get(attachments[0])).toBe(65_000);
   });
 
   it('录音中关闭弹窗：停止录音器与音轨，重新打开后没有残留的录音附件', async () => {

@@ -2,7 +2,15 @@
 // 知识库主工作区：工具栏 + 条目流 / 图谱 / 问答 + 条目详情面板
 // ================================
 
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import type { KnowledgeItem } from '../../types/knowledge';
 import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
 import type { LinkIndex, RelatedLink } from '../../lib/links/link-index';
@@ -53,7 +61,15 @@ export interface KnowledgeWorkspaceProps {
   onQuickCapture: () => void;
   /** 打开设置（用于引导配置 AI 服务商） */
   onOpenSettings: () => void;
+  /** 条目流筛选（受控：侧栏标签云也会修改） */
+  filters: ItemFilters;
+  onFiltersChange: Dispatch<SetStateAction<ItemFilters>>;
+  /** 外部请求显示某条目详情：选中并打开详情面板（每个请求对象只执行一次） */
+  detailsRequest?: { id: string } | null;
 }
+
+/** 已执行过的详情请求（工作区重新挂载时不重复打开已被用户关闭的详情面板） */
+const handledDetailsRequests = new WeakSet<object>();
 
 const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   kb,
@@ -68,10 +84,12 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   onRenameItem,
   onQuickCapture,
   onOpenSettings,
+  filters,
+  onFiltersChange: setFilters,
+  detailsRequest,
 }) => {
   const [view, setView] = useState<WorkspaceView>('items');
   const [prefs, setPrefs] = useState<WorkspacePrefs>(loadPrefs);
-  const [filters, setFilters] = useState<ItemFilters>(EMPTY_FILTERS);
   const [graphMode, setGraphMode] = useState<KnowledgeGraphMode>('global');
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const conversation = useAskConversation();
@@ -166,14 +184,20 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
     [onSelectItem]
   );
 
-  /** 问答引用：选中来源条目，并确保详情面板可见 */
-  const handleCitation = useCallback(
+  /** 选中条目，并确保详情面板可见（问答引用、外部详情请求共用） */
+  const showDetails = useCallback(
     (id: string) => {
       onSelectItem(id);
       updatePrefs({ inspectorOpen: true });
     },
     [onSelectItem, updatePrefs]
   );
+
+  useEffect(() => {
+    if (!detailsRequest || handledDetailsRequests.has(detailsRequest)) return;
+    handledDetailsRequests.add(detailsRequest);
+    showDetails(detailsRequest.id);
+  }, [detailsRequest, showDetails]);
 
   // ---------- 渲染 ----------
 
@@ -244,7 +268,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
           {view === 'ask' && (
             <AskPanel
               conversation={conversation}
-              onSelectItem={handleCitation}
+              onSelectItem={showDetails}
               onOpenSettings={onOpenSettings}
             />
           )}

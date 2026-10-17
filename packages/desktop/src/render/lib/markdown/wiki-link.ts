@@ -54,16 +54,34 @@ function headingKey(text: string): string {
   return text.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** 匹配键为 key 的第 occurrence 个标题下标（从 0 计）；不存在时返回 -1 */
+function nthHeadingIndex(headings: ReadonlyArray<{ text: string }>, key: string, occurrence: number): number {
+  let seen = 0;
+  return headings.findIndex((h) => headingKey(h.text) === key && seen++ === occurrence);
+}
+
 /**
  * 在标题列表中查找链接指向的标题
  * 先按完整文本匹配；[[note#父标题#子标题]] 这类路径写法再按最后一段匹配
+ * occurrence 指定同名标题中的第几个（从 0 计，默认第一个）
  */
-export function findHeadingIndex(headings: ReadonlyArray<{ text: string }>, heading: string): number {
-  const key = headingKey(heading);
-  const index = headings.findIndex((h) => headingKey(h.text) === key);
+export function findHeadingIndex(
+  headings: ReadonlyArray<{ text: string }>,
+  heading: string,
+  occurrence = 0
+): number {
+  const index = nthHeadingIndex(headings, headingKey(heading), occurrence);
   if (index !== -1 || !heading.includes('#')) return index;
-  const last = headingKey(heading.slice(heading.lastIndexOf('#') + 1));
-  return headings.findIndex((h) => headingKey(h.text) === last);
+  return nthHeadingIndex(headings, headingKey(heading.slice(heading.lastIndexOf('#') + 1)), occurrence);
+}
+
+/**
+ * 第 index 个标题在同名标题中的序号（从 0 计），与 findHeadingIndex 的匹配规则一致：
+ * findHeadingIndex(headings, headings[i].text, headingOccurrence(headings, i)) === i
+ */
+export function headingOccurrence(headings: ReadonlyArray<{ text: string }>, index: number): number {
+  const key = headingKey(headings[index].text);
+  return headings.slice(0, index).filter((h) => headingKey(h.text) === key).length;
 }
 
 /** 嵌入与标题的组合键（循环检测） */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { KnowledgeItem } from '../../../types/knowledge';
 import {
+  addBookmark,
   buildExcerptMarkdown,
   buildExcerptTitle,
   filterShelfItems,
@@ -10,6 +11,7 @@ import {
   getReadingStatus,
   isOnShelf,
   patchReadingState,
+  pickRecentlyRead,
   progressPatch,
   sortShelfItems,
   withReadingState,
@@ -218,6 +220,45 @@ describe('sortShelfItems / filterShelfItems', () => {
     expect(filterShelfItems(items, 'all', 'REACT.DEV').map((item) => item.id)).toEqual(['read-early']);
     expect(filterShelfItems(items, 'all', '.md')).toHaveLength(0);
     expect(filterShelfItems(items, 'unread', '新')).toEqual([unreadNew]);
+  });
+
+  it('最近阅读只含有阅读记录的条目，按最后阅读时间倒序', () => {
+    expect(pickRecentlyRead(items).map((item) => item.id)).toEqual(['read-late', 'read-early']);
+  });
+});
+
+describe('书签', () => {
+  const bookmark = (id: string, progress: number) => ({
+    id,
+    label: `书签 ${id}`,
+    createdAt: NOW.toISOString(),
+    progress,
+  });
+
+  it('解析时忽略不合法的书签并限制进度范围', () => {
+    const state = getReadingState(
+      makeItem({
+        metadata: {
+          reading: {
+            bookmarks: [
+              { ...bookmark('a', 0.2), page: 3 },
+              { ...bookmark('b', 1.5), page: 0 },
+              { id: 'c', label: '缺少进度', createdAt: NOW.toISOString() },
+              { ...bookmark('d', 0.5), createdAt: 'not-a-date' },
+              'oops',
+            ],
+          },
+        },
+      })
+    );
+    expect(state.bookmarks).toEqual([{ ...bookmark('a', 0.2), page: 3 }, bookmark('b', 1)]);
+  });
+
+  it('添加书签后按进度升序，不修改原数组', () => {
+    const existing = [bookmark('a', 0.2), bookmark('b', 0.8)];
+    expect(addBookmark(existing, bookmark('c', 0.5)).map((b) => b.id)).toEqual(['a', 'c', 'b']);
+    expect(addBookmark(undefined, bookmark('c', 0.5))).toHaveLength(1);
+    expect(existing).toHaveLength(2);
   });
 });
 

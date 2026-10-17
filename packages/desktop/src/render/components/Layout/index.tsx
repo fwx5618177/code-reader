@@ -4,10 +4,10 @@
 // 使用 CSS Modules 实现样式
 // ================================
 
-import React, { useState } from 'react';
+import React from 'react';
 import TitleBar from '../TitleBar';
 import Ribbon from '../Ribbon';
-import { AppMode } from '../../types/app-modes';
+import { AppMode, SidebarPanel } from '../../types/app-modes';
 import styles from './Layout.module.scss';
 
 // ================================
@@ -33,6 +33,10 @@ interface LayoutProps {
   onEnterFocusMode?: () => void;
   /** 是否处于专注模式 */
   isInFocusMode?: boolean;
+  /** 当前活动侧栏面板（侧栏折叠时为 null） */
+  activePanel: SidebarPanel | null;
+  /** 点击 Ribbon 导航按钮 */
+  onPanelChange: (panel: SidebarPanel) => void;
 }
 
 // 模式显示名称
@@ -56,20 +60,9 @@ const Layout: React.FC<LayoutProps> = ({
   onOpenSettings,
   onEnterFocusMode,
   isInFocusMode = false,
+  activePanel,
+  onPanelChange,
 }) => {
-  const [activePanel, setActivePanel] = useState('files');
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-
-  // 处理面板切换
-  const handlePanelChange = (panel: string) => {
-    if (panel === activePanel && sidebarVisible) {
-      setSidebarVisible(false);
-    } else {
-      setActivePanel(panel);
-      setSidebarVisible(true);
-    }
-  };
-
   // 处理模式变更
   const handleModeChange = (mode: AppMode) => {
     onModeChange?.(mode);
@@ -112,7 +105,7 @@ const Layout: React.FC<LayoutProps> = ({
         {/* Ribbon - 左侧导航栏 */}
         <Ribbon
           activePanel={activePanel}
-          onPanelChange={handlePanelChange}
+          onPanelChange={onPanelChange}
           onQuickNote={onQuickInput}
           onStartRecording={onStartRecording}
           currentMode={currentMode}

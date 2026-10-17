@@ -1,21 +1,15 @@
 // ================================
 // 全局搜索（⌘P）
-// 同时搜索写作文档（内存全文索引）与知识库条目（混合检索），按组展示
-// 输入防抖；只采用最新一次查询的结果，过期响应直接丢弃
+// 同时搜索写作文档与知识库条目，按组展示；检索见 useGlobalSearch
 // ================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Clock, Filter, Search, X } from 'lucide-react';
-import { useWritingService } from '../../lib/writing';
 import type { KnowledgeItemType } from '../../types/knowledge';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
-import {
-  mergeSearchResults,
-  splitHighlights,
-  type SearchGroupKey,
-  type SearchGroups,
-  type SearchHit,
-} from './search-results';
+import { SEARCH_GROUPS, type SearchHit } from './search-results';
+import { useGlobalSearch } from './useGlobalSearch';
+import { Snippet } from './Snippet';
 import styles from './SearchPanel.module.scss';
 
 interface SearchPanelProps {
@@ -25,38 +19,13 @@ interface SearchPanelProps {
   onOpenItem: (id: string) => void;
 }
 
-/** 输入停顿多久后发起搜索（毫秒） */
-const SEARCH_DEBOUNCE_MS = 300;
-/** 每一路搜索的结果上限 */
-const RESULT_LIMIT = 30;
 /** 保留的最近搜索词数 */
 const HISTORY_LIMIT = 10;
 
-const EMPTY_GROUPS: SearchGroups = { documents: [], knowledge: [] };
-
-const GROUPS: Array<{ key: SearchGroupKey; label: string }> = [
-  { key: 'documents', label: '写作文档' },
-  { key: 'knowledge', label: '知识条目' },
-];
-
 const ITEM_TYPES = Object.keys(ITEM_TYPE_LABELS) as KnowledgeItemType[];
-
-const Snippet: React.FC<{ snippet: string }> = ({ snippet }) => (
-  <div className={styles.resultHighlight}>
-    {splitHighlights(snippet).map((segment, index) =>
-      segment.highlight ? (
-        <mark key={index}>{segment.text}</mark>
-      ) : (
-        <React.Fragment key={index}>{segment.text}</React.Fragment>
-      )
-    )}
-  </div>
-);
 
 const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }) => {
   const [query, setQuery] = useState('');
-  const [groups, setGroups] = useState<SearchGroups>(EMPTY_GROUPS);
-  const [isLoading, setIsLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [typeFilter, setTypeFilter] = useState<KnowledgeItemType[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -64,10 +33,8 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
 
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
-  // 每次查询递增，响应返回时与最新值比较以丢弃过期结果
-  const requestSeqRef = useRef(0);
 
-  const { search: searchDocuments } = useWritingService();
+  const { groups, isLoading } = useGlobalSearch(query);
 
   // 打开时聚焦并选中输入框
   useEffect(() => {
@@ -77,41 +44,10 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
     }
   }, [isOpen]);
 
-  // 防抖搜索
-  useEffect(() => {
-    const seq = ++requestSeqRef.current;
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setGroups(EMPTY_GROUPS);
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    const timer = setTimeout(() => {
-      void Promise.allSettled([
-        searchDocuments(trimmed, { limit: RESULT_LIMIT, fuzzy: true, highlight: true }),
-        window.electron.search.hybrid(trimmed, { limit: RESULT_LIMIT }),
-      ]).then(([writing, hybrid]) => {
-        if (seq !== requestSeqRef.current) return;
-        if (writing.status === 'rejected') console.error('[Search] 写作文档搜索失败:', writing.reason);
-        if (hybrid.status === 'rejected') console.error('[Search] 知识库搜索失败:', hybrid.reason);
-        setGroups(
-          mergeSearchResults(
-            writing.status === 'fulfilled' ? writing.value : [],
-            hybrid.status === 'fulfilled' ? hybrid.value : []
-          )
-        );
-        setIsLoading(false);
-      });
-    }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [query, searchDocuments]);
-
   // 按类型筛选后的分组，以及键盘导航用的扁平列表
   const visibleGroups = useMemo(() => {
     const keep = (hit: SearchHit) => typeFilter.length === 0 || typeFilter.includes(hit.type);
-    return GROUPS.map(({ key, label }) => ({ key, label, hits: groups[key].filter(keep) })).filter(
+    return SEARCH_GROUPS.map(({ key, label }) => ({ key, label, hits: groups[key].filter(keep) })).filter(
       (group) => group.hits.length > 0
     );
   }, [groups, typeFilter]);

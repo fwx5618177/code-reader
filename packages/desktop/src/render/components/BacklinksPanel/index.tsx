@@ -24,7 +24,8 @@ export interface BacklinksPanelProps {
   related: RelatedLink[];
   onOpenItem: (id: string) => void;
   onCreateNote: (title: string) => void;
-  onClose: () => void;
+  /** 关闭右侧面板；不传时为嵌入模式（应用侧栏「参考」）：宽度随容器、无关闭按钮 */
+  onClose?: () => void;
 }
 
 /** 截取提及位置附近的文本 */
@@ -87,7 +88,7 @@ const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
   ];
 
   return (
-    <aside className={styles.panel}>
+    <aside className={`${styles.panel} ${onClose ? '' : styles.embedded}`}>
       <header className={styles.header}>
         <div className={styles.tabs} role="tablist">
           {tabs.map((t) => (
@@ -106,9 +107,11 @@ const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
             </button>
           ))}
         </div>
-        <button type="button" className={styles.close} onClick={onClose} title="关闭面板">
-          <X size={14} />
-        </button>
+        {onClose && (
+          <button type="button" className={styles.close} onClick={onClose} title="关闭面板">
+            <X size={14} />
+          </button>
+        )}
       </header>
 
       <div className={styles.body}>

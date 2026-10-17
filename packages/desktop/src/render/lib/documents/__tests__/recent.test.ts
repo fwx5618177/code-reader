@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { KnowledgeItem } from '../../../types/knowledge';
-import { pickRecentDocuments } from '../recent';
+import { pickRecentDocuments, sortByRecentUpdate } from '../recent';
 
 const item = (id: string, type: KnowledgeItem['type'], updated: string, extra: Partial<KnowledgeItem> = {}) =>
   ({ id, type, title: `${id}.md`, updatedAt: new Date(updated), ...extra }) as KnowledgeItem;
@@ -28,5 +28,13 @@ describe('pickRecentDocuments', () => {
     expect(pickRecentDocuments([item('a', 'note', '2026-01-01', { title: '' })])).toEqual([
       { id: 'a', title: '无标题' },
     ]);
+  });
+});
+
+describe('sortByRecentUpdate', () => {
+  it('按更新时间倒序，不修改原数组', () => {
+    const items = [item('a', 'audio', '2026-01-01'), item('b', 'note', '2026-03-01'), item('c', 'document', '2026-02-01')];
+    expect(sortByRecentUpdate(items).map((i) => i.id)).toEqual(['b', 'c', 'a']);
+    expect(items[0].id).toBe('a');
   });
 });

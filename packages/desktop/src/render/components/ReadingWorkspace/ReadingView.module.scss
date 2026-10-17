@@ -973,6 +973,31 @@ $outline-width: 248px;
   }
 }
 
+.bookmarkLabel {
+  @include button-reset;
+  @include truncate;
+  display: block;
+  width: 100%;
+  padding-left: var(--spacing-2);
+  border-left: 2px solid var(--accent-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.6;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+// 应用侧栏中的章节 / 书签面板
+.sidebarNav {
+  padding: var(--spacing-2);
+}
+
+.sidebarNavHeading {
+  padding: var(--spacing-2) var(--spacing-2) var(--spacing-1);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-semibold;
+  color: var(--text-muted);
+}
+
 // ================================
 // 空状态
 // ================================

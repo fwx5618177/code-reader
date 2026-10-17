@@ -40,6 +40,8 @@ export interface EpubReaderState {
   /** 当前章节对应的目录项 */
   activeTocId: string | null;
   goToChapter: (index: number) => void;
+  /** 跳转到整本书的进度位置（0–1，用于书签） */
+  goToProgress: (progress: number) => void;
   openTocEntry: (id: string) => void;
   /** 打开包内链接目标（路径#片段） */
   openTarget: (target: string) => void;
@@ -127,6 +129,15 @@ export function useEpubReader(filePath: string | undefined, initialProgress: num
     [book, showChapter]
   );
 
+  const goToProgress = useCallback(
+    (progress: number) => {
+      if (!book) return;
+      const { chapterIndex, ratio } = chapterPosition(progress, book.renderer.chapterCount);
+      showChapter(book.renderer, chapterIndex, { ratio });
+    },
+    [book, showChapter]
+  );
+
   const openTocEntry = useCallback(
     (id: string) => {
       const entry = book?.toc[Number(id.slice(TOC_ID_PREFIX.length))];
@@ -170,6 +181,7 @@ export function useEpubReader(filePath: string | undefined, initialProgress: num
     toc,
     activeTocId,
     goToChapter,
+    goToProgress,
     openTocEntry,
     openTarget,
   };

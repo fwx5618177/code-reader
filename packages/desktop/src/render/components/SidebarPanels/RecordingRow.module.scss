@@ -1,0 +1,132 @@
+// ================================
+// 录音列表行样式（行高 56px，与 RecordingsPanel 中的 ROW_HEIGHT 一致）
+// ================================
+
+@use '../../styles/variables' as *;
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  height: 56px;
+  padding: 0 var(--spacing-2) 0 var(--spacing-3);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.rowSelected {
+  background-color: var(--bg-selected);
+
+  &:hover {
+    background-color: var(--bg-selected);
+  }
+}
+
+.playButton {
+  @include button-reset;
+  @include flex-center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+
+  &:hover:not(:disabled) {
+    background-color: var(--accent-primary-alpha);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.playButtonActive {
+  background-color: var(--accent-primary);
+  color: var(--text-on-accent);
+}
+
+.body {
+  @include button-reset;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.title {
+  @include truncate;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.meta {
+  display: flex;
+  gap: var(--spacing-2);
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.transcript_done {
+  color: var(--color-success);
+}
+
+.transcript_running {
+  color: var(--accent-secondary);
+}
+
+.transcript_failed {
+  color: var(--color-error);
+}
+
+.transcript_none {
+  color: var(--text-muted);
+}
+
+// 操作按钮悬停或键盘聚焦时浮现，覆盖在行右侧
+.actions {
+  position: absolute;
+  top: 50%;
+  right: var(--spacing-2);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity $transition-fast;
+
+  .row:hover &,
+  &:focus-within {
+    opacity: 1;
+  }
+}
+
+.action {
+  @include button-reset;
+  @include flex-center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.actionDanger:hover {
+  color: var(--color-error);
+}

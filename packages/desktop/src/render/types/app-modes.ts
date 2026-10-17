@@ -87,7 +87,7 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
       showStatusBar: true,
       showTabs: true,
       sidebarCollapsed: true,
-      defaultSidebarPanel: 'bookmarks',
+      defaultSidebarPanel: 'files',
       distractionFree: false,
     },
   },
@@ -106,7 +106,7 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
       showStatusBar: true,
       showTabs: true,
       sidebarCollapsed: false,
-      defaultSidebarPanel: 'recent',
+      defaultSidebarPanel: 'files',
       distractionFree: false,
     },
   },
@@ -124,7 +124,7 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
       showStatusBar: true,
       showTabs: false,
       sidebarCollapsed: false,
-      defaultSidebarPanel: 'outline',
+      defaultSidebarPanel: 'files',
       distractionFree: false,
     },
   },
@@ -239,96 +239,41 @@ export type SidebarPanel =
   | 'graph'; // Knowledge graph
 
 /**
- * Sidebar panel configuration
+ * 侧栏面板配置（Ribbon 按钮与侧栏标题共用）
  */
 export interface SidebarPanelConfig {
   id: SidebarPanel;
-  name: string;
-  nameCN: string;
-  icon: string;
-  /** Available in which modes */
-  availableInModes: AppMode[];
+  /** 按钮提示与侧栏标题 */
+  label: string;
+  shortcut?: string;
 }
 
-export const SIDEBAR_PANELS: SidebarPanelConfig[] = [
-  {
-    id: 'files',
-    name: 'Files',
-    nameCN: '文件',
-    icon: 'FolderTree',
-    availableInModes: ['reading', 'knowledge', 'writing'],
-  },
-  {
-    id: 'search',
-    name: 'Search',
-    nameCN: '搜索',
-    icon: 'Search',
-    availableInModes: ['reading', 'knowledge', 'writing'],
-  },
-  {
-    id: 'tags',
-    name: 'Tags',
-    nameCN: '标签',
-    icon: 'Tags',
-    availableInModes: ['knowledge', 'writing'],
-  },
-  {
-    id: 'recent',
-    name: 'Recent',
-    nameCN: '最近',
-    icon: 'Clock',
-    availableInModes: ['reading', 'knowledge', 'writing'],
-  },
-  {
-    id: 'bookmarks',
-    name: 'Bookmarks',
-    nameCN: '书签',
-    icon: 'Bookmark',
-    availableInModes: ['reading', 'knowledge'],
-  },
-  {
-    id: 'calendar',
-    name: 'Calendar',
-    nameCN: '日历',
-    icon: 'Calendar',
-    availableInModes: ['knowledge'],
-  },
-  {
-    id: 'outline',
-    name: 'Outline',
-    nameCN: '大纲',
-    icon: 'List',
-    availableInModes: ['reading', 'knowledge', 'writing'],
-  },
-  {
-    id: 'chapters',
-    name: 'Chapters',
-    nameCN: '章节',
-    icon: 'BookMarked',
-    availableInModes: ['reading'],
-  },
-  {
-    id: 'references',
-    name: 'References',
-    nameCN: '参考',
-    icon: 'Link2',
-    availableInModes: ['knowledge', 'writing'],
-  },
-  {
-    id: 'recordings',
-    name: 'Recordings',
-    nameCN: '录音',
-    icon: 'Mic',
-    availableInModes: ['knowledge'],
-  },
-  {
-    id: 'graph',
-    name: 'Graph',
-    nameCN: '图谱',
-    icon: 'Network',
-    availableInModes: ['knowledge'],
-  },
-];
+/** 各模式可用的侧栏面板，顺序即 Ribbon 按钮顺序 */
+export const MODE_SIDEBAR_PANELS: Record<AppMode, SidebarPanelConfig[]> = {
+  reading: [
+    { id: 'chapters', label: '章节' },
+    { id: 'bookmarks', label: '书签' },
+    { id: 'files', label: '书库' },
+    { id: 'search', label: '搜索' },
+    { id: 'recent', label: '最近阅读' },
+  ],
+  knowledge: [
+    { id: 'files', label: '文件夹' },
+    { id: 'search', label: '搜索', shortcut: '⌘⇧F' },
+    { id: 'tags', label: '标签' },
+    { id: 'recordings', label: '录音' },
+    { id: 'graph', label: '知识图谱' },
+    { id: 'calendar', label: '日历' },
+    { id: 'recent', label: '最近' },
+  ],
+  writing: [
+    { id: 'outline', label: '大纲' },
+    { id: 'files', label: '文件' },
+    { id: 'references', label: '参考' },
+    { id: 'tags', label: '标签' },
+    { id: 'recent', label: '最近' },
+  ],
+};
 
 // ================================
 // Theme Types
@@ -370,8 +315,8 @@ export interface AppState {
   writingFeature: WritingFeature;
   /** Current theme configuration */
   theme: ThemeConfig;
-  /** Active sidebar panel */
-  activeSidebarPanel: SidebarPanel;
+  /** 每个模式各自记住的活动侧栏面板 */
+  sidebarPanels: Record<AppMode, SidebarPanel>;
   /** Is sidebar visible */
   sidebarVisible: boolean;
   /** Sidebar width */
@@ -399,7 +344,11 @@ export const DEFAULT_APP_STATE: AppState = {
   mode: 'knowledge',
   writingFeature: 'normal',
   theme: DEFAULT_THEME_CONFIG,
-  activeSidebarPanel: 'recent',
+  sidebarPanels: {
+    reading: APP_MODE_CONFIGS.reading.ui.defaultSidebarPanel,
+    knowledge: APP_MODE_CONFIGS.knowledge.ui.defaultSidebarPanel,
+    writing: APP_MODE_CONFIGS.writing.ui.defaultSidebarPanel,
+  },
   sidebarVisible: true,
   sidebarWidth: 280,
   openViews: [],
@@ -420,6 +369,7 @@ export type AppAction =
   | { type: 'SET_WRITING_FEATURE'; payload: WritingFeature }
   | { type: 'SET_THEME'; payload: Partial<ThemeConfig> }
   | { type: 'SET_SIDEBAR_PANEL'; payload: SidebarPanel }
+  | { type: 'TOGGLE_SIDEBAR_PANEL'; payload: SidebarPanel }
   | { type: 'TOGGLE_SIDEBAR'; payload?: boolean }
   | { type: 'SET_SIDEBAR_WIDTH'; payload: number }
   | { type: 'OPEN_VIEW'; payload: ViewConfig }
@@ -451,7 +401,6 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         // Reset writing feature when switching away from writing mode
         writingFeature: action.payload === 'writing' ? state.writingFeature : 'normal',
         sidebarVisible: modeConfig.ui.showSidebar && !modeConfig.ui.sidebarCollapsed,
-        activeSidebarPanel: modeConfig.ui.defaultSidebarPanel,
       };
     }
 
@@ -478,7 +427,18 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_SIDEBAR_PANEL':
       return {
         ...state,
-        activeSidebarPanel: action.payload,
+        sidebarPanels: { ...state.sidebarPanels, [state.mode]: action.payload },
+        sidebarVisible: true,
+      };
+
+    // 再次点击当前面板折叠侧栏；否则切换到该面板并展开
+    case 'TOGGLE_SIDEBAR_PANEL':
+      if (state.sidebarPanels[state.mode] === action.payload) {
+        return { ...state, sidebarVisible: !state.sidebarVisible };
+      }
+      return {
+        ...state,
+        sidebarPanels: { ...state.sidebarPanels, [state.mode]: action.payload },
         sidebarVisible: true,
       };
 
@@ -701,17 +661,9 @@ export function getEffectiveUIConfig(state: AppState): AppModeUIConfig {
   return baseConfig;
 }
 
-/**
- * Check if a sidebar panel is available in current mode
- */
-export function isPanelAvailableInMode(panel: SidebarPanel, mode: AppMode): boolean {
-  const panelConfig = SIDEBAR_PANELS.find((p) => p.id === panel);
-  return panelConfig?.availableInModes.includes(mode) ?? false;
-}
-
-/**
- * Get available sidebar panels for a mode
- */
-export function getAvailablePanels(mode: AppMode): SidebarPanelConfig[] {
-  return SIDEBAR_PANELS.filter((p) => p.availableInModes.includes(mode));
+/** 当前模式的活动侧栏面板配置 */
+export function getActiveSidebarPanel(state: AppState): SidebarPanelConfig {
+  const panels = MODE_SIDEBAR_PANELS[state.mode];
+  const id = state.sidebarPanels[state.mode];
+  return panels.find((p) => p.id === id) ?? panels[0];
 }

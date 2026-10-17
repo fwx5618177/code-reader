@@ -2,14 +2,15 @@
 // 知识库工作区集成测试：条目流渲染、搜索筛选、选中后的详情面板、问答未配置服务商时的引导
 // ================================
 
-import React from 'react';
+import React, { useState } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KnowledgeItem, Tag } from '../../../types/knowledge';
 import type { UseKnowledgeBaseReturn } from '../../../lib/knowledge/useKnowledgeBase';
 import { LinkIndex } from '../../../lib/links/link-index';
 import { KNOWLEDGE_ITEM_DRAG_TYPE } from '../../../lib/knowledge/drag';
-import KnowledgeWorkspace from '..';
+import KnowledgeWorkspace, { type KnowledgeWorkspaceProps } from '..';
+import { EMPTY_FILTERS } from '../filtering';
 
 vi.mock('../../../lib/agent/agentStore', () => ({
   useAgentActivity: () => [],
@@ -113,8 +114,16 @@ function renderWorkspace(
     onQuickCapture: vi.fn(),
     onOpenSettings: vi.fn(),
   };
-  return { props, ...render(<KnowledgeWorkspace {...props} />) };
+  return { props, ...render(<StatefulWorkspace {...props} />) };
 }
+
+/** 筛选由外部持有，测试中用带状态的包装组件模拟 App */
+const StatefulWorkspace: React.FC<Omit<KnowledgeWorkspaceProps, 'filters' | 'onFiltersChange'>> = (
+  props
+) => {
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  return <KnowledgeWorkspace {...props} filters={filters} onFiltersChange={setFilters} />;
+};
 
 describe('KnowledgeWorkspace', () => {
   beforeEach(() => {
@@ -222,6 +231,24 @@ describe('KnowledgeWorkspace', () => {
     fireEvent.keyDown(screen.getByRole('region'), { key: 'Enter' });
     expect(props.onOpenInReading).toHaveBeenCalledTimes(2);
     expect(props.onOpenInWriting).not.toHaveBeenCalled();
+  });
+
+  it('外部详情请求选中条目并重新打开已关闭的详情面板，同一请求只执行一次', () => {
+    const { props, rerender } = renderWorkspace(ITEMS, 'n1');
+    fireEvent.click(screen.getByTitle('隐藏详情面板'));
+    expect(screen.queryByLabelText('标题')).toBeNull();
+
+    const request = { id: 'a1' };
+    rerender(<StatefulWorkspace {...props} detailsRequest={request} />);
+    expect(props.onSelectItem).toHaveBeenCalledWith('a1');
+    expect(screen.getByTitle('隐藏详情面板')).toBeTruthy();
+    expect(screen.getByLabelText('标题')).toBeTruthy();
+
+    // 用户再次关闭后，重新渲染同一请求不会把面板又打开
+    fireEvent.click(screen.getByTitle('隐藏详情面板'));
+    rerender(<StatefulWorkspace {...props} detailsRequest={request} />);
+    expect(screen.getByTitle('显示详情面板')).toBeTruthy();
+    expect(props.onSelectItem).toHaveBeenCalledTimes(1);
   });
 
   it('写作文档只提供「在写作中打开」', () => {

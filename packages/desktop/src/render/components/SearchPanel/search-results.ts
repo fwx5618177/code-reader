@@ -26,6 +26,12 @@ export interface SearchGroups {
   knowledge: SearchHit[];
 }
 
+/** 结果分组的展示顺序与标题 */
+export const SEARCH_GROUPS: ReadonlyArray<{ key: SearchGroupKey; label: string }> = [
+  { key: 'documents', label: '写作文档' },
+  { key: 'knowledge', label: '知识条目' },
+];
+
 export interface SnippetSegment {
   text: string;
   highlight: boolean;

@@ -16,6 +16,8 @@ export interface PdfReaderState {
   toc: RenderedHeading[];
   /** 当前页所属的目录项 */
   activeTocId: string | null;
+  /** 当前页（从 1 开始） */
+  currentPage: number;
   /** 阅读器报告的当前页 */
   setCurrentPage: (page: number) => void;
   openTocEntry: (id: string) => void;
@@ -75,5 +77,5 @@ export function usePdfReader(filePath: string | undefined): PdfReaderState {
     [outline]
   );
 
-  return { file, readerRef, toc, activeTocId, setCurrentPage, openTocEntry };
+  return { file, readerRef, toc, activeTocId, currentPage, setCurrentPage, openTocEntry };
 }

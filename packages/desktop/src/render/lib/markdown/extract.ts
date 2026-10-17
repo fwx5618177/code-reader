@@ -99,9 +99,10 @@ export function extractSection(markdown: string, heading: string): string | null
 /**
  * 文档节点中链接标题的位置（用于滚动定位）；找不到时返回 null
  * 标题文本与 extractHeadings 的规则一致，保证编辑器、阅读视图与补全的匹配结果相同
+ * occurrence 指定同名标题中的第几个（从 0 计）
  */
-export function findHeadingInDoc(doc: PMNode, heading: string): number | null {
-  const index = findHeadingIndex(extractHeadings(serializeMarkdown(doc)), heading);
+export function findHeadingInDoc(doc: PMNode, heading: string, occurrence = 0): number | null {
+  const index = findHeadingIndex(extractHeadings(serializeMarkdown(doc)), heading, occurrence);
   if (index === -1) return null;
   let count = 0;
   let found: number | null = null;

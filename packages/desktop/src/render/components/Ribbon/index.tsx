@@ -20,7 +20,7 @@ import {
   BookMarked,
   Link2,
 } from 'lucide-react';
-import { AppMode } from '../../types/app-modes';
+import { AppMode, MODE_SIDEBAR_PANELS, SidebarPanel } from '../../types/app-modes';
 import Tooltip from '../Tooltip';
 import styles from './Ribbon.module.scss';
 
@@ -29,8 +29,8 @@ import styles from './Ribbon.module.scss';
 // ================================
 
 interface RibbonProps {
-  activePanel: string;
-  onPanelChange: (panel: string) => void;
+  activePanel: SidebarPanel | null;
+  onPanelChange: (panel: SidebarPanel) => void;
   onQuickNote?: () => void;
   onStartRecording?: () => void;
   currentMode?: AppMode;
@@ -83,45 +83,21 @@ const RibbonButton: React.FC<RibbonButtonProps> = ({
 };
 
 // ================================
-// 导航按钮定义
+// 导航按钮图标（面板列表与文案见 MODE_SIDEBAR_PANELS）
 // ================================
 
-interface NavButton {
-  id: string;
-  icon: React.ReactNode;
-  label: string;
-  shortcut?: string;
-}
-
-const getNavigationButtons = (mode: AppMode): NavButton[] => {
-  switch (mode) {
-    case 'reading':
-      return [
-        { id: 'chapters', icon: <BookMarked size={20} />, label: '章节' },
-        { id: 'bookmarks', icon: <Bookmark size={20} />, label: '书签' },
-        { id: 'files', icon: <Files size={20} />, label: '书库' },
-        { id: 'search', icon: <Search size={20} />, label: '搜索' },
-        { id: 'recent', icon: <Clock size={20} />, label: '最近阅读' },
-      ];
-    case 'knowledge':
-      return [
-        { id: 'files', icon: <Files size={20} />, label: '文件夹' },
-        { id: 'search', icon: <Search size={20} />, label: '搜索', shortcut: '⌘⇧F' },
-        { id: 'tags', icon: <Tag size={20} />, label: '标签' },
-        { id: 'recordings', icon: <Mic size={20} />, label: '录音' },
-        { id: 'graph', icon: <Network size={20} />, label: '知识图谱' },
-        { id: 'calendar', icon: <Calendar size={20} />, label: '日历' },
-        { id: 'recent', icon: <Clock size={20} />, label: '最近' },
-      ];
-    case 'writing':
-      return [
-        { id: 'outline', icon: <List size={20} />, label: '大纲' },
-        { id: 'files', icon: <Files size={20} />, label: '文件' },
-        { id: 'references', icon: <Link2 size={20} />, label: '参考' },
-        { id: 'tags', icon: <Tag size={20} />, label: '标签' },
-        { id: 'recent', icon: <Clock size={20} />, label: '最近' },
-      ];
-  }
+const PANEL_ICONS: Record<SidebarPanel, React.ReactNode> = {
+  chapters: <BookMarked size={20} />,
+  bookmarks: <Bookmark size={20} />,
+  files: <Files size={20} />,
+  search: <Search size={20} />,
+  recent: <Clock size={20} />,
+  tags: <Tag size={20} />,
+  recordings: <Mic size={20} />,
+  graph: <Network size={20} />,
+  calendar: <Calendar size={20} />,
+  outline: <List size={20} />,
+  references: <Link2 size={20} />,
 };
 
 // ================================
@@ -136,7 +112,7 @@ const Ribbon: React.FC<RibbonProps> = ({
   currentMode = 'knowledge',
   onOpenSettings,
 }) => {
-  const navigationButtons = getNavigationButtons(currentMode);
+  const navigationButtons = MODE_SIDEBAR_PANELS[currentMode];
 
   return (
     <div className={styles.ribbon}>
@@ -167,7 +143,7 @@ const Ribbon: React.FC<RibbonProps> = ({
           {navigationButtons.map((button) => (
             <RibbonButton
               key={button.id}
-              icon={button.icon}
+              icon={PANEL_ICONS[button.id]}
               label={button.label}
               shortcut={button.shortcut}
               isActive={activePanel === button.id}
