@@ -437,6 +437,47 @@ export interface PluginPackage {
   manifest: unknown;
   /** manifest.json 读取或解析失败的原因 */
   error: string | null;
+  /** 验签结果；manifest 无法读取时为 null */
+  signature: PluginSignatureCheck | null;
+  /** 按当前签名策略不允许加载的原因（内置插件始终为 null） */
+  blocked: string | null;
+}
+
+/** 插件验签结果（见 src/shared/plugin-signing.ts） */
+export type PluginSignatureCheck =
+  | { status: 'trusted'; keyId: string; signer: string }
+  | { status: 'untrusted'; keyId: string }
+  | { status: 'invalid'; reason: string }
+  | { status: 'unsigned' };
+
+/** 插件信任设置：warn 只提示，require 只允许受信任签名的用户插件 */
+export interface PluginTrustSettings {
+  policy: 'warn' | 'require';
+  keys: Array<{ keyId: string; name: string; publicKey: string; addedAt: string }>;
+}
+
+/** 插件市场中的插件 */
+export interface MarketPlugin {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  author?: string;
+  permissions: string[];
+  download: string;
+  sha256: string;
+  size?: number;
+  registry: string;
+  registryName: string;
+  installedVersion: string | null;
+  installedSource: 'builtin' | 'user' | null;
+  updateAvailable: boolean;
+}
+
+export interface MarketListing {
+  registries: string[];
+  plugins: MarketPlugin[];
+  errors: Array<{ registry: string; error: string }>;
 }
 
 export interface PluginPackageList {
@@ -807,6 +848,17 @@ interface ElectronAPI {
     readEntry: (id: string, main: string) => Promise<string>;
     openDirectory: () => Promise<void>;
     uninstall: (id: string) => Promise<void>;
+    getTrust: () => Promise<PluginTrustSettings>;
+    setPolicy: (policy: PluginTrustSettings['policy']) => Promise<PluginTrustSettings>;
+    addTrustedKey: (name: string, publicKey: string) => Promise<PluginTrustSettings>;
+    removeTrustedKey: (keyId: string) => Promise<PluginTrustSettings>;
+    /** 读取全部已添加市场的索引（单个市场失败计入 errors） */
+    marketList: () => Promise<MarketListing>;
+    /** 从市场安装或更新到用户插件目录 */
+    marketInstall: (registry: string, id: string) => Promise<{ id: string; version: string; signature: PluginSignatureCheck }>;
+    /** 添加市场（会先读取一次以确认有效），返回全部市场地址 */
+    marketAddRegistry: (url: string) => Promise<string[]>;
+    marketRemoveRegistry: (url: string) => Promise<string[]>;
   };
 
   /** 扫描版 PDF 文字识别：列出/导入（弹出文件选择框，取消时返回空数组）/删除语言数据；

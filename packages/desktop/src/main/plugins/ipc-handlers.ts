@@ -6,9 +6,32 @@
 // manifest 内容由渲染进程校验（lib/plugins/manifest.ts），这里只保证路径安全与大小上限。
 // ================================
 
-import { app, ipcMain, shell } from 'electron';
-import { isAbsolute, join, relative, resolve } from 'path';
-import { mkdir, readdir, readFile, rm, stat } from 'fs/promises';
+import { ipcMain, shell } from 'electron';
+import { join } from 'path';
+import { mkdir, readdir, rm } from 'fs/promises';
+import type { SignatureCheck } from '../../shared/plugin-signing';
+import {
+  assertPluginId,
+  checkPluginSignature,
+  entryPath,
+  errorMessage,
+  isFile,
+  MANIFEST_FILE,
+  MAX_ENTRY_BYTES,
+  MAX_MANIFEST_BYTES,
+  PLUGIN_ID,
+  readLimited,
+  signingFields,
+  userPluginsDir,
+} from './package-files';
+import {
+  addTrustedKey,
+  readTrustSettings,
+  removeTrustedKey,
+  setSignaturePolicy,
+  signatureRejection,
+} from './trust';
+import { registerMarketHandlers } from './market';
 
 export type PluginPackageSource = 'builtin' | 'user';
 
@@ -19,45 +42,16 @@ export interface PluginPackage {
   manifest: unknown;
   /** manifest.json 读取或解析失败的原因 */
   error: string | null;
+  /** 验签结果；manifest 无法读取时为 null */
+  signature: SignatureCheck | null;
+  /** 按当前策略不允许加载的原因（内置插件始终为 null） */
+  blocked: string | null;
 }
 
 export interface PluginPackageList {
   /** 用户插件目录 */
   pluginsDir: string;
   packages: PluginPackage[];
-}
-
-/** 插件 ID（即目录名）：小写字母、数字与连字符，杜绝路径穿越 */
-const PLUGIN_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const MANIFEST_FILE = 'manifest.json';
-const MAX_MANIFEST_BYTES = 64 * 1024;
-const MAX_ENTRY_BYTES = 1024 * 1024;
-
-function userPluginsDir(): string {
-  return join(app.getPath('userData'), 'plugins');
-}
-
-function assertPluginId(id: unknown): asserts id is string {
-  if (typeof id !== 'string' || !PLUGIN_ID.test(id)) throw new Error('插件 ID 无效');
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function isFile(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isFile();
-  } catch {
-    return false;
-  }
-}
-
-async function readLimited(path: string, maxBytes: number): Promise<string> {
-  const info = await stat(path);
-  if (!info.isFile()) throw new Error(`${path} 不是文件`);
-  if (info.size > maxBytes) throw new Error(`文件超过 ${Math.round(maxBytes / 1024)} KB`);
-  return readFile(path, 'utf-8');
 }
 
 async function scanDirectory(root: string, source: PluginPackageSource): Promise<PluginPackage[]> {
@@ -74,9 +68,18 @@ async function scanDirectory(root: string, source: PluginPackageSource): Promise
     if (!(await isFile(manifestPath))) continue;
     try {
       const manifest: unknown = JSON.parse(await readLimited(manifestPath, MAX_MANIFEST_BYTES));
-      result.push({ id: entry.name, source, manifest, error: null });
+      const signature = await checkPluginSignature(join(root, entry.name), entry.name, manifest);
+      const blocked = source === 'user' ? signatureRejection(signature, readTrustSettings().policy) : null;
+      result.push({ id: entry.name, source, manifest, error: null, signature, blocked });
     } catch (error) {
-      result.push({ id: entry.name, source, manifest: null, error: `manifest.json 无法读取：${errorMessage(error)}` });
+      result.push({
+        id: entry.name,
+        source,
+        manifest: null,
+        error: `manifest.json 无法读取：${errorMessage(error)}`,
+        signature: null,
+        blocked: null,
+      });
     }
   }
   return result;
@@ -90,10 +93,13 @@ export function registerPluginHandlers(packageRoot: string): void {
   const builtinDir = join(packageRoot, 'assets', 'plugins');
 
   /** 插件所在目录：用户插件优先 */
-  const resolvePluginDir = async (id: string): Promise<string> => {
-    for (const root of [userPluginsDir(), builtinDir]) {
+  const resolvePluginDir = async (id: string): Promise<{ dir: string; source: PluginPackageSource }> => {
+    for (const [root, source] of [
+      [userPluginsDir(), 'user'],
+      [builtinDir, 'builtin'],
+    ] as const) {
       const dir = join(root, id);
-      if (await isFile(join(dir, MANIFEST_FILE))) return dir;
+      if (await isFile(join(dir, MANIFEST_FILE))) return { dir, source };
     }
     throw new Error(`插件 ${id} 不存在`);
   };
@@ -110,15 +116,24 @@ export function registerPluginHandlers(packageRoot: string): void {
 
   ipcMain.handle('plugins:readEntry', async (_event, id: unknown, main: unknown): Promise<string> => {
     assertPluginId(id);
-    if (typeof main !== 'string') throw new Error('入口文件路径无效');
-    const dir = await resolvePluginDir(id);
-    const entryPath = resolve(dir, main);
-    const relativePath = relative(dir, entryPath);
-    if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath) || !/\.m?js$/.test(entryPath)) {
-      throw new Error('入口文件必须是插件目录内的 .js/.mjs 文件');
+    const { dir, source } = await resolvePluginDir(id);
+    const path = entryPath(dir, main);
+    // 用户插件加载前按策略验签；签名无效时无论策略如何都拒绝
+    if (source === 'user') {
+      const manifest: unknown = JSON.parse(await readLimited(join(dir, MANIFEST_FILE), MAX_MANIFEST_BYTES));
+      if (signingFields(manifest).main !== main) throw new Error('入口文件与 manifest 不一致');
+      const rejection = signatureRejection(await checkPluginSignature(dir, id, manifest), readTrustSettings().policy);
+      if (rejection) throw new Error(rejection);
     }
-    return readLimited(entryPath, MAX_ENTRY_BYTES);
+    return readLimited(path, MAX_ENTRY_BYTES);
   });
+
+  ipcMain.handle('plugins:getTrust', () => readTrustSettings());
+  ipcMain.handle('plugins:setPolicy', (_event, policy: unknown) => setSignaturePolicy(policy));
+  ipcMain.handle('plugins:addTrustedKey', (_event, name: unknown, publicKey: unknown) => addTrustedKey(name, publicKey));
+  ipcMain.handle('plugins:removeTrustedKey', (_event, keyId: unknown) => removeTrustedKey(keyId));
+
+  registerMarketHandlers(builtinDir);
 
   ipcMain.handle('plugins:openDirectory', async (): Promise<void> => {
     const dir = userPluginsDir();

@@ -693,6 +693,37 @@ export function deactivate() {}
 
 限制：`manifest.json` 不超过 64 KB，入口文件不超过 1 MB；插件中没有 `fetch`、DOM 与 Node.js 能力。修改代码后在插件设置中点 **重新加载**。内置的「写作助手」（应用安装目录的 `assets/plugins/writing-tools`）是一个完整的参考实现。
 
+### 13.3 插件市场
+
+设置 → 插件 → **市场**。市场是一个 `registry.json` 索引文件，列出插件的名称、版本、权限与下载地址。
+
+- **目前没有官方市场服务器**。你可以添加自己或可信第三方托管的索引：输入地址后点“添加市场”（支持 `https://`、本地文件 `file://`，以及本机调试用的 `http://localhost`）。
+- 列表显示每个插件的版本、作者、申请的权限，以及本机是否已安装；点 **安装** / **更新到 vX** 即安装到用户插件目录。安装时会校验插件包的 SHA-256、插件 ID 与版本是否与索引一致，并按下面的签名策略验签。
+- 安装后回到“已安装”启用；已启用的插件更新后会自动按新版本重新加载，新版本新增的权限会再次请求授权。
+
+### 13.4 签名与信任
+
+设置 → 插件 → **签名与信任**。
+
+- 插件作者用 Ed25519 私钥对 `manifest.json` 与入口文件签名，生成 `signature.json`。“已安装”中每个用户插件都显示签名状态：**已签名 · 签名者**（受信任）、**签名者未受信任**、**未签名**、**签名无效**。
+- **签名无效**（文件在签名后被改动，或签名伪造）的插件在任何设置下都不会加载、不能安装。
+- **签名要求**：默认“允许未签名插件（显示警告）”；改为“只允许受信任签名的插件”后，未签名或签名者不在列表中的用户插件无法启用、也不能从市场安装。内置插件不受影响。
+- **受信任的签名者**：填写名称并粘贴作者提供的公钥即可添加。
+
+### 13.5 给插件签名、发布到自己的市场
+
+在 `packages/desktop` 目录下：
+
+```bash
+pnpm plugin-tools keygen --out ~/plugin-keys                 # 生成私钥（.pem，妥善保管）与公钥，打印 keyId
+pnpm plugin-tools sign path/to/my-plugin --key ~/plugin-keys/plugin-signing-key.pem   # 写入 signature.json
+pnpm plugin-tools verify path/to/my-plugin --public-key <公钥>                        # 自查
+pnpm plugin-tools registry ./market path/to/my-plugin path/to/other-plugin --name "我的市场" \
+  --base-url https://example.com/market                       # 打包 zip 并生成 registry.json
+```
+
+把 `./market` 目录上传到任意静态文件服务器（如 GitHub Pages、对象存储），用户添加 `https://example.com/market/registry.json` 即可。省略 `--base-url` 时下载地址相对 registry.json，适合整个目录一起托管或用 `file://` 本地测试。插件代码每次修改后都要重新签名。
+
 ---
 
 ## 14. 导入、导出与备份

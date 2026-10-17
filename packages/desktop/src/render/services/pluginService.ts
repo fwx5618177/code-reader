@@ -5,7 +5,7 @@
 // 由 PluginHost 在应用启动时调用 init()，只初始化一次。
 // ================================
 
-import type { PluginPackage } from '../types/electron';
+import type { PluginPackage, PluginSignatureCheck } from '../types/electron';
 import { ExtensionRegistry } from '../lib/plugins/extension-registry';
 import { validateManifest } from '../lib/plugins/manifest';
 import { PluginLoader, type PluginCommand } from '../lib/plugins/plugin-loader';
@@ -35,6 +35,10 @@ export interface PluginEntry {
   enabled: boolean;
   grantedPermissions: Permission[];
   status: PluginStatus;
+  /** 验签结果；manifest 无法读取时为 null */
+  signature: PluginSignatureCheck | null;
+  /** 按签名策略不允许加载的原因 */
+  blocked: string | null;
 }
 
 /** 等待用户确认的授权请求 */
@@ -106,7 +110,8 @@ class PluginService {
       this.preferences = { ...(await settingsService.get()).plugins };
       await this.scan();
       for (const entry of this.snapshot.plugins) {
-        if (entry.enabled && entry.manifest) await this.enable(entry.id);
+        // 按签名策略被阻止的插件保持原有偏好，不在启动时加载（原因显示在插件设置中）
+        if (entry.enabled && entry.manifest && !entry.blocked) await this.enable(entry.id);
       }
       this.setSnapshot({ initialized: true });
     });
@@ -140,6 +145,12 @@ class PluginService {
   /** 重新扫描插件目录（发现新复制进来的插件） */
   refresh(): Promise<void> {
     return this.serialize(() => this.scan());
+  }
+
+  /** 从市场安装或更新；已启用的插件按新版本重新激活（新增权限会再次请求授权） */
+  async installFromMarket(registry: string, pluginId: PluginId): Promise<void> {
+    await window.electron.plugins.marketInstall(registry, pluginId);
+    await this.reload(pluginId);
   }
 
   uninstall(pluginId: PluginId): Promise<void> {
@@ -187,10 +198,12 @@ class PluginService {
       id: item.id,
       source: item.source,
       manifest: validation.manifest,
-      errors: validation.errors,
+      errors: item.blocked ? [...validation.errors, item.blocked] : validation.errors,
       enabled: preference.enabled,
       grantedPermissions: grantedPermissions(this.preferences, item.id),
-      status: active ? 'active' : validation.manifest ? 'disabled' : 'error',
+      status: active ? 'active' : validation.manifest && !item.blocked ? 'disabled' : 'error',
+      signature: item.signature,
+      blocked: item.blocked,
     };
   }
 
@@ -230,8 +243,10 @@ class PluginService {
 
   /** 缺少授权时先请求；用户拒绝则保持禁用。授权通过后持久化并激活 */
   private async enable(pluginId: PluginId): Promise<void> {
-    const manifest = this.findEntry(pluginId)?.manifest;
+    const entry = this.findEntry(pluginId);
+    const manifest = entry?.manifest;
     if (!manifest) throw new Error(`插件 ${pluginId} 的 manifest 无效，无法启用`);
+    if (entry.blocked) throw new Error(entry.blocked);
     if (this.loader.isActive(pluginId)) return;
 
     const missing = missingPermissions(this.preferences, manifest);

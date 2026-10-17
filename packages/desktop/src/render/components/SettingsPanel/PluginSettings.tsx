@@ -1,6 +1,6 @@
 // ================================
-// 插件设置：列出已安装插件（名称、版本、描述、权限、命令、状态），
-// 启用/禁用（首次启用时弹出授权对话框）、重新加载、卸载用户插件、打开插件目录
+// 插件设置：已安装（名称、版本、签名、描述、权限、命令、状态；启用/禁用（首次启用时弹出授权对话框）、
+// 重新加载、卸载用户插件、打开插件目录）、市场（PluginMarket）、签名与信任（PluginTrust）
 // 状态来自 pluginService
 // ================================
 
@@ -9,6 +9,9 @@ import { AlertCircle, FolderOpen, RefreshCw, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
 import { PERMISSION_INFO } from '../../lib/plugins/sandbox';
 import { pluginService, type PluginEntry, type PluginStatus } from '../../services/pluginService';
+import type { PluginSignatureCheck } from '../../types/electron';
+import { PluginMarket } from './PluginMarket';
+import { PluginTrust } from './PluginTrust';
 import styles from './SettingsPanel.module.scss';
 import pluginStyles from './PluginSettings.module.scss';
 
@@ -22,6 +25,31 @@ const STATUS_TEXT: Record<PluginStatus, string> = {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** 签名状态的徽标文字与说明 */
+export function signatureLabel(check: PluginSignatureCheck): { text: string; title: string } {
+  switch (check.status) {
+    case 'trusted':
+      return {
+        text: `已签名 · ${check.signer}`,
+        title: `签名有效，签名者已受信任（${check.keyId}）`,
+      };
+    case 'untrusted':
+      return { text: '签名者未受信任', title: `签名有效，但签名者 ${check.keyId} 不在信任列表中` };
+    case 'invalid':
+      return { text: '签名无效', title: check.reason };
+    case 'unsigned':
+      return { text: '未签名', title: '插件没有签名，无法确认来源' };
+  }
+}
+
+type PluginTab = 'installed' | 'market' | 'trust';
+
+const TABS: Array<{ id: PluginTab; label: string }> = [
+  { id: 'installed', label: '已安装' },
+  { id: 'market', label: '市场' },
+  { id: 'trust', label: '签名与信任' },
+];
 
 const PluginCard: React.FC<{
   entry: PluginEntry;
@@ -41,8 +69,20 @@ const PluginCard: React.FC<{
             {manifest && <span className={pluginStyles.version}>v{manifest.version}</span>}
           </span>
           <span className={pluginStyles.meta}>
-            <span className={pluginStyles.badge}>{entry.source === 'builtin' ? '内置' : '用户'}</span>
-            <span className={`${pluginStyles.status} ${pluginStyles[entry.status]}`}>{STATUS_TEXT[entry.status]}</span>
+            <span className={pluginStyles.badge}>
+              {entry.source === 'builtin' ? '内置' : '用户'}
+            </span>
+            {entry.source === 'user' && entry.signature && (
+              <span
+                className={`${pluginStyles.signature} ${pluginStyles[entry.signature.status]}`}
+                title={signatureLabel(entry.signature).title}
+              >
+                {signatureLabel(entry.signature).text}
+              </span>
+            )}
+            <span className={`${pluginStyles.status} ${pluginStyles[entry.status]}`}>
+              {STATUS_TEXT[entry.status]}
+            </span>
             {manifest?.author && <span>作者：{manifest.author}</span>}
             <code>{entry.id}</code>
           </span>
@@ -52,7 +92,9 @@ const PluginCard: React.FC<{
             type="checkbox"
             className={styles.toggleInput}
             checked={entry.enabled}
-            disabled={!manifest || entry.status === 'loading'}
+            disabled={
+              !manifest || entry.status === 'loading' || (!!entry.blocked && !entry.enabled)
+            }
             aria-label={`启用 ${manifest?.name ?? entry.id}`}
             onChange={(e) => onToggle(e.target.checked)}
           />
@@ -125,6 +167,7 @@ export const PluginSettings: React.FC = () => {
   const snapshot = useSyncExternalStore(pluginService.subscribe, pluginService.getSnapshot);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<PluginEntry | null>(null);
+  const [tab, setTab] = useState<PluginTab>('installed');
 
   const run = (action: () => Promise<unknown>) => {
     setActionError(null);
@@ -133,50 +176,75 @@ export const PluginSettings: React.FC = () => {
 
   return (
     <div className={styles.settingsTab}>
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <h3 className={styles.sectionTitle}>插件</h3>
-          <div className={styles.workspaceActions}>
-            <button className={`${styles.actionButton} ${styles.testBtn}`} onClick={() => run(() => pluginService.refresh())}>
-              <RefreshCw size={14} />
-              <span>刷新列表</span>
-            </button>
-            <button className={styles.addBtn} onClick={() => run(() => pluginService.openDirectory())}>
-              <FolderOpen size={14} />
-              <span>打开插件目录</span>
-            </button>
-          </div>
-        </div>
-        <p className={styles.sectionDescription}>
-          每个插件是插件目录下的一个子目录（目录名即插件 ID），包含 manifest.json 与入口文件 main.js。
-          插件在隔离的后台线程中运行，无法访问网络与本机文件，只能使用你授予的权限。
-          启用后可在命令面板（⌘⇧P / Ctrl+Shift+P）中执行插件命令。
-        </p>
-        {snapshot.pluginsDir && <p className={styles.workspacePath}>{snapshot.pluginsDir}</p>}
-        {actionError && (
-          <div className={styles.errorBanner}>
-            <AlertCircle size={14} />
-            <span>{actionError}</span>
-          </div>
-        )}
-        {snapshot.plugins.length === 0 ? (
-          <div className={styles.emptyState}>
-            <p>{snapshot.initialized ? '没有已安装的插件' : '正在加载插件…'}</p>
-          </div>
-        ) : (
-          <div className={styles.settingsList}>
-            {snapshot.plugins.map((entry) => (
-              <PluginCard
-                key={entry.id}
-                entry={entry}
-                onToggle={(enabled) => run(() => pluginService.setEnabled(entry.id, enabled))}
-                onReload={() => run(() => pluginService.reload(entry.id))}
-                onUninstall={() => setPendingUninstall(entry)}
-              />
-            ))}
-          </div>
-        )}
+      <div className={pluginStyles.tabs} role="tablist" aria-label="插件">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.id}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
+
+      {tab === 'market' && <PluginMarket />}
+      {tab === 'trust' && <PluginTrust />}
+
+      {tab === 'installed' && (
+        <div className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <h3 className={styles.sectionTitle}>插件</h3>
+            <div className={styles.workspaceActions}>
+              <button
+                className={`${styles.actionButton} ${styles.testBtn}`}
+                onClick={() => run(() => pluginService.refresh())}
+              >
+                <RefreshCw size={14} />
+                <span>刷新列表</span>
+              </button>
+              <button
+                className={styles.addBtn}
+                onClick={() => run(() => pluginService.openDirectory())}
+              >
+                <FolderOpen size={14} />
+                <span>打开插件目录</span>
+              </button>
+            </div>
+          </div>
+          <p className={styles.sectionDescription}>
+            每个插件是插件目录下的一个子目录（目录名即插件 ID），包含 manifest.json 与入口文件
+            main.js。 插件在隔离的后台线程中运行，无法访问网络与本机文件，只能使用你授予的权限。
+            启用后可在命令面板（⌘⇧P / Ctrl+Shift+P）中执行插件命令。
+          </p>
+          {snapshot.pluginsDir && <p className={styles.workspacePath}>{snapshot.pluginsDir}</p>}
+          {actionError && (
+            <div className={styles.errorBanner}>
+              <AlertCircle size={14} />
+              <span>{actionError}</span>
+            </div>
+          )}
+          {snapshot.plugins.length === 0 ? (
+            <div className={styles.emptyState}>
+              <p>{snapshot.initialized ? '没有已安装的插件' : '正在加载插件…'}</p>
+            </div>
+          ) : (
+            <div className={styles.settingsList}>
+              {snapshot.plugins.map((entry) => (
+                <PluginCard
+                  key={entry.id}
+                  entry={entry}
+                  onToggle={(enabled) => run(() => pluginService.setEnabled(entry.id, enabled))}
+                  onReload={() => run(() => pluginService.reload(entry.id))}
+                  onUninstall={() => setPendingUninstall(entry)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <ConfirmDialog
         isOpen={pendingUninstall !== null}

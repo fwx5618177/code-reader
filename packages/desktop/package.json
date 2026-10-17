@@ -22,7 +22,8 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "test:writing": "vitest run --reporter=verbose src/render/lib/writing",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "plugin-tools": "esbuild scripts/plugin-tools.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/.plugin-tools.mjs --log-level=warning && node scripts/.plugin-tools.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

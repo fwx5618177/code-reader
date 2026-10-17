@@ -38,6 +38,8 @@ function pluginPackage(permissions: string[]): PluginPackage {
     id: 'demo',
     source: 'user',
     error: null,
+    signature: { status: 'unsigned' },
+    blocked: null,
     manifest: {
       id: 'demo',
       name: 'Demo',

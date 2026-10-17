@@ -110,3 +110,97 @@
   color: var(--color-error);
   word-break: break-word;
 }
+
+// 签名状态
+.signature {
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-full);
+
+  &.trusted {
+    background-color: var(--color-success-bg);
+    color: var(--color-success);
+  }
+
+  &.untrusted,
+  &.unsigned {
+    background-color: var(--color-warning-bg);
+    color: var(--color-warning);
+  }
+
+  &.invalid {
+    background-color: var(--color-error-bg);
+    color: var(--color-error);
+  }
+}
+
+// 已安装 / 市场 / 信任 分页
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: var(--spacing-3);
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-tertiary);
+  align-self: flex-start;
+  width: fit-content;
+
+  button {
+    @include button-reset;
+    padding: var(--spacing-1) var(--spacing-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+
+    &[aria-selected='true'] {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+    }
+  }
+}
+
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  align-items: center;
+  margin: var(--spacing-2) 0;
+
+  input {
+    flex: 1;
+    min-width: 200px;
+  }
+}
+
+.keyInput {
+  width: 100%;
+  min-height: 64px;
+  padding: var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  resize: vertical;
+}
+
+.registryList {
+  margin: 0 0 var(--spacing-2);
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1) 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    word-break: break-all;
+
+    code {
+      flex: 1;
+      font-family: var(--font-mono);
+    }
+  }
+}

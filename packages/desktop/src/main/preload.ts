@@ -124,6 +124,14 @@ const validChannels = [
   'plugins:readEntry',
   'plugins:openDirectory',
   'plugins:uninstall',
+  'plugins:getTrust',
+  'plugins:setPolicy',
+  'plugins:addTrustedKey',
+  'plugins:removeTrustedKey',
+  'plugins:marketList',
+  'plugins:marketInstall',
+  'plugins:marketAddRegistry',
+  'plugins:marketRemoveRegistry',
 
   // 扫描版 PDF 文字识别
   'ocr:listLanguages',
@@ -395,6 +403,14 @@ contextBridge.exposeInMainWorld('electron', {
     readEntry: (id: string, main: string) => ipcRenderer.invoke('plugins:readEntry', id, main),
     openDirectory: () => ipcRenderer.invoke('plugins:openDirectory'),
     uninstall: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),
+    getTrust: () => ipcRenderer.invoke('plugins:getTrust'),
+    setPolicy: (policy: string) => ipcRenderer.invoke('plugins:setPolicy', policy),
+    addTrustedKey: (name: string, publicKey: string) => ipcRenderer.invoke('plugins:addTrustedKey', name, publicKey),
+    removeTrustedKey: (keyId: string) => ipcRenderer.invoke('plugins:removeTrustedKey', keyId),
+    marketList: () => ipcRenderer.invoke('plugins:marketList'),
+    marketInstall: (registry: string, id: string) => ipcRenderer.invoke('plugins:marketInstall', registry, id),
+    marketAddRegistry: (url: string) => ipcRenderer.invoke('plugins:marketAddRegistry', url),
+    marketRemoveRegistry: (url: string) => ipcRenderer.invoke('plugins:marketRemoveRegistry', url),
   },
 
   // 扫描版 PDF 文字识别：语言数据由主进程管理（识别引擎经 ocr-resource:// 协议加载），识别结果按条目保存在当前知识库
