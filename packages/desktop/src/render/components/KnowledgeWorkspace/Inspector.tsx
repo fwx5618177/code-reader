@@ -9,6 +9,7 @@ import type { ItemActivity } from '../../lib/agent/agentStore';
 import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
 import { displayTitle, type LinkIndex, type RelatedLink } from '../../lib/links/link-index';
 import { sourceHost } from '../../lib/reading';
+import { parseWikiLinkInner } from '../../lib/markdown';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
 import { openExternal } from '../ReadingWorkspace/system';
 import { absoluteTime, formatFileSize } from './item-display';
@@ -37,6 +38,8 @@ export interface InspectorProps {
   onSelectItem: (id: string | undefined) => void;
   onOpenInWriting: (itemId: string) => void;
   onCreateNote: (title: string) => void;
+  /** 重命名条目（同时更新其他笔记中指向它的链接） */
+  onRenameItem: (id: string, title: string) => Promise<void>;
   onOpenSettings: () => void;
 }
 
@@ -100,6 +103,7 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
   onSelectItem,
   onOpenInWriting,
   onCreateNote,
+  onRenameItem,
   onOpenSettings,
   tab,
   onTabChange,
@@ -120,11 +124,14 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
     }
   }, []);
 
+  /** 点击正文中的链接（目标#标题）：在知识库中选中目标，不存在时创建 */
   const handleWikiLink = useCallback(
-    (target: string) => {
+    (ref: string) => {
+      const target = parseWikiLinkInner(ref)?.target;
+      if (!target) return;
       const resolved = linkIndex.resolve(target);
       if (resolved) onSelectItem(resolved.id);
-      else onCreateNote(target.trim());
+      else onCreateNote(target);
     },
     [linkIndex, onSelectItem, onCreateNote]
   );
@@ -142,7 +149,7 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
       <header className={styles.header}>
         <div className={styles.titleRow}>
           <TypeIcon size={16} className={styles.titleIcon} aria-label={ITEM_TYPE_LABELS[item.type]} />
-          <TitleInput title={item.title} onSave={(title) => run(() => kb.updateItem(item.id, { title }))} />
+          <TitleInput title={item.title} onSave={(title) => run(() => onRenameItem(item.id, title))} />
         </div>
 
         <div className={styles.actions}>

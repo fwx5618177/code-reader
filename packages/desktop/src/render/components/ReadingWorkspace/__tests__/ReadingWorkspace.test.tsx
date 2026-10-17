@@ -4,8 +4,9 @@
 
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { KnowledgeItem } from '../../../types/knowledge';
+import { buildEpub } from '../../../lib/reading/__tests__/epub-fixture';
 import { ReadingShelf, ReadingView } from '..';
 
 function makeItem(overrides: Partial<KnowledgeItem> = {}): KnowledgeItem {
@@ -102,6 +103,31 @@ describe('ReadingView', () => {
     expect(props.onWikiLinkClick).toHaveBeenCalledWith('另一篇');
   });
 
+  it('标题链接回传 目标#标题，[[#标题]] 在正文内跳转，![[嵌入]] 展开为引用内容', () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    });
+    const props = handlers();
+    const item = makeItem({
+      content: '# 开头\n\n见 [[另一篇#第二节|第二节]] 与 [[#结尾]]\n\n![[不存在]]\n\n## 结尾\n\n完',
+    });
+    const { container } = render(<ReadingView item={item} {...props} />);
+
+    const [heading, local] = container.querySelectorAll<HTMLElement>('.wiki-link');
+    fireEvent.click(heading);
+    expect(props.onWikiLinkClick).toHaveBeenCalledWith('另一篇#第二节');
+
+    fireEvent.click(local);
+    expect(props.onWikiLinkClick).toHaveBeenCalledTimes(1);
+    expect((scrollIntoView.mock.instances[0] as unknown as HTMLElement).textContent).toBe('结尾');
+
+    // 未提供链接解析时嵌入显示为未找到
+    expect(container.querySelector('.wiki-embed-missing')?.textContent).toBe('未找到「不存在」');
+  });
+
   it('删除高亮与标记已读时只替换 reading 元数据', () => {
     const props = handlers();
     const item = makeItem({
@@ -140,5 +166,41 @@ describe('ReadingView', () => {
     );
     expect(screen.getByText('https://example.com/post')).toBeTruthy();
     expect(screen.getByRole('button', { name: '在浏览器中打开' })).toBeTruthy();
+  });
+
+  it('EPUB 按章节阅读：目录跳转、章节切换与书内链接', async () => {
+    const invoke = vi.fn().mockResolvedValue(await buildEpub());
+    vi.stubGlobal('electron', { ipcRenderer: { invoke } });
+    // jsdom 未实现 scrollIntoView
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    });
+    const item = makeItem({
+      type: 'document',
+      title: 'book.epub',
+      content: '提取的全文只用于检索',
+      filePath: '/library/book.epub',
+      mimeType: 'application/epub+zip',
+    });
+    const { container } = render(<ReadingView item={item} {...handlers()} />);
+
+    expect(await screen.findByText('第 1 / 2 章')).toBeTruthy();
+    expect(invoke).toHaveBeenCalledWith('read-binary-file', '/library/book.epub');
+    expect(container.querySelector('#epub-top')?.textContent).toBe('第二章');
+    expect(screen.queryByText('提取的全文只用于检索')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '第一章' }));
+    expect(await screen.findByText('第 2 / 2 章')).toBeTruthy();
+    expect(container.querySelector('#epub-start')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /上一章/ }));
+    expect(await screen.findByText('第 1 / 2 章')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('去第一章'));
+    expect(await screen.findByText('第 2 / 2 章')).toBeTruthy();
+    expect(scrollIntoView).toHaveBeenCalled();
   });
 });

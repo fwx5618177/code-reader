@@ -1,7 +1,7 @@
 // ================================
 // 双向链接索引
 // 从笔记的 Markdown 中提取 [[链接]]，解析为条目之间的引用关系：
-// - 出链 / 反向链接（含上下文）
+// - 出链 / 反向链接（含上下文；[[笔记#标题]] 与 ![[嵌入]] 同样计入目标笔记）
 // - 未解析链接（目标文档尚不存在）
 // - 知识图谱数据（双向链接 + Agent 发现的语义关联）
 //
@@ -46,19 +46,24 @@ export interface RelatedLink {
   targetId: string;
 }
 
+/** 文本文档扩展名（链接目标中可省略） */
+const TEXT_EXTENSION = /\.(md|markdown|mdown|mkd|txt|text|tex|latex|ltx)$/i;
+
 /**
  * 链接目标规范化：去掉 .md 等扩展名、首尾空白，大小写不敏感
  */
 export function normalizeLinkTarget(title: string): string {
-  return title
-    .trim()
-    .replace(/\.(md|markdown|mdown|mkd|txt|text|tex|latex|ltx)$/i, '')
-    .toLowerCase();
+  return title.trim().replace(TEXT_EXTENSION, '').toLowerCase();
 }
 
 /** 条目显示标题（去掉文件扩展名） */
 export function displayTitle(title: string): string {
-  return title.replace(/\.(md|markdown|mdown|mkd|txt|text|tex|latex|ltx)$/i, '');
+  return title.replace(TEXT_EXTENSION, '');
+}
+
+/** 标题中的文本文档扩展名（含点；没有时为空字符串） */
+export function textExtension(title: string): string {
+  return TEXT_EXTENSION.exec(title.trim())?.[0] ?? '';
 }
 
 /** 只有 Markdown 笔记才包含双向链接 */
@@ -104,7 +109,9 @@ export class LinkIndex {
       const updatedAt = item.updatedAt.getTime();
       let entry = this.cache.get(item.id);
       if (!entry || entry.updatedAt !== updatedAt) {
-        entry = { updatedAt, links: extractWikiLinks(item.content!) };
+        // [[#标题]] 指向文档自身，不是条目之间的引用
+        const links = extractWikiLinks(item.content!).filter((link) => link.target);
+        entry = { updatedAt, links };
         this.cache.set(item.id, entry);
       }
       this.outgoing.set(item.id, entry.links);
@@ -114,9 +121,10 @@ export class LinkIndex {
     }
   }
 
-  /** 按标题解析链接目标 */
+  /** 按标题解析链接目标（空目标即当前文档，不解析） */
   resolve(target: string): KnowledgeItem | undefined {
-    return this.byTitle.get(normalizeLinkTarget(target));
+    const key = normalizeLinkTarget(target);
+    return key ? this.byTitle.get(key) : undefined;
   }
 
   /** 条目的出链 */

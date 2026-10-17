@@ -529,6 +529,54 @@ $z-toast: 700;
   backdrop-filter: blur(var(--overlay-blur));
 }
 
+// 块级嵌入（类名由 lib/markdown/html.ts 生成）：编辑器、预览与阅读视图共用
+@mixin wiki-embed {
+  :global(.wiki-embed) {
+    margin: var(--spacing-4) 0;
+    padding: var(--spacing-2) var(--spacing-4) var(--spacing-3);
+    border-left: 3px solid var(--accent-primary-alpha);
+    background-color: var(--bg-secondary);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  }
+
+  :global(.wiki-embed-title) {
+    display: inline-block;
+    margin-bottom: var(--spacing-1);
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--accent-primary);
+    }
+  }
+
+  :global(.wiki-embed-content) {
+    & > :first-child {
+      margin-top: 0;
+    }
+
+    & > :last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  :global(.wiki-embed-missing) {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  :global(.wiki-embed-image) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 0;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+  }
+}
+
 @mixin card {
   background-color: var(--bg-quaternary);
   border: 1px solid var(--border-primary);

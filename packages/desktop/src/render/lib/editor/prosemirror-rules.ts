@@ -13,6 +13,7 @@ import {
   InputRule,
 } from 'prosemirror-inputrules';
 import { keymap } from 'prosemirror-keymap';
+import { isEmbedParagraph, parseWikiLinkInner } from '../markdown/wiki-link';
 
 // ================================
 // Types
@@ -354,14 +355,19 @@ function createMathInputRules(schema: Schema): InputRule[] {
 }
 
 /**
- * [[目标]] / [[目标|别名]] → 双向链接节点
+ * [[目标]] / [[目标#标题|别名]] → 双向链接节点；独占一段的 ![[…]] → 块级嵌入
  */
 function createWikiLinkInputRule(wikiLinkType: NodeType): InputRule {
-  return new InputRule(/\[\[([^[\]|\n]+)(?:\|([^[\]\n]+))?\]\]$/, (state, match, start, end) => {
-    const target = match[1].trim();
-    if (!target) return null;
-    const alias = match[2]?.trim() || null;
-    return state.tr.replaceWith(start, end, wikiLinkType.create({ target, alias }));
+  const embedType = wikiLinkType.schema.nodes.wiki_embed;
+  return new InputRule(/\[\[([^[\]\n]+)\]\]$/, (state, match, start, end) => {
+    const parts = parseWikiLinkInner(match[1]);
+    if (!parts) return null;
+    const $start = state.doc.resolve(start);
+    if (embedType && isEmbedParagraph($start, end, embedType)) {
+      const tr = state.tr.replaceWith($start.before(), $start.after(), embedType.create(parts));
+      return tr.setSelection(NodeSelection.create(tr.doc, $start.before()));
+    }
+    return state.tr.replaceWith(start, end, wikiLinkType.create(parts));
   });
 }
 

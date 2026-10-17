@@ -111,7 +111,12 @@ function createParser(schema: Schema): MarkdownParser {
     wiki_link: {
       node: 'wiki_link',
       noCloseToken: true,
-      getAttrs: (tok) => ({ target: tok.meta.target, alias: tok.meta.alias }),
+      getAttrs: (tok) => ({ target: tok.meta.target, heading: tok.meta.heading, alias: tok.meta.alias }),
+    },
+    wiki_embed: {
+      node: 'wiki_embed',
+      noCloseToken: true,
+      getAttrs: (tok) => ({ target: tok.meta.target, heading: tok.meta.heading, alias: tok.meta.alias }),
     },
   });
 }

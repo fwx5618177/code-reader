@@ -1,7 +1,7 @@
 // ================================
 // markdown-it 语法扩展
 // - 数学公式：行内 $…$、块级 $$…$$
-// - 双向链接：[[目标]] / [[目标|别名]]
+// - 双向链接：[[目标]] / [[目标#标题|别名]]；独占一行的 ![[目标#标题]] 为块级嵌入
 // - 任务列表：- [ ] / - [x]
 // ================================
 
@@ -9,6 +9,7 @@ import type MarkdownIt from 'markdown-it';
 import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs';
 import type StateCore from 'markdown-it/lib/rules_core/state_core.mjs';
 import type StateInline from 'markdown-it/lib/rules_inline/state_inline.mjs';
+import { parseWikiLinkInner } from './wiki-link';
 
 const DOLLAR = 0x24; // $
 const BACKSLASH = 0x5c; // \
@@ -123,7 +124,8 @@ function mathBlockRule(state: StateBlock, startLine: number, endLine: number, si
 // ================================
 
 /**
- * [[目标]] / [[目标|别名]]，目标中不允许出现换行与方括号
+ * [[目标]] / [[目标#标题]] / [[目标|别名]]，内部不允许出现换行与方括号
+ * meta.offset 记录 [[ 在行内源码中的位置（重命名时据此定位源码）
  */
 function wikiLinkRule(state: StateInline, silent: boolean): boolean {
   const { src, pos, posMax } = state;
@@ -134,18 +136,41 @@ function wikiLinkRule(state: StateInline, silent: boolean): boolean {
   if (close === -1 || close > posMax) return false;
 
   const inner = src.slice(pos + 2, close);
-  if (!inner.trim() || /[[\]\n]/.test(inner)) return false;
+  const parts = parseWikiLinkInner(inner);
+  if (!parts) return false;
 
   if (!silent) {
-    const separator = inner.indexOf('|');
-    const target = (separator === -1 ? inner : inner.slice(0, separator)).trim();
-    const alias = separator === -1 ? null : inner.slice(separator + 1).trim() || null;
-    if (!target) return false;
     const token = state.push('wiki_link', 'a', 0);
-    token.meta = { target, alias };
+    token.meta = { ...parts, offset: pos };
     token.content = inner;
   }
   state.pos = close + 2;
+  return true;
+}
+
+const EMBED_LINE = /^!\[\[([^[\]\n]+)\]\]\s*$/;
+
+/**
+ * 独占一行的 ![[目标#标题]]：块级嵌入
+ * 不打断段落（段落中间的 ![[…]] 仍是普通文本 + 链接）
+ */
+function wikiEmbedRule(state: StateBlock, startLine: number, _endLine: number, silent: boolean): boolean {
+  if (state.sCount[startLine] - state.blkIndent >= 4) return false;
+  const start = state.bMarks[startLine] + state.tShift[startLine];
+  const match = EMBED_LINE.exec(state.src.slice(start, state.eMarks[startLine]));
+  const parts = match && parseWikiLinkInner(match[1]);
+  if (!parts) return false;
+  // 列表项必须以段落开头，此时交给段落规则处理
+  if (state.tokens[state.tokens.length - 1]?.type === 'list_item_open') return false;
+  if (silent) return true;
+
+  const token = state.push('wiki_embed', 'div', 0);
+  token.block = true;
+  token.markup = '![[';
+  token.content = match[1];
+  token.meta = parts;
+  token.map = [startLine, startLine + 1];
+  state.line = startLine + 1;
   return true;
 }
 
@@ -227,6 +252,7 @@ export function markdownExtensions(md: MarkdownIt): void {
     alt: ['paragraph', 'reference', 'blockquote', 'list'],
   });
   md.inline.ruler.before('link', 'wiki_link', wikiLinkRule);
+  md.block.ruler.before('paragraph', 'wiki_embed', wikiEmbedRule);
   md.core.ruler.after('inline', 'task_list', taskListRule);
   md.core.ruler.after('task_list', 'cjk_softbreak', cjkSoftbreakRule);
 }

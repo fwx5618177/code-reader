@@ -482,6 +482,14 @@
     }
   }
 
+  // 块级嵌入：只读显示被引用的内容，点击正文选中整个嵌入
+  @include wiki-embed;
+
+  :global(.wiki-embed-node.ProseMirror-selectednode) > :global(.wiki-embed) {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
   // 任务列表
   :global(li.task-item) {
     list-style: none;
@@ -1431,6 +1439,8 @@
     color: var(--accent-primary);
     cursor: pointer;
   }
+
+  @include wiki-embed;
 }
 
 // ================================

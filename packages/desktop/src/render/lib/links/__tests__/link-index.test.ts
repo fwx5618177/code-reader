@@ -49,6 +49,22 @@ describe('LinkIndex', () => {
     expect(index.backlinks('a').map((l) => l.sourceId)).toEqual(['b']);
   });
 
+  it('标题链接与嵌入计入目标笔记，[[#标题]] 不计入任何条目', () => {
+    const index = new LinkIndex();
+    index.update([
+      note('x', '源.md', '见 [[目标#第一节|第一节]] 与 [[#本文]]\n\n![[目标#第二节]]'),
+      note('y', '目标.md', '# 第一节'),
+    ]);
+    expect(index.backlinks('y').map((l) => l.sourceId)).toEqual(['x', 'x']);
+    expect(index.outgoingLinks('x').map((l) => [l.target, l.heading])).toEqual([
+      ['目标', '第一节'],
+      ['目标', '第二节'],
+    ]);
+    expect(index.resolve('')).toBeUndefined();
+    expect(index.unresolvedLinks().size).toBe(0);
+    expect(index.resolvedTargets('x')).toEqual(['y']);
+  });
+
   it('未解析链接与解析后的目标', () => {
     const index = new LinkIndex();
     index.update(ITEMS);

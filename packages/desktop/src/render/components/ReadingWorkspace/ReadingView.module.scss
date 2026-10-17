@@ -563,6 +563,8 @@ $outline-width: 248px;
     border-bottom: 1px dashed var(--accent-primary-alpha);
   }
 
+  @include wiki-embed;
+
   strong {
     font-weight: $font-weight-bold;
   }

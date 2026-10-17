@@ -2,12 +2,14 @@
 // 详情面板「原始内容」：附件预览（图片 / 音视频 / 文件）、正文、转写、书签链接
 // ================================
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { ExternalLink } from 'lucide-react';
 import type { KnowledgeItem } from '../../types/knowledge';
-import { renderContentToHtml } from '../../lib/markdown';
+import { renderContentToHtml, wikiLinkClickTarget } from '../../lib/markdown';
 import { resolveArticle, resolveAttachmentKind, sourceHost, type ArticleSource } from '../../lib/reading';
 import { displayTitle } from '../../lib/links/link-index';
+import { useEmbedResolver } from '../../lib/links/embed';
+import { useEmbedImages } from '../ReadingWorkspace/embed-images';
 import { ReadingAttachment } from '../ReadingWorkspace/ReadingAttachment';
 import { openExternal } from '../ReadingWorkspace/system';
 import readingStyles from '../ReadingWorkspace/ReadingView.module.scss';
@@ -24,17 +26,24 @@ function articleOf(
 
 export interface InspectorContentTabProps {
   item: KnowledgeItem;
-  /** 点击正文中的 [[双向链接]] */
+  /** 点击正文中的 [[双向链接]]（参数为 目标#标题 形式的引用） */
   onWikiLink: (target: string) => void;
 }
 
 export const InspectorContentTab: React.FC<InspectorContentTabProps> = ({ item, onWikiLink }) => {
   const attachmentKind = resolveAttachmentKind(item);
-  const { type, title, content } = item;
-  const html = useMemo(() => {
-    const article = articleOf({ type, title, content });
-    return article ? renderContentToHtml(article.content, article.format).html : null;
-  }, [type, title, content]);
+  const articleRef = useRef<HTMLDivElement>(null);
+  const { type, title, content, filePath, mimeType } = item;
+  const article = useMemo(
+    () => articleOf({ type, title, content, filePath, mimeType }),
+    [type, title, content, filePath, mimeType]
+  );
+  const resolveEmbed = useEmbedResolver(article?.content);
+  const html = useMemo(
+    () => (article ? renderContentToHtml(article.content, article.format, { resolveEmbed, title }).html : null),
+    [article, resolveEmbed, title]
+  );
+  useEmbedImages(articleRef, html);
   const transcript = item.transcript?.trim();
 
   const handleClick = useCallback(
@@ -43,15 +52,16 @@ export const InspectorContentTab: React.FC<InspectorContentTabProps> = ({ item, 
       if (!anchor) return;
       // 阻止应用窗口内跳转：双向链接交给上层，外部链接在系统浏览器中打开
       event.preventDefault();
-      const wikiTarget = anchor.getAttribute('data-wiki-target');
-      if (wikiTarget !== null) {
-        onWikiLink(wikiTarget);
+      if (anchor.hasAttribute('data-wiki-target')) {
+        const click = wikiLinkClickTarget(anchor, article?.content ?? '', article?.format ?? 'markdown');
+        if (click.kind === 'open') onWikiLink(click.ref);
+        else if (click.id) articleRef.current?.querySelector(`[id="${click.id}"]`)?.scrollIntoView({ block: 'start' });
         return;
       }
       const href = anchor.getAttribute('href') ?? '';
       if (/^(https?:|mailto:)/i.test(href)) openExternal(href);
     },
-    [onWikiLink]
+    [article, onWikiLink]
   );
 
   if (!attachmentKind && !html && !transcript) {
@@ -99,6 +109,7 @@ export const InspectorContentTab: React.FC<InspectorContentTabProps> = ({ item, 
       )}
       {html !== null && (
         <div
+          ref={articleRef}
           className={`${readingStyles.article} ${styles.article}`}
           onClick={handleClick}
           // 正文由本地 Markdown 渲染器生成

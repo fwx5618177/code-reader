@@ -13,6 +13,7 @@ import {
   BookOpen,
   BookPlus,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleCheck,
   ExternalLink,
@@ -25,8 +26,12 @@ import {
   Type,
 } from 'lucide-react';
 import type { UpdateKnowledgeItemInput } from '../../lib/knowledge/repository';
-import { displayTitle } from '../../lib/links';
-import { renderContentToHtml } from '../../lib/markdown';
+import { displayTitle, useEmbedResolver } from '../../lib/links';
+import {
+  renderContentToHtml,
+  wikiLinkClickTarget,
+  type RenderedDocument,
+} from '../../lib/markdown';
 import {
   applyHighlightMarks,
   buildExcerptMarkdown,
@@ -49,14 +54,17 @@ import {
   type ReadingState,
 } from '../../lib/reading';
 import { generateUUID } from '../../lib/utils/id';
+import { bookProgress, EPUB_TARGET_ATTR } from '../../lib/reading/epub';
 import type { KnowledgeItem } from '../../types/knowledge';
 import { useDismiss, useLatestRef, useReadingSettings } from './hooks';
+import { hydrateEmbedImages } from './embed-images';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from './item-type';
 import { ReadingAttachment } from './ReadingAttachment';
 import { ReadingOutline } from './ReadingOutline';
 import { ReadingSettingsPanel } from './ReadingSettingsPanel';
 import { SelectionToolbar, type SelectionAnchor } from './SelectionToolbar';
 import { openExternal } from './system';
+import { isEpubChapterView, useEpubReader, type EpubScrollTarget } from './useEpubReader';
 import styles from './ReadingView.module.scss';
 
 /** 新建摘录笔记的输入 */
@@ -87,6 +95,16 @@ const PROGRESS_SAVE_DELAY = 1500;
 /** 选区工具栏宽度的一半，用于水平方向限位 */
 const TOOLBAR_HALF_WIDTH = 160;
 const NO_HIGHLIGHTS: ReadingHighlight[] = [];
+
+/** EPUB 章节写入后滚动到目标元素或章节内比例位置 */
+function scrollToEpubTarget(scroller: HTMLElement, articleEl: HTMLElement, target: EpubScrollTarget): void {
+  if ('elementId' in target) {
+    const element = Array.from(articleEl.querySelectorAll('[id]')).find((el) => el.id === target.elementId);
+    (element ?? articleEl).scrollIntoView({ block: 'start' });
+    return;
+  }
+  scroller.scrollTop = target.ratio * (scroller.scrollHeight - scroller.clientHeight);
+}
 
 /**
  * 阅读视图：未选择条目时显示引导；切换条目时整体重建，保证进度与高亮状态互不串扰
@@ -159,12 +177,26 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
 
   // ---------- 正文 ----------
 
-  const rendered = useMemo(() => {
+  const resolveEmbed = useEmbedResolver(item.content);
+  const previousRenderedRef = useRef<RenderedDocument | null>(null);
+  const markdownRendered = useMemo(() => {
     const article = resolveArticle(item);
-    return article ? renderContentToHtml(article.content, article.format) : null;
-  }, [item.type, item.title, item.content]);
+    if (!article) return null;
+    const next = renderContentToHtml(article.content, article.format, { resolveEmbed, title: item.title });
+    // 条目列表更新（如阅读进度写回）会生成新的解析器；结果不变时沿用旧对象，避免重写正文
+    const previous = previousRenderedRef.current;
+    return previous && previous.html === next.html ? previous : next;
+  }, [item.type, item.title, item.content, resolveEmbed]);
+  previousRenderedRef.current = markdownRendered;
 
   const attachmentKind = resolveAttachmentKind(item);
+  // EPUB 按章节渲染为正文；仅“在读”状态从上次位置继续（已读完的从头开始）
+  const epub = useEpubReader(
+    attachmentKind === 'epub' ? item.filePath : undefined,
+    getReadingStatus(readingRef.current) === 'reading' ? readingRef.current.progress ?? 0 : 0
+  );
+  const epubRef = useLatestRef(epub);
+  const rendered: RenderedDocument | null = epub.view ?? markdownRendered;
   const showTranscript = item.type === 'audio' && !!item.transcript;
   const showGuide = !!item.summary || (item.keyPoints?.length ?? 0) > 0;
 
@@ -185,22 +217,31 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     setProgressBar(readingRef.current.progress ?? 0);
   }, [setProgressBar]);
 
-  // 正文由 DOM 直接管理（高亮标记会改写文本节点），仅在内容变化时重建；
-  // 首次渲染时恢复上次的阅读位置（已读完的从头开始）
+  // 正文由 DOM 直接管理（高亮标记会改写文本节点），仅在内容变化时重建。
+  // 首次呈现时恢复上次的阅读位置（已读完的从头开始）；PDF 在页面占位完成后恢复
   const restoredRef = useRef(false);
-  useLayoutEffect(() => {
-    const articleEl = articleRef.current;
+  const restoreScroll = useCallback(() => {
     const scroller = scrollerRef.current;
-    if (!articleEl || !scroller || !rendered) return;
-    articleEl.innerHTML = rendered.html;
-
-    if (restoredRef.current) return;
+    if (!scroller || restoredRef.current) return;
     restoredRef.current = true;
     const { progress = 0 } = readingRef.current;
     if (getReadingStatus(readingRef.current) === 'reading' && progress > 0) {
       scroller.scrollTop = progress * (scroller.scrollHeight - scroller.clientHeight);
     }
-  }, [rendered]);
+  }, []);
+
+  useLayoutEffect(() => {
+    const articleEl = articleRef.current;
+    const scroller = scrollerRef.current;
+    if (!articleEl || !scroller || !rendered) return;
+    articleEl.innerHTML = rendered.html;
+    const disposeImages = hydrateEmbedImages(articleEl);
+
+    // EPUB 每次切换章节都滚动到跳转目标
+    if (isEpubChapterView(rendered)) scrollToEpubTarget(scroller, articleEl, rendered.scrollTarget);
+    else restoreScroll();
+    return disposeImages;
+  }, [rendered, restoreScroll]);
 
   // 高亮变化时重新标记（必须在写入正文之后执行）
   useLayoutEffect(() => {
@@ -285,16 +326,19 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     if (!scroller) return;
     const max = scroller.scrollHeight - scroller.clientHeight;
     const ratio = max > 0 ? scroller.scrollTop / max : 1;
-    setProgressBar(ratio);
+    // EPUB 的滚动比例只是当前章节内的位置，换算为整本书的进度
+    const { view, chapterCount } = epubRef.current;
+    const progress = view ? bookProgress(view.chapterIndex, chapterCount, ratio) : ratio;
+    setProgressBar(progress);
 
-    if (Math.abs(ratio - (readingRef.current.progress ?? 0)) < PROGRESS_EPSILON) {
+    if (Math.abs(progress - (readingRef.current.progress ?? 0)) < PROGRESS_EPSILON) {
       cancelPendingProgress();
       return;
     }
-    pendingProgressRef.current = ratio;
+    pendingProgressRef.current = progress;
     window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(flushProgress, PROGRESS_SAVE_DELAY);
-  }, [cancelPendingProgress, flushProgress, setProgressBar]);
+  }, [cancelPendingProgress, epubRef, flushProgress, setProgressBar]);
 
   const toggleFinished = useCallback(() => {
     cancelPendingProgress();
@@ -391,17 +435,24 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     (event: React.MouseEvent<HTMLDivElement>) => {
       const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>('a');
       if (!anchor) return;
-      // 阻止应用窗口内跳转：双向链接交给上层，外部链接在系统浏览器中打开
+      // 阻止应用窗口内跳转：双向链接交给上层，EPUB 书内链接跳转到对应章节，外部链接在系统浏览器中打开
       event.preventDefault();
-      const wikiTarget = anchor.getAttribute('data-wiki-target');
-      if (wikiTarget !== null) {
-        onWikiLinkClick?.(wikiTarget);
+      const epubTarget = anchor.getAttribute(EPUB_TARGET_ATTR);
+      if (epubTarget !== null) {
+        epubRef.current.openTarget(epubTarget);
+        return;
+      }
+      if (anchor.hasAttribute('data-wiki-target')) {
+        const article = resolveArticle(itemRef.current);
+        const click = wikiLinkClickTarget(anchor, article?.content ?? '', article?.format ?? 'markdown');
+        if (click.kind === 'open') onWikiLinkClick?.(click.ref);
+        else if (click.id) scrollToHeading(click.id);
         return;
       }
       const href = anchor.getAttribute('href') ?? '';
       if (/^(https?:|mailto:)/i.test(href)) openExternal(href);
     },
-    [onWikiLinkClick]
+    [onWikiLinkClick, itemRef, epubRef, scrollToHeading]
   );
 
   // ---------- 渲染 ----------
@@ -524,12 +575,13 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
               </CollapsibleSection>
             )}
 
-            {attachmentKind && item.filePath && (
+            {attachmentKind && attachmentKind !== 'epub' && item.filePath && (
               <ReadingAttachment
                 filePath={item.filePath}
                 mimeType={item.mimeType}
                 kind={attachmentKind}
                 title={displayTitle(item.title)}
+                onLayout={restoreScroll}
               />
             )}
 
@@ -546,6 +598,10 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
                 onClick={handleArticleClick}
                 onMouseUp={handleSelectionEnd}
               />
+            ) : attachmentKind === 'epub' ? (
+              <div className={epub.error ? styles.noContent : styles.mediaLoading}>
+                {epub.error ? '无法打开 EPUB，文件可能已损坏或被移动' : '正在打开 EPUB…'}
+              </div>
             ) : (
               !attachmentKind &&
               sourceUrl && (
@@ -560,6 +616,15 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
                   </button>
                 </div>
               )
+            )}
+
+            {epub.view && (
+              <EpubChapterNav
+                chapterIndex={epub.view.chapterIndex}
+                chapterCount={epub.chapterCount}
+                error={epub.error}
+                onNavigate={epub.goToChapter}
+              />
             )}
 
             {!hasBody && <div className={styles.noContent}>此条目没有可阅读的内容</div>}
@@ -577,9 +642,9 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
 
         {rendered && outlineOpen && (
           <ReadingOutline
-            headings={rendered.headings}
-            activeHeadingId={activeHeadingId}
-            onHeadingClick={scrollToHeading}
+            headings={epub.view ? epub.toc : rendered.headings}
+            activeHeadingId={epub.view ? epub.activeTocId : activeHeadingId}
+            onHeadingClick={epub.view ? epub.openTocEntry : scrollToHeading}
             highlights={highlights}
             locatedHighlightIds={locatedHighlightIds}
             onHighlightClick={scrollToHighlight}
@@ -590,6 +655,42 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     </div>
   );
 };
+
+// ================================
+// EPUB 章节切换
+// ================================
+
+interface EpubChapterNavProps {
+  chapterIndex: number;
+  chapterCount: number;
+  /** 最近一次章节渲染失败 */
+  error: boolean;
+  onNavigate: (chapterIndex: number) => void;
+}
+
+const EpubChapterNav: React.FC<EpubChapterNavProps> = ({ chapterIndex, chapterCount, error, onNavigate }) => (
+  <nav className={styles.chapterNav}>
+    <button
+      className={styles.secondaryButton}
+      onClick={() => onNavigate(chapterIndex - 1)}
+      disabled={chapterIndex === 0}
+    >
+      <ChevronLeft size={14} />
+      上一章
+    </button>
+    <span className={styles.chapterInfo}>
+      {error ? '章节加载失败' : `第 ${chapterIndex + 1} / ${chapterCount} 章`}
+    </span>
+    <button
+      className={styles.secondaryButton}
+      onClick={() => onNavigate(chapterIndex + 1)}
+      disabled={chapterIndex >= chapterCount - 1}
+    >
+      下一章
+      <ChevronRight size={14} />
+    </button>
+  </nav>
+);
 
 // ================================
 // 可折叠区块（AI 导读、转写文本）

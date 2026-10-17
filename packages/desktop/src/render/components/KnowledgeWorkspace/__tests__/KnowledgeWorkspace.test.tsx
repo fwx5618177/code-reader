@@ -107,6 +107,7 @@ function renderWorkspace(
     onSelectItem: vi.fn(),
     onOpenInWriting: vi.fn(),
     onCreateNote: vi.fn(),
+    onRenameItem: vi.fn(() => Promise.resolve()),
     onQuickCapture: vi.fn(),
     onOpenSettings: vi.fn(),
   };
@@ -175,12 +176,12 @@ describe('KnowledgeWorkspace', () => {
 
     fireEvent.change(input, { target: { value: 'Hooks 笔记' } });
     fireEvent.blur(input);
-    expect(props.kb.updateItem).toHaveBeenCalledWith('n1', { title: 'Hooks 笔记.md' });
+    expect(props.onRenameItem).toHaveBeenCalledWith('n1', 'Hooks 笔记.md');
 
     fireEvent.change(input, { target: { value: '不保存' } });
     fireEvent.keyDown(input, { key: 'Escape' });
     fireEvent.blur(input);
-    expect(props.kb.updateItem).toHaveBeenCalledTimes(1);
+    expect(props.onRenameItem).toHaveBeenCalledTimes(1);
     expect(input.value).toBe('React 笔记');
   });
 

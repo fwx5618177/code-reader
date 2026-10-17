@@ -18,6 +18,14 @@ export {
   type RelatedLink,
 } from './link-index';
 export { linkRepository } from './repository';
+export {
+  createLinkResolver,
+  LinkResolverContext,
+  useLinkResolver,
+  useEmbedResolver,
+  type LinkResolver,
+} from './embed';
+export { planLinkRename, isLinkableTitle } from './rename';
 
 /** 全局共享的解析缓存：未修改的笔记不会被重复解析 */
 const sharedCache: LinkParseCache = new Map();

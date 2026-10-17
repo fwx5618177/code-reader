@@ -24,6 +24,8 @@ export interface TitleInputProps {
   documentId: string | null;
   /** Callback when title changes */
   onChange: (newTitle: string) => void;
+  /** 失焦（提交重命名） */
+  onBlur?: () => void;
   /** Placeholder text */
   placeholder?: string;
   /** Additional CSS class name */
@@ -51,6 +53,7 @@ const TitleInputInner: React.FC<TitleInputProps> = ({
   value,
   documentId,
   onChange,
+  onBlur,
   placeholder = '无标题',
   className = '',
   readOnly = false,
@@ -65,6 +68,8 @@ const TitleInputInner: React.FC<TitleInputProps> = ({
   // Ref for onChange to avoid stale closures
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onBlurRef = useRef(onBlur);
+  onBlurRef.current = onBlur;
 
   // Input ref for focus management
   const inputRef = useRef<HTMLInputElement>(null);
@@ -109,6 +114,7 @@ const TitleInputInner: React.FC<TitleInputProps> = ({
       className={className}
       value={localValue}
       onChange={handleChange}
+      onBlur={() => onBlurRef.current?.()}
       placeholder={placeholder}
       readOnly={readOnly}
     />
@@ -136,7 +142,7 @@ function arePropsEqual(prev: TitleInputProps, next: TitleInputProps): boolean {
 
   // DON'T re-render just because value or onChange changed
   // - value is only used on document switch (handled by useEffect)
-  // - onChange is captured in ref
+  // - onChange / onBlur are captured in refs
   return true;
 }
 

@@ -1,7 +1,8 @@
 // ================================
 // 写作编辑器补全提供者
 // - / 斜杠命令：插入标题、列表、表格、公式等结构化块
-// - [[ 双向链接：补全已有文档标题，或创建指向新文档的链接
+// - [[ 双向链接：补全已有文档标题，或创建指向新文档的链接；[[文档# 补全该文档的标题
+//   独占一段的 ![[ 插入块级嵌入
 // ================================
 
 import type { Node as PMNode, Schema } from 'prosemirror-model';
@@ -15,6 +16,7 @@ import type {
   CompletionProvider,
   CompletionType,
 } from '../editor/prosemirror-autocomplete';
+import { isEmbedParagraph, parseWikiLinkInner, type WikiLinkParts } from './wiki-link';
 
 /** 删除触发文本后执行命令 */
 function runAfterDelete(view: EditorView, from: number, to: number, command: Command): void {
@@ -208,6 +210,12 @@ export class SlashCommandProvider implements CompletionProvider {
   }
 }
 
+/** 补全使用的标题信息 */
+export interface CompletionHeading {
+  level: number;
+  text: string;
+}
+
 /**
  * [[ 双向链接补全
  */
@@ -219,10 +227,12 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
   /**
    * @param schema 文档 Schema
    * @param getTargets 返回可链接的文档标题（每次补全时读取最新值）
+   * @param getHeadings 返回目标文档的标题（空字符串表示当前文档）
    */
   constructor(
     private readonly schema: Schema,
-    private readonly getTargets: () => string[]
+    private readonly getTargets: () => string[],
+    private readonly getHeadings: (target: string) => ReadonlyArray<CompletionHeading>
   ) {}
 
   shouldActivate(context: CompletionContext): boolean {
@@ -230,6 +240,9 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
   }
 
   getCompletions(context: CompletionContext): CompletionItem[] {
+    const hash = context.query.indexOf('#');
+    if (hash !== -1) return this.headingCompletions(context.query, hash);
+
     const query = context.query.trim();
     const targets = this.getTargets();
     const items: CompletionItem[] = targets.map((target) => ({
@@ -238,30 +251,72 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
       insertText: '',
       type: this.type,
       icon: '🔗',
-      detail: '链接到文档',
-      apply: (view, from, to) => this.insertLink(view, from, to, target),
+      detail: '链接到文档（输入 # 选择标题）',
+      apply: (view, from, to) => this.insertLink(view, from, to, { target, heading: null, alias: null }),
     }));
 
     if (query && !targets.some((target) => target === query)) {
-      items.push({
-        id: `wiki-new:${query}`,
-        label: query,
-        insertText: '',
-        type: this.type,
-        icon: '＋',
-        detail: '新建链接（目标文档稍后创建）',
-        priority: -1,
-        apply: (view, from, to) => this.insertLink(view, from, to, query),
-      });
+      items.push(this.newLinkItem(query, { target: query, heading: null, alias: null }));
     }
     return items;
   }
 
-  private insertLink(view: EditorView, from: number, to: number, target: string): void {
+  /** [[文档#… 补全该文档的标题（[[#… 为当前文档） */
+  private headingCompletions(rawQuery: string, hash: number): CompletionItem[] {
+    const target = rawQuery.slice(0, hash).trim();
+    // 过滤按用户输入的原样前缀匹配
+    const prefix = rawQuery.slice(0, hash + 1);
+    const headings = this.getHeadings(target);
+    const items: CompletionItem[] = headings.map((heading, index) => ({
+      id: `wiki-heading:${index}`,
+      label: heading.text,
+      insertText: '',
+      type: this.type,
+      icon: '#',
+      detail: `H${heading.level} · ${target || '当前文档'}`,
+      // 保持文档中的标题顺序
+      priority: headings.length - index,
+      filterText: prefix + heading.text,
+      apply: (view, from, to) => this.insertLink(view, from, to, { target, heading: heading.text, alias: null }),
+    }));
+
+    const parts = parseWikiLinkInner(rawQuery);
+    const typed = rawQuery.slice(hash + 1).trim();
+    if (parts?.heading && !headings.some((heading) => heading.text === typed)) {
+      items.push(this.newLinkItem(rawQuery.trim(), parts));
+    }
+    return items;
+  }
+
+  /** 目标尚不存在时仍可创建链接 */
+  private newLinkItem(label: string, parts: WikiLinkParts): CompletionItem {
+    return {
+      id: `wiki-new:${label}`,
+      label,
+      insertText: '',
+      type: this.type,
+      icon: '＋',
+      detail: '新建链接（目标稍后创建）',
+      priority: -1,
+      filterText: label,
+      apply: (view, from, to) => this.insertLink(view, from, to, parts),
+    };
+  }
+
+  private insertLink(view: EditorView, from: number, to: number, parts: WikiLinkParts): void {
+    const { doc } = view.state;
     // 自动补全的右括号 ]] 一并替换
-    const after = view.state.doc.textBetween(to, Math.min(to + 2, view.state.doc.content.size));
+    const after = doc.textBetween(to, Math.min(to + 2, doc.content.size));
     const end = after === ']]' ? to + 2 : to;
-    const node = this.schema.nodes.wiki_link.create({ target, alias: null });
+
+    // 段落中只有 ![[…]] 时插入块级嵌入
+    const embed = this.schema.nodes.wiki_embed;
+    if (isEmbedParagraph(doc.resolve(from), end, embed)) {
+      insertBlock(view, from - 1, end, embed.create(parts), true);
+      return;
+    }
+
+    const node = this.schema.nodes.wiki_link.create(parts);
     view.dispatch(view.state.tr.replaceWith(from, end, node).scrollIntoView());
     view.focus();
   }

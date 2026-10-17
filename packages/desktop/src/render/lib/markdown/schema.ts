@@ -7,6 +7,7 @@
 import { Schema, type NodeSpec, type MarkSpec } from 'prosemirror-model';
 import { schema as basicSchema } from 'prosemirror-schema-basic';
 import { addListNodes } from 'prosemirror-schema-list';
+import { formatWikiLink, wikiLinkRef, type WikiLinkParts } from './wiki-link';
 
 /** 表格单元格对齐方式 */
 export type CellAlign = 'left' | 'center' | 'right' | null;
@@ -86,26 +87,53 @@ const EXTRA_NODES: Record<string, NodeSpec> = {
     },
   },
 
-  // 双向链接 [[目标|别名]]
+  // 双向链接 [[目标#标题|别名]]
   wiki_link: {
     group: 'inline',
     inline: true,
     atom: true,
-    attrs: { target: { default: '' }, alias: { default: null } },
+    attrs: { target: { default: '' }, heading: { default: null }, alias: { default: null } },
     parseDOM: [
       {
         tag: 'a[data-wiki-target]',
         getAttrs: (dom: HTMLElement) => ({
           target: dom.getAttribute('data-wiki-target') || '',
+          heading: dom.getAttribute('data-wiki-heading'),
           alias: dom.getAttribute('data-wiki-alias'),
         }),
       },
     ],
     toDOM(node) {
-      const { target, alias } = node.attrs as { target: string; alias: string | null };
+      const { target, heading, alias } = node.attrs as WikiLinkParts;
       const attrs: Record<string, string> = { class: 'wiki-link', 'data-wiki-target': target };
-      if (alias) attrs['data-wiki-alias'] = alias;
-      return ['a', attrs, alias || target];
+      if (heading) attrs['data-wiki-heading'] = heading;
+      // 别名遮住了链接目标，悬停时显示
+      if (alias) Object.assign(attrs, { 'data-wiki-alias': alias, title: wikiLinkRef(target, heading) });
+      return ['a', attrs, alias || wikiLinkRef(target, heading)];
+    },
+  },
+
+  // 块级嵌入 ![[目标#标题]]：文档中只保存引用，内容在渲染时解析
+  wiki_embed: {
+    group: 'block',
+    atom: true,
+    attrs: { target: { default: '' }, heading: { default: null }, alias: { default: null } },
+    parseDOM: [
+      {
+        tag: 'div[data-wiki-embed]',
+        getAttrs: (dom: HTMLElement) => ({
+          target: dom.getAttribute('data-wiki-embed') || '',
+          heading: dom.getAttribute('data-wiki-heading'),
+          alias: dom.getAttribute('data-wiki-alias'),
+        }),
+      },
+    ],
+    toDOM(node) {
+      const parts = node.attrs as WikiLinkParts;
+      const attrs: Record<string, string> = { class: 'wiki-embed', 'data-wiki-embed': parts.target };
+      if (parts.heading) attrs['data-wiki-heading'] = parts.heading;
+      if (parts.alias) attrs['data-wiki-alias'] = parts.alias;
+      return ['div', attrs, formatWikiLink(parts, true)];
     },
   },
 };

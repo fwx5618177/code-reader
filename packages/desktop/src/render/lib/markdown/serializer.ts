@@ -9,6 +9,7 @@
 import { MarkdownSerializer, defaultMarkdownSerializer } from 'prosemirror-markdown';
 import type { Node as PMNode } from 'prosemirror-model';
 import { markdownSchema, type CellAlign } from './schema';
+import { formatWikiLink, type WikiLinkParts } from './wiki-link';
 
 /** 代码围栏：必须比内容中最长的反引号序列更长 */
 function fenceFor(content: string): string {
@@ -99,8 +100,11 @@ const serializer: MarkdownSerializer = new MarkdownSerializer(
       state.closeBlock(node);
     },
     wiki_link(state, node) {
-      const { target, alias } = node.attrs as { target: string; alias: string | null };
-      state.write(`[[${target}${alias ? `|${alias}` : ''}]]`);
+      state.write(formatWikiLink(node.attrs as WikiLinkParts));
+    },
+    wiki_embed(state, node) {
+      state.write(formatWikiLink(node.attrs as WikiLinkParts, true));
+      state.closeBlock(node);
     },
   },
   {

@@ -32,8 +32,15 @@ import {
   createTableKeymap,
   SlashCommandProvider,
   WikiLinkCompletionProvider,
+  extractHeadings,
+  findHeadingInDoc,
+  parseWikiLinkInner,
+  wikiLinkRef,
+  wikiLinkRefOf,
   type ContentFormat,
+  type WikiLinkParts,
 } from '../../lib/markdown';
+import { useLinkResolver } from '../../lib/links';
 import {
   Bold,
   Italic,
@@ -67,6 +74,7 @@ import {
 import { createCodeBlockView } from './CodeBlockView';
 import { createMathInlineView, createMathBlockView } from './MathNodeView';
 import { createListItemView } from './ListItemView';
+import { createWikiEmbedView } from './WikiEmbedView';
 import { DocumentPreview } from './DocumentPreview';
 import { LatexEditor } from './LatexEditor';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
@@ -103,6 +111,8 @@ export interface EditorOptions {
   title?: string;
   titlePlaceholder?: string;
   onTitleChange?: (title: string) => void;
+  /** 标题输入框失焦（提交重命名） */
+  onTitleBlur?: () => void;
   /** 代码块选项 */
   darkCodeTheme?: boolean;
   /** 是否启用搜索功能 */
@@ -126,8 +136,10 @@ export interface RichEditorProps {
   fileName?: string;
   /** 可链接的文档标题（[[ 补全来源） */
   linkTargets?: string[];
-  /** 点击双向链接 */
+  /** 点击双向链接（参数为 目标#标题 形式的引用） */
   onWikiLinkClick?: (target: string) => void;
+  /** 滚动到指定标题（每个请求对象只执行一次） */
+  revealHeading?: { heading: string } | null;
 }
 
 /**
@@ -175,6 +187,7 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
   // 链接目标与链接点击回调变化频率很低，重渲染以更新 ref
   if (prevProps.linkTargets !== nextProps.linkTargets) return false;
   if (prevProps.onWikiLinkClick !== nextProps.onWikiLinkClick) return false;
+  if (prevProps.revealHeading !== nextProps.revealHeading) return false;
 
   // Note: We DON'T compare onChange, onTitleChange, title, titlePlaceholder, linkTargets, onWikiLinkClick
   // - 回调与链接目标通过 ref 读取最新值
@@ -540,6 +553,18 @@ const StatusBar: React.FC<StatusBarProps> = ({ wordCount, charCount }) => (
 // RichEditor Component
 // ================================
 
+/** 选中文档中的标题并滚动到视口顶部；找不到标题时不做任何事 */
+function revealHeadingInView(view: EditorView, heading: string): void {
+  const pos = findHeadingInDoc(view.state.doc, heading);
+  if (pos === null) return;
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + 1)));
+  view.focus();
+  (view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+/** 已执行过的标题定位请求（编辑器重新挂载时不重复滚动） */
+const revealedHeadingRequests = new WeakSet<object>();
+
 /**
  * RichEditor Component
  *
@@ -562,6 +587,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   fileName,
   linkTargets,
   onWikiLinkClick,
+  revealHeading,
 }) => {
   // Use refs for callbacks to avoid closure issues and unnecessary re-renders
   // This is critical for preventing cursor loss during auto-save
@@ -574,11 +600,21 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   const onWikiLinkClickRef = useRef(onWikiLinkClick);
   onWikiLinkClickRef.current = onWikiLinkClick;
 
+  // 链接解析（嵌入内容与 [[文档# 标题补全）与当前文档标题（嵌入的循环检测）
+  const linkResolver = useLinkResolver();
+  const linkResolverRef = useRef(linkResolver);
+  linkResolverRef.current = linkResolver;
+  const documentTitleRef = useRef(userOptions?.title ?? '');
+  documentTitleRef.current = userOptions?.title ?? '';
+  const embedViewsRef = useRef<ReturnType<typeof createWikiEmbedView> | null>(null);
+
   // 存储格式：.md 等为 Markdown，.txt 为纯文本
   const format: ContentFormat = formatForFileType(fileType);
 
   const onTitleChangeRef = useRef(userOptions?.onTitleChange);
   onTitleChangeRef.current = userOptions?.onTitleChange;
+  const onTitleBlurRef = useRef(userOptions?.onTitleBlur);
+  onTitleBlurRef.current = userOptions?.onTitleBlur;
 
   // Stable options merge - only re-compute when userOptions object identity changes
   const options = useMemo(() => ({ ...DEFAULT_OPTIONS, ...userOptions }), [userOptions]);
@@ -738,7 +774,16 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     if (isMarkdown) {
       providers.unshift(
         new SlashCommandProvider(schema),
-        new WikiLinkCompletionProvider(schema, () => linkTargetsRef.current),
+        new WikiLinkCompletionProvider(
+          schema,
+          () => linkTargetsRef.current,
+          (target) => {
+            if (target) return linkResolverRef.current?.headings(target) ?? [];
+            // [[#… 补全当前文档的标题
+            const current = editorViewRef.current;
+            return current ? extractHeadings(serializeContent(current.state.doc, format)) : [];
+          }
+        ),
         new LaTeXCompletionProvider()
       );
     }
@@ -750,17 +795,43 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       container: editorContainerRef.current,
     });
 
-    // 点击双向链接跳转
+    // 点击双向链接：[[#标题]] 在当前文档内跳转，其余交给上层打开
+    const openWikiRef = (editorView: EditorView, ref: string) => {
+      const parts = parseWikiLinkInner(ref);
+      if (parts && !parts.target && parts.heading) revealHeadingInView(editorView, parts.heading);
+      else onWikiLinkClickRef.current?.(ref);
+    };
     const wikiLinkClickPlugin = new Plugin({
       props: {
-        handleClickOn(_view, _pos, node, _nodePos, event) {
-          if (node.type !== schema.nodes.wiki_link || !onWikiLinkClickRef.current) return false;
+        handleClickOn(editorView, _pos, node, _nodePos, event) {
+          if (node.type === schema.nodes.wiki_link) {
+            const { target, heading } = node.attrs as WikiLinkParts;
+            event.preventDefault();
+            openWikiRef(editorView, wikiLinkRef(target, heading));
+            return true;
+          }
+          if (node.type !== schema.nodes.wiki_embed) return false;
+          // 点击嵌入的标题或其中的链接时跳转，点击正文则选中嵌入
+          const link = (event.target as HTMLElement).closest<HTMLElement>('[data-wiki-target]');
+          if (!link) return false;
           event.preventDefault();
-          onWikiLinkClickRef.current(node.attrs.target as string);
+          openWikiRef(editorView, wikiLinkRefOf(link));
           return true;
         },
       },
     });
+
+    // 块级嵌入：渲染时读取最新的链接解析与当前文档（![[#标题]] 指向当前文档）
+    const embedViews = createWikiEmbedView((editorView) => ({
+      resolveEmbed: linkResolverRef.current?.resolveEmbed,
+      self: {
+        kind: 'note',
+        title: documentTitleRef.current,
+        content: serializeContent(editorView.state.doc, format),
+        format,
+      },
+    }));
+    embedViewsRef.current = embedViews;
 
     // 插件顺序：输入规则与块级回车 → 表格/列表/格式快捷键 → 基础快捷键 → 历史与光标
     const plugins: Plugin[] = [
@@ -812,6 +883,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
         math_inline: createMathInlineView(),
         math_block: createMathBlockView(),
         list_item: createListItemView(),
+        wiki_embed: embedViews.nodeView,
       },
       dispatchTransaction(transaction: Transaction) {
         const newState = view.state.apply(transaction);
@@ -908,8 +980,25 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       editorDisposable.dispose();
       view.destroy();
       editorViewRef.current = null;
+      embedViewsRef.current = null;
     };
   }, []);
+
+  // 条目列表更新后，被嵌入的内容可能已变化
+  useEffect(() => {
+    embedViewsRef.current?.refresh();
+  }, [linkResolver]);
+
+  // 通过 [[文档#标题]] 打开时滚动到标题（等待首次布局完成）
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view || !revealHeading || revealedHeadingRequests.has(revealHeading)) return;
+    const frame = requestAnimationFrame(() => {
+      revealedHeadingRequests.add(revealHeading);
+      revealHeadingInView(view, revealHeading.heading);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [revealHeading]);
 
   // Update editable state when mode changes
   useEffect(() => {
@@ -1312,6 +1401,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
             value={localTitle}
             placeholder={options.titlePlaceholder || '无标题'}
             onChange={handleTitleChange}
+            onBlur={() => onTitleBlurRef.current?.()}
             readOnly={readOnly}
           />
         </div>
@@ -1495,6 +1585,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
                 <DocumentPreview
                   content={sourceContent}
                   format={format}
+                  title={options.title}
                   onWikiLinkClick={onWikiLinkClick}
                 />
               </div>

@@ -43,6 +43,8 @@ export interface KnowledgeWorkspaceProps {
   onOpenInWriting: (itemId: string) => void;
   /** 通过双向链接创建新笔记（目标不存在时） */
   onCreateNote: (title: string) => void;
+  /** 重命名条目（同时更新其他笔记中指向它的链接） */
+  onRenameItem: (id: string, title: string) => Promise<void>;
   /** 打开快速输入 */
   onQuickCapture: () => void;
   /** 打开设置（用于引导配置 AI 服务商） */
@@ -58,6 +60,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   onSelectItem,
   onOpenInWriting,
   onCreateNote,
+  onRenameItem,
   onQuickCapture,
   onOpenSettings,
 }) => {
@@ -248,6 +251,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
             onSelectItem={onSelectItem}
             onOpenInWriting={onOpenInWriting}
             onCreateNote={onCreateNote}
+            onRenameItem={onRenameItem}
             onOpenSettings={onOpenSettings}
           />
         )}

@@ -54,12 +54,17 @@ import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
 import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
 import {
+  createLinkResolver,
   displayTitle,
+  isLinkableTitle,
   linkRepository,
+  LinkResolverContext,
+  normalizeLinkTarget,
+  planLinkRename,
   useLinkIndex,
   useRelatedLinks,
 } from './lib/links';
-import { extractWikiLinks } from './lib/markdown';
+import { extractWikiLinks, parseWikiLinkInner } from './lib/markdown';
 import { ChevronDown, ChevronRight, Plus, PenTool, X, History, Link2 } from 'lucide-react';
 import { AppMode, APP_MODE_CONFIGS, appReducer, DEFAULT_APP_STATE } from './types/app-modes';
 import { aiConfigService } from './services/aiConfigService';
@@ -77,6 +82,7 @@ const App: React.FC = () => {
   // 知识库：SQLite 是唯一数据源，知识库、写作、阅读、Agent 共用
   const kb = useKnowledgeBase(true);
   const linkIndex = useLinkIndex(kb.items);
+  const linkResolver = useMemo(() => createLinkResolver(linkIndex), [linkIndex]);
   const relatedLinks = useRelatedLinks(kb.items);
 
   // 知识库侧边栏选中的范围（智能文件夹或用户文件夹）与选中的条目
@@ -138,18 +144,81 @@ const App: React.FC = () => {
     await refreshList();
   }, [refreshList]);
 
-  // 处理文档重命名
-  const handleRenameDocument = useCallback(
-    (id: string, newTitle: string) => {
-      // 如果是当前选中的文档，直接更新本地状态
-      if (id === selectedDocId) {
-        updateLocal({ title: newTitle });
+  // ================================
+  // 重命名：自动改写其他笔记中指向原标题的 [[链接]]，并提示改写数量
+  // ================================
+
+  const renameStateRef = useRef({ items: kb.items, currentDocument });
+  renameStateRef.current = { items: kb.items, currentDocument };
+  /** 当前文档最近一次提交的标题（编辑器标题逐键保存，失焦时才视为一次重命名） */
+  const committedTitleRef = useRef<{ id: string; title: string } | null>(null);
+  useEffect(() => {
+    const doc = renameStateRef.current.currentDocument;
+    committedTitleRef.current = doc ? { id: doc.id, title: doc.title } : null;
+  }, [currentDocument?.id]);
+
+  const updateLinksAfterRename = useCallback(
+    async (oldTitle: string, newTitle: string) => {
+      try {
+        // 先保存编辑中的文档，改写基于最新内容
+        await saveCurrentDocument();
+        const { items, currentDocument: current } = renameStateRef.current;
+        const sources = items
+          .filter((item) => item.type === 'note')
+          .map((item) => ({
+            id: item.id,
+            content: item.id === current?.id ? current.content : (item.content ?? ''),
+          }));
+        const plan = planLinkRename(sources, oldTitle, newTitle);
+        if (plan.count === 0) return;
+        if (!isLinkableTitle(newTitle)) {
+          setNotice(`新标题含有 # | [ ] 等字符，无法作为链接目标，${plan.count} 处指向原标题的链接未更新`);
+          return;
+        }
+        await Promise.all(
+          plan.changes.map((change) => knowledgeRepository.update(change.id, { content: change.content }))
+        );
+        if (current && plan.changes.some((change) => change.id === current.id)) await reloadDocument();
+        await kb.reload();
+        setNotice(`已更新 ${plan.changes.length} 篇笔记中的 ${plan.count} 处链接`);
+      } catch (error) {
+        console.error('更新链接失败:', error);
+        setNotice(`更新链接失败：${error instanceof Error ? error.message : String(error)}`);
       }
-      // 刷新列表以显示新标题
-      refreshList();
     },
-    [selectedDocId, updateLocal, refreshList]
+    [saveCurrentDocument, reloadDocument, kb.reload]
   );
+
+  /** 重命名条目（写作侧边栏与知识库详情面板） */
+  const handleRenameItem = useCallback(
+    async (id: string, newTitle: string) => {
+      const { items, currentDocument: current } = renameStateRef.current;
+      const isCurrent = id === current?.id;
+      const oldTitle = isCurrent
+        ? (committedTitleRef.current?.title ?? current.title)
+        : items.find((item) => item.id === id)?.title;
+      if (isCurrent) {
+        // 打开中的文档经编辑会话修改，避免之后的自动保存写回旧标题
+        updateLocal({ title: newTitle });
+        committedTitleRef.current = { id, title: newTitle };
+      }
+      await kb.updateItem(id, { title: newTitle });
+      await refreshList();
+      if (oldTitle && normalizeLinkTarget(oldTitle) !== normalizeLinkTarget(newTitle)) {
+        await updateLinksAfterRename(oldTitle, newTitle);
+      }
+    },
+    [updateLocal, kb.updateItem, refreshList, updateLinksAfterRename]
+  );
+
+  /** 编辑器标题失焦：标题有变化时更新指向原标题的链接 */
+  const handleTitleCommit = useCallback(() => {
+    const committed = committedTitleRef.current;
+    const current = renameStateRef.current.currentDocument;
+    if (!committed || !current || committed.id !== current.id || committed.title === current.title) return;
+    committedTitleRef.current = { id: current.id, title: current.title };
+    void updateLinksAfterRename(committed.title, current.title);
+  }, [updateLinksAfterRename]);
 
   const [writingSidebarCollapsed, setWritingSidebarCollapsed] = useState(false);
 
@@ -579,15 +648,28 @@ const App: React.FC = () => {
     [createDocument, kb.refreshItem]
   );
 
-  /** 点击 [[双向链接]]：目标存在则打开，否则创建 */
+  /** 通过 [[文档#标题]] 打开写作文档后要定位的标题 */
+  const [headingRequest, setHeadingRequest] = useState<{ docId: string; heading: string } | null>(null);
+
+  /** 点击 [[双向链接]]（目标#标题）：目标存在则打开并定位标题，否则创建 */
   const openWikiTarget = useCallback(
-    (target: string) => {
-      const item = linkIndex.resolve(target);
-      if (item) openItem(item.id);
-      else void createNoteFromLink(target);
+    (ref: string) => {
+      const parts = parseWikiLinkInner(ref);
+      // [[#标题]] 由各视图在当前文档内处理
+      if (!parts?.target) return;
+      const item = linkIndex.resolve(parts.target);
+      if (!item) {
+        void createNoteFromLink(parts.target);
+        return;
+      }
+      openItem(item.id);
+      if (parts.heading && item.type === 'note') {
+        setHeadingRequest({ docId: item.id, heading: parts.heading });
+      }
     },
     [linkIndex, openItem, createNoteFromLink]
   );
+  const revealHeading = headingRequest?.docId === selectedDocId ? headingRequest : null;
 
   /** 写作编辑器 [[ 补全的候选标题 */
   const linkTargets = useMemo(
@@ -774,7 +856,7 @@ const App: React.FC = () => {
           onDeleteDocument={deleteDocument}
           onOpenHelp={handleOpenWelcomeGuide}
           onMoveDocument={handleMoveDocument}
-          onRenameDocument={handleRenameDocument}
+          onRenameDocument={handleRenameItem}
         />
     );
   };
@@ -812,6 +894,7 @@ const App: React.FC = () => {
               onSelectItem={setSelectedKnowledgeItemId}
               onOpenInWriting={openInWriting}
               onCreateNote={(title) => void createNoteFromLink(title)}
+              onRenameItem={handleRenameItem}
               onQuickCapture={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
               onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
             />
@@ -841,6 +924,7 @@ const App: React.FC = () => {
                     fileName={currentDocument.title}
                     linkTargets={linkTargets}
                     onWikiLinkClick={openWikiTarget}
+                    revealHeading={revealHeading}
                     options={{
                       placeholder: PLACEHOLDERS.CONTENT,
                       showWordCount: false,
@@ -852,6 +936,7 @@ const App: React.FC = () => {
                       title: currentDocument.title,
                       titlePlaceholder: PLACEHOLDERS.TITLE,
                       onTitleChange: handleTitleChange,
+                      onTitleBlur: handleTitleCommit,
                     }}
                   />
                 </Suspense>
@@ -931,6 +1016,7 @@ const App: React.FC = () => {
   // Focus mode render - clean, distraction-free with RichEditor
   if (isInFocusMode) {
     return (
+      <LinkResolverContext.Provider value={linkResolver}>
       <div className="app focus-mode">
         <div className="focus-container">
           {/* Minimal header with close button */}
@@ -940,6 +1026,7 @@ const App: React.FC = () => {
               value={currentDocument?.title ?? ''}
               documentId={selectedDocId}
               onChange={handleTitleChange}
+              onBlur={handleTitleCommit}
               placeholder={PLACEHOLDERS.TITLE}
             />
             <button
@@ -963,6 +1050,7 @@ const App: React.FC = () => {
                   fileName={currentDocument.title}
                   linkTargets={linkTargets}
                   onWikiLinkClick={openWikiTarget}
+                  revealHeading={revealHeading}
                   options={{
                     placeholder: PLACEHOLDERS.FOCUS_CONTENT,
                     showWordCount: false,
@@ -1021,10 +1109,12 @@ const App: React.FC = () => {
           />
         </div>
       </div>
+      </LinkResolverContext.Provider>
     );
   }
 
   return (
+    <LinkResolverContext.Provider value={linkResolver}>
     <Layout
       onQuickInput={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
       onStartRecording={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'voice' })}
@@ -1137,6 +1227,7 @@ const App: React.FC = () => {
       )}
 
     </Layout>
+    </LinkResolverContext.Provider>
   );
 };
 
