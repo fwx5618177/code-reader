@@ -1,0 +1,86 @@
+// ================================
+// 命令面板样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background-color: var(--overlay-bg);
+  z-index: $z-modal + 10;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-primary);
+  background-color: var(--bg-secondary);
+  box-shadow: var(--shadow-xl);
+}
+
+.input {
+  flex-shrink: 0;
+  padding: var(--spacing-3) var(--spacing-4);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  outline: none;
+  background-color: transparent;
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+
+  &::placeholder {
+    color: var(--text-faint);
+  }
+}
+
+.list {
+  margin: 0;
+  padding: var(--spacing-1);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+
+  &.active {
+    background-color: var(--bg-selected);
+  }
+}
+
+.label {
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.empty {
+  padding: var(--spacing-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  text-align: center;
+  line-height: $line-height-relaxed;
+}

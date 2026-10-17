@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { ThemeProvider } from './theme';
-import { PermissionProvider } from './components/PermissionDialog/PermissionProvider';
+import { PluginHost } from './components/PluginHost';
 import { listenForFlushRequests } from './services/flushRegistry';
 
 // 全局样式
@@ -19,10 +19,10 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <ThemeProvider>
-      {/* 插件权限确认上下文：包裹整个应用，专注模式下同样可用 */}
-      <PermissionProvider autoConnect>
+      {/* 插件宿主：初始化插件、授权对话框与命令面板，包裹整个应用，专注模式下同样可用 */}
+      <PluginHost>
         <App />
-      </PermissionProvider>
+      </PluginHost>
     </ThemeProvider>
   </React.StrictMode>
 );

@@ -897,6 +897,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
         setCharCount(countChars(text));
         setChunked(newState.doc.childCount >= CHUNKED_RENDERING_MIN_BLOCKS);
         onChangeRef.current?.(content, text);
+        getEditorBridge().notifyContentChange();
       },
       attributes: {
         class: styles.prosemirror,
@@ -955,9 +956,6 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       },
       focus(): void {
         editorViewRef.current?.focus();
-      },
-      blur(): void {
-        editorViewRef.current?.dom.blur();
       },
     };
 

@@ -7,6 +7,7 @@
 import React from 'react';
 import TitleBar from '../TitleBar';
 import Ribbon from '../Ribbon';
+import PluginStatusBar from '../PluginHost/PluginStatusBar';
 import { AppMode, SidebarPanel } from '../../types/app-modes';
 import styles from './Layout.module.scss';
 
@@ -125,6 +126,7 @@ const Layout: React.FC<LayoutProps> = ({
           </span>
         </div>
         <div className={styles.statusbarRight}>
+          <PluginStatusBar />
           <span className={styles.statusbarItem}>就绪</span>
         </div>
       </div>

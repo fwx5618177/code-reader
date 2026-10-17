@@ -25,6 +25,7 @@ import {
   Keyboard,
   SpellCheck,
   Library,
+  Puzzle,
 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
 import { AIProviderType, LLM_PROVIDER_PRESETS } from '../../types/ai-providers';
@@ -40,6 +41,7 @@ import { settingsService } from '../../services/settingsService';
 import { ThemeSettings } from '../ThemeSettings';
 import { SettingSelect, SettingToggle } from './SettingControls';
 import { SpellCheckSettings } from './SpellCheckSettings';
+import { PluginSettings } from './PluginSettings';
 import { WorkspaceSettings } from './WorkspaceSettings';
 import styles from './SettingsPanel.module.scss';
 
@@ -54,6 +56,7 @@ type SettingsTab =
   | 'transcription'
   | 'appearance'
   | 'editor'
+  | 'plugins'
   | 'shortcuts';
 
 interface SettingsPanelProps {
@@ -159,6 +162,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
     { id: 'transcription', icon: <Mic size={18} />, label: '语音转写' },
     { id: 'appearance', icon: <Palette size={18} />, label: '外观' },
     { id: 'editor', icon: <SpellCheck size={18} />, label: '编辑器' },
+    { id: 'plugins', icon: <Puzzle size={18} />, label: '插件' },
     { id: 'shortcuts', icon: <Keyboard size={18} />, label: '快捷键' },
   ];
 
@@ -242,6 +246,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
             {!isLoading && activeTab === 'appearance' && <AppearanceSettingsTab />}
 
             {!isLoading && activeTab === 'editor' && <SpellCheckSettings />}
+
+            {!isLoading && activeTab === 'plugins' && <PluginSettings />}
 
             {!isLoading && activeTab === 'shortcuts' && <ShortcutsSettingsTab />}
           </div>
@@ -499,6 +505,7 @@ const ShortcutsSettingsTab: React.FC = () => {
   const shortcuts = [
     { action: '快速输入', shortcut: '⌘ N' },
     { action: '全局搜索', shortcut: '⌘ P' },
+    { action: '命令面板（插件命令）', shortcut: '⌘ ⇧ P' },
     { action: '切换侧边栏', shortcut: '⌘ B' },
     { action: '知识库模式', shortcut: '⌘ 1' },
     { action: '写作模式', shortcut: '⌘ 2' },

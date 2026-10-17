@@ -1,0 +1,16 @@
+{
+  "id": "writing-tools",
+  "name": "写作助手",
+  "version": "1.0.0",
+  "description": "插入当前日期、统计当前文档字数与预计阅读时间，并在状态栏显示字数目标进度。",
+  "author": "Code Reader",
+  "main": "main.js",
+  "permissions": ["editor:read", "editor:write", "ui:message", "ui:dialog", "ui:statusbar", "storage"],
+  "contributes": {
+    "commands": [
+      { "id": "insert-date", "title": "写作助手：插入当前日期", "description": "在光标处插入形如 2026-01-01 星期四 的日期" },
+      { "id": "word-stats", "title": "写作助手：统计字数", "description": "统计当前文档与选中内容的字数、预计阅读时间" },
+      { "id": "set-goal", "title": "写作助手：设置字数目标", "description": "设置后状态栏显示当前文档的完成进度" }
+    ]
+  }
+}

@@ -107,6 +107,12 @@ const validChannels = [
   'spellcheck:addUserWord',
   'spellcheck:removeUserWord',
 
+  // 插件
+  'plugins:list',
+  'plugins:readEntry',
+  'plugins:openDirectory',
+  'plugins:uninstall',
+
   // 扫描版 PDF 文字识别
   'ocr:listLanguages',
   'ocr:importLanguage',
@@ -334,6 +340,14 @@ contextBridge.exposeInMainWorld('electron', {
     getUserWords: () => ipcRenderer.invoke('spellcheck:getUserWords'),
     addUserWord: (word: string) => ipcRenderer.invoke('spellcheck:addUserWord', word),
     removeUserWord: (word: string) => ipcRenderer.invoke('spellcheck:removeUserWord', word),
+  },
+
+  // 插件：插件目录由主进程管理，渲染进程只拿到 manifest 与入口代码文本
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    readEntry: (id: string, main: string) => ipcRenderer.invoke('plugins:readEntry', id, main),
+    openDirectory: () => ipcRenderer.invoke('plugins:openDirectory'),
+    uninstall: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),
   },
 
   // 扫描版 PDF 文字识别：语言数据由主进程管理（识别引擎经 ocr-resource:// 协议加载），识别结果按条目保存在当前知识库

@@ -346,6 +346,22 @@ export interface SpellcheckDictionaryFiles {
   dic: Uint8Array;
 }
 
+/** 插件目录中的一个插件包；manifest 为 manifest.json 的解析结果（未校验） */
+export interface PluginPackage {
+  /** 插件 ID（即目录名） */
+  id: string;
+  source: 'builtin' | 'user';
+  manifest: unknown;
+  /** manifest.json 读取或解析失败的原因 */
+  error: string | null;
+}
+
+export interface PluginPackageList {
+  /** 用户插件目录 */
+  pluginsDir: string;
+  packages: PluginPackage[];
+}
+
 /** 文字识别语言：内置随应用打包，用户导入的可删除 */
 export interface OcrLanguageInfo {
   /** tesseract 语言代码，如 eng、chi_sim */
@@ -573,6 +589,14 @@ interface ElectronAPI {
     getUserWords: () => Promise<string[]>;
     addUserWord: (word: string) => Promise<void>;
     removeUserWord: (word: string) => Promise<void>;
+  };
+
+  /** 插件：列出内置与用户插件（同 ID 时用户插件优先）、读取入口代码、打开用户插件目录、卸载用户插件 */
+  plugins: {
+    list: () => Promise<PluginPackageList>;
+    readEntry: (id: string, main: string) => Promise<string>;
+    openDirectory: () => Promise<void>;
+    uninstall: (id: string) => Promise<void>;
   };
 
   /** 扫描版 PDF 文字识别：列出/导入（弹出文件选择框，取消时返回空数组）/删除语言数据；

@@ -294,6 +294,13 @@ export interface SearchHighlight {
 // Settings (设置)
 // ================================
 
+/** 单个插件的持久化偏好 */
+export interface PluginPreference {
+  enabled: boolean;
+  /** 用户已授予的权限（插件更新后新增的权限需重新授权） */
+  grantedPermissions: string[];
+}
+
 /**
  * 应用设置
  */
@@ -333,6 +340,10 @@ export interface AppSettings {
   spellCheck: boolean;
   /** 当前词典 ID（builtin:en_US / user:xx） */
   spellCheckDictionary: string;
+
+  // ======= 插件 =======
+  /** 插件启用状态与已授予的权限（按插件 ID） */
+  plugins: Record<string, PluginPreference>;
 
   // ======= 同步 =======
   /** 启用同步 */

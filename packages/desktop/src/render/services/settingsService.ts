@@ -24,6 +24,7 @@ function createDefaultSettings(dataPath: string): AppSettings {
     defaultInputType: 'text',
     spellCheck: true,
     spellCheckDictionary: DEFAULT_SPELLCHECK_DICTIONARY,
+    plugins: {},
     enableSync: false,
   };
 }

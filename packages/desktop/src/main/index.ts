@@ -13,6 +13,7 @@ import { registerEntityHandlers, cleanupEntityHandlers } from './database/entity
 import { registerVersionHistoryHandlers } from './database/version-ipc-handlers';
 import { registerWebHandlers } from './web/ipc-handlers';
 import { registerSpellcheckHandlers } from './spellcheck/ipc-handlers';
+import { registerPluginHandlers } from './plugins/ipc-handlers';
 import { registerOcrHandlers, registerOcrScheme } from './ocr/ipc-handlers';
 import { registerAIHandlers, cleanupAIHandlers } from './ai/ipc-handlers';
 import {
@@ -482,6 +483,9 @@ function setupIPC() {
 
   // 拼写检查词典与用户词表
   registerSpellcheckHandlers(getPackageRoot());
+
+  // 插件：列出内置与用户插件、读取入口代码、打开插件目录、卸载
+  registerPluginHandlers(getPackageRoot());
 
   // 扫描版 PDF 文字识别：资源协议、语言数据与识别结果
   registerOcrHandlers(getPackageRoot());

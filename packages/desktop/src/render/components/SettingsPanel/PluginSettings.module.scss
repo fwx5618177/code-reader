@@ -1,0 +1,112 @@
+// ================================
+// 插件设置专用样式（通用设置项样式见 SettingsPanel.module.scss）
+// ================================
+
+@use '../../styles/variables' as *;
+
+.card {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--spacing-2);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+}
+
+.version {
+  margin-left: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  color: var(--text-muted);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+
+  code {
+    font-family: var(--font-mono);
+  }
+}
+
+.badge {
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-full);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.status {
+  &.active {
+    color: var(--color-success);
+  }
+
+  &.loading {
+    color: var(--color-info);
+  }
+
+  &.error {
+    color: var(--color-error);
+  }
+}
+
+.description {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: $line-height-relaxed;
+  color: var(--text-secondary);
+}
+
+.group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+}
+
+.groupLabel {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  line-height: 1.8;
+  color: var(--text-secondary);
+
+  &.granted {
+    border-color: var(--color-success);
+  }
+}
+
+.errors {
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  list-style: none;
+  border-radius: var(--radius-md);
+  background-color: var(--color-error-bg);
+  font-size: var(--font-size-xs);
+  line-height: $line-height-relaxed;
+  color: var(--color-error);
+  word-break: break-word;
+}
