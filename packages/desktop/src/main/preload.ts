@@ -100,6 +100,7 @@ const eventChannels = [
   'tray:open-search',
   'tray:switch-mode',
   'tray:open-settings',
+  'tray:open-document',
 ];
 
 /** 流式对话序号；事件只发往发起请求的窗口，窗口内唯一即可 */
@@ -269,12 +270,15 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('version:should-auto-save', itemId, minIntervalMs),
   },
 
-  // 托盘菜单动作（主进程推送）
+  // 托盘菜单：动作由主进程推送；最近文档列表由渲染进程提供
   tray: {
     onQuickNote: (callback: () => void) => subscribe('tray:quick-note', callback),
     onOpenSearch: (callback: () => void) => subscribe('tray:open-search', callback),
     onSwitchMode: (callback: (mode: string) => void) => subscribe('tray:switch-mode', callback),
     onOpenSettings: (callback: () => void) => subscribe('tray:open-settings', callback),
+    onOpenDocument: (callback: (id: string) => void) => subscribe('tray:open-document', callback),
+    setRecentDocuments: (documents: Array<{ id: string; title: string }>) =>
+      ipcRenderer.send('tray:set-recent-documents', documents),
   },
 });
 

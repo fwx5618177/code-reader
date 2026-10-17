@@ -267,6 +267,12 @@ export interface HybridSearchResult extends SemanticSearchResult {
   combinedScore: number;
 }
 
+/** 托盘“最近打开”中的文档 */
+export interface RecentDocument {
+  id: string;
+  title: string;
+}
+
 interface HybridSearchOptions extends SemanticSearchOptions {
   semanticWeight?: number;
 }
@@ -418,12 +424,14 @@ interface ElectronAPI {
     shouldAutoSave: (itemId: string, minIntervalMs?: number) => Promise<boolean>;
   };
 
-  /** 托盘菜单动作；返回取消订阅函数 */
+  /** 托盘菜单：on* 订阅菜单动作并返回取消订阅函数；setRecentDocuments 更新“最近打开”子菜单 */
   tray: {
     onQuickNote: (callback: () => void) => () => void;
     onOpenSearch: (callback: () => void) => () => void;
     onSwitchMode: (callback: (mode: 'knowledge' | 'writing' | 'reading') => void) => () => void;
     onOpenSettings: (callback: () => void) => () => void;
+    onOpenDocument: (callback: (id: string) => void) => () => void;
+    setRecentDocuments: (documents: RecentDocument[]) => void;
   };
 }
 

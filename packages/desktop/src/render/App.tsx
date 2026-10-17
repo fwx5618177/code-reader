@@ -48,6 +48,7 @@ import {
   type DocumentTypeId,
 } from './lib/documents';
 import { ensureExtension } from './lib/documents/file-types';
+import { pickRecentDocuments } from './lib/documents/recent';
 import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
 import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
@@ -540,6 +541,18 @@ const App: React.FC = () => {
     dispatch({ type: 'SET_MODE', payload: 'knowledge' });
     setSelectedKnowledgeItemId(itemId);
   }, []);
+
+  // 托盘“最近打开”：写作文档按更新时间排序，列表内容变化时才推送给主进程
+  const sentRecentDocumentsRef = useRef('');
+  useEffect(() => {
+    const recent = pickRecentDocuments(kb.items);
+    const key = JSON.stringify(recent);
+    if (key === sentRecentDocumentsRef.current) return;
+    sentRecentDocumentsRef.current = key;
+    window.electron.tray.setRecentDocuments(recent);
+  }, [kb.items]);
+
+  useEffect(() => window.electron.tray.onOpenDocument(openInWriting), [openInWriting]);
 
   /** 打开条目：笔记进入写作，其他类型在知识库中查看 */
   const openItem = useCallback(

@@ -1,4 +1,5 @@
-import { Tray, Menu, nativeImage, app, BrowserWindow, nativeTheme, NativeImage } from 'electron';
+import { Tray, Menu, nativeImage, app, BrowserWindow, nativeTheme, NativeImage, ipcMain } from 'electron';
+import { buildRecentSubmenu, normalizeRecentDocuments, type RecentDocument } from './recent-menu';
 
 /**
  * TrayManager - Manages the system tray icon and menu for Code Reader
@@ -14,11 +15,20 @@ export class TrayManager {
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
   private isQuitting = false;
+  private unreadCount = 0;
+  /** “最近打开”的文档，由渲染进程在文档列表变化时推送 */
+  private recentDocuments: RecentDocument[] = [];
 
   constructor() {
     // Listen for app quit to clean up
     app.on('before-quit', () => {
       this.isQuitting = true;
+    });
+
+    // 单例构造时注册一次（initialize 可能随窗口重建多次调用）
+    ipcMain.on('tray:set-recent-documents', (_event, payload: unknown) => {
+      this.recentDocuments = normalizeRecentDocuments(payload);
+      this.updateContextMenu();
     });
   }
 
@@ -271,11 +281,13 @@ export class TrayManager {
 
   /**
    * Update the context menu
+   * @param options.unreadCount 不传时保留上次的未读数
    */
   updateContextMenu(options?: { unreadCount?: number }): void {
     if (!this.tray) return;
 
-    const unreadCount = options?.unreadCount || 0;
+    if (options?.unreadCount !== undefined) this.unreadCount = options.unreadCount;
+    const unreadCount = this.unreadCount;
 
     const contextMenu = Menu.buildFromTemplate([
       // App name header
@@ -307,6 +319,13 @@ export class TrayManager {
           this.showAndFocusWindow();
           this.mainWindow?.webContents.send('tray:open-search');
         },
+      },
+      {
+        label: '最近打开',
+        submenu: buildRecentSubmenu(this.recentDocuments, (id) => {
+          this.showAndFocusWindow();
+          this.mainWindow?.webContents.send('tray:open-document', id);
+        }),
       },
       { type: 'separator' },
 
