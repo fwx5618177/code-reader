@@ -54,10 +54,14 @@ describe('PaneEditor 分栏编辑', () => {
     const { getByTestId, rerender, unmount } = render(<Panes docId="doc" focused="left" />);
     const left = getByTestId('left');
     const right = getByTestId('right');
-    await waitFor(() => {
-      expect(editorText(left)).toBe('第一段');
-      expect(editorText(right)).toBe('第一段');
-    });
+    // 编辑器是懒加载组件，全量测试并发运行时首次加载可能超过默认的 1 秒
+    await waitFor(
+      () => {
+        expect(editorText(left)).toBe('第一段');
+        expect(editorText(right)).toBe('第一段');
+      },
+      { timeout: 5000 }
+    );
 
     // 插件 API 作用于聚焦栏
     typeInActiveEditor('左栏输入');

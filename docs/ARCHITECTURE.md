@@ -36,6 +36,16 @@
 
 依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；`lib/latex` 只依赖 `@code-reader/text-buffer`（LaTeX 解析器在 `lib/latex/parser.ts`）。桌面端插件系统在 `lib/plugins` 自成一体，不使用 `plugin-system` 子包。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
 
+**未被引用的子包（保留，待决定如何接入）**：
+
+| 子包 | 主要能力（测试） | 桌面端现状 | 桌面端尚未具备、可由子包提供的能力 |
+|------|------|------|------|
+| `syntax-parser`（约 8.4k 行，4 个测试文件 76 个用例） | 手写 LaTeX tokenizer / 增量解析器（含 `errors` / `warnings`）、LaTeX 块扫描器（文档结构树）、语言注册表与高亮引擎（含自动闭合、折叠标记、缩进规则）、Lezer 增量解析封装与 AST 缓存 | `af13f51` 统一 LaTeX 链路时删除了对它的引用（旧链路用其解析器与块扫描器），`5e8b89e` 移除依赖；现在 LaTeX 解析在 `lib/latex/parser.ts`，编辑器高亮是 `codemirror-latex.ts` 的 StreamLanguage | LaTeX 编辑器的**语法错误提示**（未闭合环境 / 括号，桌面端没有 lint）、**代码折叠**（按环境 / 章节，桌面端没有 foldService）、基于结构树的大纲 |
+| `format-parser`（约 7.9k 行，**没有测试**） | 自研 CommonMark/GFM 解析器（带位置信息的 AST）、LaTeX 解析器（提取 `\label` / `\ref` / `\cite`、文档元数据）、增量编辑解析与流式解析、按内容自动判断格式 | 桌面端从未引用；Markdown 用 markdown-it + ProseMirror（`lib/markdown`），分块渲染按顶层块懒渲染 | LaTeX **交叉引用检查**（未定义的 `\ref`、未引用的 `\label`、参考文献）与文档元数据；超大 Markdown 的增量 / 流式解析。接入前需要先补测试 |
+| `plugin-system`（约 2.5k 行，没有测试） | `PluginManager`（依赖与优先级、`activationEvents` 按需激活、生命周期事件）、`ExtensionRegistry`（菜单、快捷键、工具栏、侧栏视图、语言、主题、配置项、文件类型等贡献点）、沙箱代理 | `45dc0c2` 让桌面端插件接入真实 UI 时改为自建的 `lib/plugins`（Worker 沙箱 + 权限 + 命令 + 状态栏 + 存储），不再引用子包 | manifest 只支持 `commands`；子包定义了但桌面端缺少的是**快捷键、菜单 / 工具栏按钮、侧栏视图、插件配置项、插件间依赖、按事件激活** |
+
+注意：`plugin-system` 的沙箱在主线程执行插件代码，桌面端的 Worker 隔离更安全，接入时宜只复用其贡献点模型与生命周期编排，而不是替换 Worker 运行时。
+
 ## 2. 主进程
 
 | 模块 | 文件 | 职责 |
