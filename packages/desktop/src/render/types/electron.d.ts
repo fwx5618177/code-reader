@@ -559,6 +559,24 @@ export interface VersionPruneResult {
 }
 
 // ================================
+// 定期整理建议
+// ================================
+
+/** 定期整理状态（当前知识库） */
+export interface OrganizeStatus {
+  enabled: boolean;
+  /** 间隔天数：1 / 3 / 7 / 14 / 30 */
+  intervalDays: number;
+  /** 上次自动提交整理的时间（开启时记为开启时间） */
+  lastRunAt: string | null;
+  lastTaskId: string | null;
+  /** 上次整理之后新增的条目数 */
+  newItemCount: number;
+  /** 下次到期时间；到期且有新条目时提交 */
+  nextRunAt: string | null;
+}
+
+// ================================
 // Electron API Interface
 // ================================
 
@@ -657,6 +675,11 @@ interface ElectronAPI {
     listPending: () => Promise<CategorizationProposal[]>;
     /** 记录审阅结果；只更新仍待审阅的提议，已审阅的提议会报错 */
     review: (decisions: CategorizationReviewDecision[]) => Promise<void>;
+  };
+
+  organize: {
+    getStatus: () => Promise<OrganizeStatus>;
+    update: (input: { enabled?: boolean; intervalDays?: number }) => Promise<OrganizeStatus>;
   };
 
   search: {

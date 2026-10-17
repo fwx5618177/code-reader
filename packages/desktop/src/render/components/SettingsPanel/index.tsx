@@ -45,6 +45,7 @@ import { SpellCheckSettings } from './SpellCheckSettings';
 import { PluginSettings } from './PluginSettings';
 import { WorkspaceSettings } from './WorkspaceSettings';
 import { VersionRetentionSettings } from './VersionRetentionSettings';
+import { OrganizeSettings } from './OrganizeSettings';
 import styles from './SettingsPanel.module.scss';
 
 // ================================
@@ -376,6 +377,8 @@ const AISettingsTab: React.FC<AISettingsTabProps> = ({
           </div>
         </div>
       )}
+
+      <OrganizeSettings />
     </div>
   );
 };

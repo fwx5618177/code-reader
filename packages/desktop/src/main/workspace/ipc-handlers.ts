@@ -6,6 +6,7 @@ import { BrowserWindow, dialog, ipcMain, type MessageBoxOptions } from 'electron
 import { getWorkspaceManager, type WorkspaceInfo } from './workspace-manager';
 import type { WorkspaceInput } from './registry';
 import { flushWindows } from '../flush/window-flush';
+import { getOrganizeScheduler } from '../agent/organize-schedule';
 
 const CHANNELS = [
   'workspace:list',
@@ -55,6 +56,8 @@ export function registerWorkspaceHandlers(): void {
   ipcMain.handle('workspace:switch', async (_event, id: string) => {
     // 关闭数据库前先让所有窗口写回防抖中的数据，否则重新加载会丢失
     if (!(await manager.switchTo(id, () => flushWindows()))) return;
+    // 定期整理按新知识库的设置重新计时
+    getOrganizeScheduler().restart();
     // 所有窗口重新加载：渲染进程的缓存、仓储与订阅全部基于新知识库重建
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.reload();

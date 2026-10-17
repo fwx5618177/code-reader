@@ -81,6 +81,10 @@ const validChannels = [
   'categorization:listPending',
   'categorization:review',
 
+  // 定期整理建议
+  'organize:getStatus',
+  'organize:update',
+
   // 语义搜索
   'search:semantic',
   'search:findSimilar',
@@ -308,6 +312,12 @@ contextBridge.exposeInMainWorld('electron', {
   categorization: {
     listPending: () => ipcRenderer.invoke('categorization:listPending'),
     review: (decisions: unknown) => ipcRenderer.invoke('categorization:review', decisions),
+  },
+
+  // 定期整理建议：设置保存在当前知识库，由主进程按间隔提交整库归类
+  organize: {
+    getStatus: () => ipcRenderer.invoke('organize:getStatus'),
+    update: (input: unknown) => ipcRenderer.invoke('organize:update', input),
   },
 
   // 语义搜索便捷方法

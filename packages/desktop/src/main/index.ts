@@ -26,6 +26,7 @@ import {
   updateAgentMainWindow,
 } from './agent/ipc-handlers';
 import { getAgentExecutor } from './agent/agent-executor';
+import { cleanupOrganizeHandlers, getOrganizeScheduler, registerOrganizeHandlers } from './agent/organize-schedule';
 import { initializeTray } from './tray/tray-manager';
 import {
   registerFlushHandlers,
@@ -482,6 +483,9 @@ function setupIPC() {
   // 自动归类待审阅提议
   registerCategorizationHandlers();
 
+  // 定期整理建议（按间隔自动提交整库归类）
+  registerOrganizeHandlers();
+
   // Version history and Git handlers
   registerVersionHistoryHandlers();
 
@@ -518,6 +522,8 @@ async function initializeServices() {
     agent.start();
     console.log('[Main] Agent executor started');
 
+    getOrganizeScheduler().start();
+
     console.log('[Main] All services initialized');
   } catch (error) {
     console.error('[Main] Failed to initialize services:', error);
@@ -537,6 +543,7 @@ async function cleanup() {
     cleanupSearchHandlers();
     cleanupEntityHandlers();
     cleanupCategorizationHandlers();
+    cleanupOrganizeHandlers();
     cleanupAIHandlers();
     cleanupDatabaseHandlers();
     cleanupWorkspaceHandlers();
