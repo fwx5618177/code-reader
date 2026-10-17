@@ -56,6 +56,7 @@ import { pickRecentDocuments, sortByRecentUpdate } from './lib/documents/recent'
 import { isWritingDocument } from './lib/documents/constants';
 import { isReadableItem, itemOpenTarget } from './lib/knowledge/open-target';
 import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
+import { onKnowledgeChanged } from './lib/knowledge/changes';
 import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
 import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
@@ -212,6 +213,9 @@ const App: React.FC = () => {
   const handleMoveDocument = useCallback(async () => {
     await refreshList();
   }, [refreshList]);
+
+  // 批量导入等整体变化后写作文档列表同样重新加载（知识库数据由 useKnowledgeBase 自行订阅）
+  useEffect(() => onKnowledgeChanged(() => void refreshList()), [refreshList]);
 
   // ================================
   // 重命名：自动改写其他笔记中指向原标题的 [[链接]]，并提示改写数量

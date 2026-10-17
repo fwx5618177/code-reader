@@ -577,6 +577,42 @@ export interface OrganizeStatus {
 }
 
 // ================================
+// 备份与批量导入导出
+// ================================
+
+/** 数据库备份文件（当前知识库 backups 目录） */
+export interface BackupFileInfo {
+  fileName: string;
+  path: string;
+  size: number;
+  createdAt: string;
+}
+
+export type ImportSourceKind = 'obsidian' | 'notion' | 'evernote' | 'json';
+
+export interface ImportFileEntry {
+  /** 相对来源根目录的路径（/ 分隔） */
+  path: string;
+  size: number;
+  /** 文本文件内容；二进制文件为 undefined */
+  text?: string;
+}
+
+/** 已选择并读取的导入来源 */
+export interface ImportSource {
+  id: string;
+  kind: ImportSourceKind;
+  name: string;
+  files: ImportFileEntry[];
+}
+
+/** 复制或写入到附件目录后的文件 */
+export interface SavedAttachment {
+  filePath: string;
+  size: number;
+}
+
+// ================================
 // Electron API Interface
 // ================================
 
@@ -612,7 +648,6 @@ interface ElectronAPI {
       options?: { types?: string[]; limit?: number; offset?: number }
     ) => Promise<FTSResult[]>;
     getSchemaVersion: () => Promise<number>;
-    backup: (path?: string) => Promise<{ success: boolean; path: string }>;
     vacuum: () => Promise<{ success: boolean }>;
     stats: () => Promise<DatabaseStats>;
   };
@@ -675,6 +710,38 @@ interface ElectronAPI {
     listPending: () => Promise<CategorizationProposal[]>;
     /** 记录审阅结果；只更新仍待审阅的提议，已审阅的提议会报错 */
     review: (decisions: CategorizationReviewDecision[]) => Promise<void>;
+  };
+
+  backup: {
+    list: () => Promise<BackupFileInfo[]>;
+    create: () => Promise<BackupFileInfo>;
+    /** 恢复 backups 目录中的备份（主进程确认后替换数据库并重新加载窗口） */
+    restore: (fileName: string) => Promise<{ restored: boolean }>;
+    /** 选择外部 .db 文件恢复 */
+    restoreFromFile: () => Promise<{ restored: boolean }>;
+    remove: (fileName: string) => Promise<void>;
+    openFolder: () => Promise<void>;
+    /** 选择位置写入完整备份（数据库 + 附件 + 识别结果），返回备份文件夹；取消时为 null */
+    exportFull: () => Promise<string | null>;
+    /** 选择完整备份文件夹恢复 */
+    restoreFull: () => Promise<{ restored: boolean }>;
+  };
+
+  transfer: {
+    /** 选择导入来源；取消时为 null */
+    pickImportSource: (kind: ImportSourceKind) => Promise<ImportSource | null>;
+    /** 把来源中的文件复制到附件目录 */
+    copyAttachment: (sourceId: string, path: string) => Promise<SavedAttachment>;
+    /** 把 base64 内容写入附件目录 */
+    writeAttachment: (fileName: string, base64: string) => Promise<SavedAttachment>;
+    /** 结束导入（清理解压的临时文件） */
+    finishImport: (sourceId: string) => Promise<void>;
+    /** 选择导出位置并新建导出文件夹；取消时为 null */
+    pickExportDirectory: (label: string) => Promise<{ id: string; path: string } | null>;
+    writeExportFile: (exportId: string, path: string, text: string) => Promise<void>;
+    /** 复制当前知识库附件目录中的文件到导出文件夹 */
+    copyExportFile: (exportId: string, path: string, source: string) => Promise<void>;
+    finishExport: (exportId: string) => Promise<void>;
   };
 
   organize: {

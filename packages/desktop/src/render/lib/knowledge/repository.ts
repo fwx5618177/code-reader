@@ -118,6 +118,12 @@ export interface CreateKnowledgeItemInput {
   sourceUrl?: string;
   folderId?: string;
   metadata?: Record<string, unknown>;
+  /** 导入时还原的 AI 解读与状态 */
+  summary?: string;
+  keyPoints?: string[];
+  transcript?: string;
+  isFavorite?: boolean;
+  isPinned?: boolean;
   /** 迁移旧数据时保留原始时间 */
   createdAt?: string;
   updatedAt?: string;
@@ -186,8 +192,8 @@ class KnowledgeRepository {
     await databaseService.run(
       `INSERT INTO knowledge_items
        (id, title, type, status, content, file_path, file_size, mime_type, source_url,
-        folder_id, metadata, created_at, updated_at, is_favorite, is_pinned, is_deleted)
-       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)`,
+        folder_id, metadata, summary, key_points, transcript, created_at, updated_at, is_favorite, is_pinned, is_deleted)
+       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
       [
         id,
         input.title,
@@ -199,8 +205,13 @@ class KnowledgeRepository {
         input.sourceUrl ?? null,
         input.folderId ?? null,
         input.metadata ? JSON.stringify(input.metadata) : null,
+        input.summary ?? null,
+        input.keyPoints ? JSON.stringify(input.keyPoints) : null,
+        input.transcript ?? null,
         createdAt,
         input.updatedAt ?? createdAt,
+        input.isFavorite ? 1 : 0,
+        input.isPinned ? 1 : 0,
       ]
     );
     const item = await this.getById(id);

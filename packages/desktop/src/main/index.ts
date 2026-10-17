@@ -26,6 +26,8 @@ import {
   updateAgentMainWindow,
 } from './agent/ipc-handlers';
 import { getAgentExecutor } from './agent/agent-executor';
+import { cleanupBackupHandlers, registerBackupHandlers } from './transfer/backup';
+import { cleanupTransferHandlers, registerTransferHandlers } from './transfer/files';
 import { cleanupOrganizeHandlers, getOrganizeScheduler, registerOrganizeHandlers } from './agent/organize-schedule';
 import { initializeTray } from './tray/tray-manager';
 import {
@@ -504,6 +506,10 @@ function setupIPC() {
   // 知识库管理与切换
   registerWorkspaceHandlers();
 
+  // 备份与恢复、批量导入导出的文件访问
+  registerBackupHandlers();
+  registerTransferHandlers();
+
   // 切换知识库、关闭窗口、退出前的落盘 ack
   registerFlushHandlers();
 }
@@ -547,6 +553,8 @@ async function cleanup() {
     cleanupAIHandlers();
     cleanupDatabaseHandlers();
     cleanupWorkspaceHandlers();
+    cleanupBackupHandlers();
+    cleanupTransferHandlers();
     cleanupFlushHandlers();
 
     console.log('[Main] Cleanup complete');

@@ -27,6 +27,7 @@ import {
   Library,
   Puzzle,
   History,
+  HardDrive,
 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
 import { AIProviderType, LLM_PROVIDER_PRESETS } from '../../types/ai-providers';
@@ -46,6 +47,7 @@ import { PluginSettings } from './PluginSettings';
 import { WorkspaceSettings } from './WorkspaceSettings';
 import { VersionRetentionSettings } from './VersionRetentionSettings';
 import { OrganizeSettings } from './OrganizeSettings';
+import { DataSettings } from './DataSettings';
 import styles from './SettingsPanel.module.scss';
 
 // ================================
@@ -60,6 +62,7 @@ type SettingsTab =
   | 'appearance'
   | 'editor'
   | 'versions'
+  | 'data'
   | 'plugins'
   | 'shortcuts';
 
@@ -167,6 +170,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
     { id: 'appearance', icon: <Palette size={18} />, label: '外观' },
     { id: 'editor', icon: <SpellCheck size={18} />, label: '编辑器' },
     { id: 'versions', icon: <History size={18} />, label: '版本保留' },
+    { id: 'data', icon: <HardDrive size={18} />, label: '导入导出与备份' },
     { id: 'plugins', icon: <Puzzle size={18} />, label: '插件' },
     { id: 'shortcuts', icon: <Keyboard size={18} />, label: '快捷键' },
   ];
@@ -253,6 +257,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ isOpen, onClose }) => {
             {!isLoading && activeTab === 'editor' && <SpellCheckSettings />}
 
             {!isLoading && activeTab === 'versions' && <VersionRetentionSettings />}
+
+            {!isLoading && activeTab === 'data' && <DataSettings />}
 
             {!isLoading && activeTab === 'plugins' && <PluginSettings />}
 

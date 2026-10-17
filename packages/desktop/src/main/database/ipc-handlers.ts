@@ -6,8 +6,6 @@
 import { ipcMain } from 'electron';
 import { getSQLiteService, type FTSResult } from './sqlite';
 import { parseTransactionStatements } from './statements';
-import { getWorkspaceManager } from '../workspace/workspace-manager';
-import { join } from 'path';
 
 /**
  * Register all database-related IPC handlers
@@ -187,30 +185,6 @@ export function registerDatabaseHandlers(): void {
   });
 
   /**
-   * Create a backup
-   */
-  ipcMain.handle('db:backup', async (_event, customPath?: string) => {
-    try {
-      // 备份归属当前知识库
-      const backupDir = getWorkspaceManager().getCurrent().backupsPath;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = customPath || join(backupDir, `knowledge-backup-${timestamp}.db`);
-
-      // Ensure backup directory exists
-      const { mkdirSync, existsSync } = await import('fs');
-      if (!existsSync(backupDir)) {
-        mkdirSync(backupDir, { recursive: true });
-      }
-
-      await sqlite.backup(backupPath);
-      return { success: true, path: backupPath };
-    } catch (error) {
-      console.error('[DB:IPC] Backup error:', error);
-      throw error;
-    }
-  });
-
-  /**
    * Vacuum the database
    */
   ipcMain.handle('db:vacuum', async () => {
@@ -270,7 +244,6 @@ export function cleanupDatabaseHandlers(): void {
     'db:search',
     'db:rebuildFTS',
     'db:getSchemaVersion',
-    'db:backup',
     'db:vacuum',
     'db:stats',
     'db:clearAllData',

@@ -37,7 +37,6 @@ const validChannels = [
   'db:search',
   'db:rebuildFTS',
   'db:getSchemaVersion',
-  'db:backup',
   'db:vacuum',
   'db:stats',
   'db:clearAllData',
@@ -144,6 +143,26 @@ const validChannels = [
   'workspace:remove',
   'workspace:switch',
 
+  // 备份与恢复
+  'backup:list',
+  'backup:create',
+  'backup:restore',
+  'backup:restoreFromFile',
+  'backup:delete',
+  'backup:openFolder',
+  'backup:exportFull',
+  'backup:restoreFull',
+
+  // 批量导入导出
+  'transfer:pickImportSource',
+  'transfer:copyAttachment',
+  'transfer:writeAttachment',
+  'transfer:finishImport',
+  'transfer:pickExportDirectory',
+  'transfer:writeExportFile',
+  'transfer:copyExportFile',
+  'transfer:finishExport',
+
 ];
 
 // 用于接收事件的通道
@@ -238,7 +257,6 @@ contextBridge.exposeInMainWorld('electron', {
     search: (query: string, options?: { types?: string[]; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('db:search', query, options),
     getSchemaVersion: () => ipcRenderer.invoke('db:getSchemaVersion'),
-    backup: (path?: string) => ipcRenderer.invoke('db:backup', path),
     vacuum: () => ipcRenderer.invoke('db:vacuum'),
     stats: () => ipcRenderer.invoke('db:stats'),
     clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
@@ -411,6 +429,33 @@ contextBridge.exposeInMainWorld('electron', {
     update: (id: string, input: unknown) => ipcRenderer.invoke('workspace:update', id, input),
     remove: (id: string) => ipcRenderer.invoke('workspace:remove', id),
     switchTo: (id: string) => ipcRenderer.invoke('workspace:switch', id),
+  },
+
+  // 备份与恢复（当前知识库）：恢复前由主进程弹出确认框，恢复后主进程重新加载所有窗口
+  backup: {
+    list: () => ipcRenderer.invoke('backup:list'),
+    create: () => ipcRenderer.invoke('backup:create'),
+    restore: (fileName: string) => ipcRenderer.invoke('backup:restore', fileName),
+    restoreFromFile: () => ipcRenderer.invoke('backup:restoreFromFile'),
+    remove: (fileName: string) => ipcRenderer.invoke('backup:delete', fileName),
+    openFolder: () => ipcRenderer.invoke('backup:openFolder'),
+    exportFull: () => ipcRenderer.invoke('backup:exportFull'),
+    restoreFull: () => ipcRenderer.invoke('backup:restoreFull'),
+  },
+
+  // 批量导入导出：主进程负责选择来源 / 目标与文件读写，格式解析与写入知识库在渲染进程
+  transfer: {
+    pickImportSource: (kind: string) => ipcRenderer.invoke('transfer:pickImportSource', kind),
+    copyAttachment: (sourceId: string, path: string) => ipcRenderer.invoke('transfer:copyAttachment', sourceId, path),
+    writeAttachment: (fileName: string, base64: string) =>
+      ipcRenderer.invoke('transfer:writeAttachment', fileName, base64),
+    finishImport: (sourceId: string) => ipcRenderer.invoke('transfer:finishImport', sourceId),
+    pickExportDirectory: (label: string) => ipcRenderer.invoke('transfer:pickExportDirectory', label),
+    writeExportFile: (exportId: string, path: string, text: string) =>
+      ipcRenderer.invoke('transfer:writeExportFile', exportId, path, text),
+    copyExportFile: (exportId: string, path: string, source: string) =>
+      ipcRenderer.invoke('transfer:copyExportFile', exportId, path, source),
+    finishExport: (exportId: string) => ipcRenderer.invoke('transfer:finishExport', exportId),
   },
 
   // 落盘：主进程在切换知识库、关闭窗口、退出前请求写回防抖中的数据，handler 完成后自动回 ack

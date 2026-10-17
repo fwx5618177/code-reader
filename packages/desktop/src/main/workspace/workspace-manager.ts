@@ -6,9 +6,17 @@
 
 import { app } from 'electron';
 import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import { rm } from 'fs/promises';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { getSQLiteService } from '../database/sqlite';
 import { getSemanticSearchService } from '../database/semantic-search';
 import { getAgentExecutor } from '../agent/agent-executor';
@@ -154,6 +162,44 @@ class WorkspaceManager {
     }
     console.log(`[Workspace] 已切换到知识库 ${id}`);
     return true;
+  }
+
+  /**
+   * 用备份替换当前知识库的数据库：等待渲染进程落盘 → 停止 Agent → 关闭数据库 →
+   * 把当前数据库另存为 safetyCopyPath（恢复失败或反悔时可用）→ 复制备份并打开（同一条建表 + 迁移路径，
+   * 旧版本备份会被升级）。打开失败时放回原数据库并抛出错误。渲染进程窗口的重新加载由调用方负责
+   */
+  async replaceDatabase(sourcePath: string, safetyCopyPath: string, flushRenderers: () => Promise<void>): Promise<void> {
+    if (this.switching) throw new Error('正在切换知识库，请稍候');
+    this.switching = true;
+    const id = this.registry.currentId;
+    const { dbPath } = resolveWorkspacePaths(this.userDataPath, id);
+    const agent = getAgentExecutor();
+    const agentWasActive = agent.isActive();
+    try {
+      await flushRenderers();
+      await agent.stop();
+      getSQLiteService().close();
+      mkdirSync(dirname(safetyCopyPath), { recursive: true });
+      copyFileSync(dbPath, safetyCopyPath);
+      // WAL 与共享内存文件属于旧数据库，必须一并移除，否则会被重放到恢复后的数据库上
+      for (const suffix of ['-wal', '-shm']) rmSync(dbPath + suffix, { force: true });
+      copyFileSync(sourcePath, dbPath);
+      try {
+        this.openDatabase(id);
+      } catch (error) {
+        console.error('[Workspace] 打开恢复的数据库失败，放回原数据库:', error);
+        getSQLiteService().close();
+        for (const suffix of ['-wal', '-shm']) rmSync(dbPath + suffix, { force: true });
+        copyFileSync(safetyCopyPath, dbPath);
+        this.openDatabase(id);
+        throw error;
+      }
+    } finally {
+      if (agentWasActive) agent.start();
+      this.switching = false;
+    }
+    console.log(`[Workspace] 已从 ${sourcePath} 恢复知识库 ${id}`);
   }
 
   private openDatabase(id: string): void {

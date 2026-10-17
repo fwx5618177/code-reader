@@ -41,6 +41,7 @@
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | 知识库 | `main/workspace/registry.ts`、`workspace-manager.ts`、`ipc-handlers.ts` | 注册表 `userData/config/workspaces.json`（纯函数增删改 + 校验）；每个知识库目录结构一致（`data/knowledge.db`、`attachments/`、`backups/`、`ocr-results/`），默认知识库的根目录就是 `userData`（兼容升级前的数据），其余在 `userData/workspaces/<id>/`。切换：所有窗口落盘 → 关闭并打开新数据库（建表 + 迁移）→ 重新加载所有窗口；打开失败回到原知识库。删除先确认、再删目录、最后改注册表；默认与当前知识库不可删 |
+| 备份与导入导出 | `main/transfer/backup.ts`、`files.ts` | 备份：SQLite 在线备份到 `backups/*.db`；恢复前校验（必须含 `knowledge_items` 与 `schema_version`，版本不高于当前），`WorkspaceManager.replaceDatabase` 落盘 → 停 Agent → 关库 → 当前库另存 `before-restore-*.db` → 复制备份（清除 -wal/-shm）→ 打开（迁移）→ 重新加载窗口，打开失败放回原库。完整备份 = 数据库 + `attachments/` + `ocr-results/` + `manifest.json`（记录原附件目录），恢复时在临时副本上把附件绝对路径改写到当前附件目录。导入导出：主进程只做选择与文件访问——Notion zip 解压到 `<知识库根>/import-staging/<id>/`（含一层嵌套 zip），目录遍历跳过隐藏目录并读出文本文件；附件复制 / 导出写入都限制在登记过的来源 / 导出目录与当前附件目录之内 |
 | 落盘协调 | `main/flush/flush-coordinator.ts`、`window-flush.ts` | 向窗口发 `app:flush-request` 并等待 `app:flush-ack`（超时不阻塞）；切换知识库、关闭窗口（只是隐藏到托盘时不落盘）、`before-quit` 统一走这里，退出时落盘完成后再清理资源 |
 | SQLite | `main/database/sqlite.ts` | better-sqlite3，WAL 模式；`open(dbPath)` 由知识库管理器调用，切换知识库时关闭旧连接并走同一条建表 + 迁移路径 |
 | 全文搜索 | `sqlite.ts`、`search-ipc-handlers.ts` | FTS5 虚拟表 `items_fts`（title / content / summary / transcript），分词器 `trigram`（支持中文子串）；少于 3 个字符的查询词退化为 LIKE 扫描 |
@@ -70,6 +71,7 @@
 | `lib/latex` | LaTeX 文档模型、块分割与块级增量引擎、解析器与渲染器、渲染管线（Worker + 帧调度）、实测高度映射与滚动所有权锁（见第 6 节） |
 | `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax）：TeX 原子间距、显示/行内样式、按内容高度伸缩的分隔符、严格模式校验 |
 | `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`，标签重命名 / 合并 / 颜色）、快速收集与附件保存、PDF / EPUB 正文提取（`document-text.ts`）、网页剪藏（`web-clip.ts`：Readability 提取正文后经 ProseMirror schema 转 Markdown；`clip-images.ts`：图片下载为图片条目并改写为 `![[ ]]`）、条目打开方式（`open-target.ts`：写作文档 → 写作，文档附件 → 阅读，其余 → 知识库）、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、删除条目的唯一入口 `removeKnowledgeItem`（软删除并清理文字识别缓存）、`useKnowledgeBase` |
+| `lib/transfer` | 批量导入导出：各来源解析为统一的 `ImportPlan`（`obsidian.ts` 最短路径优先解析链接、frontmatter 与行内标签；`notion.ts` 去 ID 后缀、属性块、CSV 表格；`enex.ts` ENML 经 markdownSchema 转 Markdown，`<en-media>` 按资源 MD5（`md5.ts`）对应附件；`json-format.ts` 本应用全量格式），`link-rewrite.ts` 统一把引用改写为按标题解析的 `[[ ]]` / `![[ ]]`；`importer.ts` 与已有标题冲突时改名并改写引用、建「导入 · 来源」文件夹树、保存附件、写标签；`exporter.ts` 写 Markdown 目录（YAML 头部、附件以标题命名）或 JSON。完成后 `lib/knowledge/changes.ts` 通知知识库与写作列表整体重载 |
 | `lib/agent` | Agent 事件订阅与条目处理活动（`useAgentActivity`）、整库动作（自动归类、提取全部实体、重建语义索引，`actions.ts`）与变更记录（自动归类生成的待审阅建议摘要）、知识库问答（混合检索 + 引用，经 `ai:chatStream` 流式生成，可经 `ai:chatStreamCancel` 停止） |
 | `lib/categorization` | 待审阅归类：提议列表与面板开关（`reviewStore.ts`）、接受时把提议翻译为知识库操作（`acceptance.ts`：移动 / 新建文件夹、追加标签、合并标签，只追加不删除）与执行（`review-actions.ts`） |
 | `lib/entities` | 实体图谱数据（实体节点 + 条目节点 + 实体间关系边）、关系类型显示名、`useEntityGraph` / `useItemEntityRelations` |

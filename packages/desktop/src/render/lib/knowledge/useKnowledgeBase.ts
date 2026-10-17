@@ -11,6 +11,7 @@ import type { Folder as DocumentFolder } from '../folders/types';
 import { agentActivity } from '../agent/agentStore';
 import { knowledgeRepository, type UpdateKnowledgeItemInput } from './repository';
 import { ensureKnowledgeReady, removeKnowledgeItem } from './service';
+import { onKnowledgeChanged } from './changes';
 
 export interface KnowledgeBaseState {
   items: KnowledgeItem[];
@@ -98,7 +99,12 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
   useEffect(() => {
     if (!enabled) return;
     void reload();
-    return agentActivity.onItemChanged((id) => void reloadItem(id));
+    const offItem = agentActivity.onItemChanged((id) => void reloadItem(id));
+    const offAll = onKnowledgeChanged(() => void reload());
+    return () => {
+      offItem();
+      offAll();
+    };
   }, [enabled, reload, reloadItem]);
 
   const updateItem = useCallback(
