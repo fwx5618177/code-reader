@@ -1,5 +1,5 @@
 // ================================
-// 数据库结构测试（纯 SQL 文本部分）：v5 迁移与全新建库共用同一份实体表 / agent_tasks 定义
+// 数据库结构测试（纯 SQL 文本部分）：v5 / v6 迁移与全新建库共用同一份建表定义
 // better-sqlite3 是为 Electron 编译的原生模块，测试中以 mock 替代，只检查生成的 SQL
 // ================================
 
@@ -23,9 +23,9 @@ function migrationSql(version: number): string {
 
 const compact = (sql: string) => sql.replace(/\s+/g, ' ');
 
-describe('schema v5', () => {
+describe('schema', () => {
   it('版本号与最后一个迁移一致', () => {
-    expect(SCHEMA_VERSION).toBe(5);
+    expect(SCHEMA_VERSION).toBe(6);
     expect(MIGRATIONS[MIGRATIONS.length - 1].version).toBe(SCHEMA_VERSION);
   });
 
@@ -69,5 +69,23 @@ describe('schema v5', () => {
     const sql = compact(migrationSql(4));
     const kept = sql.match(/WHERE type IN \(([^)]*)\)/)?.[1];
     expect(kept).toBe("'transcribe', 'summarize', 'extract-tags', 'generate-embedding', 'find-related'");
+  });
+
+  it('全新建库：语义索引按分段存储，不再创建单向量 embeddings 表', () => {
+    const sql = compact(CREATE_TABLES_SQL);
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS item_embedding_chunks');
+    expect(sql).toContain('PRIMARY KEY (item_id, chunk_index)');
+    expect(sql).not.toMatch(/TABLE IF NOT EXISTS embeddings\b|ON embeddings\(/);
+  });
+
+  it('v6 迁移：创建分段表（与全新建库同一份语句），旧向量作为第 0 段迁入后删除旧表', () => {
+    const sql = compact(migrationSql(6));
+    const table = sql.match(/CREATE TABLE IF NOT EXISTS item_embedding_chunks \(.*?\);/)?.[0];
+    expect(table).toBeTruthy();
+    expect(compact(CREATE_TABLES_SQL)).toContain(table);
+    expect(sql).toContain(
+      'SELECT item_id, 0, model, dimensions, vector, created_at FROM embeddings WHERE item_id IN (SELECT id FROM knowledge_items)'
+    );
+    expect(sql.indexOf('DROP TABLE embeddings')).toBeGreaterThan(sql.indexOf('INSERT OR IGNORE INTO item_embedding_chunks'));
   });
 });

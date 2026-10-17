@@ -43,3 +43,11 @@ export async function requestExtractAllEntities(): Promise<LibraryActionResult> 
   const count = await agentActivity.extractAllEntities();
   return count > 0 ? 'submitted' : 'nothing-to-do';
 }
+
+/** 为语义索引过期的条目重建向量（问答与相似条目检索依赖语义索引） */
+export async function requestReindexEmbeddings(): Promise<LibraryActionResult> {
+  const unavailable = await checkAiAvailability();
+  if (unavailable) return unavailable;
+  const count = await agentActivity.reindexEmbeddings();
+  return count > 0 ? 'submitted' : 'nothing-to-do';
+}

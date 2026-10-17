@@ -173,6 +173,12 @@ class AgentActivityStore {
     return window.electron.agent.extractAllEntities();
   }
 
+  /** 为语义索引过期的条目重建向量，返回提交的条目数（各条目的活动由主进程事件创建） */
+  async reindexEmbeddings(): Promise<number> {
+    this.attach();
+    return window.electron.agent.reindexEmbeddings();
+  }
+
   /** 关闭一条变更记录 */
   dismissRecord(taskId: string): void {
     this.records = this.records.filter((record) => record.taskId !== taskId);

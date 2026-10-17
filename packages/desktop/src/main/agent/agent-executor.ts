@@ -6,13 +6,16 @@
 
 import { EventEmitter } from 'events';
 import { getSQLiteService } from '../database/sqlite';
-import { cosineSimilarity, decodeEmbedding, encodeEmbedding } from '../database/embedding-vector';
+import { encodeEmbedding } from '../database/embedding-vector';
+import { getSemanticSearchService } from '../database/semantic-search';
 import { getAIService } from '../ai/ai-service';
 import { BrowserWindow } from 'electron';
 import { TASK_TYPES, type TaskType } from './task-types';
 import { generateId } from './id';
 import { runCategorize } from './categorize-task';
 import { runExtractEntities } from './extract-entities-task';
+import { buildEmbeddingInputs, embedChunks } from './embedding-chunks';
+import { extractTagsLongText, summarizeLongText } from './long-text';
 
 // ================================
 // Types
@@ -114,6 +117,7 @@ export type ReportProgress = (progress: number, message: string) => void;
 /** 归类放在摘要、标签之后执行，以便利用已生成的摘要 */
 const CATEGORIZE_PRIORITY = 3;
 const EXTRACT_ENTITIES_PRIORITY = 4;
+const GENERATE_EMBEDDING_PRIORITY = 6;
 
 // processItem 的处理步骤；同一条目内按优先级从高到低串行执行，后续步骤依赖前序步骤的产出
 const PROCESS_ITEM_STEPS: ReadonlyArray<{
@@ -124,7 +128,7 @@ const PROCESS_ITEM_STEPS: ReadonlyArray<{
   { option: 'transcribe', type: 'transcribe', priority: 10 },
   { option: 'summarize', type: 'summarize', priority: 8 },
   { option: 'extractTags', type: 'extract-tags', priority: 7 },
-  { option: 'generateEmbedding', type: 'generate-embedding', priority: 6 },
+  { option: 'generateEmbedding', type: 'generate-embedding', priority: GENERATE_EMBEDDING_PRIORITY },
   { option: 'findRelated', type: 'find-related', priority: 5 },
   { option: 'extractEntities', type: 'extract-entities', priority: EXTRACT_ENTITIES_PRIORITY },
   { option: 'categorize', type: 'categorize', priority: CATEGORIZE_PRIORITY },
@@ -313,6 +317,41 @@ export class AgentExecutor extends EventEmitter {
     );
     for (const item of items) {
       this.enqueueTasks(item.id, [{ type: 'extract-entities', priority: EXTRACT_ENTITIES_PRIORITY }]);
+    }
+    return items.length;
+  }
+
+  /**
+   * 为语义索引过期的条目重新生成分段向量，返回新提交的条目数。需要重建的条目：
+   * - 没有任何分段向量；
+   * - 向量生成后条目又被修改；
+   * - 向量早于 v6 迁移：旧版由截断后的文本生成，只覆盖正文开头。
+   * 已有未结束向量任务的条目跳过。created_at 为 ISO 格式、applied_at 为 datetime('now') 格式，
+   * 统一用 julianday 比较
+   */
+  reindexEmbeddings(): number {
+    const items = getSQLiteService().all<{ id: string }>(
+      `SELECT k.id FROM knowledge_items k
+       WHERE k.is_deleted = 0
+         AND (TRIM(COALESCE(k.content, '')) != '' OR TRIM(COALESCE(k.transcript, '')) != ''
+              OR TRIM(COALESCE(k.summary, '')) != '')
+         AND NOT EXISTS (
+           SELECT 1 FROM agent_tasks t
+           WHERE t.target_item_id = k.id AND t.type = 'generate-embedding' AND t.is_deleted = 0
+             AND t.status IN ('pending', 'processing')
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM item_embedding_chunks c
+           WHERE c.item_id = k.id
+           GROUP BY c.item_id
+           HAVING julianday(MAX(c.created_at)) >= julianday(k.updated_at)
+              AND julianday(MIN(c.created_at)) >=
+                  (SELECT julianday(applied_at) FROM schema_version WHERE version = 6)
+         )
+       ORDER BY k.created_at ASC`
+    );
+    for (const item of items) {
+      this.enqueueTasks(item.id, [{ type: 'generate-embedding', priority: GENERATE_EMBEDDING_PRIORITY }]);
     }
     return items.length;
   }
@@ -653,11 +692,11 @@ export class AgentExecutor extends EventEmitter {
       case 'transcribe':
         return this.executeTranscribe(itemTask);
       case 'summarize':
-        return this.executeSummarize(itemTask);
+        return this.executeSummarize(itemTask, report);
       case 'extract-tags':
-        return this.executeExtractTags(itemTask);
+        return this.executeExtractTags(itemTask, report);
       case 'generate-embedding':
-        return this.executeGenerateEmbedding(itemTask);
+        return this.executeGenerateEmbedding(itemTask, report);
       case 'find-related':
         return this.executeFindRelated(itemTask);
       case 'extract-entities':
@@ -845,10 +884,10 @@ export class AgentExecutor extends EventEmitter {
 
   /**
    * Execute summarization task
+   * 长文按段摘要后归并（见 long-text.ts）
    */
-  private async executeSummarize(task: ItemTaskRef): Promise<TaskOutput> {
+  private async executeSummarize(task: ItemTaskRef, report: ReportProgress): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
-    const aiService = getAIService();
 
     // Get item content
     const item = sqlite.get<{ content: string; transcript: string }>(
@@ -861,14 +900,11 @@ export class AgentExecutor extends EventEmitter {
       throw new Error('No content to summarize');
     }
 
-    this.sendProgress(task, 10, 'processing', 'Generating summary...');
+    report(10, 'Generating summary...');
 
-    // Summarize
-    const result = await aiService.summarize({
-      content: textContent,
-    });
+    const result = await summarizeLongText(getAIService(), textContent, report);
 
-    this.sendProgress(task, 80, 'processing', 'Saving summary...');
+    report(90, 'Saving summary...');
 
     const commit = () => {
       sqlite.run(
@@ -887,10 +923,10 @@ export class AgentExecutor extends EventEmitter {
 
   /**
    * Execute tag extraction task
+   * 长文按段提取后合并（见 long-text.ts）
    */
-  private async executeExtractTags(task: ItemTaskRef): Promise<TaskOutput> {
+  private async executeExtractTags(task: ItemTaskRef, report: ReportProgress): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
-    const aiService = getAIService();
 
     // Get item content
     const item = sqlite.get<{ content: string; transcript: string; summary: string }>(
@@ -908,15 +944,16 @@ export class AgentExecutor extends EventEmitter {
       `SELECT name FROM tags WHERE is_deleted = 0 ORDER BY usage_count DESC LIMIT 50`
     );
 
-    this.sendProgress(task, 10, 'processing', 'Extracting tags...');
+    report(10, 'Extracting tags...');
 
-    // Extract tags
-    const result = await aiService.extractTags({
-      content: textContent,
-      existingTags: existingTags.map((t) => t.name),
-    });
+    const result = await extractTagsLongText(
+      getAIService(),
+      textContent,
+      existingTags.map((t) => t.name),
+      report
+    );
 
-    this.sendProgress(task, 60, 'processing', 'Saving tags...');
+    report(60, 'Saving tags...');
 
     // Create/update tags and link to item
     const commit = () => {
@@ -954,58 +991,38 @@ export class AgentExecutor extends EventEmitter {
 
   /**
    * Execute embedding generation task
+   * 全文分段生成向量（见 embedding-chunks.ts），写回时整体替换条目的全部分段
    */
-  private async executeGenerateEmbedding(task: ItemTaskRef): Promise<TaskOutput> {
+  private async executeGenerateEmbedding(task: ItemTaskRef, report: ReportProgress): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
-    const aiService = getAIService();
 
     // Get item content
-    const item = sqlite.get<{ title: string; content: string; transcript: string; summary: string }>(
-      `SELECT title, content, transcript, summary FROM knowledge_items WHERE id = ?`,
-      [task.targetItemId]
-    );
+    const item = sqlite.get<{
+      title: string;
+      content: string | null;
+      transcript: string | null;
+      summary: string | null;
+    }>(`SELECT title, content, transcript, summary FROM knowledge_items WHERE id = ?`, [task.targetItemId]);
 
     if (!item) {
       throw new Error('Item not found');
     }
 
-    // Combine content for embedding
-    const textParts = [item.title];
-    if (item.summary) textParts.push(item.summary);
-    if (item.content) textParts.push(item.content.slice(0, 8000)); // Limit content length
-    if (item.transcript) textParts.push(item.transcript.slice(0, 8000));
+    const result = await embedChunks(getAIService(), buildEmbeddingInputs(item), report);
 
-    const textContent = textParts.join('\n\n');
+    report(90, 'Saving embedding...');
 
-    this.sendProgress(task, 10, 'processing', 'Generating embedding...');
-
-    // Generate embedding
-    const result = await aiService.createEmbeddings({
-      input: textContent,
-    });
-
-    this.sendProgress(task, 80, 'processing', 'Saving embedding...');
-
-    const embeddingId = generateId();
     const commit = () => {
       const now = new Date().toISOString();
 
-      // Delete old embeddings for this item
-      sqlite.run(`DELETE FROM embeddings WHERE item_id = ?`, [task.targetItemId]);
-
-      // Insert new embedding
-      sqlite.run(
-        `INSERT INTO embeddings (id, item_id, model, dimensions, vector, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [
-          embeddingId,
-          task.targetItemId,
-          result.model,
-          result.dimensions,
-          encodeEmbedding(result.embeddings[0]),
-          now,
-        ]
-      );
+      sqlite.run(`DELETE FROM item_embedding_chunks WHERE item_id = ?`, [task.targetItemId]);
+      result.vectors.forEach((vector, chunkIndex) => {
+        sqlite.run(
+          `INSERT INTO item_embedding_chunks (item_id, chunk_index, model, dimensions, vector, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [task.targetItemId, chunkIndex, result.model, result.dimensions, encodeEmbedding(vector), now]
+        );
+      });
 
       // Mark item as indexed
       sqlite.run(`UPDATE knowledge_items SET is_indexed = 1, updated_at = ? WHERE id = ?`, [
@@ -1015,7 +1032,7 @@ export class AgentExecutor extends EventEmitter {
     };
 
     return {
-      result: { embeddingId, dimensions: result.dimensions, model: result.model },
+      result: { chunkCount: result.vectors.length, dimensions: result.dimensions, model: result.model },
       commit,
     };
   }
@@ -1026,39 +1043,19 @@ export class AgentExecutor extends EventEmitter {
   private async executeFindRelated(task: ItemTaskRef): Promise<TaskOutput> {
     const sqlite = getSQLiteService();
 
-    // Get source embedding
-    const sourceEmbedding = sqlite.get<{ vector: Buffer; dimensions: number }>(
-      `SELECT vector, dimensions FROM embeddings WHERE item_id = ?`,
-      [task.targetItemId]
-    );
-
-    if (!sourceEmbedding) {
+    const hasEmbedding = sqlite.get(`SELECT 1 FROM item_embedding_chunks WHERE item_id = ? LIMIT 1`, [
+      task.targetItemId,
+    ]);
+    if (!hasEmbedding) {
       throw new Error('Source item has no embedding');
     }
 
     this.sendProgress(task, 10, 'processing', 'Finding similar items...');
 
-    // Get all other embeddings
-    const embeddings = sqlite.all<{ item_id: string; vector: Buffer }>(
-      `SELECT item_id, vector FROM embeddings WHERE item_id != ?`,
-      [task.targetItemId]
-    );
-
-    // Calculate cosine similarity
-    const sourceVector = decodeEmbedding(sourceEmbedding.vector);
-    const similarities: Array<{ itemId: string; similarity: number }> = [];
-
-    for (const emb of embeddings) {
-      const similarity = cosineSimilarity(sourceVector, decodeEmbedding(emb.vector));
-      if (similarity > 0.5) {
-        // Threshold
-        similarities.push({ itemId: emb.item_id, similarity });
-      }
-    }
-
-    // Sort by similarity and take top 10
-    similarities.sort((a, b) => b.similarity - a.similarity);
-    const topRelated = similarities.slice(0, 10);
+    // 与语义检索共用分段打分；已删除的条目不参与
+    const topRelated = (
+      await getSemanticSearchService().findSimilar(task.targetItemId, { limit: 10, threshold: 0.5 })
+    ).map((related) => ({ itemId: related.itemId, similarity: related.similarity }));
 
     this.sendProgress(task, 80, 'processing', 'Creating links...');
 

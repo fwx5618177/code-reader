@@ -71,6 +71,7 @@ const validChannels = [
   'agent:processItem',
   'agent:categorizeLibrary',
   'agent:extractAllEntities',
+  'agent:reindexEmbeddings',
 
   // 实体图谱
   'entities:getGraph',
@@ -254,6 +255,7 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('agent:processItem', targetItemId, options),
     categorizeLibrary: () => ipcRenderer.invoke('agent:categorizeLibrary'),
     extractAllEntities: () => ipcRenderer.invoke('agent:extractAllEntities'),
+    reindexEmbeddings: () => ipcRenderer.invoke('agent:reindexEmbeddings'),
     onProgress: (callback: (progress: unknown) => void) => subscribe('agent:progress', callback),
     onTaskCompleted: (callback: (event: unknown) => void) =>
       subscribe('agent:taskCompleted', callback),

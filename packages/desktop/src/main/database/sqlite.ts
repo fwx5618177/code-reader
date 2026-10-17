@@ -38,7 +38,7 @@ export interface RunResult {
 // Schema Definitions
 // ================================
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /** 字符串常量列表 → SQL 的 IN 列表（取值均为代码内常量，不含引号） */
 const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
@@ -135,6 +135,23 @@ CREATE TABLE IF NOT EXISTS item_entities (
 
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
 CREATE INDEX IF NOT EXISTS idx_item_entities_entity ON item_entities(entity_id);
+`;
+
+/**
+ * 语义索引：条目全文按段切分后逐段生成向量，每段一行（vector 为 Float32 小端 BLOB），
+ * 检索时以条目最相近的一段作为条目得分；全新数据库与 v6 迁移共用
+ */
+const EMBEDDING_CHUNKS_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS item_embedding_chunks (
+  item_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  model TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (item_id, chunk_index),
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+);
 `;
 
 export const CREATE_TABLES_SQL = `
@@ -292,16 +309,8 @@ CREATE TABLE IF NOT EXISTS ai_providers (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Embeddings table for vector search
-CREATE TABLE IF NOT EXISTS embeddings (
-  id TEXT PRIMARY KEY,
-  item_id TEXT NOT NULL,
-  model TEXT NOT NULL,
-  dimensions INTEGER NOT NULL,
-  vector BLOB NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
-);
+-- Chunked embeddings for vector search
+${EMBEDDING_CHUNKS_TABLE_SQL}
 
 -- ================================
 -- Version History Tables (Phase 4)
@@ -373,9 +382,6 @@ CREATE INDEX IF NOT EXISTS idx_links_type ON links(type);
 -- Tasks indexes
 ${AGENT_TASKS_INDEXES_SQL}
 
--- Embeddings indexes
-CREATE INDEX IF NOT EXISTS idx_embeddings_item ON embeddings(item_id);
-CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
 
 -- Document versions indexes
 CREATE INDEX IF NOT EXISTS idx_versions_item ON document_versions(item_id);
@@ -484,6 +490,21 @@ export const MIGRATIONS: Migration[] = [
     up: (db) => {
       db.exec(rebuildAgentTasksSql(AGENT_TASK_TYPES_SQL));
       db.exec(ENTITY_TABLES_SQL);
+    },
+  },
+  {
+    version: 6,
+    description: '语义索引改为分段存储：embeddings 迁入 item_embedding_chunks（作为第 0 段）后删除',
+    // 旧版每个条目只有一条向量（由截断后的文本生成），保留为第 0 段，条目重新生成语义索引时整体替换；
+    // 此前各版本的建表语句都包含 embeddings，因此这里可以直接读取
+    up: (db) => {
+      db.exec(EMBEDDING_CHUNKS_TABLE_SQL);
+      db.exec(`
+        INSERT OR IGNORE INTO item_embedding_chunks (item_id, chunk_index, model, dimensions, vector, created_at)
+          SELECT item_id, 0, model, dimensions, vector, created_at FROM embeddings
+          WHERE item_id IN (SELECT id FROM knowledge_items);
+        DROP TABLE embeddings;
+      `);
     },
   },
 ];

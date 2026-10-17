@@ -470,6 +470,8 @@ interface ElectronAPI {
     categorizeLibrary: () => Promise<string>;
     /** 为所有有文本的条目抽取实体，返回新提交的条目数 */
     extractAllEntities: () => Promise<number>;
+    /** 为语义索引过期（缺失、条目已修改、旧版截断向量）的条目重建分段向量，返回新提交的条目数 */
+    reindexEmbeddings: () => Promise<number>;
     onProgress: (callback: (progress: TaskProgress) => void) => () => void;
     onTaskCompleted: (callback: (event: TaskCompletedEvent) => void) => () => void;
     onTaskFailed: (callback: (event: TaskFailedEvent) => void) => () => void;

@@ -5,7 +5,7 @@
 
 import { getSQLiteService } from './sqlite';
 import { getAIService } from '../ai/ai-service';
-import { cosineSimilarity, decodeEmbedding } from './embedding-vector';
+import { bestChunkScores, decodeEmbedding, meanEmbedding } from './embedding-vector';
 
 // ================================
 // Types
@@ -42,6 +42,19 @@ export interface HybridSearchResult extends SemanticSearchResult {
   combinedScore: number;
 }
 
+/** 向量打分后入选的条目及其得分 */
+interface RankedItem {
+  item: {
+    id: string;
+    title: string;
+    type: string;
+    summary: string | null;
+    content: string | null;
+    created_at: string;
+  };
+  similarity: number;
+}
+
 // ================================
 // Semantic Search Service
 // ================================
@@ -58,87 +71,26 @@ export class SemanticSearchService {
    * Search using semantic similarity
    */
   async search(query: string, options?: SemanticSearchOptions): Promise<SemanticSearchResult[]> {
-    const aiService = getAIService();
-    const sqlite = getSQLiteService();
-
-    const limit = options?.limit ?? 20;
-    const threshold = options?.threshold ?? 0.5;
-
     try {
       // Generate query embedding
-      const embeddingResponse = await aiService.createEmbeddings({
+      const embeddingResponse = await getAIService().createEmbeddings({
         input: query,
       });
-
       const queryVector = new Float32Array(embeddingResponse.embeddings[0]);
 
-      // Get all embeddings from database
-      let sql = `
-        SELECT
-          e.item_id,
-          e.vector,
-          ki.title,
-          ki.type,
-          ki.summary,
-          ki.content,
-          ki.created_at
-        FROM embeddings e
-        INNER JOIN knowledge_items ki ON e.item_id = ki.id
-        WHERE 1=1
-      `;
-
-      const params: unknown[] = [];
-
-      if (!options?.includeDeleted) {
-        sql += ` AND ki.is_deleted = 0`;
-      }
-
-      if (options?.types && options.types.length > 0) {
-        sql += ` AND ki.type IN (${options.types.map(() => '?').join(', ')})`;
-        params.push(...options.types);
-      }
-
-      if (options?.folderId) {
-        sql += ` AND ki.folder_id = ?`;
-        params.push(options.folderId);
-      }
-
-      if (options?.projectId) {
-        sql += ` AND ki.project_id = ?`;
-        params.push(options.projectId);
-      }
-
-      const rows = sqlite.all<{
-        item_id: string;
-        vector: Buffer;
-        title: string;
-        type: string;
-        summary: string | null;
-        content: string | null;
-        created_at: string;
-      }>(sql, params);
-
-      // Calculate similarities
-      const results: SemanticSearchResult[] = [];
-
-      for (const row of rows) {
-        const similarity = cosineSimilarity(queryVector, decodeEmbedding(row.vector));
-
-        if (similarity >= threshold) {
-          results.push({
-            itemId: row.item_id,
-            title: row.title,
-            type: row.type,
-            similarity,
-            snippet: this.generateSnippet(row.summary || row.content, query),
-            createdAt: row.created_at,
-          });
-        }
-      }
-
-      // Sort by similarity and limit
-      results.sort((a, b) => b.similarity - a.similarity);
-      return results.slice(0, limit);
+      const ranked = this.rankItems(queryVector, null, {
+        ...options,
+        limit: options?.limit ?? 20,
+        threshold: options?.threshold ?? 0.5,
+      });
+      return ranked.map(({ item, similarity }) => ({
+        itemId: item.id,
+        title: item.title,
+        type: item.type,
+        similarity,
+        snippet: this.generateSnippet(item.summary || item.content, query),
+        createdAt: item.created_at,
+      }));
     } catch (error) {
       console.error('[SemanticSearch] Search error:', error);
       throw error;
@@ -147,90 +99,103 @@ export class SemanticSearchService {
 
   /**
    * Find items similar to a given item
+   * 源条目以其各分段向量的均值作为整篇的代表向量，目标条目按最相近的一段打分
    */
   async findSimilar(
     itemId: string,
     options?: SemanticSearchOptions
   ): Promise<SemanticSearchResult[]> {
-    const sqlite = getSQLiteService();
-
-    const limit = options?.limit ?? 10;
-    const threshold = options?.threshold ?? 0.6;
-
     try {
-      // Get source embedding
-      const sourceEmbedding = sqlite.get<{ vector: Buffer }>(
-        `SELECT vector FROM embeddings WHERE item_id = ?`,
+      const sourceChunks = getSQLiteService().all<{ vector: Buffer }>(
+        `SELECT vector FROM item_embedding_chunks WHERE item_id = ?`,
         [itemId]
       );
-
-      if (!sourceEmbedding) {
+      if (sourceChunks.length === 0) {
         return [];
       }
+      const sourceVector = meanEmbedding(sourceChunks.map((chunk) => decodeEmbedding(chunk.vector)));
 
-      const sourceVector = decodeEmbedding(sourceEmbedding.vector);
-
-      // Get all other embeddings
-      let sql = `
-        SELECT
-          e.item_id,
-          e.vector,
-          ki.title,
-          ki.type,
-          ki.summary,
-          ki.content,
-          ki.created_at
-        FROM embeddings e
-        INNER JOIN knowledge_items ki ON e.item_id = ki.id
-        WHERE e.item_id != ?
-      `;
-
-      const params: unknown[] = [itemId];
-
-      if (!options?.includeDeleted) {
-        sql += ` AND ki.is_deleted = 0`;
-      }
-
-      if (options?.types && options.types.length > 0) {
-        sql += ` AND ki.type IN (${options.types.map(() => '?').join(', ')})`;
-        params.push(...options.types);
-      }
-
-      const rows = sqlite.all<{
-        item_id: string;
-        vector: Buffer;
-        title: string;
-        type: string;
-        summary: string | null;
-        content: string | null;
-        created_at: string;
-      }>(sql, params);
-
-      // Calculate similarities
-      const results: SemanticSearchResult[] = [];
-
-      for (const row of rows) {
-        const similarity = cosineSimilarity(sourceVector, decodeEmbedding(row.vector));
-
-        if (similarity >= threshold) {
-          results.push({
-            itemId: row.item_id,
-            title: row.title,
-            type: row.type,
-            similarity,
-            snippet: row.summary || undefined,
-            createdAt: row.created_at,
-          });
-        }
-      }
-
-      // Sort by similarity and limit
-      results.sort((a, b) => b.similarity - a.similarity);
-      return results.slice(0, limit);
+      const ranked = this.rankItems(sourceVector, itemId, {
+        ...options,
+        limit: options?.limit ?? 10,
+        threshold: options?.threshold ?? 0.6,
+      });
+      return ranked.map(({ item, similarity }) => ({
+        itemId: item.id,
+        title: item.title,
+        type: item.type,
+        similarity,
+        snippet: item.summary || undefined,
+        createdAt: item.created_at,
+      }));
     } catch (error) {
       console.error('[SemanticSearch] Find similar error:', error);
       throw error;
     }
+  }
+
+  /**
+   * 按分段向量为条目打分（每个条目取最相近的一段），过滤阈值、排序并截取前 limit 个；
+   * 逐段扫描时只读取向量，条目元数据与正文只为最终入选的条目读取
+   */
+  private rankItems(
+    queryVector: Float32Array,
+    excludeItemId: string | null,
+    options: SemanticSearchOptions & { limit: number; threshold: number }
+  ): RankedItem[] {
+    const sqlite = getSQLiteService();
+
+    let sql = `
+      SELECT c.item_id, c.vector
+      FROM item_embedding_chunks c
+      INNER JOIN knowledge_items ki ON c.item_id = ki.id
+      WHERE 1=1
+    `;
+    const params: unknown[] = [];
+
+    if (excludeItemId !== null) {
+      sql += ` AND c.item_id != ?`;
+      params.push(excludeItemId);
+    }
+
+    if (!options.includeDeleted) {
+      sql += ` AND ki.is_deleted = 0`;
+    }
+
+    if (options.types && options.types.length > 0) {
+      sql += ` AND ki.type IN (${options.types.map(() => '?').join(', ')})`;
+      params.push(...options.types);
+    }
+
+    if (options.folderId) {
+      sql += ` AND ki.folder_id = ?`;
+      params.push(options.folderId);
+    }
+
+    if (options.projectId) {
+      sql += ` AND ki.project_id = ?`;
+      params.push(options.projectId);
+    }
+
+    const scores = bestChunkScores(queryVector, sqlite.all<{ item_id: string; vector: Buffer }>(sql, params));
+    const top = Array.from(scores)
+      .filter(([, similarity]) => similarity >= options.threshold)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, options.limit);
+    if (top.length === 0) {
+      return [];
+    }
+
+    const items = sqlite.all<RankedItem['item']>(
+      `SELECT id, title, type, summary, content, created_at FROM knowledge_items
+       WHERE id IN (${top.map(() => '?').join(', ')})`,
+      top.map(([id]) => id)
+    );
+    const itemsById = new Map(items.map((item) => [item.id, item]));
+    return top.flatMap(([id, similarity]) => {
+      const item = itemsById.get(id);
+      return item ? [{ item, similarity }] : [];
+    });
   }
 
   // ================================

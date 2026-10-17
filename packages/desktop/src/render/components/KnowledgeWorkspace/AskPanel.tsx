@@ -5,10 +5,13 @@
 // ================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowUp, Bot, RefreshCw, Settings, Square } from 'lucide-react';
+import { AlertCircle, ArrowUp, Bot, DatabaseZap, RefreshCw, Settings, Square } from 'lucide-react';
 import aiConfigService from '../../services/aiConfigService';
 import type { AnswerSource } from '../../lib/agent/askService';
+import { requestReindexEmbeddings } from '../../lib/agent/actions';
 import { displayTitle } from '../../lib/links/link-index';
+import { LibraryAiButton } from '../AgentActivity/LibraryAiButton';
+import { useTaskTypeRunning } from '../AgentActivity/activity';
 import { ITEM_TYPE_ICONS } from '../ReadingWorkspace/item-type';
 import { parseAnswer } from './citations';
 import type { AskConversation, AskTurn } from './useAskConversation';
@@ -149,6 +152,7 @@ export interface AskPanelProps {
 export const AskPanel: React.FC<AskPanelProps> = ({ conversation, onSelectItem, onOpenSettings }) => {
   const { turns, pending, ask, retry, stop } = conversation;
   const [provider, recheck] = useProviderState();
+  const reindexing = useTaskTypeRunning('generate-embedding');
   const [input, setInput] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
 
@@ -174,6 +178,17 @@ export const AskPanel: React.FC<AskPanelProps> = ({ conversation, onSelectItem, 
               <Bot size={28} className={styles.introIcon} />
               <h3>向知识库提问</h3>
               <p>AI 会检索相关条目并据此回答，回答中的编号可以点击查看来源。</p>
+              <LibraryAiButton
+                className={styles.indexButton}
+                label="重建语义索引"
+                icon={DatabaseZap}
+                confirmTitle="重建语义索引"
+                confirmMessage="为没有语义索引、索引后又修改过，或由旧版本只索引了正文开头的条目重新生成分段向量。会按条目调用向量接口，进度见右下角的 AI 任务。"
+                emptyHint="所有有文本的条目语义索引都已是最新。"
+                busy={reindexing}
+                run={requestReindexEmbeddings}
+                onOpenSettings={onOpenSettings}
+              />
             </div>
           ) : (
             turns.map((turn) => (

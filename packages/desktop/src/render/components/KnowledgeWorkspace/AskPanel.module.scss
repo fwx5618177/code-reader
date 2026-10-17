@@ -76,6 +76,31 @@
   color: var(--accent-primary);
 }
 
+// 重建语义索引：次要操作，描边按钮
+.indexButton {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  margin-top: var(--spacing-2);
+  padding: 0 var(--spacing-3);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+
+  &:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
+
 // ================================
 // 消息
 // ================================

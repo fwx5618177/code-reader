@@ -171,6 +171,18 @@ export function registerAgentHandlers(mainWindow: BrowserWindow | null): void {
     }
   });
 
+  /**
+   * 为语义索引过期的条目重建分段向量，返回新提交的条目数
+   */
+  ipcMain.handle('agent:reindexEmbeddings', async (): Promise<number> => {
+    try {
+      return executor.reindexEmbeddings();
+    } catch (error) {
+      console.error('[Agent:IPC] Reindex embeddings error:', error);
+      throw error;
+    }
+  });
+
   console.log('[Agent:IPC] Agent handlers registered');
 }
 
@@ -201,6 +213,7 @@ export async function cleanupAgentHandlers(): Promise<void> {
     'agent:processItem',
     'agent:categorizeLibrary',
     'agent:extractAllEntities',
+    'agent:reindexEmbeddings',
   ];
 
   handlers.forEach((channel) => {
