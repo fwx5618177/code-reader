@@ -1,6 +1,8 @@
 // ================================
 // 编辑器桥接
-// 连接插件系统与真实编辑器：编辑器组件注册实例，最后注册（挂载）的为活动编辑器；
+// 连接插件系统与真实编辑器：编辑器组件注册实例，分栏时可同时有多个；
+// 注册时声明是否为活动编辑器，之后由聚焦的一栏调用 activate 切换；活动编辑器注销时
+// 回落到最近一次活动的其余编辑器。
 // 插件 API 一律作用于“当前活动编辑器”，没有活动编辑器时抛错。
 // 界面交互（消息、输入框、选择列表、确认框）由 PluginHost 注册的 UIManager 提供。
 // ================================
@@ -25,7 +27,8 @@ export type UIManager = UIAPI;
 class EditorBridge {
   private static instance: EditorBridge | null = null;
 
-  private editor: EditorInstance | null = null;
+  /** 已注册的编辑器，按最近活动顺序排列，末尾为活动编辑器 */
+  private readonly editors: EditorInstance[] = [];
   private uiManager: UIManager | null = null;
   /** 活动编辑器切换或其内容变化 */
   private readonly changeListeners = new Set<() => void>();
@@ -35,17 +38,32 @@ class EditorBridge {
     return EditorBridge.instance;
   }
 
-  /** 注册编辑器实例并设为活动编辑器 */
-  registerEditor(editor: EditorInstance): Disposable {
-    this.editor = editor;
-    this.emitChange();
+  /**
+   * 注册编辑器实例：active 为 true 时设为活动编辑器，否则排在所有已注册编辑器之后备用
+   */
+  registerEditor(editor: EditorInstance, active = true): Disposable {
+    const previous = this.getEditor();
+    if (active) this.editors.push(editor);
+    else this.editors.unshift(editor);
+    if (this.getEditor() !== previous) this.emitChange();
     return {
       dispose: () => {
-        if (this.editor !== editor) return;
-        this.editor = null;
-        this.emitChange();
+        const index = this.editors.indexOf(editor);
+        if (index === -1) return;
+        const wasActive = index === this.editors.length - 1;
+        this.editors.splice(index, 1);
+        if (wasActive) this.emitChange();
       },
     };
+  }
+
+  /** 把已注册的编辑器设为活动编辑器（分栏中聚焦的一栏） */
+  activate(editor: EditorInstance): void {
+    const index = this.editors.indexOf(editor);
+    if (index === -1 || index === this.editors.length - 1) return;
+    this.editors.splice(index, 1);
+    this.editors.push(editor);
+    this.emitChange();
   }
 
   /** 编辑器内容发生变化时由编辑器组件调用 */
@@ -64,14 +82,15 @@ class EditorBridge {
 
   /** 当前活动编辑器（命令面板关闭后用于恢复焦点） */
   getEditor(): EditorInstance | null {
-    return this.editor;
+    return this.editors[this.editors.length - 1] ?? null;
   }
 
   /** 创建作用于当前活动编辑器的 API */
   createEditorAPI(): EditorAPI {
     const active = (): EditorInstance => {
-      if (!this.editor) throw new Error('没有活动的编辑器');
-      return this.editor;
+      const editor = this.getEditor();
+      if (!editor) throw new Error('没有活动的编辑器');
+      return editor;
     };
     return {
       getContent: () => active().getContent(),

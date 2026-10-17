@@ -328,6 +328,20 @@ export function getFileTypeId(filename: string): DocumentTypeId {
 }
 
 /**
+ * 编辑标题时保留原有扩展名，避免意外改变文件类型：
+ * 原标题有扩展名而新标题没有（末尾 5 个字符内没有点）时，去掉末尾的点并补回原扩展名
+ */
+export function keepFileExtension(currentTitle: string, newTitle: string): string {
+  const lastDot = currentTitle.lastIndexOf('.');
+  const originalExtension = lastDot !== -1 ? currentTitle.slice(lastDot) : '';
+  const newLastDot = newTitle.lastIndexOf('.');
+  const hasNewExtension = newLastDot !== -1 && newLastDot > newTitle.length - 6;
+  return originalExtension && !hasNewExtension
+    ? newTitle.replace(/\.+$/, '') + originalExtension
+    : newTitle;
+}
+
+/**
  * 检查文件是否支持数学公式
  */
 export function supportsMath(filename: string): boolean {

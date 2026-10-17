@@ -1,13 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  useReducer,
-  useRef,
-  Suspense,
-  lazy,
-} from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useReducer, useRef } from 'react';
 import Layout from './components/Layout';
 import QuickInput, { QuickInputData } from './components/QuickInput';
 import SearchPanel from './components/SearchPanel';
@@ -18,22 +9,12 @@ import WritingSidebar, { type CreateDocumentOptions } from './components/Writing
 import VersionHistory from './components/VersionHistory';
 import TitleInput from './components/TitleInput';
 import SplitEditor from './components/SplitEditor';
+import PaneEditor, { type PaneEditorProps } from './components/SplitEditor/PaneEditor';
 import PageSettings from './components/PageSettings';
 import PageSurface from './components/PageSettings/PageSurface';
 import { useEditorTabs } from './hooks/useEditorTabs';
 import { usePageSettings } from './hooks/usePageSettings';
 import { PAGE_CONTENT_WIDTH_VALUES } from './lib/editor/page-settings';
-
-// Lazy load heavy editor components for better initial load performance
-const RichEditor = lazy(() => import('./components/RichEditor'));
-
-// Loading fallback component
-const EditorLoadingFallback: React.FC = () => (
-  <div className="editor-loading">
-    <div className="loading-spinner" />
-    <span>加载编辑器...</span>
-  </div>
-);
 
 import VirtualFolders, { VirtualFolder } from './components/VirtualFolders';
 import InputDialog, { ConfirmDialog } from './components/InputDialog';
@@ -67,6 +48,7 @@ import {
   PLACEHOLDERS,
   fileTypeRegistry,
   getFileTypeId,
+  keepFileExtension,
   type DocumentTypeId,
 } from './lib/documents';
 import { ensureExtension } from './lib/documents/file-types';
@@ -156,6 +138,24 @@ const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // 文档保存后：同步 [[链接]] 到 links 表，并刷新知识库中的该条目（反向链接随之更新）。
+  // 按保存的文档执行：分栏时保存的不一定是当前文档；最新的索引通过 ref 读取
+  const linkSyncRef = useRef({ linkIndex, refresh: kb.refreshItem });
+  linkSyncRef.current = { linkIndex, refresh: kb.refreshItem };
+  const syncDocumentLinks = useCallback((document: { id: string; content: string }) => {
+    const { linkIndex: index, refresh } = linkSyncRef.current;
+    const targetIds = new Set<string>();
+    for (const link of extractWikiLinks(document.content)) {
+      const target = index.resolve(link.target);
+      if (target && target.id !== document.id) targetIds.add(target.id);
+    }
+    linkRepository
+      .syncReferences(document.id, [...targetIds])
+      .then(() => refresh(document.id))
+      .catch((error) => console.error('同步双向链接失败:', error));
+  }, []);
+  const documentsConfig = useMemo(() => ({ onDocumentSaved: syncDocumentLinks }), [syncDocumentLinks]);
+
   // Writing mode state - using useDocuments hook for document management
   // Auto-save is now handled internally by the hook via AutoSaveManager
   const {
@@ -166,7 +166,6 @@ const App: React.FC = () => {
     // Editor state
     currentDocument,
     selectedId: selectedDocId,
-    editorLoading,
     isDirty: editorDirty,
 
     // Auto-save state
@@ -190,7 +189,8 @@ const App: React.FC = () => {
     saveDocument: saveCurrentDocument,
     deleteDocument,
     refreshList,
-  } = useDocuments();
+    saveExecutor,
+  } = useDocuments(documentsConfig);
 
   // 标签页与分栏：聚焦窗格的活动标签决定编辑会话的文档
   const editorTabs = useEditorTabs({
@@ -369,27 +369,10 @@ const App: React.FC = () => {
     [createDocument]
   );
 
-  // Handle title change - updates local state via hook
-  // 保持原有文件扩展名，避免意外更改文件类型
+  // 专注模式标题栏编辑当前文档标题：保持原有文件扩展名，避免意外更改文件类型
   const handleTitleChange = useCallback(
     (newTitle: string) => {
-      // 获取当前文档的原始扩展名
-      const currentTitle = currentDocument?.title ?? '';
-      const lastDot = currentTitle.lastIndexOf('.');
-      const originalExtension = lastDot !== -1 ? currentTitle.slice(lastDot) : '';
-
-      // 检查新标题是否已有扩展名
-      const newLastDot = newTitle.lastIndexOf('.');
-      const hasNewExtension = newLastDot !== -1 && newLastDot > newTitle.length - 6; // 扩展名不超过 5 个字符
-
-      // 如果原标题有扩展名且新标题没有，则保持原扩展名
-      let finalTitle = newTitle;
-      if (originalExtension && !hasNewExtension) {
-        // 去除新标题末尾的点（如果有）
-        finalTitle = newTitle.replace(/\.+$/, '') + originalExtension;
-      }
-
-      updateLocal({ title: finalTitle });
+      updateLocal({ title: keepFileExtension(currentDocument?.title ?? '', newTitle) });
     },
     [updateLocal, currentDocument?.title]
   );
@@ -800,7 +783,9 @@ const App: React.FC = () => {
     [linkIndex, appState.mode, openInReading, openItem, createNoteFromLink]
   );
   const revealHeading =
-    headingRequest?.view === 'writing' && headingRequest.docId === selectedDocId ? headingRequest : null;
+    headingRequest?.view === 'writing' && headingRequest.docId === editorTabs.activeDocId
+      ? headingRequest
+      : null;
   const revealReading =
     headingRequest?.view === 'reading' && headingRequest.docId === readingItemId ? headingRequest : null;
 
@@ -840,25 +825,6 @@ const App: React.FC = () => {
   );
   const resolveItemTitle = useCallback((id: string) => itemTitles.get(id), [itemTitles]);
 
-  // 文档保存后：同步 [[链接]] 到 links 表，并刷新知识库中的该条目（反向链接随之更新）
-  // 只在保存完成时触发，最新的文档与索引通过 ref 读取
-  const linkSyncRef = useRef({ linkIndex, currentDocument, selectedDocId, refresh: kb.refreshItem });
-  linkSyncRef.current = { linkIndex, currentDocument, selectedDocId, refresh: kb.refreshItem };
-  useEffect(() => {
-    const { linkIndex: index, currentDocument: doc, selectedDocId: docId, refresh } =
-      linkSyncRef.current;
-    if (!lastSavedAt || !docId || !doc) return;
-    const targetIds = new Set<string>();
-    for (const link of extractWikiLinks(doc.content)) {
-      const target = index.resolve(link.target);
-      if (target && target.id !== docId) targetIds.add(target.id);
-    }
-    linkRepository
-      .syncReferences(docId, [...targetIds])
-      .then(() => refresh(docId))
-      .catch((error) => console.error('同步双向链接失败:', error));
-  }, [lastSavedAt]);
-
   // 切换文档时确保知识库中有该条目（新建文档后反向链接面板可立即使用）
   useEffect(() => {
     if (selectedDocId && !kb.items.some((item) => item.id === selectedDocId)) {
@@ -894,90 +860,9 @@ const App: React.FC = () => {
     [kb.refreshItem]
   );
 
-  // ================================
-  // Editor Change Handler
-  // Optimized to prevent cursor loss during auto-save
-  //
-  // Key design decisions:
-  // 1. Use ref for updateLocal to avoid closure staleness
-  // 2. Micro-debounce (16ms) to batch rapid changes without noticeable delay
-  // 3. Skip duplicate content to avoid unnecessary state updates
-  // 4. ProseMirror handles its own state - we just sync to React when needed
-  // ================================
-
-  // Stable ref for updateLocal to avoid recreating callback
-  const updateLocalRef = useRef(updateLocal);
-  updateLocalRef.current = updateLocal;
-
-  // Refs for debouncing and tracking
-  const pendingUpdateRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastContentRef = useRef<string>('');
-  const lastDocIdRef = useRef<string | null>(null);
-
-  // Reset content tracking when document changes
-  useEffect(() => {
-    if (selectedDocId !== lastDocIdRef.current) {
-      lastDocIdRef.current = selectedDocId;
-      lastContentRef.current = currentDocument?.content || '';
-
-      // Clear any pending updates from the previous document
-      if (pendingUpdateRef.current) {
-        clearTimeout(pendingUpdateRef.current);
-        pendingUpdateRef.current = null;
-      }
-    }
-  }, [selectedDocId, currentDocument?.content]);
-
-  // 把微防抖中的最新内容交给编辑会话（定时器到期或落盘时调用）
-  const commitPendingUpdate = useCallback(() => {
-    if (!pendingUpdateRef.current) return;
-    clearTimeout(pendingUpdateRef.current);
-    pendingUpdateRef.current = null;
-    // Use ref to get latest updateLocal function
-    updateLocalRef.current({ content: lastContentRef.current });
-  }, []);
-
-  // 落盘（切换知识库、关闭窗口、退出前）：须先同步提交微防抖中的内容，再写回所有文档的待保存更改，
-  // 顺序不能交给并发执行的注册表，因此合并为一个回调
-  useEffect(
-    () =>
-      registerFlush(() => {
-        commitPendingUpdate();
-        return getEditorManager().flushAll();
-      }),
-    [commitPendingUpdate]
-  );
-
-  // Stable editor change handler - never changes identity
-  // Uses refs internally to always access latest values
-  const handleEditorChange = useCallback((html: string) => {
-    // Skip if content hasn't actually changed
-    if (html === lastContentRef.current) {
-      return;
-    }
-
-    // Store the new content immediately
-    lastContentRef.current = html;
-
-    // Clear any pending update
-    if (pendingUpdateRef.current) {
-      clearTimeout(pendingUpdateRef.current);
-    }
-
-    // Micro-debounce: batch rapid changes but stay responsive
-    // 16ms is roughly one frame - imperceptible delay
-    pendingUpdateRef.current = setTimeout(commitPendingUpdate, 16);
-  }, [commitPendingUpdate]); // 依赖恒定，其余外部值经 ref 读取
-
-  // Cleanup pending updates on unmount
-  useEffect(() => {
-    return () => {
-      if (pendingUpdateRef.current) {
-        clearTimeout(pendingUpdateRef.current);
-        pendingUpdateRef.current = null;
-      }
-    };
-  }, []);
+  // 落盘（切换知识库、关闭窗口、退出前）：写回所有文档的待保存更改（包括已关闭、仍在缓存中的文档）；
+  // 各栏编辑器微防抖中的内容由 PaneEditor 自行写入并落盘
+  useEffect(() => registerFlush(() => getEditorManager().flushAll()), []);
 
   // ================================
   // 侧栏：Ribbon 导航按钮选择面板，每个模式各自记住活动面板
@@ -1267,6 +1152,25 @@ const App: React.FC = () => {
     />
   ) : null;
 
+  /** 写作编辑器的公共属性：分栏各栏与专注模式共用；定位请求只交给聚焦的一栏 */
+  const writingEditorProps = (
+    focused: boolean,
+    options: NonNullable<PaneEditorProps['editorProps']['options']>
+  ): PaneEditorProps['editorProps'] => ({
+    linkTargets,
+    onWikiLinkClick: openWikiTarget,
+    revealHeading: focused ? revealHeading : null,
+    onAssignBlockId: assignBlockId,
+    options: {
+      showWordCount: false,
+      showToolbar: false,
+      showBorder: false,
+      typewriterMode: pageSettings.settings.typewriter,
+      contentMaxWidth: pageContentWidth,
+      ...options,
+    },
+  });
+
   // Render main content based on mode
   const renderMainContent = () => {
     switch (appState.mode) {
@@ -1311,60 +1215,40 @@ const App: React.FC = () => {
         );
 
       case 'writing':
-        // Only render editor when document is loaded to prevent stale content
-        // 编辑会话尚未切换到聚焦窗格的活动文档时视为加载中
-        const editorPending =
-          editorLoading ||
-          (editorTabs.activeDocId !== null && editorTabs.activeDocId !== selectedDocId);
-        const canRenderEditor =
-          selectedDocId && selectedDocId === editorTabs.activeDocId && currentDocument && !editorLoading;
-        const currentKnowledgeItem = kb.items.find((item) => item.id === selectedDocId);
+        // 编辑会话已切换到聚焦栏的活动文档（底栏、反向链接与版本历史作用于它）
+        const sessionReady = selectedDocId !== null && selectedDocId === editorTabs.activeDocId;
+        const currentKnowledgeItem = sessionReady
+          ? kb.items.find((item) => item.id === selectedDocId)
+          : undefined;
 
         return (
           <div className="writing-content">
             <PageSurface className="writing-body" settings={pageSettings.settings}>
-            <SplitEditor tabs={editorTabs} documents={documentList} sessionDocument={currentDocument}>
-            <div className="writing-editor-wrapper">
-              {editorPending ? (
-                <div className="editor-loading">
-                  <p>加载中...</p>
-                </div>
-              ) : canRenderEditor ? (
-                <Suspense fallback={<EditorLoadingFallback />}>
-                  <RichEditor
-                    key={`${selectedDocId}-${currentDocument.id}`}
-                    initialContent={currentDocument.content}
-                    onChange={handleEditorChange}
-                    fileType={getFileTypeId(currentDocument.title)}
-                    fileName={currentDocument.title}
-                    linkTargets={linkTargets}
-                    onWikiLinkClick={openWikiTarget}
-                    revealHeading={revealHeading}
-                    onAssignBlockId={assignBlockId}
-                    options={{
+            <SplitEditor
+              tabs={editorTabs}
+              renderPane={(docId, focused) => (
+                <div className="writing-editor-wrapper">
+                  <PaneEditor
+                    docId={docId}
+                    focused={focused}
+                    executor={saveExecutor}
+                    editorProps={writingEditorProps(focused, {
                       placeholder: PLACEHOLDERS.CONTENT,
-                      showWordCount: false,
-                      showToolbar: false,
-                      showBorder: false,
-                      typewriterMode: pageSettings.settings.typewriter,
-                      contentMaxWidth: pageContentWidth,
                       showTitle: true,
-                      title: currentDocument.title,
                       titlePlaceholder: PLACEHOLDERS.TITLE,
-                      onTitleChange: handleTitleChange,
                       onTitleBlur: handleTitleCommit,
-                    }}
+                    })}
                   />
-                </Suspense>
-              ) : (
+                </div>
+              )}
+              emptyPane={
                 <div className="editor-empty">
                   <PenTool size={48} strokeWidth={1} />
                   <p>选择或创建一个文档开始写作</p>
                 </div>
-              )}
-            </div>
-            </SplitEditor>
-            {showBacklinks && canRenderEditor && currentKnowledgeItem && (
+              }
+            />
+            {showBacklinks && currentKnowledgeItem && (
               <BacklinksPanel
                 item={currentKnowledgeItem}
                 items={kb.items}
@@ -1377,7 +1261,7 @@ const App: React.FC = () => {
             )}
             </PageSurface>
             <EditorFooter
-              hasDocument={editorTabs.activeDocId !== null && editorTabs.activeDocId === selectedDocId}
+              hasDocument={sessionReady}
               charCount={focusCharCount}
               wordCount={focusWordCount}
               isDirty={editorDirty}
@@ -1465,36 +1349,20 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Main editor - RichEditor without toolbar */}
+          {/* 正文编辑器：编辑聚焦栏的活动文档 */}
           <div className="focus-content">
-            {currentDocument ? (
-              <Suspense fallback={<EditorLoadingFallback />}>
-                <RichEditor
-                  key={`focus-${selectedDocId}-${currentDocument.id}`}
-                  initialContent={currentDocument.content}
-                  onChange={handleEditorChange}
-                  fileType={getFileTypeId(currentDocument.title)}
-                  fileName={currentDocument.title}
-                  linkTargets={linkTargets}
-                  onWikiLinkClick={openWikiTarget}
-                  revealHeading={revealHeading}
-                  onAssignBlockId={assignBlockId}
-                  options={{
-                    placeholder: PLACEHOLDERS.FOCUS_CONTENT,
-                    showWordCount: false,
-                    showToolbar: false,
-                    showBorder: false,
-                    typewriterMode: pageSettings.settings.typewriter,
-                    minHeight: '100%',
-                    contentMaxWidth: pageContentWidth,
-                    showTitle: false,
-                  }}
-                />
-              </Suspense>
-            ) : (
-              <div className="editor-loading">
-                <p>加载中...</p>
-              </div>
+            {editorTabs.activeDocId && (
+              <PaneEditor
+                key={editorTabs.activeDocId}
+                docId={editorTabs.activeDocId}
+                focused
+                executor={saveExecutor}
+                editorProps={writingEditorProps(true, {
+                  placeholder: PLACEHOLDERS.FOCUS_CONTENT,
+                  minHeight: '100%',
+                  showTitle: false,
+                })}
+              />
             )}
           </div>
 

@@ -438,6 +438,15 @@ export class DocumentEditorManager {
 
     const saveEngine = new SaveEngine(saveEngineConfig);
 
+    // 实例自身负责自动保存与保存后的标记，不依赖创建它的组件：
+    // 同一文档可能同时被多个编辑窗格持有，任一方释放后其余持有方照常工作
+    model.onContentChange(() => saveEngine.requestSave());
+    saveEngine.addEventListener((event) => {
+      if (event.type === 'SAVE_SUCCESS') {
+        model.markAsSaved(event.result.savedVersionId, event.result.savedContentHash);
+      }
+    });
+
     const now = Date.now();
 
     return {

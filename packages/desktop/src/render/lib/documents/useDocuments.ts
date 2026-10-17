@@ -24,6 +24,7 @@ import {
   createSuccessResult,
   createFailedResult,
   ContentSnapshot,
+  type ISaveExecutor,
 } from '../core';
 import { WritingIntegration, getWritingIntegration } from './writing-integration';
 import { stripMarkup } from '../markdown/extract';
@@ -41,6 +42,8 @@ export interface UseDocumentsConfig {
   autoSaveEnabled?: boolean;
   /** 版本创建时的回调 */
   onVersionCreated?: (version: DocumentVersion) => void;
+  /** 任一文档保存成功后的回调（分栏时保存的不一定是当前文档） */
+  onDocumentSaved?: (document: { id: string; title: string; content: string }) => void;
   /** 是否启用调试日志 */
   debug?: boolean;
 }
@@ -56,6 +59,7 @@ export interface UseDocumentsReturn {
   listError: string | null;
 
   // 编辑器状态
+  /** 当前（聚焦栏）文档；标题与内容取自托管模型，任何写入方的修改都会反映 */
   currentDocument: Document | null;
   selectedId: string | null;
   editorLoading: boolean;
@@ -94,6 +98,9 @@ export interface UseDocumentsReturn {
   // 版本历史
   lastVersionCreatedAt: Date | null;
   createVersion: (changeDescription?: string) => Promise<DocumentVersion | null>;
+
+  /** 文档保存执行器：其他编辑窗格为文档创建托管实例时使用，保存后同样更新列表、索引与版本 */
+  saveExecutor: ISaveExecutor;
 }
 
 // ================================
@@ -120,8 +127,9 @@ function calculateCharCount(content: string): number {
 // 默认配置
 // ================================
 
-const DEFAULT_CONFIG: Required<Omit<UseDocumentsConfig, 'onVersionCreated'>> & {
+const DEFAULT_CONFIG: Required<Omit<UseDocumentsConfig, 'onVersionCreated' | 'onDocumentSaved'>> & {
   onVersionCreated?: UseDocumentsConfig['onVersionCreated'];
+  onDocumentSaved?: UseDocumentsConfig['onDocumentSaved'];
 } = {
   debounceMs: 1500,
   maxIntervalMs: 30000,
@@ -192,6 +200,11 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
             const listItem = documentService.toListItem(saved);
             dispatch(actions.listUpdateItem(listItem));
           }
+          configRef.current.onDocumentSaved?.({
+            id: snapshot.documentId,
+            title: snapshot.title,
+            content: snapshot.content,
+          });
 
           // Maybe create version
           const now = Date.now();
@@ -628,6 +641,14 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
   const content = editor.isReady ? editor.content : (state.editor.document?.content ?? '');
   const wordCount = useMemo(() => calculateWordCount(content), [content]);
   const charCount = useMemo(() => calculateCharCount(content), [content]);
+  const loadedDocument = state.editor.document;
+  const currentDocument = useMemo(
+    () =>
+      loadedDocument && (loadedDocument.title !== title || loadedDocument.content !== content)
+        ? { ...loadedDocument, title, content }
+        : loadedDocument,
+    [loadedDocument, title, content]
+  );
 
   const isFirstTime = state.initialized && state.list.items.length === 0;
   // 修复：只使用 editor.isSaving 作为唯一来源，避免状态不同步
@@ -649,7 +670,7 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       listError: state.list.error,
 
       // Editor state
-      currentDocument: state.editor.document,
+      currentDocument,
       selectedId: state.editor.documentId,
       editorLoading: state.editor.loading,
       editorError: state.editor.error,
@@ -687,12 +708,14 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       // Version history
       lastVersionCreatedAt,
       createVersion,
+
+      saveExecutor,
     }),
     [
       state.list.items,
       state.list.loading,
       state.list.error,
-      state.editor.document,
+      currentDocument,
       state.editor.documentId,
       state.editor.loading,
       state.editor.error,
@@ -718,6 +741,7 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       editor.isAutoSaveEnabled,
       lastVersionCreatedAt,
       createVersion,
+      saveExecutor,
     ]
   );
 }

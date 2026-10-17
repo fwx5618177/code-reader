@@ -147,6 +147,15 @@ export interface RichEditorProps {
   revealHeading?: { heading: string; occurrence?: number } | null;
   /** [[文档#^ 补全选中其他文档中没有 ID 的块：在写入位置写入块 ID */
   onAssignBlockId?: (target: string, slot: BlockIdSlot, id: string) => void;
+  /**
+   * 是否为插件桥接的活动编辑器（分栏时只有聚焦的一栏是），默认是
+   */
+  active?: boolean;
+  /**
+   * 外部写入的标题或正文（另一栏对同一文档的编辑、版本恢复等重新加载）：正文替换全文，
+   * 不触发 onChange、不进入撤销历史；每个请求对象只应用一次
+   */
+  externalUpdate?: { title?: string; content?: string } | null;
 }
 
 /**
@@ -195,6 +204,8 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
   if (prevProps.onWikiLinkClick !== nextProps.onWikiLinkClick) return false;
   if (prevProps.revealHeading !== nextProps.revealHeading) return false;
   if (prevProps.onAssignBlockId !== nextProps.onAssignBlockId) return false;
+  if (prevProps.active !== nextProps.active) return false;
+  if (prevProps.externalUpdate !== nextProps.externalUpdate) return false;
 
   // Note: We DON'T compare onChange, onTitleChange, title, titlePlaceholder, linkTargets, onWikiLinkClick
   // - 回调与链接目标通过 ref 读取最新值
@@ -212,6 +223,9 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
  * 分块渲染会给每个块加上绘制包含（裁剪溢出的阴影与描边），小文档没有必要付出这个代价
  */
 const CHUNKED_RENDERING_MIN_BLOCKS = 150;
+
+/** 标记外部写入正文的事务（见 externalUpdate） */
+const EXTERNAL_CONTENT_META = 'richEditor/externalContent';
 
 /** 块菜单与拼写建议菜单共用的样式 */
 const POPUP_MENU_CLASSES: PopupMenuClasses = {
@@ -599,11 +613,18 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   onWikiLinkClick,
   revealHeading,
   onAssignBlockId,
+  active = true,
+  externalUpdate,
 }) => {
   // Use refs for callbacks to avoid closure issues and unnecessary re-renders
   // This is critical for preventing cursor loss during auto-save
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+
+  // 注册到桥接时读取；之后的变化由下方的 effect 处理
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const bridgeEditorRef = useRef<EditorInstance | null>(null);
 
   const linkTargetsRef = useRef<string[]>(linkTargets ?? []);
   linkTargetsRef.current = linkTargets ?? [];
@@ -928,6 +949,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
         setWordCount(countWords(text));
         setCharCount(countChars(text));
         setChunked(newState.doc.childCount >= CHUNKED_RENDERING_MIN_BLOCKS);
+        // 外部写入的内容来自上层，不再回传
+        if (transaction.getMeta(EXTERNAL_CONTENT_META)) return;
         onChangeRef.current?.(content, text);
         getEditorBridge().notifyContentChange();
       },
@@ -992,7 +1015,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     };
 
     const bridge = getEditorBridge();
-    const editorDisposable = bridge.registerEditor(editorInstance);
+    const editorDisposable = bridge.registerEditor(editorInstance, activeRef.current);
+    bridgeEditorRef.current = editorInstance;
 
     // 初始化预览内容与计数
     setSourceContent(lastNotified);
@@ -1004,6 +1028,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     // Cleanup
     return () => {
       editorDisposable.dispose();
+      bridgeEditorRef.current = null;
       view.destroy();
       editorViewRef.current = null;
       embedViewsRef.current = null;
@@ -1025,6 +1050,28 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     });
     return () => cancelAnimationFrame(frame);
   }, [revealHeading]);
+
+  // 成为聚焦的一栏时把本编辑器设为插件桥接的活动编辑器
+  useEffect(() => {
+    if (active && bridgeEditorRef.current) getEditorBridge().activate(bridgeEditorRef.current);
+  }, [active]);
+
+  // 应用外部写入的标题与正文：内容相同时不动，保留光标与撤销历史
+  useEffect(() => {
+    if (!externalUpdate) return;
+    if (externalUpdate.title !== undefined) setLocalTitle(externalUpdate.title);
+    const view = editorViewRef.current;
+    const content = externalUpdate.content;
+    if (!view || content === undefined) return;
+    if (serializeContent(view.state.doc, format) === content) return;
+    const doc = parseContent(content, format);
+    view.dispatch(
+      view.state.tr
+        .replaceWith(0, view.state.doc.content.size, doc.content)
+        .setMeta(EXTERNAL_CONTENT_META, true)
+        .setMeta('addToHistory', false)
+    );
+  }, [externalUpdate, format]);
 
   // 打字机模式开关变化时切换插件状态（初始值已在创建插件时传入）
   useEffect(() => {

@@ -21,6 +21,7 @@ export {
   // 工具函数
   getFileType,
   getFileTypeId,
+  keepFileExtension,
   supportsMath,
   supportsCodeBlocks,
   getDefaultTemplate,

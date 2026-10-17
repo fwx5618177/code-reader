@@ -663,8 +663,7 @@ body.distraction-free {
   }
 }
 
-// Editor loading and empty states
-.editor-loading,
+// 窗格中没有打开的文档
 .editor-empty {
   flex: 1;
   display: flex;
@@ -683,27 +682,6 @@ body.distraction-free {
   p {
     font-size: var(--font-size-sm);
     margin: 0;
-  }
-
-  // Loading spinner for lazy-loaded components
-  .loading-spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--border-subtle);
-    border-top-color: var(--accent-primary);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  span {
-    font-size: var(--font-size-sm);
-    color: var(--text-muted);
-  }
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
   }
 }
 

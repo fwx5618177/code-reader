@@ -30,28 +30,10 @@
   min-height: 0;
 }
 
-// 非聚焦窗格的只读预览
-.preview {
-  @include scrollbar;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  cursor: text;
-}
-
-.previewTitle {
-  max-width: var(--editor-content-max-width, 720px);
-  margin: 0 auto;
-  padding: var(--spacing-6) var(--spacing-6) 0;
-  font-family: var(--font-family-sans);
-  font-size: 2rem;
-  font-weight: 700;
-  line-height: 1.3;
-  color: var(--text-primary);
-}
-
-.previewStatus {
+// 窗格中编辑器的加载与异常状态
+.paneStatus {
   @include flex-center;
+  flex: 1;
   height: 100%;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
