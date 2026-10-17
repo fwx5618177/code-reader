@@ -5,6 +5,7 @@
 
 import type { KnowledgeItem, KnowledgeItemType, Tag } from '../../types/knowledge';
 import { matchesAllRules, type FilterRule } from '../../lib/knowledge/filter-rules';
+import { tagLineageIds, tagScopeIds } from '../../lib/knowledge/tag-tree';
 import { displayTitle } from '../../lib/links/link-index';
 
 /** 全部条目类型（筛选与分组的固定顺序） */
@@ -66,7 +67,7 @@ export interface ItemFilters {
   query: string;
   /** 类型（多选，任一命中） */
   types: KnowledgeItemType[];
-  /** 标签 ID（多选，全部命中） */
+  /** 标签 ID（多选，全部命中；父标签包含其子孙标签） */
   tagIds: string[];
 }
 
@@ -106,15 +107,20 @@ function increment<K>(map: Map<K, number>, key: K): void {
 
 /**
  * 应用搜索、类型、标签筛选，并统计分面计数
+ * 标签按层级匹配：选中父标签时带有其任一子孙标签的条目也命中；子标签的条目同时计入祖先标签的计数
  * @param searchText 条目的可搜索文本（由调用方缓存）
+ * @param tags 全部标签（用于展开层级）
  */
 export function applyFilters(
   items: KnowledgeItem[],
   filters: ItemFilters,
-  searchText: (item: KnowledgeItem) => string
+  searchText: (item: KnowledgeItem) => string,
+  tags: readonly Tag[]
 ): FilterResult {
   const terms = parseSearchTerms(filters.query);
   const types = new Set(filters.types);
+  const scopes = filters.tagIds.map((id) => tagScopeIds(id, tags));
+  const lineage = tagLineageIds(tags);
   const result: FilterResult = { items: [], typeCounts: new Map(), tagCounts: new Map() };
 
   for (const item of items) {
@@ -122,11 +128,12 @@ export function applyFilters(
       const text = searchText(item);
       if (!terms.every((term) => text.includes(term))) continue;
     }
-    if (!filters.tagIds.every((id) => item.tagIds.includes(id))) continue;
+    if (!scopes.every((scope) => item.tagIds.some((id) => scope.has(id)))) continue;
     increment(result.typeCounts, item.type);
     if (types.size > 0 && !types.has(item.type)) continue;
     result.items.push(item);
-    for (const tagId of item.tagIds) increment(result.tagCounts, tagId);
+    const counted = new Set(item.tagIds.flatMap((id) => lineage.get(id) ?? [id]));
+    for (const tagId of counted) increment(result.tagCounts, tagId);
   }
   return result;
 }

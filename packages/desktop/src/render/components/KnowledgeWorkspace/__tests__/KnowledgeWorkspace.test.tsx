@@ -261,10 +261,12 @@ describe('KnowledgeWorkspace', () => {
     expect(screen.queryByRole('button', { name: '在阅读模式中打开' })).toBeNull();
   });
 
-  it('标签管理列出标签及条目数，Esc 关闭', () => {
+  it('标签管理按层级与名称列出标签及条目数，搜索时按条目数排序，Esc 关闭', () => {
     const { dialog } = openTagManager();
-    const rows = within(dialog).getAllByRole('listitem');
-    expect(rows.map((row) => row.textContent)).toEqual(['React2', '前端2', 'react1']);
+    const rows = () => within(dialog).getAllByRole('listitem').map((row) => row.textContent);
+    expect(rows()).toEqual(['前端2', 'react1', 'React2']);
+    fireEvent.change(within(dialog).getByLabelText('查找标签'), { target: { value: 're' } });
+    expect(rows()).toEqual(['React2', 'react1']);
 
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: '管理标签' })).toBeNull();

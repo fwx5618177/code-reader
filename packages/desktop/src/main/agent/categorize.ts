@@ -5,6 +5,7 @@
 
 import { isRecord, normalizeText, parseConfidence } from './json-output';
 import { chunkText } from './text-chunks';
+import { normalizeTagPath } from '../../shared/tag-path';
 
 /** 每个条目最多建议的标签数 */
 export const MAX_TAGS_PER_ITEM = 6;
@@ -23,9 +24,9 @@ export const SAME_KEY_MERGE_REASON = '写法仅大小写、空白或符号不同
 // 名称规范化
 // ================================
 
-/** 标签显示名：统一全半角与空白，去掉开头的 # */
+/** 标签显示名：统一全半角与空白，去掉开头的 #，层级标签各级去除首尾空白（见 shared/tag-path） */
 export function normalizeTagName(name: string): string {
-  return normalizeText(name).replace(/^#+\s*/, '');
+  return normalizeTagPath(name);
 }
 
 /** 标签比较键：大小写不敏感，忽略空白与连字符/下划线差异 */
@@ -110,7 +111,7 @@ export function buildCategorizeSystemPrompt(folderPaths: string[], tagNames: str
 
 要求：
 1. folder 优先使用已有文件夹（原样填写名称或路径）；都不合适时给出一个简短的新文件夹名称（2-8 个字，不要包含 /）；无法判断时填 null
-2. tags 给出 1-${MAX_TAGS_PER_ITEM} 个标签，优先复用已有标签的原始写法；新标签简短（1-3 个词），不要带 #
+2. tags 给出 1-${MAX_TAGS_PER_ITEM} 个标签，优先复用已有标签的原始写法；新标签简短（1-3 个词），不要带 #。标签可以用“父/子”表示层级（如“技术/前端”）：已有层级标签时把新标签放到合适的父标签下，不要为同一概念另起平级标签
 3. 同一条目被拆成多段时（标注了“第 x/y 段”），每段都按整篇条目的主题判断
 4. reason 用一句话说明归类依据（不超过 40 字），confidence 为 0-1 之间的置信度
 5. 只返回 JSON：{"items": [{"id": "条目编号", "folder": "文件夹名称或 null", "tags": ["标签"], "reason": "归类依据", "confidence": 0.8}]}`;

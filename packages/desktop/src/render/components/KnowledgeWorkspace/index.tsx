@@ -141,8 +141,8 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   // 搜索词延迟应用，输入时不被大列表的重新筛选阻塞
   const query = useDeferredValue(filters.query);
   const result = useMemo(
-    () => applyFilters(scoped, { ...filters, query }, searchText),
-    [scoped, filters.types, filters.tagIds, query, searchText]
+    () => applyFilters(scoped, { ...filters, query }, searchText, kb.tags),
+    [scoped, filters.types, filters.tagIds, query, searchText, kb.tags]
   );
   const sorted = useMemo(() => sortItems(result.items, prefs.sort), [result.items, prefs.sort]);
   const groups = useMemo(

@@ -89,7 +89,8 @@ describe('knowledgeRepository 标签管理', () => {
   });
 
   describe('renameTag', () => {
-    it('名称未被占用时直接改名（去除首尾空白）', async () => {
+    it('名称未被占用时直接改名（规范化首尾空白）', async () => {
+      db.all.mockResolvedValueOnce([{ id: 't1', name: '旧名' }]);
       const id = await knowledgeRepository.renameTag('t1', '  前端  ');
 
       expect(id).toBe('t1');
@@ -102,6 +103,10 @@ describe('knowledgeRepository 标签管理', () => {
     });
 
     it('新名称已存在时在一个事务中合并到已有标签，并返回已有标签 ID', async () => {
+      db.all.mockResolvedValueOnce([
+        { id: 't1', name: '旧名' },
+        { id: 'existing', name: '前端' },
+      ]);
       db.get.mockResolvedValue({ id: 'existing' });
 
       const id = await knowledgeRepository.renameTag('t1', '前端');
@@ -115,8 +120,39 @@ describe('knowledgeRepository 标签管理', () => {
       expect(calls[0].some(([sql]) => sql.startsWith('UPDATE tags SET name'))).toBe(false);
     });
 
+    it('子孙标签随父标签改名，新路径缺少的父标签一并创建', async () => {
+      db.all.mockResolvedValueOnce([
+        { id: 't1', name: '前端' },
+        { id: 't2', name: '前端/React' },
+        { id: 't3', name: '前端/React/Hooks' },
+        { id: 't4', name: '前端工程' },
+      ]);
+
+      await knowledgeRepository.renameTag('t1', '技术 / 前端');
+
+      expect(runCalls()).toEqual([
+        ['UPDATE tags SET name = ?, updated_at = ? WHERE id = ?', ['技术/前端', NOW, 't1']],
+        ['UPDATE tags SET name = ?, updated_at = ? WHERE id = ?', ['技术/前端/React', NOW, 't2']],
+        ['UPDATE tags SET name = ?, updated_at = ? WHERE id = ?', ['技术/前端/React/Hooks', NOW, 't3']],
+      ]);
+      expect(transactionCalls()).toEqual([
+        [
+          [
+            'INSERT OR IGNORE INTO tags (id, name, usage_count, is_auto_generated, created_at, updated_at) VALUES (?, ?, 0, 0, ?, ?)',
+            ['generated-id', '技术', NOW, NOW],
+          ],
+        ],
+      ]);
+    });
+
+    it('不能移到自己的子标签下', async () => {
+      db.all.mockResolvedValueOnce([{ id: 't1', name: '前端' }]);
+      await expect(knowledgeRepository.renameTag('t1', '前端/框架')).rejects.toThrow('不能把标签移到它自己的子标签下');
+      expect(db.run).not.toHaveBeenCalled();
+    });
+
     it('空名称报错且不写数据库', async () => {
-      await expect(knowledgeRepository.renameTag('t1', '   ')).rejects.toThrow('标签名称不能为空');
+      await expect(knowledgeRepository.renameTag('t1', ' / ')).rejects.toThrow('标签名称不能为空');
       expect(db.get).not.toHaveBeenCalled();
       expect(db.run).not.toHaveBeenCalled();
       expect(db.transaction).not.toHaveBeenCalled();
@@ -148,6 +184,24 @@ describe('knowledgeRepository 标签管理', () => {
           ['INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?, ?)', ['item-1', 'generated-id']],
           ['UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?', [NOW, 'generated-id']],
         ],
+      ]);
+    });
+
+    it('层级标签规范化，并先补齐缺少的父标签', async () => {
+      db.all.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+      await knowledgeRepository.setItemTags('item-1', ['#技术 / 前端/React', '技术']);
+
+      expect(db.all.mock.calls[0][1]).toEqual(['技术/前端/React', '技术']);
+      const [statements] = transactionCalls();
+      // “技术”本身在列表中，作为普通标签创建；只补“技术/前端”
+      expect(statements[0]).toEqual([
+        'INSERT OR IGNORE INTO tags (id, name, usage_count, is_auto_generated, created_at, updated_at) VALUES (?, ?, 0, 0, ?, ?)',
+        ['generated-id', '技术/前端', NOW, NOW],
+      ]);
+      expect(statements.filter(([sql]) => sql.startsWith('INSERT INTO tags')).map(([, params]) => params?.[1])).toEqual([
+        '技术/前端/React',
+        '技术',
       ]);
     });
 

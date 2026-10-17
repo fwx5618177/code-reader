@@ -1,10 +1,14 @@
 // ================================
 // 标签管理对话框：列出全部标签及条目数，行内重命名（与已有标签同名时合并）、多选合并、设置颜色
+// 未搜索时按层级（“父/子”）缩进显示；重命名填写完整路径，可改变层级，子标签随之改名
 // ================================
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Ban, Merge, Search, X } from 'lucide-react';
+import type { Tag } from '../../types/knowledge';
 import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
+import { buildTagTree, flattenTagTree } from '../../lib/knowledge/tag-tree';
+import { ancestorTagPaths, isTagPathWithin } from '../../../shared/tag-path';
 import { TAG_COLORS, tagColorStyle } from './TagColor';
 import styles from './TagManager.module.scss';
 
@@ -38,13 +42,23 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
     return map;
   }, [kb.items]);
 
-  const rows = useMemo(() => {
+  const rows = useMemo((): Array<{ tag: Tag; depth: number; label: string }> => {
     const keyword = query.trim().toLowerCase();
-    return kb.tags
-      .filter((tag) => !keyword || tag.name.toLowerCase().includes(keyword))
-      .sort(
-        (a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0) || a.name.localeCompare(b.name)
-      );
+    if (keyword) {
+      // 搜索时按条目数排序平铺，显示完整路径
+      return kb.tags
+        .filter((tag) => tag.name.toLowerCase().includes(keyword))
+        .sort((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0) || a.name.localeCompare(b.name))
+        .map((tag) => ({ tag, depth: 0, label: tag.name }));
+    }
+    // 旧数据中可能没有同名的父标签：按实际存在的祖先缩进，名称显示相对最近祖先的路径
+    const names = new Set(kb.tags.map((tag) => tag.name));
+    return flattenTagTree(buildTagTree(kb.tags)).flatMap(({ node }) => {
+      if (!node.tag) return [];
+      const ancestors = ancestorTagPaths(node.path).filter((path) => names.has(path));
+      const label = ancestors.length > 0 ? node.path.slice(ancestors[0].length + 1) : node.path;
+      return [{ tag: node.tag, depth: ancestors.length, label }];
+    });
   }, [kb.tags, counts, query]);
 
   // 已被合并掉的标签自动从选择中剔除
@@ -53,6 +67,11 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
   const renameConflict = renaming
     ? kb.tags.find((tag) => tag.id !== renaming.id && tag.name === renaming.value.trim())
     : undefined;
+  /** 重命名会一并改名的子标签数 */
+  const renamingTag = renaming ? kb.tags.find((tag) => tag.id === renaming.id) : undefined;
+  const descendantCount = renamingTag
+    ? kb.tags.filter((tag) => tag.id !== renamingTag.id && isTagPathWithin(tag.name, renamingTag.name)).length
+    : 0;
 
   /** 执行写操作，失败时在对话框内提示 */
   const run = useCallback(async (action: () => Promise<void>) => {
@@ -150,11 +169,16 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
           <p className={styles.empty}>{kb.tags.length === 0 ? '还没有标签' : '没有匹配的标签'}</p>
         ) : (
           <ul className={styles.list}>
-            {rows.map((tag) => {
+            {rows.map(({ tag, depth, label }) => {
               const isSelected = selected.has(tag.id);
               const isRenaming = renaming?.id === tag.id;
               return (
-                <li key={tag.id} className={styles.row} data-selected={isSelected}>
+                <li
+                  key={tag.id}
+                  className={styles.row}
+                  data-selected={isSelected}
+                  style={{ '--tag-depth': depth } as React.CSSProperties}
+                >
                   <div className={styles.rowMain}>
                     <input
                       type="checkbox"
@@ -195,11 +219,11 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
                       <button
                         type="button"
                         className={styles.name}
-                        title="点击重命名"
+                        title={`${tag.name}（点击重命名）`}
                         disabled={busy}
                         onClick={() => setRenaming({ id: tag.id, value: tag.name })}
                       >
-                        {tag.name}
+                        {label}
                       </button>
                     )}
                     <span className={styles.count}>{counts.get(tag.id) ?? 0}</span>
@@ -207,6 +231,9 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
 
                   {isRenaming && renameConflict && (
                     <p className={styles.rowHint}>已存在「{renameConflict.name}」，保存后将合并到该标签</p>
+                  )}
+                  {isRenaming && descendantCount > 0 && (
+                    <p className={styles.rowHint}>其下 {descendantCount} 个子标签会一并改名</p>
                   )}
 
                   {paletteId === tag.id && (
@@ -262,7 +289,9 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
               </button>
             </>
           ) : (
-            <span className={styles.hint}>点击名称重命名，点击色块设置颜色；勾选两个或以上标签可合并</span>
+            <span className={styles.hint}>
+              点击名称重命名（用“父/子”表示层级），点击色块设置颜色；勾选两个或以上标签可合并
+            </span>
           )}
         </footer>
       </div>

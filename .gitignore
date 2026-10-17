@@ -45,3 +45,6 @@ prompt.md
 # 测试报告产物
 test-results/
 coverage/
+
+# 冒烟测试的临时用户数据目录
+packages/desktop/.smoke-userdata/

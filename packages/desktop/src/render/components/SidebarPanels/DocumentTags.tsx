@@ -34,8 +34,8 @@ export const DocumentTags: React.FC<DocumentTagsProps> = ({ documents, tags, sel
     [selectedTagIds, tags]
   );
   const result = useMemo(
-    () => applyFilters(documents, { ...EMPTY_FILTERS, tagIds: activeTagIds }, noSearchText),
-    [documents, activeTagIds]
+    () => applyFilters(documents, { ...EMPTY_FILTERS, tagIds: activeTagIds }, noSearchText, tags),
+    [documents, activeTagIds, tags]
   );
   const sortedDocuments = useMemo(() => sortByRecentUpdate(result.items), [result.items]);
 

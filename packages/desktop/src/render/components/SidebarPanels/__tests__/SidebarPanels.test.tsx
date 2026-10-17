@@ -78,6 +78,26 @@ describe('TagCloud', () => {
     fireEvent.click(screen.getByRole('button', { name: /清除/ }));
     expect(onClearTags).toHaveBeenCalled();
   });
+
+  it('有层级标签时默认显示层级视图：缩进、汇总次数、可折叠，缺失的父级只作分组', () => {
+    const onToggleTag = vi.fn();
+    const tags = [tag('t1', '技术', 1), tag('t2', '技术/前端', 3), tag('t3', '生活/旅行', 2)];
+    render(<TagCloud tags={tags} selectedTagIds={[]} onToggleTag={onToggleTag} onClearTags={vi.fn()} />);
+    const tree = screen.getByRole('list', { name: '标签层级' });
+    const rows = within(tree).getAllByRole('listitem');
+    expect(rows.map((row) => row.textContent)).toEqual(['技术4', '前端3', '生活2', '旅行2']);
+    expect(rows[1].style.getPropertyValue('--tree-depth')).toBe('1');
+    // “生活”没有同名标签，不能用于筛选
+    expect(within(rows[2]).queryByRole('button', { name: '生活' })).toBeNull();
+
+    fireEvent.click(within(tree).getByRole('button', { name: '技术' }));
+    expect(onToggleTag).toHaveBeenCalledWith('t1');
+    fireEvent.click(screen.getByRole('button', { name: '折叠「技术」' }));
+    expect(within(tree).queryByRole('button', { name: '前端' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '云' }));
+    expect(screen.getByRole('button', { name: '技术/前端' })).toBeTruthy();
+  });
 });
 
 describe('CalendarPanel', () => {

@@ -5,6 +5,12 @@
 
 import { databaseService, generateId, now, parseJSON } from '../../services/database';
 import type { SqlStatement } from '../../types/electron';
+import {
+  ancestorTagPaths,
+  isTagPathWithin,
+  normalizeTagPath,
+  rebaseTagPath,
+} from '../../../shared/tag-path';
 import type {
   KnowledgeItem,
   KnowledgeItemStatus,
@@ -252,10 +258,11 @@ class KnowledgeRepository {
 
   /**
    * 设置条目的标签（替换原有标签），同时维护标签使用次数
+   * 标签名按层级路径规范化；层级标签缺少的父标签一并创建（使用次数 0），使父标签可筛选、可着色
    * 新建标签、增删关联与使用次数在同一个事务中写入
    */
   async setItemTags(itemId: string, names: string[]): Promise<void> {
-    const uniqueNames = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+    const uniqueNames = [...new Set(names.map(normalizeTagPath).filter(Boolean))];
     const existing =
       uniqueNames.length > 0
         ? await databaseService.all<{ id: string; name: string }>(
@@ -270,7 +277,10 @@ class KnowledgeRepository {
     );
     const previousIds = new Set(previous.map((row) => row.tag_id));
     const timestamp = now();
-    const statements: SqlStatement[] = [];
+    const statements: SqlStatement[] = this.ensureTagPathStatements(
+      uniqueNames.flatMap(ancestorTagPaths).filter((path) => !uniqueNames.includes(path)),
+      timestamp
+    );
 
     const nextIds = new Set<string>();
     for (const name of uniqueNames) {
@@ -309,26 +319,55 @@ class KnowledgeRepository {
     await databaseService.transaction(statements);
   }
 
+  /** 确保这些标签存在的语句（已存在的由唯一约束忽略），用于补齐层级标签的父标签 */
+  private ensureTagPathStatements(paths: string[], timestamp: string): SqlStatement[] {
+    return [...new Set(paths)].map((path) => ({
+      sql: `INSERT OR IGNORE INTO tags (id, name, usage_count, is_auto_generated, created_at, updated_at)
+            VALUES (?, ?, 0, 0, ?, ?)`,
+      params: [generateId(), path, timestamp, timestamp],
+    }));
+  }
+
   /**
-   * 重命名标签；新名称已被其他标签使用时，合并到该标签
+   * 重命名标签（可改变层级，如“前端”→“技术/前端”）：
+   * - 子孙标签随之改名（“前端/React”→“技术/前端/React”）
+   * - 任一新名称已被其他标签使用时，合并到该标签
+   * - 新名称缺少的父标签一并创建
+   * 每个标签的改名或合并各自是原子操作；中途失败时已处理的标签保持新名称，可再次重命名父标签完成剩余部分
    * @returns 最终保留的标签 ID
    */
   async renameTag(id: string, name: string): Promise<string> {
-    const trimmed = name.trim();
-    if (!trimmed) throw new Error('标签名称不能为空');
+    const target = normalizeTagPath(name);
+    if (!target) throw new Error('标签名称不能为空');
+    const tags = await databaseService.all<{ id: string; name: string }>(
+      `SELECT id, name FROM tags WHERE is_deleted = 0`
+    );
+    const current = tags.find((tag) => tag.id === id);
+    if (!current) throw new Error('标签不存在或已被合并');
+    if (target === current.name) return id;
+    if (isTagPathWithin(target, current.name)) throw new Error('不能把标签移到它自己的子标签下');
+
+    const descendants = tags.filter((tag) => tag.id !== id && isTagPathWithin(tag.name, current.name));
+    const keptId = await this.renameSingleTag(id, target);
+    for (const tag of descendants) {
+      await this.renameSingleTag(tag.id, rebaseTagPath(tag.name, current.name, target)!);
+    }
+    const ancestors = ancestorTagPaths(target);
+    if (ancestors.length > 0) await databaseService.transaction(this.ensureTagPathStatements(ancestors, now()));
+    return keptId;
+  }
+
+  /** 只重命名一个标签；新名称已被其他标签使用时合并到该标签，返回保留的标签 ID */
+  private async renameSingleTag(id: string, name: string): Promise<string> {
     const existing = await databaseService.get<{ id: string }>(
       `SELECT id FROM tags WHERE name = ? AND id != ? AND is_deleted = 0`,
-      [trimmed, id]
+      [name, id]
     );
     if (existing) {
       await this.mergeTags([id], existing.id);
       return existing.id;
     }
-    await databaseService.run(`UPDATE tags SET name = ?, updated_at = ? WHERE id = ?`, [
-      trimmed,
-      now(),
-      id,
-    ]);
+    await databaseService.run(`UPDATE tags SET name = ?, updated_at = ? WHERE id = ?`, [name, now(), id]);
     return id;
   }
 

@@ -49,7 +49,7 @@ const TAGS = [tag('t-react', 'React'), tag('t-perf', '性能')];
 const tagNameById = new Map(TAGS.map((t) => [t.id, t.name]));
 const searchText = (item: KnowledgeItem) => buildSearchText(item, tagNameById);
 const filter = (items: KnowledgeItem[], filters: Partial<ItemFilters>) =>
-  applyFilters(items, { ...EMPTY_FILTERS, ...filters }, searchText);
+  applyFilters(items, { ...EMPTY_FILTERS, ...filters }, searchText, TAGS);
 const ids = (items: KnowledgeItem[]) => items.map((item) => item.id);
 
 // 2026-10-14 是周三，本周从 10-12（周一）开始
@@ -97,6 +97,27 @@ describe('applyFilters', () => {
     expect(Object.fromEntries(one.tagCounts)).toEqual({ 't-react': 2, 't-perf': 1 });
 
     expect(ids(filter(items, { tagIds: ['t-react', 't-perf'] }).items)).toEqual(['c']);
+  });
+
+  it('层级标签：按父标签筛选包含子孙标签，子标签的条目计入父标签计数', () => {
+    const tags = [tag('t-tech', '技术'), tag('t-fe', '技术/前端'), tag('t-react2', '技术/前端/React'), tag('t-life', '生活')];
+    const nested = [
+      make('x', { tagIds: ['t-react2'] }),
+      make('y', { tagIds: ['t-fe', 't-react2'] }),
+      make('z', { tagIds: ['t-tech'] }),
+      make('w', { tagIds: ['t-life'] }),
+    ];
+    const byParent = applyFilters(nested, { ...EMPTY_FILTERS, tagIds: ['t-tech'] }, () => '', tags);
+    expect(ids(byParent.items)).toEqual(['x', 'y', 'z']);
+    // y 同时带有前端与 React，父标签只计一次
+    expect(Object.fromEntries(byParent.tagCounts)).toEqual({ 't-tech': 3, 't-fe': 2, 't-react2': 2 });
+
+    const byMiddle = applyFilters(nested, { ...EMPTY_FILTERS, tagIds: ['t-fe'] }, () => '', tags);
+    expect(ids(byMiddle.items)).toEqual(['x', 'y']);
+    // “技术/前端工程”之类同前缀但非子级的标签不会被包含
+    const sibling = [...tags, tag('t-fe2', '技术/前端工程')];
+    const prefixed = applyFilters([make('v', { tagIds: ['t-fe2'] })], { ...EMPTY_FILTERS, tagIds: ['t-fe'] }, () => '', sibling);
+    expect(prefixed.items).toEqual([]);
   });
 
   it('搜索与标签筛选同时作用于类型计数', () => {

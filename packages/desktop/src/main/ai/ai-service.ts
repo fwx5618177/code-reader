@@ -741,7 +741,7 @@ export class AIService {
 要求：
 1. 最多提取${maxTags}个标签
 2. 标签应该简短（1-3个词）
-3. 优先使用已有标签列表中的标签：${existingTags.length > 0 ? existingTags.join(', ') : '（暂无已有标签）'}
+3. 优先使用已有标签列表中的标签：${existingTags.length > 0 ? existingTags.join(', ') : '（暂无已有标签）'}；标签可以用“父/子”表示层级（如“技术/前端”），已有层级标签时沿用其层级
 4. 为每个标签评估置信度（0-1之间的小数）
 5. 返回JSON格式：{"tags": [{"name": "标签名", "confidence": 0.9}, ...]}
 

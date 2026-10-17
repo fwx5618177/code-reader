@@ -16,6 +16,7 @@ import { runCategorize } from './categorize-task';
 import { runExtractEntities } from './extract-entities-task';
 import { buildEmbeddingInputs, embedChunks } from './embedding-chunks';
 import { extractTagsLongText, summarizeLongText } from './long-text';
+import { ancestorTagPaths, normalizeTagPath } from '../../shared/tag-path';
 
 // ================================
 // Types
@@ -956,33 +957,44 @@ export class AgentExecutor extends EventEmitter {
     report(60, 'Saving tags...');
 
     // Create/update tags and link to item
+    // 标签名按层级路径规范化；层级标签缺少的父标签一并创建（使用次数 0），与渲染进程 setItemTags 一致
+    const names = [...new Set(result.tags.map((tag) => normalizeTagPath(tag.name)).filter(Boolean))];
     const commit = () => {
       const now = new Date().toISOString();
 
-      for (const tag of result.tags) {
+      for (const path of new Set(names.flatMap(ancestorTagPaths))) {
+        sqlite.run(
+          `INSERT OR IGNORE INTO tags (id, name, is_auto_generated, created_at, updated_at) VALUES (?, ?, 1, ?, ?)`,
+          [generateId(), path, now, now]
+        );
+      }
+
+      for (const name of names) {
         // Get or create tag
-        let tagRow = sqlite.get<{ id: string }>(`SELECT id FROM tags WHERE name = ?`, [tag.name]);
+        let tagRow = sqlite.get<{ id: string }>(`SELECT id FROM tags WHERE name = ?`, [name]);
 
         if (!tagRow) {
           const tagId = generateId();
           sqlite.run(
             `INSERT INTO tags (id, name, is_auto_generated, created_at, updated_at) VALUES (?, ?, 1, ?, ?)`,
-            [tagId, tag.name, now, now]
+            [tagId, name, now, now]
           );
           tagRow = { id: tagId };
         }
 
         // Link tag to item
-        sqlite.run(
+        const linked = sqlite.run(
           `INSERT OR IGNORE INTO item_tags (item_id, tag_id, created_at) VALUES (?, ?, ?)`,
           [task.targetItemId, tagRow.id, now]
         );
 
-        // Update usage count
-        sqlite.run(`UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?`, [
-          now,
-          tagRow.id,
-        ]);
+        // Update usage count（已有关联时不重复计数）
+        if (linked.changes > 0) {
+          sqlite.run(`UPDATE tags SET usage_count = usage_count + 1, updated_at = ? WHERE id = ?`, [
+            now,
+            tagRow.id,
+          ]);
+        }
       }
     };
 
