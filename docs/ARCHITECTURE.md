@@ -8,9 +8,10 @@
 ┌──────────────────────────────────────────────────────────────┐
 │ 渲染进程 packages/desktop/src/render（React 18 + Vite）       │
 │  components/  UI 组件（每个组件配套 *.module.scss）            │
-│  lib/         业务模块：latex / math / writing / documents /  │
-│               core / file-system / folders / autocomplete /   │
-│               editor / plugins / content-parser / algorithms  │
+│  lib/         业务模块：latex / math / markdown / writing /    │
+│               documents / core / file-system / folders /      │
+│               autocomplete / editor / plugins / algorithms /  │
+│               knowledge / links / reading / agent             │
 │  theme/ services/ contexts/ hooks/ types/                     │
 ├──────────────────────────── IPC（preload 白名单通道）─────────┤
 │ 主进程 packages/desktop/src/main（Electron）                   │

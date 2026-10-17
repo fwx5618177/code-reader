@@ -11,9 +11,8 @@
 | 模糊评分 | Fuzzy Score | O(m×n) 最坏 | O(m) | ✅ 已实现 | 智能补全排序 | `algorithms/fuzzy-score.ts` |
 | 快速模糊评分 | Quick Fuzzy Score | O(n) | O(1) | ✅ 已实现 | 实时搜索过滤 | `algorithms/fuzzy-score.ts` |
 | 压缩前缀树 | Radix Tree / Patricia Trie | O(k) 插入/查找 | O(n×k) 压缩存储 | ✅ 已实现 | 补全索引、前缀搜索 | `algorithms/radix-tree.ts` |
-| 增量解析器 | Incremental Parser (FSM) | O(n) 流式 | O(tokens) | ✅ 已实现 | 大文档流式解析 | `content-parser/incremental-parser.ts` |
-| 增量编辑解析器 | Incremental Edit Parser | O(Δ) 局部 | O(cache) | ✅ 已实现 | 实时编辑重解析 | `content-parser/incremental-edit-parser.ts` |
-| CommonMark 解析器 | CommonMark Parser | O(n) | O(AST) | ✅ 已实现 | Markdown AST 生成 | `content-parser/commonmark-parser.ts` |
+
+> 增量解析器、增量编辑解析器与 CommonMark 解析器已迁移到独立子包 `packages/format-parser`（`src/incremental/`、`src/markdown/`）。写作模块的 Markdown 解析与序列化由 `lib/markdown`（基于 markdown-it）负责。
 
 ## 📁 文件结构
 
@@ -34,11 +33,7 @@ lib/
 │   ├── extended-providers.ts      # 扩展补全提供者
 │   └── codemirror-adapter.ts      # CodeMirror 集成适配器
 │
-├── content-parser/                # 内容解析模块（未来: @code-reader/parser）
-│   ├── index.ts                   # 解析器模块入口
-│   ├── incremental-parser.ts      # 增量解析器（FSM）
-│   ├── incremental-edit-parser.ts # 增量编辑解析器
-│   └── commonmark-parser.ts       # CommonMark 规范解析器
+├── markdown/                      # Markdown 解析/序列化/实时预览（markdown-it + ProseMirror）
 │
 ├── plugins/                       # 插件系统
 │   ├── index.ts                   # 插件模块入口
@@ -153,61 +148,17 @@ lib/
 - `HistoryProvider` - 历史记录补全
 - `SymbolProvider` - 符号补全
 
-### 5. 增量解析器 (`incremental-parser.ts`)
-
-**用途**: 大文档的流式解析
-
-**特点**:
-- 基于有限状态机（FSM）
-- 支持分块处理
-- 可中断和恢复
-- 流式处理大文件
-
-**使用位置**:
-- 大文档预览
-- 流式内容加载
-
-### 6. 增量编辑解析器 (`incremental-edit-parser.ts`)
-
-**用途**: 实时编辑时的局部重解析
-
-**特点**:
-- 只重新解析受影响的区域
-- 智能检测代码块边界
-- Token 缓存机制
-- O(Δ) 时间复杂度（仅处理变更区域）
-
-**使用位置**:
-- RichEditor 实时预览
-- 代码块语法高亮
-
-### 7. CommonMark 解析器 (`commonmark-parser.ts`)
-
-**用途**: 完整的 Markdown AST 解析
-
-**已实现的 GFM 扩展**:
-- ✅ GFM 表格解析
-- ✅ 任务列表复选框
-- ✅ 脚注（引用和定义）
-- ✅ 删除线
-- ✅ 自动链接
-
-**使用位置**:
-- 文档渲染
-- 大纲生成
-- 格式转换
 
 ## 🚀 性能优化策略
 
 ### 1. 空间优化
 - Levenshtein 使用单行数组代替完整矩阵
 - Radix Tree 压缩单子节点路径
-- 解析器使用 Token 缓存避免重复解析
+
 
 ### 2. 时间优化
 - 早期终止：编辑距离超过阈值立即返回
-- 增量解析：只处理变更区域
-- 缓存：补全结果缓存、Token 缓存
+- 缓存：补全结果缓存
 
 ### 3. 内存管理
 - 共享 AutocompleteService 单例
@@ -229,11 +180,6 @@ lib/
 - [x] 删除旧的 `styles.scss` 文件
 - [x] 使用主题变量保持样式一致
 
-### GFM 特性 ✅
-- [x] GFM 表格解析
-- [x] 任务列表复选框
-- [x] 脚注引用和定义
-- [x] 删除线语法
 
 ### 智能补全 ✅
 - [x] AutocompleteService 核心服务
@@ -269,8 +215,7 @@ lib/
 
 ### 长期
 1. 抽取算法模块为独立包 `@code-reader/algorithms`
-2. 抽取解析器模块为独立包 `@code-reader/parser`
-3. 支持更多格式（LaTeX、AsciiDoc 等）
+2. 支持更多格式（AsciiDoc 等）
 
 ## 📚 API 使用示例
 

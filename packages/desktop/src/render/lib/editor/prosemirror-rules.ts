@@ -163,40 +163,6 @@ function createCodeBlockInputRules(codeBlockType: NodeType): InputRule[] {
   return rules;
 }
 
-/**
- * Create keymap plugin for code block Shift+Enter handling
- * Alternative trigger for users who prefer Shift+Enter
- */
-export function createCodeBlockShiftEnterKeymap(schema: Schema): Plugin {
-  if (!schema.nodes.code_block) {
-    return keymap({});
-  }
-
-  const codeBlockType = schema.nodes.code_block;
-
-  return keymap({
-    'Shift-Enter': (state: EditorState, dispatch?: (tr: Transaction) => void): boolean => {
-      const { $from, empty } = state.selection;
-
-      if (!empty) return false;
-      if ($from.parent.type.name !== 'paragraph') return false;
-
-      const textContent = $from.parent.textContent;
-      const { isMatch, language } = parseCodeFence(textContent);
-      if (!isMatch) return false;
-
-      const tr = createCodeBlockTransaction(state, codeBlockType, language);
-      if (!tr) return false;
-
-      if (dispatch) {
-        dispatch(tr);
-      }
-
-      return true;
-    },
-  });
-}
-
 // ================================
 // Heading Input Rules
 // ================================

@@ -34,7 +34,6 @@ export {
   createEditorPlugins,
   // 键盘映射
   createBlockEnterKeymap,
-  createCodeBlockShiftEnterKeymap,
   // 单独的规则创建器
   createCodeBlockInputRules,
   createHeadingInputRules,

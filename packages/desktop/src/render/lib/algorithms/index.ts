@@ -139,33 +139,6 @@ export const ALGORITHM_REGISTRY: Record<string, AlgorithmInfo> = {
     description: '压缩版的前缀树，合并单子节点路径以节省空间',
     file: 'radix-tree.ts',
   },
-  incrementalParser: {
-    name: '增量解析器',
-    englishName: 'Incremental Parser (FSM-based)',
-    timeComplexity: 'O(n) 流式处理',
-    spaceComplexity: 'O(tokens)',
-    useCases: ['大文档解析', '流式处理', '实时预览'],
-    description: '基于有限状态机的增量解析器，支持分块处理和流式解析',
-    file: 'content-parser/incremental-parser.ts',
-  },
-  incrementalEditParser: {
-    name: '增量编辑解析器',
-    englishName: 'Incremental Edit Parser',
-    timeComplexity: 'O(Δ) 局部变更区域',
-    spaceComplexity: 'O(cache)',
-    useCases: ['实时编辑', '代码编辑器', '协同编辑'],
-    description: '支持局部重解析的增量解析器，只解析变更影响的区域',
-    file: 'content-parser/incremental-edit-parser.ts',
-  },
-  commonMarkParser: {
-    name: 'CommonMark 解析器',
-    englishName: 'CommonMark Parser',
-    timeComplexity: 'O(n)',
-    spaceComplexity: 'O(AST)',
-    useCases: ['Markdown 渲染', '文档预览', '格式转换'],
-    description: '完全自主实现的 CommonMark 规范解析器，包含 GFM 扩展',
-    file: 'content-parser/commonmark-parser.ts',
-  },
 };
 
 /**
