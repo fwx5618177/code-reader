@@ -14,7 +14,6 @@ export {
   createMarkdownCompletionSource,
   createEmojiCompletionSource,
   createSnippetCompletionSource,
-  createSpellCheckCompletionSource,
   createMixedCompletionExtension,
 } from './codemirror-adapter';
 

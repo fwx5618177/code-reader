@@ -6,7 +6,7 @@
 // ================================
 
 import { ContentSnapshot } from '../editor-model';
-import { createDiffEngine } from '../delta';
+import { createDiffEngine } from '@code-reader/diff-algorithm';
 import {
   ISaveEngine,
   ISaveStrategy,

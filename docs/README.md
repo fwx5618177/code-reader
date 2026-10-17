@@ -35,8 +35,8 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `diff-algorithm` | 文本/二进制差分、编辑距离、模糊匹配，含流式哈希、差分缓存与 Worker 支持 |
 | `syntax-parser` | 增量语法解析：手写 Lezer 风格 LaTeX 解析器、LaTeX 块扫描器、语言注册表与高亮引擎、AST 缓存 |
 | `format-parser` | 内容格式解析：自研 CommonMark/GFM Markdown 解析器、LaTeX 解析器、增量编辑解析 |
-| `autocomplete-service` | 通用自动补全服务：补全提供者、编辑器适配器（CodeMirror / ProseMirror）、拼写检查 |
-| `fuzzy-match-algorithm` | 补全核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
+| `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）、编辑器适配器（CodeMirror / ProseMirror） |
+| `fuzzy-match-algorithm` | 补全与拼写建议的核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
 | `plugin-system` | 插件系统核心：注册表、生命周期管理、沙箱与权限控制 |
 | `search-service` | 全文搜索倒排索引、文件内容搜索、模糊匹配 |
 | `text-buffer` | 文本存储数据结构：Piece Table、Rope、Gap Buffer |

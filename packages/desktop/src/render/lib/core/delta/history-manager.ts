@@ -12,7 +12,7 @@ import {
   DIFF_DELETE,
   DIFF_EQUAL,
   DIFF_INSERT,
-} from './diff-engine';
+} from '@code-reader/diff-algorithm';
 
 // 类型别名，保持兼容
 type Diff = TextDiff;

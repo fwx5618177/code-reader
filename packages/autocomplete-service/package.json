@@ -22,10 +22,6 @@
     "./adapters": {
       "import": "./dist/adapters/index.js",
       "types": "./dist/adapters/index.d.ts"
-    },
-    "./spell-check": {
-      "import": "./dist/spell-check/index.js",
-      "types": "./dist/spell-check/index.d.ts"
     }
   },
   "files": [
@@ -47,7 +43,6 @@
     "completion",
     "intellisense",
     "code-completion",
-    "spell-check",
     "prosemirror",
     "codemirror",
     "editor"

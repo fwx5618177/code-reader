@@ -168,7 +168,7 @@ log.acknowledge(['op-1', 'op-2']);
 
 ### 5. 统一差分引擎 (DiffEngine)
 
-基于成熟 npm 包的统一差分引擎，整合多种算法：
+基于成熟 npm 包的统一差分引擎，整合多种算法（直接从 `@code-reader/diff-algorithm` 包导入，`lib/core` 不再转发）：
 
 | 算法 | npm 包 | 时间复杂度 | 特点 | 适用场景 |
 |------|--------|-----------|------|---------|
@@ -188,7 +188,7 @@ import {
   DIFF_INSERT,
   DIFF_DELETE,
   DIFF_EQUAL,
-} from './lib/core';
+} from '@code-reader/diff-algorithm';
 
 // 创建差分引擎
 const engine = createDiffEngine();
@@ -532,7 +532,6 @@ core/
 │       └── immediate.ts       # 立即策略
 ├── delta/
 │   ├── index.ts               # 模块导出
-│   ├── diff-engine.ts         # 统一差分引擎 (diff-match-patch/fossil-delta)
 │   ├── content-hasher.ts      # 内容哈希 (xxHash/SHA-256)
 │   ├── history-manager.ts     # 撤销/重做管理器
 │   └── versioned-snapshot.ts  # 版本化快照
@@ -673,7 +672,7 @@ const editor = useManagedEditor({
 ### 算法选择指南
 
 ```typescript
-import { DiffEngine, createDiffEngine } from './lib/core';
+import { createDiffEngine } from '@code-reader/diff-algorithm';
 
 const engine = createDiffEngine();
 

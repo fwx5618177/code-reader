@@ -117,7 +117,6 @@ if (decision.useIncremental) {
 ```typescript
 import {
   createLevenshteinEngine,
-  createSpellCheckEngine,
   quickLevenshteinDistance,
   quickSimilarity,
   quickFindMostSimilar,

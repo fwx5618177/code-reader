@@ -15,6 +15,11 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 import { lineNumbers, highlightActiveLineGutter } from '@codemirror/view';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import {
+  AutocompleteService,
+  CodeMirrorAdapter,
+  createDefaultProviders,
+} from '@code-reader/autocomplete-service';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/components/prism-typescript';
@@ -40,11 +45,6 @@ import {
   getLanguageOptions,
   getLanguageDefinition,
 } from '../../lib/editor/languages';
-import {
-  AutocompleteService,
-  CodeMirrorAdapter,
-  createDefaultProviders,
-} from '../../lib/autocomplete';
 import { whenNearViewport } from '../../lib/editor/lazy-visibility';
 
 // ================================

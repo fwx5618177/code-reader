@@ -7,7 +7,7 @@
 - 🚀 **高性能** - 基于 Radix Tree 的快速前缀匹配和模糊搜索
 - 🔌 **可扩展** - 插件化的提供者架构，易于扩展
 - 🎯 **多编辑器支持** - 内置 CodeMirror 和 ProseMirror 适配器
-- 📝 **丰富的内置提供者** - Markdown、Emoji、代码片段、拼写检查
+- 📝 **丰富的内置提供者** - Markdown、Emoji、代码片段
 - 🎨 **可定制** - 灵活的配置选项和样式定制
 - 📦 **TypeScript 优先** - 完整的类型定义
 
@@ -57,16 +57,10 @@ console.log(result.items); // 补全项列表
 ### 使用便捷工厂函数
 
 ```typescript
-import {
-  createDefaultAutocompleteService,
-  createSpellCheckAutocompleteService,
-} from '@code-reader/autocomplete-service';
+import { createDefaultAutocompleteService } from '@code-reader/autocomplete-service';
 
 // 创建带有默认提供者的服务
 const service = await createDefaultAutocompleteService();
-
-// 创建带有拼写检查的服务
-const serviceWithSpell = await createSpellCheckAutocompleteService();
 ```
 
 ## CodeMirror 集成
@@ -207,27 +201,6 @@ service.registerProvider(provider);
 - Python
 - Rust
 - Go
-
-### SpellCheckProvider
-
-提供英语拼写检查和纠正建议：
-
-```typescript
-import { SpellCheckProvider } from '@code-reader/autocomplete-service';
-
-const provider = new SpellCheckProvider({
-  language: 'en',
-  maxEditDistance: 2,
-  maxSuggestions: 5,
-});
-
-// 添加自定义词汇
-provider.addToUserDictionary('customword');
-
-// 检查拼写
-const result = provider.checkSpelling('helo');
-// { correct: false, suggestions: [...], word: 'helo' }
-```
 
 ## 自定义提供者
 

@@ -121,7 +121,6 @@ export {
   LevenshteinEngine,
   // 工厂函数
   createLevenshteinEngine,
-  createSpellCheckEngine,
   // 便捷函数
   quickLevenshteinDistance,
   quickSimilarity,

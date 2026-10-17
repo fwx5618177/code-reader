@@ -7,7 +7,6 @@ export { BaseProvider } from './base-provider';
 export { MarkdownProvider } from './markdown-provider';
 export { EmojiProvider } from './emoji-provider';
 export { SnippetProvider } from './snippet-provider';
-export { SpellCheckProvider } from './spell-check-provider';
 
 // ================================
 // 工厂函数

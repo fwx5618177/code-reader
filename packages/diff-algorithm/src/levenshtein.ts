@@ -602,18 +602,6 @@ export function createLevenshteinEngine(config?: LevenshteinConfig): Levenshtein
   return new LevenshteinEngine(config);
 }
 
-/**
- * 创建用于拼写检查的引擎
- *
- * @returns 拼写检查引擎
- */
-export function createSpellCheckEngine(): LevenshteinEngine {
-  return new LevenshteinEngine({
-    caseSensitive: false,
-    maxDistance: 2,
-  });
-}
-
 // ================================
 // 便捷函数
 // ================================

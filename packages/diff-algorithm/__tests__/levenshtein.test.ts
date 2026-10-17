@@ -6,7 +6,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   LevenshteinEngine,
   createLevenshteinEngine,
-  createSpellCheckEngine,
   quickLevenshteinDistance,
   quickSimilarity,
   quickFindMostSimilar,
@@ -233,14 +232,9 @@ describe('LevenshteinEngine', () => {
   });
 });
 
-describe('createSpellCheckEngine', () => {
-  it('应该创建拼写检查引擎', () => {
-    const engine = createSpellCheckEngine();
-    expect(engine).toBeDefined();
-  });
-
+describe('大小写不敏感的拼写建议', () => {
   it('应该提供拼写建议', () => {
-    const engine = createSpellCheckEngine();
+    const engine = createLevenshteinEngine({ caseSensitive: false, maxDistance: 2 });
     const dictionary = [
       'apple',
       'application',

@@ -500,55 +500,6 @@ export function createSnippetCompletionSource(
   };
 }
 
-/**
- * 创建拼写检查补全源
- * @param service AutocompleteService 实例
- */
-export function createSpellCheckCompletionSource(service: AutocompleteService): CompletionSource {
-  return async (context: CMCompletionContext): Promise<CMCompletionResult | null> => {
-    const line = context.state.doc.lineAt(context.pos);
-    const textBefore = line.text.slice(0, context.pos - line.from);
-
-    // 提取当前单词
-    const wordMatch = textBefore.match(/[a-zA-Z]+$/);
-    if (!wordMatch || wordMatch[0].length < 3) {
-      return null;
-    }
-
-    const query = wordMatch[0];
-
-    const serviceContext: CompletionContext = {
-      query,
-      position: { line: line.number, column: context.pos - line.from + 1, offset: context.pos },
-      lineText: line.text,
-      textBefore,
-      textAfter: line.text.slice(context.pos - line.from),
-      editorType: 'codemirror',
-    };
-
-    const result = await service.getCompletions(serviceContext);
-
-    // 过滤只保留拼写建议
-    const spellItems = result.items.filter(
-      (item) => item.type === 'spell' || item.source === 'spell-check'
-    );
-
-    if (spellItems.length === 0) {
-      return null;
-    }
-
-    return {
-      from: context.pos - query.length,
-      options: spellItems.map((item) => ({
-        label: item.label,
-        apply: item.insertText || item.label,
-        type: 'text',
-        detail: item.detail,
-        boost: (item.priority ?? 50) - 50,
-      })),
-    };
-  };
-}
 
 /**
  * 创建混合补全扩展
