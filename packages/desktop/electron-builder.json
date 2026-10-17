@@ -3,10 +3,12 @@
   "appId": "com.codereader.app",
   "productName": "Code Reader",
   "directories": {
+    "app": ".app-stage",
     "output": "release",
     "buildResources": "assets"
   },
-  "files": ["dist/**/*", "assets/**/*", "!assets/dictionaries/**/*", "!assets/ocr/**/*", "!assets/plugins/**/*"],
+  "files": ["dist/**/*"],
+  "asarUnpack": ["**/*.node"],
   "extraResources": [
     {
       "from": "assets/icons",
@@ -106,7 +108,7 @@
   },
   "publish": {
     "provider": "github",
-    "owner": "your-username",
+    "owner": "fwx5618177",
     "repo": "code-reader"
   }
 }

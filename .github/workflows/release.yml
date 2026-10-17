@@ -1,0 +1,141 @@
+# 发布构建：推送 v* 标签（或手动触发）时在 macOS / Windows / Linux 上构建安装包，
+# 标签触发时汇总到 GitHub Release（草稿，人工确认后发布）。
+#
+# 代码签名全部可选，未配置对应 secrets 时产出未签名的安装包：
+# - macOS 签名：CSC_LINK（.p12 的 base64 或下载地址）、CSC_KEY_PASSWORD
+# - macOS 公证：APPLE_ID、APPLE_APP_SPECIFIC_PASSWORD、APPLE_TEAM_ID
+# - Windows 签名：WIN_CSC_LINK、WIN_CSC_KEY_PASSWORD
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 安装依赖时不需要 Electron 二进制；electron-builder 打包时按目标平台自行下载
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  # 让 pnpm 用跨平台的 shell 模拟执行脚本（desktop 的 postinstall 含 `|| true`，Windows cmd 不支持）
+  npm_config_shell_emulator: 'true'
+
+jobs:
+  verify:
+    name: 类型检查与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: 构建子包
+        run: pnpm build:libs
+      - name: 类型检查
+        run: pnpm typecheck
+      - name: 单元测试
+        run: pnpm test
+
+  build:
+    name: 构建 ${{ matrix.name }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            target: --mac
+          - name: Windows
+            os: windows-latest
+            target: --win
+          - name: Linux
+            os: ubuntu-latest
+            target: --linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建子包
+        run: pnpm build:libs
+
+      - name: 构建应用
+        run: pnpm build:desktop
+
+      # 标签触发时以标签为版本号（v1.2.0 → 1.2.0），手动触发时使用 package.json 中的版本
+      - name: 准备应用目录
+        working-directory: packages/desktop
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then export APP_VERSION="${GITHUB_REF_NAME}"; fi
+          node scripts/stage-app.mjs
+
+      - name: 打包安装包
+        working-directory: packages/desktop
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          # 没有证书时跳过签名，而不是去钥匙串里自动查找
+          if [ -z "${CSC_LINK}" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; unset CSC_LINK CSC_KEY_PASSWORD; fi
+          if [ -z "${WIN_CSC_LINK}" ]; then unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; fi
+          if [ -z "${APPLE_ID}" ]; then unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; fi
+          npx electron-builder ${{ matrix.target }} --publish never
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            packages/desktop/release/*.dmg
+            packages/desktop/release/*.zip
+            packages/desktop/release/*.exe
+            packages/desktop/release/*.AppImage
+            packages/desktop/release/*.deb
+            packages/desktop/release/latest*.yml
+
+  release:
+    name: 发布到 GitHub Release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+
+      - name: 生成校验和
+        working-directory: installers
+        run: sha256sum * > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: installers/*

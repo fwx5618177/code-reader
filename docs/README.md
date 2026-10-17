@@ -56,4 +56,14 @@ pnpm --filter @code-reader/desktop test:writing   # 写作服务模块测试
 
 pnpm benchmark               # 运行所有带 benchmark 脚本的子包基准测试
 pnpm benchmark:diff-algorithm                     # 单独运行差分基准
+
+# 本地打包（先 pnpm build:libs）：构建 → scripts/stage-app.mjs 整理 .app-stage（只含 dist 与 better-sqlite3）→ electron-builder
+pnpm --filter @code-reader/desktop pack           # 只生成未压缩的应用目录，用于自测
+pnpm --filter @code-reader/desktop dist:mac       # dmg / zip（x64 + arm64）；dist:win 为 nsis + portable，dist:linux 为 AppImage + deb
 ```
+
+## 持续集成与发布
+
+- `.github/workflows/ci.yml`：push main 与 PR 时运行类型检查、单元测试与基准测试。
+- `.github/workflows/release.yml`：推送 `v*` 标签（如 `git tag v0.2.0 && git push origin v0.2.0`）或在 Actions 页手动触发。先做类型检查与测试，再在 macOS / Windows / Linux 三个运行器上分别打包；标签触发时把全部安装包与 `SHA256SUMS.txt` 上传到 GitHub Release **草稿**，人工确认后发布；手动触发只保留为构建产物（Artifacts）。版本号取自标签。
+- 代码签名可选：在仓库 Secrets 中配置 `CSC_LINK` / `CSC_KEY_PASSWORD`（macOS 证书）、`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`（公证）、`WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`（Windows 证书）；未配置时产出未签名安装包（macOS 首次打开需右键→打开）。

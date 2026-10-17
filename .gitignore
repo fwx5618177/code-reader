@@ -5,6 +5,10 @@ node_modules/
 dist/
 build/
 
+# 打包：应用暂存目录（见 packages/desktop/scripts/stage-app.mjs）与安装包输出
+packages/desktop/.app-stage/
+packages/desktop/release/
+
 # 构建时从 node_modules 复制的 OCR 资源（见 packages/desktop/scripts/ocr-assets.ts）
 packages/desktop/assets/ocr/
 
