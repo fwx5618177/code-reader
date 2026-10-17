@@ -5,6 +5,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { List, useListRef, type RowComponentProps } from 'react-window';
 import { Check } from 'lucide-react';
+import { TagDot } from './TagColor';
 import styles from './TagOptionList.module.scss';
 
 export interface TagOption {
@@ -13,6 +14,8 @@ export interface TagOption {
   name: string;
   count?: number;
   selected?: boolean;
+  /** 标签颜色（调色板键名） */
+  color?: string;
   /** 新建标签（补全列表中的“创建”项） */
   isNew?: boolean;
 }
@@ -56,6 +59,7 @@ function OptionRow({
         onClick={() => onPick(option)}
       >
         <span className={styles.check}>{option.selected && <Check size={12} />}</span>
+        <TagDot color={option.color} />
         <span className={styles.name}>{option.isNew ? `创建标签「${option.name}」` : option.name}</span>
         {option.count !== undefined && <span className={styles.count}>{option.count}</span>}
       </button>

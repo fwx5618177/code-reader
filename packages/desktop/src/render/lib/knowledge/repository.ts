@@ -303,6 +303,60 @@ class KnowledgeRepository {
       );
     }
   }
+
+  /**
+   * 重命名标签；新名称已被其他标签使用时，合并到该标签
+   * @returns 最终保留的标签 ID
+   */
+  async renameTag(id: string, name: string): Promise<string> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('标签名称不能为空');
+    const existing = await databaseService.get<{ id: string }>(
+      `SELECT id FROM tags WHERE name = ? AND id != ? AND is_deleted = 0`,
+      [trimmed, id]
+    );
+    if (existing) {
+      await this.mergeTags([id], existing.id);
+      return existing.id;
+    }
+    await databaseService.run(`UPDATE tags SET name = ?, updated_at = ? WHERE id = ?`, [
+      trimmed,
+      now(),
+      id,
+    ]);
+    return id;
+  }
+
+  /**
+   * 合并标签：源标签关联的条目改为关联目标标签，随后删除源标签并重算目标标签使用次数
+   * 源标签物理删除：tags.name 有唯一约束，软删除会占用名称，导致之后无法再创建同名标签
+   */
+  async mergeTags(sourceIds: string[], targetId: string): Promise<void> {
+    const sources = [...new Set(sourceIds)].filter((sourceId) => sourceId !== targetId);
+    if (sources.length === 0) return;
+    const placeholders = sources.map(() => '?').join(',');
+    await databaseService.run(
+      `INSERT OR IGNORE INTO item_tags (item_id, tag_id)
+       SELECT item_id, ? FROM item_tags WHERE tag_id IN (${placeholders})`,
+      [targetId, ...sources]
+    );
+    await databaseService.run(`DELETE FROM item_tags WHERE tag_id IN (${placeholders})`, sources);
+    await databaseService.run(`DELETE FROM tags WHERE id IN (${placeholders})`, sources);
+    await databaseService.run(
+      `UPDATE tags SET usage_count = (SELECT COUNT(*) FROM item_tags WHERE tag_id = ?), updated_at = ?
+       WHERE id = ?`,
+      [targetId, now(), targetId]
+    );
+  }
+
+  /** 设置标签颜色（调色板键名），null 表示清除 */
+  async setTagColor(id: string, color: string | null): Promise<void> {
+    await databaseService.run(`UPDATE tags SET color = ?, updated_at = ? WHERE id = ?`, [
+      color,
+      now(),
+      id,
+    ]);
+  }
 }
 
 export const knowledgeRepository = new KnowledgeRepository();

@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { KnowledgeItem, Tag } from '../../types/knowledge';
 import { folderRepository } from '../folders/repository';
+import { folderService } from '../folders/service';
 import type { Folder as DocumentFolder } from '../folders/types';
 import { agentActivity } from '../agent/agentStore';
 import { knowledgeRepository, type UpdateKnowledgeItemInput } from './repository';
@@ -32,6 +33,16 @@ export interface UseKnowledgeBaseReturn extends KnowledgeBaseState {
   removeItem: (id: string) => Promise<void>;
   /** 新建文件夹 */
   createFolder: (name: string) => Promise<void>;
+  /** 重命名文件夹（同级重名时抛出错误） */
+  renameFolder: (id: string, name: string) => Promise<void>;
+  /** 删除文件夹：其中的条目不删除，变为未归档 */
+  deleteFolder: (id: string) => Promise<void>;
+  /** 重命名标签（与已有标签同名时合并） */
+  renameTag: (id: string, name: string) => Promise<void>;
+  /** 将源标签合并到目标标签 */
+  mergeTags: (sourceIds: string[], targetId: string) => Promise<void>;
+  /** 设置标签颜色，null 清除 */
+  setTagColor: (id: string, color: string | null) => Promise<void>;
 }
 
 /**
@@ -119,5 +130,57 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
     [reload]
   );
 
-  return { ...state, reload, refreshItem: reloadItem, updateItem, setItemTags, removeItem, createFolder };
+  const renameFolder = useCallback(
+    async (id: string, name: string) => {
+      await folderService.renameFolder(id, name);
+      await reload();
+    },
+    [reload]
+  );
+
+  const deleteFolder = useCallback(
+    async (id: string) => {
+      await folderService.deleteFolder(id);
+      await reload();
+    },
+    [reload]
+  );
+
+  // 重命名可能触发合并、合并会改变条目的标签，因此整体重新加载
+  const renameTag = useCallback(
+    async (id: string, name: string) => {
+      await knowledgeRepository.renameTag(id, name);
+      await reload();
+    },
+    [reload]
+  );
+
+  const mergeTags = useCallback(
+    async (sourceIds: string[], targetId: string) => {
+      await knowledgeRepository.mergeTags(sourceIds, targetId);
+      await reload();
+    },
+    [reload]
+  );
+
+  const setTagColor = useCallback(async (id: string, color: string | null) => {
+    await knowledgeRepository.setTagColor(id, color);
+    const tags = await knowledgeRepository.listTags();
+    setState((prev) => ({ ...prev, tags }));
+  }, []);
+
+  return {
+    ...state,
+    reload,
+    refreshItem: reloadItem,
+    updateItem,
+    setItemTags,
+    removeItem,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    renameTag,
+    mergeTags,
+    setTagColor,
+  };
 }

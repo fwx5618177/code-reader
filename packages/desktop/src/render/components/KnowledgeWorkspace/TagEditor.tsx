@@ -6,6 +6,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import type { Tag } from '../../types/knowledge';
 import { TagOptionList, type TagOption } from './TagOptionList';
+import { TagDot } from './TagColor';
 import styles from './Inspector.module.scss';
 
 export interface TagEditorProps {
@@ -27,7 +28,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({ names, allTags, onChange }
     const matches: TagOption[] = allTags
       .filter((tag) => !current.has(tag.name.toLowerCase()))
       .filter((tag) => !lower || tag.name.toLowerCase().includes(lower))
-      .map((tag) => ({ key: tag.id, name: tag.name, count: tag.usageCount }));
+      .map((tag) => ({ key: tag.id, name: tag.name, color: tag.color, count: tag.usageCount }));
     const exists = allTags.some((tag) => tag.name.toLowerCase() === lower);
     if (keyword && !exists && !current.has(lower)) {
       matches.push({ key: `new:${keyword}`, name: keyword, isNew: true });
@@ -47,6 +48,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({ names, allTags, onChange }
   );
 
   const remove = (name: string) => onChange(names.filter((n) => n !== name));
+  const colorByName = useMemo(() => new Map(allTags.map((tag) => [tag.name, tag.color])), [allTags]);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     // 输入法组字过程中的按键不处理
@@ -82,6 +84,7 @@ export const TagEditor: React.FC<TagEditorProps> = ({ names, allTags, onChange }
       <div className={styles.tagField}>
         {names.map((name) => (
           <span key={name} className={styles.tagChip}>
+            <TagDot color={colorByName.get(name)} />
             #{name}
             <button type="button" title={`移除标签「${name}」`} onClick={() => remove(name)}>
               <X size={10} />

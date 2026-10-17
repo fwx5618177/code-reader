@@ -73,14 +73,14 @@ class FolderService {
 
     // Validate name
     if (!input.name.trim()) {
-      throw new Error('Folder name cannot be empty');
+      throw new Error('文件夹名称不能为空');
     }
 
     // Check for duplicate name at the same level
     const exists = await folderRepository.existsByName(input.name.trim(), input.parentId ?? null);
 
     if (exists) {
-      throw new Error('A folder with this name already exists at this level');
+      throw new Error('同一层级已存在同名文件夹');
     }
 
     const folder = await folderRepository.create({
@@ -100,18 +100,18 @@ class FolderService {
     await this.initialize();
 
     if (!newName.trim()) {
-      throw new Error('Folder name cannot be empty');
+      throw new Error('文件夹名称不能为空');
     }
 
     const folder = await folderRepository.getById(id);
     if (!folder) {
-      throw new Error('Folder not found');
+      throw new Error('文件夹不存在');
     }
 
     // Check for duplicate name at the same level (excluding self)
     const exists = await folderRepository.existsByName(newName.trim(), folder.parentId);
     if (exists && folder.name !== newName.trim()) {
-      throw new Error('A folder with this name already exists at this level');
+      throw new Error('同一层级已存在同名文件夹');
     }
 
     const success = await folderRepository.update(id, { name: newName.trim() });

@@ -26,6 +26,7 @@ import { ItemStream } from './ItemStream';
 import { EmptyScope, LoadError, NoMatches, Onboarding, StreamSkeleton } from './StreamStates';
 import { Inspector } from './Inspector';
 import { AskPanel } from './AskPanel';
+import { TagManager } from './TagManager';
 import { useAskConversation } from './useAskConversation';
 import styles from './KnowledgeWorkspace.module.scss';
 
@@ -64,6 +65,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
   const [prefs, setPrefs] = useState<WorkspacePrefs>(loadPrefs);
   const [filters, setFilters] = useState<ItemFilters>(EMPTY_FILTERS);
   const [graphMode, setGraphMode] = useState<KnowledgeGraphMode>('global');
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const conversation = useAskConversation();
   const activityByItem = useActivityByItem();
 
@@ -75,8 +77,17 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
 
   // ---------- 数据管线：范围 → 筛选 → 排序 → 分组 ----------
 
+  const tagById = useMemo(() => new Map(kb.tags.map((tag) => [tag.id, tag])), [kb.tags]);
   const tagNameById = useMemo(() => new Map(kb.tags.map((tag) => [tag.id, tag.name])), [kb.tags]);
   const itemsById = useMemo(() => new Map(kb.items.map((item) => [item.id, item])), [kb.items]);
+
+  // 标签被合并后，已不存在的标签从筛选中移除
+  useEffect(() => {
+    setFilters((prev) => {
+      const tagIds = prev.tagIds.filter((id) => tagById.has(id));
+      return tagIds.length === prev.tagIds.length ? prev : { ...prev, tagIds };
+    });
+  }, [tagById]);
 
   // 可搜索文本按条目对象缓存；标签名变化时整体失效
   const searchText = useMemo(() => {
@@ -174,7 +185,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
         onSelect={onSelectItem}
         onOpen={handleOpen}
         onToggleFavorite={handleToggleFavorite}
-        tagNameById={tagNameById}
+        tagById={tagById}
         activityByItem={activityByItem}
       />
     );
@@ -196,6 +207,7 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
         prefs={prefs}
         onPrefsChange={updatePrefs}
         onQuickCapture={onQuickCapture}
+        onManageTags={() => setTagManagerOpen(true)}
       />
 
       <div className={styles.content}>
@@ -240,6 +252,8 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
           />
         )}
       </div>
+
+      {tagManagerOpen && <TagManager kb={kb} onClose={() => setTagManagerOpen(false)} />}
     </div>
   );
 };

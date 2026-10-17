@@ -118,6 +118,12 @@
   }
 }
 
+// 拖动条目悬停在文件夹上
+.folderItemDropTarget {
+  background-color: var(--accent-primary-alpha);
+  box-shadow: inset 0 0 0 1px var(--accent-primary);
+}
+
 .folderToggle {
   @include flex-center;
   width: 16px;

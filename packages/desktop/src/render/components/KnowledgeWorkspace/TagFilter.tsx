@@ -34,6 +34,7 @@ export const TagFilter: React.FC<TagFilterProps> = ({ tags, counts, selected, on
       .map((tag) => ({
         key: tag.id,
         name: tag.name,
+        color: tag.color,
         count: counts.get(tag.id) ?? 0,
         selected: selectedSet.has(tag.id),
       }))

@@ -12,6 +12,7 @@ import {
   PanelRightOpen,
   Plus,
   Search,
+  Tags,
   X,
 } from 'lucide-react';
 import type { KnowledgeItemType, Tag } from '../../types/knowledge';
@@ -26,6 +27,7 @@ import {
 } from './filtering';
 import type { StreamLayout, WorkspacePrefs } from './preferences';
 import { TagFilter } from './TagFilter';
+import { TagDot } from './TagColor';
 import styles from './Toolbar.module.scss';
 
 export type WorkspaceView = 'items' | 'graph' | 'ask';
@@ -57,6 +59,8 @@ export interface ToolbarProps {
   prefs: WorkspacePrefs;
   onPrefsChange: (patch: Partial<WorkspacePrefs>) => void;
   onQuickCapture: () => void;
+  /** 打开标签管理 */
+  onManageTags: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -73,11 +77,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   prefs,
   onPrefsChange,
   onQuickCapture,
+  onManageTags,
 }) => {
   const isItems = view === 'items';
   const filtered = resultCount !== scopeCount;
   const typeTotal = [...typeCounts.values()].reduce((sum, n) => sum + n, 0);
-  const tagNames = new Map(tags.map((tag) => [tag.id, tag.name]));
+  const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   const toggleType = (type: KnowledgeItemType) =>
     onFiltersChange({
@@ -196,9 +201,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             selected={filters.tagIds}
             onChange={(tagIds) => onFiltersChange({ ...filters, tagIds })}
           />
+          <button type="button" className={styles.control} onClick={onManageTags}>
+            <Tags size={13} />
+            管理标签
+          </button>
           {filters.tagIds.map((id) => (
             <span key={id} className={styles.tagChip}>
-              #{tagNames.get(id) ?? id}
+              <TagDot color={tagById.get(id)?.color} />#{tagById.get(id)?.name ?? id}
               <button
                 type="button"
                 title="移除标签筛选"

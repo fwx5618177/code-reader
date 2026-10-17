@@ -195,6 +195,24 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
         <dl className={styles.meta}>
           <dt>类型</dt>
           <dd>{ITEM_TYPE_LABELS[item.type]}</dd>
+          <dt>文件夹</dt>
+          <dd>
+            <select
+              className={styles.folderSelect}
+              aria-label="移动到文件夹"
+              value={item.folderId ?? ''}
+              onChange={(event) =>
+                void run(() => kb.updateItem(item.id, { folderId: event.target.value || null }))
+              }
+            >
+              <option value="">未归档</option>
+              {kb.folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+          </dd>
           <dt>创建</dt>
           <dd>{absoluteTime(item.createdAt)}</dd>
           <dt>更新</dt>

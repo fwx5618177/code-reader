@@ -30,6 +30,7 @@ const EditorLoadingFallback: React.FC = () => (
 );
 
 import VirtualFolders, { VirtualFolder } from './components/VirtualFolders';
+import InputDialog, { ConfirmDialog } from './components/InputDialog';
 import KnowledgeWorkspace from './components/KnowledgeWorkspace';
 import AgentActivityPanel from './components/AgentActivity';
 import BacklinksPanel from './components/BacklinksPanel';
@@ -468,6 +469,78 @@ const App: React.FC = () => {
     }
   }, [kb.createFolder, kb.folders.length]);
 
+  // 知识库文件夹的重命名 / 删除确认对话框
+  const [folderDialog, setFolderDialog] = useState<{
+    action: 'rename' | 'delete';
+    folder: VirtualFolder;
+  } | null>(null);
+  const closeFolderDialog = useCallback(() => setFolderDialog(null), []);
+
+  /** 执行文件夹 / 条目归档操作，结果以轻提示反馈 */
+  const runFolderAction = useCallback(
+    async (action: () => Promise<void>, success: string, failure: string) => {
+      try {
+        await action();
+        setNotice(success);
+      } catch (error) {
+        console.error(`${failure}:`, error);
+        setNotice(`${failure}：${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    []
+  );
+
+  const handleEditFolder = useCallback((folder: VirtualFolder) => {
+    setFolderDialog({ action: 'rename', folder });
+  }, []);
+
+  const handleDeleteFolder = useCallback(
+    (folderId: string) => {
+      const folder = virtualFolders.find((f) => f.id === folderId);
+      if (folder) setFolderDialog({ action: 'delete', folder });
+    },
+    [virtualFolders]
+  );
+
+  const confirmRenameFolder = useCallback(
+    (name: string) => {
+      if (!folderDialog) return;
+      const { id } = folderDialog.folder;
+      setFolderDialog(null);
+      void runFolderAction(() => kb.renameFolder(id, name), `已重命名为「${name}」`, '重命名失败');
+    },
+    [folderDialog, kb.renameFolder, runFolderAction]
+  );
+
+  // 文件夹内的条目不删除，变为未归档；删除的是当前选中文件夹时回到「全部」
+  const confirmDeleteFolder = useCallback(() => {
+    if (!folderDialog) return;
+    const { id, name } = folderDialog.folder;
+    setFolderDialog(null);
+    void runFolderAction(
+      async () => {
+        await kb.deleteFolder(id);
+        setSelectedFolderId((current) => (current === id ? 'all' : current));
+      },
+      `已删除文件夹「${name}」`,
+      '删除文件夹失败'
+    );
+  }, [folderDialog, kb.deleteFolder, runFolderAction]);
+
+  /** 条目拖到侧边栏文件夹上：移动到该文件夹 */
+  const handleDropItemOnFolder = useCallback(
+    (folderId: string, itemId: string) => {
+      const folder = kb.folders.find((f) => f.id === folderId);
+      if (!folder) return;
+      void runFolderAction(
+        () => kb.updateItem(itemId, { folderId }),
+        `已移动到「${folder.name}」`,
+        '移动失败'
+      );
+    },
+    [kb.folders, kb.updateItem, runFolderAction]
+  );
+
   // ================================
   // 跨模式导航：知识库 ⇄ 写作 ⇄ 阅读
   // ================================
@@ -679,6 +752,9 @@ const App: React.FC = () => {
           selectedFolderId={selectedFolderId}
           onFolderSelect={handleFolderSelect}
           onCreateFolder={handleCreateFolder}
+          onEditFolder={handleEditFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onDropItem={handleDropItemOnFolder}
         />
       );
     }
@@ -1035,6 +1111,25 @@ const App: React.FC = () => {
 
       {/* AI 后台任务进度（任意模式可见） */}
       <AgentActivityPanel resolveTitle={resolveItemTitle} onOpenItem={openInKnowledge} />
+
+      {/* 知识库文件夹重命名 / 删除 */}
+      <InputDialog
+        isOpen={folderDialog?.action === 'rename'}
+        title="重命名文件夹"
+        placeholder="请输入文件夹名称"
+        defaultValue={folderDialog?.folder.name ?? ''}
+        onConfirm={confirmRenameFolder}
+        onCancel={closeFolderDialog}
+      />
+      <ConfirmDialog
+        isOpen={folderDialog?.action === 'delete'}
+        title="删除文件夹"
+        message={`确定删除文件夹「${folderDialog?.folder.name ?? ''}」吗？其中的 ${folderDialog?.folder.itemCount ?? 0} 个条目不会被删除，将变为未归档。`}
+        confirmText="删除"
+        isDanger
+        onConfirm={confirmDeleteFolder}
+        onCancel={closeFolderDialog}
+      />
 
       {notice && (
         <div className="app-notice" role="status">

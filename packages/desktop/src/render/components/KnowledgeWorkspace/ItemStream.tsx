@@ -6,8 +6,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { List, useListRef, type RowComponentProps } from 'react-window';
 import { AlertCircle, Pin, Star } from 'lucide-react';
-import type { KnowledgeItem } from '../../types/knowledge';
+import type { KnowledgeItem, Tag } from '../../types/knowledge';
 import type { ItemActivity } from '../../lib/agent/agentStore';
+import { KNOWLEDGE_ITEM_DRAG_TYPE } from '../../lib/knowledge/drag';
 import { displayTitle } from '../../lib/links/link-index';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
 import { activeTaskLabel } from '../AgentActivity/activity';
@@ -21,6 +22,7 @@ import {
 } from './filtering';
 import { absoluteTime, itemSnippet, relativeTime } from './item-display';
 import type { StreamLayout } from './preferences';
+import { TagDot } from './TagColor';
 import styles from './ItemStream.module.scss';
 
 /** 行高，与样式中 .header / .entry / .cardRow 的尺寸一致 */
@@ -42,7 +44,7 @@ export interface ItemStreamProps {
   /** Enter / 双击：在写作中打开（仅笔记） */
   onOpen: (item: KnowledgeItem) => void;
   onToggleFavorite: (item: KnowledgeItem) => void;
-  tagNameById: ReadonlyMap<string, string>;
+  tagById: ReadonlyMap<string, Tag>;
   activityByItem: ReadonlyMap<string, ItemActivity>;
 }
 
@@ -55,7 +57,7 @@ interface RowData {
   onSelect: (id: string) => void;
   onOpen: (item: KnowledgeItem) => void;
   onToggleFavorite: (item: KnowledgeItem) => void;
-  tagNameById: ReadonlyMap<string, string>;
+  tagById: ReadonlyMap<string, Tag>;
   activityByItem: ReadonlyMap<string, ItemActivity>;
 }
 
@@ -99,9 +101,9 @@ const Entry: React.FC<EntryProps> = ({ item, data }) => {
   const Icon = ITEM_TYPE_ICONS[item.type];
   const title = displayTitle(item.title) || '未命名';
   const snippet = itemSnippet(item);
-  const tagNames = item.tagIds
-    .map((id) => data.tagNameById.get(id))
-    .filter((name): name is string => !!name);
+  const tags = item.tagIds
+    .map((id) => data.tagById.get(id))
+    .filter((tag): tag is Tag => !!tag);
   const time = item[data.timeField];
 
   return (
@@ -110,6 +112,12 @@ const Entry: React.FC<EntryProps> = ({ item, data }) => {
       data-layout={data.layout}
       data-selected={item.id === data.selectedId}
       aria-current={item.id === data.selectedId}
+      // 可拖到侧边栏文件夹上移动
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.setData(KNOWLEDGE_ITEM_DRAG_TYPE, item.id);
+        event.dataTransfer.effectAllowed = 'move';
+      }}
       onClick={() => data.onSelect(item.id)}
       onDoubleClick={() => data.onOpen(item)}
     >
@@ -137,11 +145,11 @@ const Entry: React.FC<EntryProps> = ({ item, data }) => {
         </time>
       </div>
       {snippet && <p className={styles.snippet}>{snippet}</p>}
-      {tagNames.length > 0 && (
+      {tags.length > 0 && (
         <div className={styles.tags}>
-          {tagNames.map((name) => (
-            <span key={name} className={styles.tag}>
-              #{name}
+          {tags.map((tag) => (
+            <span key={tag.id} className={styles.tag}>
+              <TagDot color={tag.color} />#{tag.name}
             </span>
           ))}
         </div>
@@ -193,7 +201,7 @@ export const ItemStream: React.FC<ItemStreamProps> = ({
   onSelect,
   onOpen,
   onToggleFavorite,
-  tagNameById,
+  tagById,
   activityByItem,
 }) => {
   const listRef = useListRef(null);
@@ -213,10 +221,10 @@ export const ItemStream: React.FC<ItemStreamProps> = ({
       onSelect,
       onOpen,
       onToggleFavorite,
-      tagNameById,
+      tagById,
       activityByItem,
     }),
-    [rows, layout, columns, timeField, selectedId, onSelect, onOpen, onToggleFavorite, tagNameById, activityByItem]
+    [rows, layout, columns, timeField, selectedId, onSelect, onOpen, onToggleFavorite, tagById, activityByItem]
   );
 
   // 只在选中项变化时滚动到可见位置；条目被 Agent 更新导致的重排不打断用户滚动

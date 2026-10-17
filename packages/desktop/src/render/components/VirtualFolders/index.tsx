@@ -27,6 +27,7 @@ import {
   type FilterRule,
 } from '../../lib/knowledge/filter-rules';
 import type { KnowledgeItem } from '../../types/knowledge';
+import { KNOWLEDGE_ITEM_DRAG_TYPE } from '../../lib/knowledge/drag';
 
 // ================================
 // 类型定义
@@ -54,6 +55,8 @@ interface VirtualFoldersProps {
   onCreateFolder?: () => void;
   onEditFolder?: (folder: VirtualFolder) => void;
   onDeleteFolder?: (folderId: string) => void;
+  /** 条目从条目流拖到用户文件夹上 */
+  onDropItem?: (folderId: string, itemId: string) => void;
 }
 
 // ================================
@@ -354,9 +357,12 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
   onCreateFolder,
   onEditFolder,
   onDeleteFolder,
+  onDropItem,
 }) => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['smart']));
   const [contextMenuFolder, setContextMenuFolder] = useState<string | null>(null);
+  // 拖动条目时悬停的文件夹
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   // 切换文件夹展开状态
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders((prev) => {
@@ -414,11 +420,14 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
       const isExpanded = expandedFolders.has(folder.id);
       const isSelected = selectedFolderId === folder.id;
       const hasChildren = folder.children && folder.children.length > 0;
+      // 只有用户文件夹可以接收拖入的条目
+      const dropItem = folder.type === 'manual' && folder.id !== 'user' ? onDropItem : undefined;
 
       const folderItemClasses = [
         styles.folderItem,
         isSelected && styles.folderItemSelected,
         folder.type === 'smart' && styles.folderItemSmart,
+        dropTargetId === folder.id && styles.folderItemDropTarget,
       ]
         .filter(Boolean)
         .join(' ');
@@ -442,6 +451,37 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
               e.preventDefault();
               setContextMenuFolder(folder.id);
             }}
+            onDragOver={
+              dropItem
+                ? (e) => {
+                    if (!e.dataTransfer.types.includes(KNOWLEDGE_ITEM_DRAG_TYPE)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    setDropTargetId(folder.id);
+                  }
+                : undefined
+            }
+            onDragLeave={
+              dropItem
+                ? (e) => {
+                    // 移入子元素时不算离开
+                    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                      setDropTargetId(null);
+                    }
+                  }
+                : undefined
+            }
+            onDrop={
+              dropItem
+                ? (e) => {
+                    const itemId = e.dataTransfer.getData(KNOWLEDGE_ITEM_DRAG_TYPE);
+                    setDropTargetId(null);
+                    if (!itemId) return;
+                    e.preventDefault();
+                    dropItem(folder.id, itemId);
+                  }
+                : undefined
+            }
           >
             {/* 展开/折叠按钮 */}
             <span
@@ -493,8 +533,8 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
             )}
           </div>
 
-          {/* 上下文菜单 */}
-          {contextMenuFolder === folder.id && folder.type === 'manual' && (
+          {/* 上下文菜单（「我的文件夹」根节点不可重命名 / 删除） */}
+          {contextMenuFolder === folder.id && folder.type === 'manual' && folder.id !== 'user' && (
             <div className={styles.folderContextMenu}>
               <button
                 className={styles.contextMenuItem}
@@ -504,7 +544,7 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
                 }}
               >
                 <Edit3 size={14} />
-                <span>编辑</span>
+                <span>重命名</span>
               </button>
               <button
                 className={styles.contextMenuItem}
@@ -543,11 +583,13 @@ const VirtualFolders: React.FC<VirtualFoldersProps> = ({
       expandedFolders,
       selectedFolderId,
       contextMenuFolder,
+      dropTargetId,
       toggleFolder,
       getFolderIcon,
       onFolderSelect,
       onEditFolder,
       onDeleteFolder,
+      onDropItem,
     ]
   );
 
