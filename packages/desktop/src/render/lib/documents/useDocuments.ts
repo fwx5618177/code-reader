@@ -528,20 +528,10 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
 
         dispatch(actions.listRemoveItem(id));
 
+        // 删除当前文档只清空编辑会话，接下来编辑哪个文档由写作模式的标签页决定（激活相邻标签）
         if (state.editor.documentId === id) {
           editor.clear();
           dispatch(actions.editorClear());
-
-          // Select next document if available
-          const remaining = state.list.items.filter((item) => item.id !== id);
-          if (remaining.length > 0) {
-            // Use queueMicrotask to ensure state is updated before selecting
-            queueMicrotask(() => {
-              if (isMountedRef.current) {
-                selectDocument(remaining[0].id);
-              }
-            });
-          }
         }
 
         return success;
@@ -550,7 +540,7 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
         return false;
       }
     },
-    [state.editor.documentId, state.list.items, editor, selectDocument]
+    [state.editor.documentId, editor]
   );
 
   // ================================

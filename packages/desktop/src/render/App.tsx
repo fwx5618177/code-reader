@@ -17,6 +17,8 @@ import WelcomeGuide, { wasWelcomeGuideDismissed } from './components/WelcomeGuid
 import WritingSidebar, { type CreateDocumentOptions } from './components/WritingSidebar';
 import VersionHistory from './components/VersionHistory';
 import TitleInput from './components/TitleInput';
+import SplitEditor from './components/SplitEditor';
+import { useEditorTabs } from './hooks/useEditorTabs';
 
 // Lazy load heavy editor components for better initial load performance
 const RichEditor = lazy(() => import('./components/RichEditor'));
@@ -130,7 +132,7 @@ const App: React.FC = () => {
 
     // Actions
     initialize: initializeDocuments,
-    selectDocument,
+    selectDocument: selectSessionDocument,
     reloadDocument,
     createDocument,
     updateLocal,
@@ -138,6 +140,22 @@ const App: React.FC = () => {
     deleteDocument,
     refreshList,
   } = useDocuments();
+
+  // 标签页与分栏：聚焦窗格的活动标签决定编辑会话的文档
+  const editorTabs = useEditorTabs({
+    documents: documentList,
+    isInitialized: documentsInitialized,
+    sessionDocId: selectedDocId,
+    sessionDocument: currentDocument,
+    isDirty: editorDirty,
+    selectSessionDocument,
+    saveSessionDocument: saveCurrentDocument,
+    refreshList,
+    shortcutsEnabled: appState.mode === 'writing' && appState.writingFeature !== 'focus',
+    onError: setNotice,
+  });
+  // 所有“打开文档”入口（侧边栏、搜索、跨模式跳转等）都在聚焦窗格中打开标签
+  const selectDocument = editorTabs.openDocument;
 
   // 处理文档移动（移动后刷新列表）
   const handleMoveDocument = useCallback(async () => {
@@ -847,7 +865,7 @@ const App: React.FC = () => {
     return (
         <WritingSidebar
           documents={documentList}
-          selectedDocId={selectedDocId}
+          selectedDocId={editorTabs.activeDocId}
           documentsLoading={documentsLoading}
           isCollapsed={writingSidebarCollapsed}
           onToggleCollapse={() => setWritingSidebarCollapsed(!writingSidebarCollapsed)}
@@ -903,14 +921,20 @@ const App: React.FC = () => {
 
       case 'writing':
         // Only render editor when document is loaded to prevent stale content
-        const canRenderEditor = selectedDocId && currentDocument && !editorLoading;
+        // 编辑会话尚未切换到聚焦窗格的活动文档时视为加载中
+        const editorPending =
+          editorLoading ||
+          (editorTabs.activeDocId !== null && editorTabs.activeDocId !== selectedDocId);
+        const canRenderEditor =
+          selectedDocId && selectedDocId === editorTabs.activeDocId && currentDocument && !editorLoading;
         const currentKnowledgeItem = kb.items.find((item) => item.id === selectedDocId);
 
         return (
           <div className="writing-content">
             <div className="writing-body">
+            <SplitEditor tabs={editorTabs} documents={documentList} sessionDocument={currentDocument}>
             <div className="writing-editor-wrapper">
-              {editorLoading ? (
+              {editorPending ? (
                 <div className="editor-loading">
                   <p>加载中...</p>
                 </div>
@@ -947,6 +971,7 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
+            </SplitEditor>
             {showBacklinks && canRenderEditor && currentKnowledgeItem && (
               <BacklinksPanel
                 item={currentKnowledgeItem}
@@ -970,7 +995,7 @@ const App: React.FC = () => {
               className="writing-footer"
             >
               {/* 反向链接面板开关 */}
-              {selectedDocId && (
+              {editorTabs.activeDocId && (
                 <button
                   className={`footer-action-btn ${showBacklinks ? 'active' : ''}`}
                   onClick={() => setShowBacklinks(!showBacklinks)}
@@ -983,7 +1008,7 @@ const App: React.FC = () => {
                 </button>
               )}
               {/* Version History Button */}
-              {selectedDocId && (
+              {editorTabs.activeDocId && (
                 <button
                   className="footer-action-btn"
                   onClick={() => setShowVersionHistory(true)}
