@@ -91,4 +91,8 @@ export type {
   PreambleItem,
   DocumentMetadata,
   AuthorInfo,
+
+  // 交叉引用
+  CrossReferenceEntry,
+  CrossReferenceIndex,
 } from './types';

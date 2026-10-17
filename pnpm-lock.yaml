@@ -84,12 +84,18 @@ importers:
       '@code-reader/diff-algorithm':
         specifier: workspace:*
         version: link:../diff-algorithm
+      '@code-reader/format-parser':
+        specifier: workspace:*
+        version: link:../format-parser
       '@code-reader/fuzzy-match-algorithm':
         specifier: workspace:*
         version: link:../fuzzy-match-algorithm
       '@code-reader/search-service':
         specifier: workspace:*
         version: link:../search-service
+      '@code-reader/syntax-parser':
+        specifier: workspace:*
+        version: link:../syntax-parser
       '@code-reader/text-buffer':
         specifier: workspace:*
         version: link:../text-buffer

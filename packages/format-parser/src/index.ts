@@ -105,6 +105,10 @@ export type {
   DocumentClass,
   PreambleItem,
   DocumentMetadata,
+
+  // 交叉引用
+  CrossReferenceEntry,
+  CrossReferenceIndex,
 } from './latex';
 
 // ================================

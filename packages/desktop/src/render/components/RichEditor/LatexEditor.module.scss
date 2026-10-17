@@ -22,3 +22,47 @@
 .previewBlock[data-latex-kind='preamble'] + .previewBlock > .blockAnchor + :is(h1, h2, h3, h4, h5, h6) {
   margin-top: 0;
 }
+
+// ================================
+// 头部诊断计数（点击打开诊断面板）
+// ================================
+
+.diagnosticSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 1px;
+  }
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+}
+
+.diagnosticError {
+  color: var(--color-error);
+}
+
+.diagnosticWarning {
+  color: var(--color-warning);
+}
+
+.diagnosticInfo {
+  color: var(--color-info);
+}

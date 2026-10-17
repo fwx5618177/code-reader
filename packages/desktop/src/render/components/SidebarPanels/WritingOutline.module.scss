@@ -30,3 +30,22 @@
     color: var(--text-primary);
   }
 }
+
+// LaTeX 文档信息（\title / \author）
+.documentInfo {
+  padding: var(--spacing-1) var(--spacing-3) var(--spacing-2);
+  margin-bottom: var(--spacing-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.documentTitle {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.documentAuthors {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}

@@ -1627,6 +1627,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
             }}
             readOnly={readOnly}
             showLineNumbers={true}
+            revealHeading={revealHeading}
           />
         ) : (
           <>

@@ -33,6 +33,7 @@ import {
   SidebarSearch,
   TagCloud,
   WritingOutline,
+  LatexOutline,
   describeReading,
   describeUpdated,
   diaryTitle,
@@ -1071,13 +1072,23 @@ const App: React.FC = () => {
 
   const renderWritingSidebar = () => {
     switch (activeSidebarPanel.id) {
-      case 'outline':
+      case 'outline': {
         if (!currentDocument) return <PanelEmpty>打开一个文档查看大纲</PanelEmpty>;
-        return getFileTypeId(currentDocument.title) === 'markdown' ? (
-          <WritingOutline content={currentDocument.content} onSelectHeading={revealWritingHeading} />
-        ) : (
-          <PanelEmpty>大纲仅支持 Markdown 文档</PanelEmpty>
-        );
+        const fileType = getFileTypeId(currentDocument.title);
+        if (fileType === 'markdown') {
+          return <WritingOutline content={currentDocument.content} onSelectHeading={revealWritingHeading} />;
+        }
+        if (fileType === 'latex') {
+          return (
+            <LatexOutline
+              key={currentDocument.id}
+              content={currentDocument.content}
+              onSelectHeading={revealWritingHeading}
+            />
+          );
+        }
+        return <PanelEmpty>大纲支持 Markdown 与 LaTeX 文档</PanelEmpty>;
+      }
       case 'references': {
         const currentItem = writingItems.find((item) => item.id === selectedDocId);
         return currentItem ? (

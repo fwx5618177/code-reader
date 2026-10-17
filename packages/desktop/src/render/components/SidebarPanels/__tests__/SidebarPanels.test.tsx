@@ -12,7 +12,7 @@ import { DocumentTags } from '../DocumentTags';
 import { RecordingsPanel } from '../RecordingsPanel';
 import { SidebarSearch } from '../SidebarSearch';
 import { TagCloud } from '../TagCloud';
-import { WritingOutline } from '../WritingOutline';
+import { LatexOutline, WritingOutline } from '../WritingOutline';
 
 const searchDocuments = vi.hoisted(() => vi.fn());
 vi.mock('../../../lib/writing', () => ({ useWritingService: () => ({ search: searchDocuments }) }));
@@ -261,6 +261,28 @@ describe('写作侧栏', () => {
     render(<WritingOutline content={'## 小结\n\n## 其他\n\n## 小结\n'} onSelectHeading={onSelectHeading} />);
     fireEvent.click(screen.getAllByRole('button', { name: '小结' })[1]);
     expect(onSelectHeading).toHaveBeenCalledWith('小结', 1);
+  });
+
+  it('LaTeX 大纲列出章节层级与文档标题作者，点击传入同名序号', async () => {
+    const onSelectHeading = vi.fn();
+    const source = String.raw`\title{论文 \textbf{标题}}\author{甲 \and 乙}
+\begin{document}
+\section{引言}
+\subsection{背景}
+\section*{引言}
+\end{document}`;
+    render(<LatexOutline content={source} onSelectHeading={onSelectHeading} />);
+    const background = await screen.findByRole('button', { name: '背景' });
+    expect(background.style.getPropertyValue('--outline-depth')).toBe('1');
+    expect(screen.getByText('论文 标题')).toBeTruthy();
+    expect(screen.getByText('甲、乙')).toBeTruthy();
+    fireEvent.click(screen.getAllByRole('button', { name: '引言' })[1]);
+    expect(onSelectHeading).toHaveBeenCalledWith('引言', 1);
+  });
+
+  it('LaTeX 文档没有章节时提示章节命令', async () => {
+    render(<LatexOutline content={'只有正文'} onSelectHeading={vi.fn()} />);
+    expect(await screen.findByText(/文档中还没有章节/)).toBeTruthy();
   });
 
   it('标签多选时只列出同时带有这些标签的文档', () => {

@@ -50,6 +50,7 @@ export {
   wikiLinkRef,
   wikiLinkRefOf,
   headingOccurrence,
+  findHeadingIndex,
   type WikiLinkParts,
 } from './wiki-link';
 export {

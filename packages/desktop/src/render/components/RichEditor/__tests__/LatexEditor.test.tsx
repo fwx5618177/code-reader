@@ -7,6 +7,7 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, waitFor, fireEvent, screen } from '@testing-library/react';
 import { EditorView } from '@codemirror/view';
+import { foldable } from '@codemirror/language';
 import { LatexEditor } from '../LatexEditor';
 
 const SOURCE = [
@@ -106,5 +107,35 @@ describe('LatexEditor', () => {
     fireEvent.click(screen.getByTitle('分栏'));
     expect(getView(container)).toBe(view);
     await waitFor(() => expect(previewText(container)).toContain('第二段'));
+  });
+
+  it('语法错误与交叉引用问题显示在头部计数与诊断面板中', async () => {
+    const source = '\\begin{itemize}\n\\item 见 \\ref{nowhere}\n';
+    const { container } = render(<LatexEditor initialContent={source} />);
+
+    const summary = await screen.findByRole('button', { name: /诊断：1 个错误，1 个警告/ });
+    expect(container.querySelector('.cm-lintRange-error')?.textContent).toBe('\\begin{itemize}');
+    expect(container.querySelector('.cm-lintRange-warning')?.textContent).toBe('nowhere');
+
+    fireEvent.click(summary);
+    const panel = container.querySelector('.cm-panel-lint');
+    expect(panel?.textContent).toContain('缺少 \\end{itemize}');
+    expect(panel?.textContent).toContain('未定义的引用 \\ref{nowhere}');
+  });
+
+  it('环境与章节可折叠', async () => {
+    const { container } = render(<LatexEditor initialContent={SOURCE} />);
+    const view = getView(container);
+    const sectionLine = view.state.doc.line(SOURCE.split('\n').indexOf('\\section{章节}') + 1);
+    await waitFor(() => expect(foldable(view.state, sectionLine.from, sectionLine.to)).not.toBeNull());
+    const range = foldable(view.state, sectionLine.from, sectionLine.to)!;
+    expect(view.state.sliceDoc(range.from, range.to).trim()).toBe('第二段 $x^2$');
+  });
+
+  it('大纲定位请求把光标移到对应章节', async () => {
+    const { container, rerender } = render(<LatexEditor initialContent={SOURCE} />);
+    const view = getView(container);
+    rerender(<LatexEditor initialContent={SOURCE} revealHeading={{ heading: '章节', occurrence: 0 }} />);
+    await waitFor(() => expect(view.state.selection.main.head).toBe(SOURCE.indexOf('\\section{章节}')));
   });
 });

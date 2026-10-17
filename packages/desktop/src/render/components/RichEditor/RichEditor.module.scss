@@ -2305,6 +2305,136 @@ $page-rule-rows: repeating-linear-gradient(
       .cm-typeName {
         color: var(--syntax-type);
       }
+
+      // 诊断下划线：以波浪线替代 lint 默认的固定色 SVG
+      .cm-lintRange {
+        background-image: none;
+        padding-bottom: 0;
+        text-decoration-line: underline;
+        text-decoration-style: wavy;
+        text-decoration-skip-ink: none;
+        text-underline-offset: 3px;
+      }
+
+      .cm-lintRange-error {
+        text-decoration-color: var(--color-error);
+      }
+
+      .cm-lintRange-warning {
+        text-decoration-color: var(--color-warning);
+      }
+
+      .cm-lintRange-info {
+        text-decoration-color: var(--color-info);
+      }
+
+      .cm-lintRange-active {
+        background-color: var(--accent-primary-alpha);
+      }
+
+      .cm-lintPoint::after {
+        border-bottom-color: var(--color-error);
+      }
+
+      .cm-lintPoint-warning::after {
+        border-bottom-color: var(--color-warning);
+      }
+
+      .cm-lintPoint-info::after {
+        border-bottom-color: var(--color-info);
+      }
+
+      .cm-lint-marker {
+        content: normal;
+        width: 0.6em;
+        height: 0.6em;
+        margin: 0.2em;
+        border-radius: 50%;
+      }
+
+      .cm-lint-marker-error {
+        background-color: var(--color-error);
+      }
+
+      .cm-lint-marker-warning {
+        background-color: var(--color-warning);
+      }
+
+      .cm-lint-marker-info {
+        background-color: var(--color-info);
+      }
+
+      .cm-tooltip {
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-lg);
+      }
+
+      .cm-diagnostic {
+        font-size: var(--font-size-xs);
+      }
+
+      .cm-diagnostic-error {
+        border-left-color: var(--color-error);
+      }
+
+      .cm-diagnostic-warning {
+        border-left-color: var(--color-warning);
+      }
+
+      .cm-diagnostic-info {
+        border-left-color: var(--color-info);
+      }
+
+      .cm-diagnosticSource {
+        color: var(--text-muted);
+      }
+
+      .cm-panels {
+        background-color: var(--bg-secondary);
+        color: var(--text-primary);
+      }
+
+      .cm-panels-bottom {
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .cm-panel.cm-panel-lint {
+        ul {
+          max-height: 160px;
+
+          [aria-selected] {
+            background-color: var(--bg-hover);
+          }
+        }
+
+        ul:focus [aria-selected] {
+          background-color: var(--accent-primary-alpha);
+          color: var(--text-primary);
+        }
+
+        button[name='close'] {
+          color: var(--text-muted);
+          cursor: pointer;
+        }
+      }
+
+      // 折叠
+      .cm-foldGutter span {
+        color: var(--text-muted);
+
+        &:hover {
+          color: var(--text-primary);
+        }
+      }
+
+      .cm-foldPlaceholder {
+        background-color: var(--bg-tertiary);
+        border: 1px solid var(--border-subtle);
+        color: var(--text-muted);
+      }
     }
   }
 }

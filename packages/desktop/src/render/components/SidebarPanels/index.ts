@@ -10,6 +10,6 @@ export { RecordingsPanel, type RecordingsPanelProps } from './RecordingsPanel';
 export { SidebarItemList, type SidebarItemListProps } from './SidebarItemList';
 export { SidebarSearch, type SidebarSearchProps } from './SidebarSearch';
 export { TagCloud, type TagCloudProps } from './TagCloud';
-export { WritingOutline, type WritingOutlineProps } from './WritingOutline';
+export { WritingOutline, LatexOutline, type WritingOutlineProps } from './WritingOutline';
 export { diaryTitle } from './calendar';
 export { describeReading, describeUpdated } from './describe';

@@ -5,7 +5,13 @@
 // 将输入文本分解为 Token 流
 // ================================
 
-import { SPECIAL_CHARS, MATH_ENVIRONMENTS, VERBATIM_ENVIRONMENTS } from './types';
+import { MATH_ENVIRONMENTS, VERBATIM_ENVIRONMENTS } from './types';
+
+/** 紧跟 \begin / \end 的环境名参数 */
+const ENV_NAME_PATTERN = /\{([^{}\n]*)\}/y;
+
+/** 参数需要原样读取的命令（其中的 % # _ 等字符不具特殊含义） */
+const RAW_ARGUMENT_COMMANDS = new Set(['url', 'path']);
 
 // ================================
 // Token 类型定义
@@ -81,9 +87,9 @@ export interface Token {
   from: number;
   /** 结束位置 */
   to: number;
-  /** 行号 */
+  /** 起始行号（从 0 计） */
   line: number;
-  /** 列号 */
+  /** 起始列号（从 0 计） */
   column: number;
 }
 
@@ -111,6 +117,10 @@ export interface TokenizerState {
   braceStack: number;
   /** 环境栈 */
   envStack: string[];
+  /** \begin{name} 读完后待进入的模式（原样输出或数学环境），at 为环境名参数之后的位置 */
+  pendingMode: { kind: 'verbatim' | 'math'; env: string; at: number } | null;
+  /** \url / \path 的原样参数：pending 等待左花括号，open 正在读取参数内容 */
+  rawArgument: 'pending' | 'open' | null;
 }
 
 // ================================
@@ -166,6 +176,8 @@ export class LatexTokenizer {
       verbatimEnvName: null,
       braceStack: 0,
       envStack: [],
+      pendingMode: null,
+      rawArgument: null,
     };
   }
 
@@ -183,86 +195,72 @@ export class LatexTokenizer {
     this.tokenPositionIndex.clear();
   }
 
-  /**
-   * 从指定位置开始重新 tokenize
-   * @param fromPos 起始位置
-   * @param newInput 新的输入文本
-   */
-  retokenizeFrom(fromPos: number, newInput: string): void {
-    this.input = newInput;
-    this.length = newInput.length;
-
-    // 找到 fromPos 之前最近的有效状态
-    const cacheIndex = this.findCacheIndexForPosition(fromPos);
-    if (cacheIndex > 0) {
-      // 从缓存中恢复状态
-      this.tokenCache = this.tokenCache.slice(0, cacheIndex);
-      const lastToken = this.tokenCache[cacheIndex - 1];
-      if (lastToken) {
-        this.state.pos = lastToken.to;
-        this.state.line = lastToken.line;
-        this.state.column = lastToken.column + lastToken.value.length;
-      }
-    } else {
-      // 从头开始
-      this.state = this.createInitialState();
-      this.tokenCache = [];
-    }
-
-    // 重建位置索引
-    this.rebuildPositionIndex();
-  }
-
-  /**
-   * 查找指定位置对应的缓存索引
-   */
-  private findCacheIndexForPosition(pos: number): number {
-    for (let i = this.tokenCache.length - 1; i >= 0; i--) {
-      const token = this.tokenCache[i];
-      if (token && token.to <= pos) {
-        return i + 1;
-      }
-    }
-    return 0;
-  }
-
-  /**
-   * 重建位置索引
-   */
-  private rebuildPositionIndex(): void {
-    this.tokenPositionIndex.clear();
-    for (let i = 0; i < this.tokenCache.length; i++) {
-      const token = this.tokenCache[i];
-      if (token) {
-        this.tokenPositionIndex.set(token.from, i);
-      }
-    }
-  }
 
   /**
    * 获取下一个 Token
    */
   nextToken(): Token {
-    // 跳过并处理空白（根据上下文）
-    this.skipWhitespaceIfNeeded();
+    this.activatePendingMode();
+    const line = this.state.line;
+    const column = this.state.column;
+    const token = this.scanToken();
+    // Token 记录起始行列（扫描过程中 state 已前进到 Token 末尾）
+    token.line = line;
+    token.column = column;
+    return token;
+  }
 
-    // 检查是否到达末尾
+  private scanToken(): Token {
     if (this.state.pos >= this.length) {
       return this.createToken(TokenType.EOF, '', this.state.pos, this.state.pos);
     }
 
-    // 原样输出模式
     if (this.state.inVerbatim) {
       return this.tokenizeVerbatim();
     }
 
-    // 数学模式
+    if (this.state.rawArgument) {
+      const raw = this.tokenizeRawArgument();
+      if (raw) return raw;
+    }
+
     if (this.state.inMathMode) {
       return this.tokenizeMathMode();
     }
 
-    // 正常模式
     return this.tokenizeNormalMode();
+  }
+
+  /**
+   * 环境名参数读完后进入对应模式：词法分析先于语法分析整体完成，
+   * 原样输出与数学环境的模式切换只能由词法器自己根据 \begin{name} 决定
+   */
+  private activatePendingMode(): void {
+    const pending = this.state.pendingMode;
+    if (!pending || this.state.pos < pending.at) return;
+    this.state.pendingMode = null;
+    if (pending.kind === 'verbatim') {
+      this.state.inVerbatim = true;
+      this.state.verbatimEnvName = pending.env;
+    } else if (!this.state.inMathMode) {
+      this.state.inMathMode = true;
+      this.state.mathModeType = 'environment';
+      this.state.mathDelimiter = pending.env;
+    }
+  }
+
+  /** 读取紧跟当前位置的 {环境名} */
+  private peekEnvironmentName(): { name: string; end: number } | null {
+    ENV_NAME_PATTERN.lastIndex = this.state.pos;
+    const match = ENV_NAME_PATTERN.exec(this.input);
+    if (!match) return null;
+    return { name: (match[1] ?? '').trim(), end: this.state.pos + match[0].length };
+  }
+
+  private exitMathMode(): void {
+    this.state.inMathMode = false;
+    this.state.mathModeType = null;
+    this.state.mathDelimiter = null;
   }
 
   /**
@@ -298,13 +296,6 @@ export class LatexTokenizer {
     return this.tokenCache.filter((t) => t.from >= from && t.to <= to);
   }
 
-  /**
-   * 根据需要跳过空白
-   */
-  private skipWhitespaceIfNeeded(): void {
-    // 在某些上下文中不跳过空白
-    // 这里的实现保留空白作为单独的 Token
-  }
 
   /**
    * 正常模式下的 tokenize
@@ -380,43 +371,39 @@ export class LatexTokenizer {
 
     const nextChar = this.peek();
 
-    // 检查是否是数学模式分隔符
-    if (nextChar === '(') {
-      this.advance();
-      this.state.inMathMode = true;
-      this.state.mathModeType = 'inline';
-      this.state.mathDelimiter = '\\(';
-      return this.createToken(TokenType.MathParenOpen, '\\(', start, this.state.pos);
+    if (nextChar === '') {
+      // 文末孤立的反斜杠
+      return this.createToken(TokenType.Error, '\\', start, this.state.pos);
     }
 
-    if (nextChar === ')') {
-      this.advance();
-      this.state.inMathMode = false;
-      this.state.mathModeType = null;
-      this.state.mathDelimiter = null;
-      return this.createToken(TokenType.MathParenClose, '\\)', start, this.state.pos);
-    }
+    // 数学分隔符只在文本模式下生效；数学模式内匹配的结束符由 tokenizeMathMode 处理
+    if (!this.state.inMathMode) {
+      if (nextChar === '(') {
+        this.advance();
+        this.state.inMathMode = true;
+        this.state.mathModeType = 'inline';
+        this.state.mathDelimiter = '\\(';
+        return this.createToken(TokenType.MathParenOpen, '\\(', start, this.state.pos);
+      }
 
-    if (nextChar === '[') {
-      this.advance();
-      this.state.inMathMode = true;
-      this.state.mathModeType = 'display';
-      this.state.mathDelimiter = '\\[';
-      return this.createToken(TokenType.MathBracketOpen, '\\[', start, this.state.pos);
-    }
+      if (nextChar === '[') {
+        this.advance();
+        this.state.inMathMode = true;
+        this.state.mathModeType = 'display';
+        this.state.mathDelimiter = '\\[';
+        return this.createToken(TokenType.MathBracketOpen, '\\[', start, this.state.pos);
+      }
 
-    if (nextChar === ']') {
-      this.advance();
-      this.state.inMathMode = false;
-      this.state.mathModeType = null;
-      this.state.mathDelimiter = null;
-      return this.createToken(TokenType.MathBracketClose, '\\]', start, this.state.pos);
-    }
+      // 文本模式下的 \) \] 没有对应的开始分隔符，交给语法分析报错
+      if (nextChar === ')') {
+        this.advance();
+        return this.createToken(TokenType.MathParenClose, '\\)', start, this.state.pos);
+      }
 
-    // 检查是否是特殊字符转义
-    if (SPECIAL_CHARS.has(nextChar)) {
-      this.advance();
-      return this.createToken(TokenType.CommandName, nextChar, start, this.state.pos);
+      if (nextChar === ']') {
+        this.advance();
+        return this.createToken(TokenType.MathBracketClose, '\\]', start, this.state.pos);
+      }
     }
 
     // 换行符（\\ 或 \\*）
@@ -430,23 +417,98 @@ export class LatexTokenizer {
       return this.createToken(TokenType.RowSeparator, value, start, this.state.pos);
     }
 
-    // 读取命令名称
-    const commandName = this.readCommandName();
-    if (commandName === '') {
-      // 空命令名，返回错误
-      return this.createToken(TokenType.Error, '\\', start, this.state.pos);
+    // 控制符号：反斜杠后跟单个非字母字符（\, \| \{ \$ \% 等）
+    if (!this.isLetter(nextChar)) {
+      this.advance();
+      return this.createToken(TokenType.CommandName, nextChar, start, this.state.pos);
     }
 
-    // 检查是否是 begin/end
+    const commandName = this.readCommandName();
+
     if (commandName === 'begin') {
+      const env = this.peekEnvironmentName();
+      if (env && VERBATIM_ENVIRONMENTS.includes(env.name as never)) {
+        this.state.pendingMode = { kind: 'verbatim', env: env.name, at: env.end };
+      } else if (env && !this.state.inMathMode && MATH_ENVIRONMENTS.includes(env.name as never)) {
+        this.state.pendingMode = { kind: 'math', env: env.name, at: env.end };
+      }
       return this.createToken(TokenType.BeginEnv, '\\begin', start, this.state.pos);
     }
 
     if (commandName === 'end') {
+      if (this.state.mathModeType === 'environment') {
+        const env = this.peekEnvironmentName();
+        if (env && env.name === this.state.mathDelimiter) {
+          this.exitMathMode();
+        }
+      }
       return this.createToken(TokenType.EndEnv, '\\end', start, this.state.pos);
     }
 
+    if (commandName === 'verb') {
+      return this.tokenizeVerb(start);
+    }
+
+    if (RAW_ARGUMENT_COMMANDS.has(commandName)) {
+      this.state.rawArgument = 'pending';
+    }
+
     return this.createToken(TokenType.CommandName, commandName, start, this.state.pos);
+  }
+
+  /**
+   * \verb|...|：分隔符之间原样输出，必须在同一行内结束
+   */
+  private tokenizeVerb(start: number): Token {
+    if (this.peek() === '*') {
+      this.advance();
+    }
+    const delimiter = this.peek();
+    const lineEnd = this.input.indexOf('\n', this.state.pos);
+    const close =
+      delimiter && delimiter !== ' ' && delimiter !== '\n' && !this.isLetter(delimiter)
+        ? this.input.indexOf(delimiter, this.state.pos + 1)
+        : -1;
+
+    if (close === -1 || (lineEnd !== -1 && close > lineEnd)) {
+      return this.createToken(TokenType.Error, this.input.slice(start, this.state.pos), start, this.state.pos);
+    }
+
+    while (this.state.pos <= close) {
+      this.advance();
+    }
+    return this.createToken(TokenType.Text, this.input.slice(start, this.state.pos), start, this.state.pos);
+  }
+
+  /**
+   * \url / \path 的参数：左花括号、原样内容、右花括号依次产出
+   */
+  private tokenizeRawArgument(): Token | null {
+    const start = this.state.pos;
+
+    if (this.state.rawArgument === 'pending') {
+      if (this.peek() !== '{') {
+        this.state.rawArgument = null;
+        return null;
+      }
+      this.state.rawArgument = 'open';
+      return this.createTokenAndAdvance(TokenType.BraceOpen, '{', start);
+    }
+
+    const close = this.input.indexOf('}', start);
+    if (close === start) {
+      this.state.rawArgument = null;
+      return this.createTokenAndAdvance(TokenType.BraceClose, '}', start);
+    }
+
+    const end = close === -1 ? this.length : close;
+    while (this.state.pos < end) {
+      this.advance();
+    }
+    if (close === -1) {
+      this.state.rawArgument = null;
+    }
+    return this.createToken(TokenType.Text, this.input.slice(start, end), start, end);
   }
 
   /**
@@ -479,33 +541,18 @@ export class LatexTokenizer {
       this.advance();
       this.advance();
 
-      if (this.state.inMathMode && this.state.mathDelimiter === '$$') {
-        this.state.inMathMode = false;
-        this.state.mathModeType = null;
-        this.state.mathDelimiter = null;
-        return this.createToken(TokenType.MathDisplayClose, '$$', start, this.state.pos);
-      } else {
         this.state.inMathMode = true;
-        this.state.mathModeType = 'display';
-        this.state.mathDelimiter = '$$';
-        return this.createToken(TokenType.MathDisplayOpen, '$$', start, this.state.pos);
-      }
+      this.state.mathModeType = 'display';
+      this.state.mathDelimiter = '$$';
+      return this.createToken(TokenType.MathDisplayOpen, '$$', start, this.state.pos);
     }
 
     // 单个 $（inline math）
     this.advance();
-
-    if (this.state.inMathMode && this.state.mathDelimiter === '$') {
-      this.state.inMathMode = false;
-      this.state.mathModeType = null;
-      this.state.mathDelimiter = null;
-      return this.createToken(TokenType.MathInlineClose, '$', start, this.state.pos);
-    } else {
-      this.state.inMathMode = true;
-      this.state.mathModeType = 'inline';
-      this.state.mathDelimiter = '$';
-      return this.createToken(TokenType.MathInlineOpen, '$', start, this.state.pos);
-    }
+    this.state.inMathMode = true;
+    this.state.mathModeType = 'inline';
+    this.state.mathDelimiter = '$';
+    return this.createToken(TokenType.MathInlineOpen, '$', start, this.state.pos);
   }
 
   /**
@@ -559,9 +606,6 @@ export class LatexTokenizer {
         break;
       }
     }
-
-    this.state.line += newlineCount;
-    this.state.column = 0;
 
     if (newlineCount >= 2) {
       return this.createToken(
@@ -664,19 +708,20 @@ export class LatexTokenizer {
     // 检查结束分隔符
     if (this.state.mathDelimiter === '$' && char === '$') {
       this.advance();
-      this.state.inMathMode = false;
-      this.state.mathModeType = null;
-      this.state.mathDelimiter = null;
+      this.exitMathMode();
       return this.createToken(TokenType.MathInlineClose, '$', start, this.state.pos);
     }
 
     if (this.state.mathDelimiter === '$$' && char === '$' && this.peek(1) === '$') {
       this.advance();
       this.advance();
-      this.state.inMathMode = false;
-      this.state.mathModeType = null;
-      this.state.mathDelimiter = null;
+      this.exitMathMode();
       return this.createToken(TokenType.MathDisplayClose, '$$', start, this.state.pos);
+    }
+
+    // 其余数学模式（\( \[ $$ 与公式环境）中出现的 $ 不合法
+    if (char === '$') {
+      return this.createTokenAndAdvance(TokenType.Error, '$', start);
     }
 
     if (char === '\\') {
@@ -684,17 +729,13 @@ export class LatexTokenizer {
       if (this.state.mathDelimiter === '\\(' && nextChar === ')') {
         this.advance();
         this.advance();
-        this.state.inMathMode = false;
-        this.state.mathModeType = null;
-        this.state.mathDelimiter = null;
+        this.exitMathMode();
         return this.createToken(TokenType.MathParenClose, '\\)', start, this.state.pos);
       }
       if (this.state.mathDelimiter === '\\[' && nextChar === ']') {
         this.advance();
         this.advance();
-        this.state.inMathMode = false;
-        this.state.mathModeType = null;
-        this.state.mathDelimiter = null;
+        this.exitMathMode();
         return this.createToken(TokenType.MathBracketClose, '\\]', start, this.state.pos);
       }
     }
@@ -728,8 +769,14 @@ export class LatexTokenizer {
         return this.tokenizeWhitespace();
 
       case '\n':
-      case '\r':
-        return this.tokenizeNewline();
+      case '\r': {
+        // 段落分隔会终止未闭合的行内/行间公式（公式环境除外），避免一个缺失的 $ 让后文全部错位
+        const token = this.tokenizeNewline();
+        if (token.type === TokenType.ParagraphBreak && this.state.mathModeType !== 'environment') {
+          this.exitMathMode();
+        }
+        return token;
+      }
 
       default:
         return this.tokenizeMathText();
@@ -790,46 +837,16 @@ export class LatexTokenizer {
       return this.createToken(TokenType.Text, this.input.slice(start), start, this.state.pos);
     }
 
-    // 读取到结束标记之前
-    this.state.pos = endIndex;
+    // 读取到结束标记之前（逐字符前进以维护行列号）
+    while (this.state.pos < endIndex) {
+      this.advance();
+    }
 
     // 退出原样输出模式
     this.state.inVerbatim = false;
     this.state.verbatimEnvName = null;
 
     return this.createToken(TokenType.Text, this.input.slice(start, endIndex), start, endIndex);
-  }
-
-  /**
-   * 进入原样输出模式
-   */
-  enterVerbatimMode(envName: string): void {
-    if (VERBATIM_ENVIRONMENTS.includes(envName as never)) {
-      this.state.inVerbatim = true;
-      this.state.verbatimEnvName = envName;
-    }
-  }
-
-  /**
-   * 进入数学环境模式
-   */
-  enterMathEnvironment(envName: string): void {
-    if (MATH_ENVIRONMENTS.includes(envName as never)) {
-      this.state.inMathMode = true;
-      this.state.mathModeType = 'environment';
-      this.state.mathDelimiter = envName;
-    }
-  }
-
-  /**
-   * 退出数学环境模式
-   */
-  exitMathEnvironment(envName: string): void {
-    if (this.state.mathModeType === 'environment' && this.state.mathDelimiter === envName) {
-      this.state.inMathMode = false;
-      this.state.mathModeType = null;
-      this.state.mathDelimiter = null;
-    }
   }
 
   // ================================

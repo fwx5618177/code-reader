@@ -24,11 +24,14 @@ import { EditorView, keymap, lineNumbers, highlightActiveLineGutter } from '@cod
 import { EditorState, type Extension } from '@codemirror/state';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { openLintPanel } from '@codemirror/lint';
 import {
   Code,
   Eye,
   Columns,
   AlertTriangle,
+  AlertCircle,
+  Info,
   Loader2,
   FileText,
   ZoomIn,
@@ -36,6 +39,10 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { latex } from '../../lib/latex/codemirror-latex';
+import { latexAnalysis } from '../../lib/latex/codemirror-analysis';
+import type { LatexAnalysis } from '../../lib/latex/analysis';
+import { requestLatexAnalysis } from '../../lib/latex/analysis-client';
+import { findHeadingIndex } from '../../lib/markdown';
 import {
   LatexDocument,
   editorChangesToChangeSet,
@@ -77,6 +84,8 @@ export interface LatexEditorProps {
   showLineNumbers?: boolean;
   /** 预览刷新防抖延迟（毫秒） */
   debounceMs?: number;
+  /** 定位到章节（侧栏大纲点击）：occurrence 为同名章节中的序号 */
+  revealHeading?: { heading: string; occurrence?: number } | null;
 }
 
 /** 编辑器视图模式 */
@@ -92,6 +101,20 @@ interface ParseStatus {
 
 /** 文件大小类型 */
 type FileSizeType = 'small' | 'large' | 'huge';
+
+/** 各级别诊断数量 */
+type DiagnosticCounts = Record<'error' | 'warning' | 'info', number>;
+
+const NO_DIAGNOSTICS: DiagnosticCounts = { error: 0, warning: 0, info: 0 };
+
+function countDiagnostics(analysis: LatexAnalysis): DiagnosticCounts {
+  const counts = { ...NO_DIAGNOSTICS };
+  for (const diagnostic of analysis.diagnostics) counts[diagnostic.severity]++;
+  return counts;
+}
+
+/** 已执行过的章节定位请求（编辑器重新挂载时不重复滚动） */
+const revealedHeadingRequests = new WeakSet<object>();
 
 // ================================
 // 工具函数
@@ -161,6 +184,8 @@ interface SourceEditorProps {
   onScroll: () => void;
   /** EditorView 创建/销毁 */
   onViewChange: (view: EditorView | null) => void;
+  /** 语法/引用分析结果写入编辑器后回调 */
+  onAnalysis: (analysis: LatexAnalysis) => void;
   /** 是否只读 */
   readOnly?: boolean;
   /** 是否显示行号 */
@@ -168,14 +193,24 @@ interface SourceEditorProps {
 }
 
 const SourceEditor = memo<SourceEditorProps>(
-  ({ document, onDocumentChange, onScroll, onViewChange, readOnly = false, showLineNumbers = true }) => {
+  ({
+    document,
+    onDocumentChange,
+    onScroll,
+    onViewChange,
+    onAnalysis,
+    readOnly = false,
+    showLineNumbers = true,
+  }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const onDocumentChangeRef = useRef(onDocumentChange);
     const onScrollRef = useRef(onScroll);
     const onViewChangeRef = useRef(onViewChange);
+    const onAnalysisRef = useRef(onAnalysis);
     onDocumentChangeRef.current = onDocumentChange;
     onScrollRef.current = onScroll;
     onViewChangeRef.current = onViewChange;
+    onAnalysisRef.current = onAnalysis;
 
     const extensions = useMemo((): Extension[] => {
       const exts: Extension[] = [
@@ -183,6 +218,7 @@ const SourceEditor = memo<SourceEditorProps>(
         history(),
         closeBrackets(),
         keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap, indentWithTab]),
+        latexAnalysis((analysis) => onAnalysisRef.current(analysis)),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return;
           // 一个事务内的多处变更都使用事务前坐标，必须整批应用
@@ -414,6 +450,8 @@ interface StatusIndicatorsProps {
   isRendering: boolean;
   parseError: string | null;
   parseStatus: ParseStatus;
+  diagnostics: DiagnosticCounts;
+  onOpenDiagnostics: () => void;
 }
 
 /**
@@ -430,10 +468,40 @@ function formatFileSize(bytes: number): string {
 }
 
 const StatusIndicators = memo<StatusIndicatorsProps>(
-  ({ fileSize, isRendering, parseError, parseStatus }) => {
+  ({ fileSize, isRendering, parseError, parseStatus, diagnostics, onOpenDiagnostics }) => {
     const fileSizeType = getFileSizeType(fileSize);
+    const diagnosticTotal = diagnostics.error + diagnostics.warning + diagnostics.info;
     return (
       <div className={styles.latexEditorHeaderRight}>
+        {diagnosticTotal > 0 && (
+          <button
+            type="button"
+            className={latexStyles.diagnosticSummary}
+            onClick={onOpenDiagnostics}
+            title="打开诊断面板（⌘⇧M），F8 跳到下一处"
+            aria-label={`诊断：${diagnostics.error} 个错误，${diagnostics.warning} 个警告，${diagnostics.info} 条提示`}
+          >
+            {diagnostics.error > 0 && (
+              <span className={latexStyles.diagnosticError}>
+                <AlertCircle size={13} />
+                {diagnostics.error}
+              </span>
+            )}
+            {diagnostics.warning > 0 && (
+              <span className={latexStyles.diagnosticWarning}>
+                <AlertTriangle size={13} />
+                {diagnostics.warning}
+              </span>
+            )}
+            {diagnostics.info > 0 && (
+              <span className={latexStyles.diagnosticInfo}>
+                <Info size={13} />
+                {diagnostics.info}
+              </span>
+            )}
+          </button>
+        )}
+
         {fileSize > 0 && (
           <div className={styles.latexFileSizeIndicator} title={`文件大小: ${formatFileSize(fileSize)}`}>
             <FileText size={14} />
@@ -489,6 +557,7 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   className = '',
   showLineNumbers = true,
   debounceMs = DEFAULT_DEBOUNCE_MS,
+  revealHeading = null,
 }) => {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -512,8 +581,11 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   const [isRendering, setIsRendering] = useState(false);
   const [parseError, setParseError] = useState<string | null>(initial.error);
   const [parseStatus, setParseStatus] = useState<ParseStatus>(initial.status);
+  const [diagnosticCounts, setDiagnosticCounts] = useState<DiagnosticCounts>(NO_DIAGNOSTICS);
 
   const sourceViewRef = useRef<EditorView | null>(null);
+  /** 在仅预览模式下请求打开诊断面板：源码编辑器挂载后再打开 */
+  const openDiagnosticsOnMountRef = useRef(false);
   const previewRef = useRef<RenderPreviewHandle>(null);
   const pipelineRef = useRef<RenderPipeline | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -600,7 +672,57 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
 
   const handleSourceView = useCallback((view: EditorView | null) => {
     sourceViewRef.current = view;
+    if (view && openDiagnosticsOnMountRef.current) {
+      openDiagnosticsOnMountRef.current = false;
+      openLintPanel(view);
+    }
   }, []);
+
+  // ================================
+  // 诊断与章节定位
+  // ================================
+
+  const handleAnalysis = useCallback((analysis: LatexAnalysis) => {
+    setDiagnosticCounts(countDiagnostics(analysis));
+  }, []);
+
+  const openDiagnostics = useCallback(() => {
+    const view = sourceViewRef.current;
+    if (view) {
+      openLintPanel(view);
+    } else {
+      openDiagnosticsOnMountRef.current = true;
+      setViewMode('split');
+    }
+  }, []);
+
+  // 侧栏大纲点击章节：源码可见时定位光标并滚动（分栏模式下预览跟随同步），仅预览时滚动预览
+  useEffect(() => {
+    if (!revealHeading || revealedHeadingRequests.has(revealHeading)) return;
+    let cancelled = false;
+    const text = latexDocument.getText();
+    void requestLatexAnalysis(text).then(({ outline }) => {
+      if (cancelled) return;
+      revealedHeadingRequests.add(revealHeading);
+      const entry = outline[findHeadingIndex(outline, revealHeading.heading, revealHeading.occurrence)];
+      if (!entry) return;
+
+      const view = sourceViewRef.current;
+      if (view) {
+        const anchor = Math.min(entry.from, view.state.doc.length);
+        view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: 'start', yMargin: 24 }) });
+        view.focus();
+        return;
+      }
+      const scroller = previewRef.current?.getScrollContainer();
+      const line = text.slice(0, entry.from).split('\n').length;
+      const target = pipelineRef.current?.heightMap.getPositionForLine(line);
+      if (scroller && target != null) scroller.scrollTop = target;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [revealHeading, latexDocument]);
 
   // ================================
   // 渲染管线生命周期（预览挂载期间存在）
@@ -695,6 +817,8 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
           isRendering={isRendering}
           parseError={parseError}
           parseStatus={parseStatus}
+          diagnostics={diagnosticCounts}
+          onOpenDiagnostics={openDiagnostics}
         />
       </div>
 
@@ -706,6 +830,7 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
               onDocumentChange={handleDocumentChange}
               onScroll={handleSourceScroll}
               onViewChange={handleSourceView}
+              onAnalysis={handleAnalysis}
               readOnly={readOnly}
               showLineNumbers={showLineNumbers}
             />

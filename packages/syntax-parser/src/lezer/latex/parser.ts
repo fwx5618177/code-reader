@@ -23,12 +23,38 @@ import {
   DEFAULT_LATEX_LEZER_CONFIG,
   SECTION_COMMANDS,
   LIST_ENVIRONMENTS,
-  MATH_ENVIRONMENTS,
-  VERBATIM_ENVIRONMENTS,
   COMMAND_ARG_COUNTS,
 } from './types';
 
 import { LatexTokenizer, TokenType, type Token } from './tokenizer';
+
+/** 没有必选参数的常见环境：紧跟的 {...} 是环境内容而不是参数 */
+const ARGUMENTLESS_ENVIRONMENTS = new Set([
+  'document',
+  'center',
+  'flushleft',
+  'flushright',
+  'itemize',
+  'enumerate',
+  'description',
+  'quote',
+  'quotation',
+  'verse',
+  'abstract',
+  'figure',
+  'figure*',
+  'table',
+  'table*',
+  'equation',
+  'equation*',
+  'align',
+  'align*',
+  'gather',
+  'gather*',
+  'multline',
+  'multline*',
+  'proof',
+]);
 
 // ================================
 // 解析器状态定义
@@ -54,10 +80,12 @@ interface ParserState {
   nodeMap: Map<number, LatexASTNode>;
   /** 环境栈 */
   envStack: string[];
-  /** 是否在数学模式中 */
-  inMathMode: boolean;
   /** 开始时间 */
   startTime: number;
+  /** 解析输入（用于把偏移换算为行列） */
+  input: string;
+  /** 各行起始偏移，首次报告问题时计算 */
+  lineStarts: number[] | null;
 }
 
 // ================================
@@ -76,9 +104,6 @@ interface ParserState {
 export class LatexLezerParser {
   /** 配置 */
   private config: LatexLezerConfig;
-
-  /** Tokenizer 实例 */
-  private tokenizer: LatexTokenizer | null = null;
 
   /** 解析器状态 */
   private state: ParserState | null = null;
@@ -108,10 +133,9 @@ export class LatexLezerParser {
     this.version++;
 
     // 初始化
-    this.tokenizer = new LatexTokenizer(input);
-    const tokens = this.tokenizer.tokenizeAll();
+    const tokens = new LatexTokenizer(input).tokenizeAll();
 
-    this.state = this.createInitialState(tokens, startTime);
+    this.state = this.createInitialState(input, tokens, startTime);
 
     try {
       // 解析文档
@@ -176,12 +200,8 @@ export class LatexLezerParser {
     // 增量解析
     this.version++;
 
-    // 初始化 tokenizer 并进行增量 tokenize
-    this.tokenizer = new LatexTokenizer(input);
-    this.tokenizer.retokenizeFrom(changeFrom, input);
-
-    const tokens = this.tokenizer.tokenizeAll();
-    this.state = this.createInitialState(tokens, startTime);
+    const tokens = new LatexTokenizer(input).tokenizeAll();
+    this.state = this.createInitialState(input, tokens, startTime);
 
     try {
       // 计算受影响的范围
@@ -438,17 +458,37 @@ export class LatexLezerParser {
         return this.parseError();
 
       case TokenType.BraceClose:
-      case TokenType.BracketClose:
+        // 父级分组会在调用 parseContent 前消费自己的 }，到这里的都是多余的
+        this.addError('多余的右花括号 }', token.from, token.to);
+        this.advance();
+        return null;
+
       case TokenType.EndEnv:
-        // 这些应该由父级解析器处理
-        // 必须前进 token 位置，否则会陷入无限循环
+        return this.parseStrayEnd();
+
+      case TokenType.MathParenClose:
+      case TokenType.MathBracketClose:
+        this.addError(`多余的 ${token.value}（没有对应的开始分隔符）`, token.from, token.to);
         this.advance();
         return null;
 
       default:
-        // 其他 Token 作为文本处理
+        // 其他 Token（包括正文中的 ] 等）作为文本处理
         return this.parseText();
     }
+  }
+
+  /**
+   * 没有对应 \begin 的 \end{name}
+   */
+  private parseStrayEnd(): null {
+    const token = this.currentToken()!;
+    const name = this.peekEnvironmentName(this.state!.tokenIndex);
+    this.advance();
+    this.parseRequiredArg();
+    const to = this.previousToken()?.to ?? token.to;
+    this.addError(`多余的 \\end{${name ?? ''}}（没有对应的 \\begin）`, token.from, to);
+    return null;
   }
 
   /**
@@ -471,34 +511,33 @@ export class LatexLezerParser {
       this.advance();
     }
 
-    // 解析可选参数
+    // 解析参数：可选参数可以出现在必选参数之间（如 \newcommand{\foo}[1]{...}）
     const optionalArgs: string[] = [];
-    while (this.currentToken()?.type === TokenType.BracketOpen) {
-      const arg = this.parseOptionalArg();
-      if (arg !== null) {
-        optionalArgs.push(arg);
-      }
-    }
-
-    // 解析必选参数
-    const requiredArgs: string[] = [];
-    const argInfo = COMMAND_ARG_COUNTS[commandName];
-    const expectedArgs = argInfo?.required ?? 0;
-
-    for (let i = 0; i < expectedArgs; i++) {
-      if (this.currentToken()?.type === TokenType.BraceOpen) {
-        const arg = this.parseRequiredArg();
+    const readOptionalArgs = () => {
+      while (this.currentToken()?.type === TokenType.BracketOpen) {
+        const arg = this.parseOptionalArg();
         if (arg !== null) {
-          requiredArgs.push(arg);
+          optionalArgs.push(arg);
         }
       }
-    }
+    };
 
-    // 如果没有预定义参数数量，尝试解析一个参数
-    if (!argInfo && this.currentToken()?.type === TokenType.BraceOpen) {
+    const requiredArgs: string[] = [];
+    const argInfo = COMMAND_ARG_COUNTS[commandName];
+    // 未登记参数个数的命令最多读取一个紧跟的必选参数
+    const expectedArgs = argInfo?.required ?? 1;
+
+    readOptionalArgs();
+    for (let i = 0; i < expectedArgs; i++) {
+      if (this.currentToken()?.type !== TokenType.BraceOpen) {
+        break;
+      }
       const arg = this.parseRequiredArg();
       if (arg !== null) {
         requiredArgs.push(arg);
+      }
+      if (i < expectedArgs - 1) {
+        readOptionalArgs();
       }
     }
 
@@ -536,10 +575,11 @@ export class LatexLezerParser {
   }
 
   /**
-   * 解析可选参数
+   * 解析可选参数（不跨段落：遇到空行仍未闭合即报错并停止）
    */
   private parseOptionalArg(): string | null {
-    if (this.currentToken()?.type !== TokenType.BracketOpen) {
+    const open = this.currentToken();
+    if (open?.type !== TokenType.BracketOpen) {
       return null;
     }
 
@@ -550,6 +590,9 @@ export class LatexLezerParser {
     while (!this.isAtEnd() && depth > 0) {
       const token = this.currentToken()!;
 
+      if (token.type === TokenType.ParagraphBreak || token.type === TokenType.EOF) {
+        break;
+      }
       if (token.type === TokenType.BracketOpen) {
         depth++;
         content += '[';
@@ -565,6 +608,9 @@ export class LatexLezerParser {
       this.advance();
     }
 
+    if (depth > 0) {
+      this.addError('可选参数缺少右方括号 ]', open.from, open.to);
+    }
     return content;
   }
 
@@ -572,7 +618,8 @@ export class LatexLezerParser {
    * 解析必选参数
    */
   private parseRequiredArg(): string | null {
-    if (this.currentToken()?.type !== TokenType.BraceOpen) {
+    const open = this.currentToken();
+    if (open?.type !== TokenType.BraceOpen) {
       return null;
     }
 
@@ -583,6 +630,9 @@ export class LatexLezerParser {
     while (!this.isAtEnd() && depth > 0) {
       const token = this.currentToken()!;
 
+      if (token.type === TokenType.EOF) {
+        break;
+      }
       if (token.type === TokenType.BraceOpen) {
         depth++;
         content += '{';
@@ -598,6 +648,9 @@ export class LatexLezerParser {
       this.advance();
     }
 
+    if (depth > 0) {
+      this.addError('缺少右花括号 }', open.from, open.to);
+    }
     return content;
   }
 
@@ -619,21 +672,12 @@ export class LatexLezerParser {
       this.addError('缺少环境名称', start, beginToken.to);
       return this.createErrorNode('缺少环境名称', start, beginToken.to);
     }
+    // \begin{name} 的范围，缺少结束标记时把问题标在这里
+    const headerEnd = this.previousToken()?.to ?? beginToken.to;
 
     // 进入环境
     this.state!.envStack.push(envName);
     this.state!.depth++;
-
-    // 检查是否是数学环境
-    if (MATH_ENVIRONMENTS.includes(envName as never)) {
-      this.state!.inMathMode = true;
-      this.tokenizer?.enterMathEnvironment(envName);
-    }
-
-    // 检查是否是原样输出环境
-    if (VERBATIM_ENVIRONMENTS.includes(envName as never)) {
-      this.tokenizer?.enterVerbatimMode(envName);
-    }
 
     // 解析可选参数和必选参数
     const optionalArgs: string[] = [];
@@ -645,7 +689,10 @@ export class LatexLezerParser {
     }
 
     const requiredArgs: string[] = [];
-    while (this.currentToken()?.type === TokenType.BraceOpen) {
+    while (
+      !ARGUMENTLESS_ENVIRONMENTS.has(envName) &&
+      this.currentToken()?.type === TokenType.BraceOpen
+    ) {
       const arg = this.parseRequiredArg();
       if (arg !== null) {
         requiredArgs.push(arg);
@@ -715,32 +762,34 @@ export class LatexLezerParser {
 
     // 解析 \end{envName}
     let end = this.previousToken()?.to ?? start;
+    const endToken = this.currentToken();
 
-    if (this.currentToken()?.type === TokenType.EndEnv) {
-      this.advance(); // 跳过 \end
-      const endEnvName = this.parseRequiredArg();
+    if (endToken?.type === TokenType.EndEnv) {
+      const endEnvName = this.peekEnvironmentName(this.state!.tokenIndex);
+      const outerEnvs = this.state!.envStack.slice(0, -1);
 
-      if (endEnvName !== envName) {
-        this.addWarning(
-          `环境不匹配: \\begin{${envName}} 对应 \\end{${endEnvName}}`,
-          start,
-          this.previousToken()?.to ?? start
-        );
+      if (endEnvName !== envName && endEnvName !== null && outerEnvs.includes(endEnvName)) {
+        // 这个 \end 属于外层环境：当前环境漏写了结束标记，不消费交给外层
+        this.addError(`缺少 \\end{${envName}}`, start, headerEnd);
+      } else {
+        this.advance(); // 跳过 \end
+        this.parseRequiredArg();
+        end = this.previousToken()?.to ?? end;
+        if (endEnvName !== envName) {
+          this.addError(
+            `\\begin{${envName}} 与 \\end{${endEnvName ?? ''}} 不匹配`,
+            endToken.from,
+            end
+          );
+        }
       }
-
-      end = this.previousToken()?.to ?? end;
     } else {
-      this.addError(`缺少 \\end{${envName}}`, start, end);
+      this.addError(`缺少 \\end{${envName}}`, start, headerEnd);
     }
 
     // 退出环境
     this.state!.envStack.pop();
     this.state!.depth--;
-
-    if (MATH_ENVIRONMENTS.includes(envName as never)) {
-      this.state!.inMathMode = false;
-      this.tokenizer?.exitMathEnvironment(envName);
-    }
 
     // 创建环境节点
     const node: EnvironmentASTNode = {
@@ -850,6 +899,10 @@ export class LatexLezerParser {
       if (token?.type === TokenType.BraceClose) {
         break;
       }
+      // 外层环境的 \end 会让分组在此截断（报缺少 }），由环境自己消费
+      if (this.atOpenEnvironmentEnd()) {
+        break;
+      }
 
       const content = this.parseContent();
       if (content) {
@@ -861,7 +914,7 @@ export class LatexLezerParser {
     if (this.currentToken()?.type === TokenType.BraceClose) {
       this.advance();
     } else {
-      this.addError('缺少右花括号 }', start, this.previousToken()?.to ?? start);
+      this.addError('缺少右花括号 }', start, startToken.to);
     }
 
     this.state!.depth--;
@@ -881,7 +934,6 @@ export class LatexLezerParser {
     const delimiter = startToken.value;
 
     this.advance(); // 跳过开始分隔符
-    this.state!.inMathMode = true;
 
     let content = '';
     const closeType = delimiter === '$' ? TokenType.MathInlineClose : TokenType.MathParenClose;
@@ -889,8 +941,12 @@ export class LatexLezerParser {
     while (!this.isAtEnd()) {
       const token = this.currentToken()!;
 
-      if (token.type === closeType) {
+      if (token.type === closeType || token.type === TokenType.ParagraphBreak || this.atOpenEnvironmentEnd()) {
         break;
+      }
+      if (token.type === TokenType.Error) {
+        this.parseError();
+        continue;
       }
 
       content += token.value;
@@ -901,10 +957,8 @@ export class LatexLezerParser {
     if (this.currentToken()?.type === closeType) {
       this.advance();
     } else {
-      this.addError(`缺少数学模式结束分隔符`, start, this.previousToken()?.to ?? start);
+      this.addError(`公式缺少结束分隔符 ${delimiter === '$' ? '$' : '\\)'}`, start, startToken.to);
     }
-
-    this.state!.inMathMode = false;
 
     const end = this.previousToken()?.to ?? start;
 
@@ -931,7 +985,6 @@ export class LatexLezerParser {
     const delimiter = startToken.value;
 
     this.advance(); // 跳过开始分隔符
-    this.state!.inMathMode = true;
 
     let content = '';
     const closeType = delimiter === '$$' ? TokenType.MathDisplayClose : TokenType.MathBracketClose;
@@ -939,8 +992,12 @@ export class LatexLezerParser {
     while (!this.isAtEnd()) {
       const token = this.currentToken()!;
 
-      if (token.type === closeType) {
+      if (token.type === closeType || token.type === TokenType.ParagraphBreak || this.atOpenEnvironmentEnd()) {
         break;
+      }
+      if (token.type === TokenType.Error) {
+        this.parseError();
+        continue;
       }
 
       content += token.value;
@@ -951,10 +1008,8 @@ export class LatexLezerParser {
     if (this.currentToken()?.type === closeType) {
       this.advance();
     } else {
-      this.addError(`缺少数学模式结束分隔符`, start, this.previousToken()?.to ?? start);
+      this.addError(`公式缺少结束分隔符 ${delimiter === '$$' ? '$$' : '\\]'}`, start, startToken.to);
     }
-
-    this.state!.inMathMode = false;
 
     const end = this.previousToken()?.to ?? start;
 
@@ -1049,12 +1104,13 @@ export class LatexLezerParser {
   }
 
   /**
-   * 解析错误
+   * 解析错误 Token（词法器无法识别的片段）
    */
   private parseError(): LatexASTNode {
     const token = this.currentToken()!;
-    this.addError(`无效的 Token: ${token.value}`, token.from, token.to);
-    const node = this.createErrorNode(`无效的 Token`, token.from, token.to);
+    const message = describeErrorToken(token.value);
+    this.addError(message, token.from, token.to);
+    const node = this.createErrorNode(message, token.from, token.to);
     this.advance();
     return node;
   }
@@ -1066,7 +1122,7 @@ export class LatexLezerParser {
   /**
    * 创建初始状态
    */
-  private createInitialState(tokens: Token[], startTime: number): ParserState {
+  private createInitialState(input: string, tokens: Token[], startTime: number): ParserState {
     return {
       tokenIndex: 0,
       tokens,
@@ -1076,8 +1132,9 @@ export class LatexLezerParser {
       nodeIdCounter: 0,
       nodeMap: new Map(),
       envStack: [],
-      inMathMode: false,
       startTime,
+      input,
+      lineStarts: null,
     };
   }
 
@@ -1187,6 +1244,17 @@ export class LatexLezerParser {
   }
 
   /**
+   * 当前 Token 是否为某个已打开环境的 \end：内层未闭合的分组/公式在此截断，交给该环境消费
+   */
+  private atOpenEnvironmentEnd(): boolean {
+    const token = this.currentToken();
+    return (
+      token?.type === TokenType.EndEnv &&
+      this.state!.envStack.includes(this.peekEnvironmentName(this.state!.tokenIndex) ?? '')
+    );
+  }
+
+  /**
    * 查看环境名称
    */
   private peekEnvironmentName(beginIndex: number): string | null {
@@ -1235,34 +1303,44 @@ export class LatexLezerParser {
    * 添加错误
    */
   private addError(message: string, from: number, to: number): void {
-    if (!this.state) return;
-
-    const token = this.currentToken();
-    this.state.errors.push({
-      message,
-      from,
-      to,
-      line: token?.line ?? 0,
-      column: token?.column ?? 0,
-      severity: 'error',
-    });
+    this.addProblem('error', message, from, to);
   }
 
   /**
    * 添加警告
    */
   private addWarning(message: string, from: number, to: number): void {
-    if (!this.state) return;
+    this.addProblem('warning', message, from, to);
+  }
 
-    const token = this.currentToken();
-    this.state.warnings.push({
-      message,
-      from,
-      to,
-      line: token?.line ?? 0,
-      column: token?.column ?? 0,
-      severity: 'warning',
-    });
+  private addProblem(severity: 'error' | 'warning', message: string, from: number, to: number): void {
+    if (!this.state) return;
+    const { line, column } = this.locate(from);
+    const problem: LatexParseError = { message, from, to, line, column, severity };
+    (severity === 'error' ? this.state.errors : this.state.warnings).push(problem);
+  }
+
+  /**
+   * 偏移 → 行列（行从 1 计，列从 0 计）
+   */
+  private locate(offset: number): { line: number; column: number } {
+    const state = this.state!;
+    if (!state.lineStarts) {
+      const starts = [0];
+      for (let i = state.input.indexOf('\n'); i !== -1; i = state.input.indexOf('\n', i + 1)) {
+        starts.push(i + 1);
+      }
+      state.lineStarts = starts;
+    }
+    const starts = state.lineStarts;
+    let low = 0;
+    let high = starts.length - 1;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (starts[mid]! <= offset) low = mid;
+      else high = mid - 1;
+    }
+    return { line: low + 1, column: offset - starts[low]! };
   }
 
   /**
@@ -1352,4 +1430,14 @@ export function parseLatexDocument(
 ): LatexLezerParseResult {
   const parser = new LatexLezerParser(config);
   return parser.parse(input);
+}
+
+/**
+ * 词法错误 Token 的说明
+ */
+function describeErrorToken(value: string): string {
+  if (value === '\\') return '反斜杠后缺少命令名';
+  if (value === '$') return '公式中出现多余的 $';
+  if (value.startsWith('\\verb')) return '\\verb 缺少结束分隔符（必须在同一行内闭合）';
+  return `无法识别的内容: ${value}`;
 }

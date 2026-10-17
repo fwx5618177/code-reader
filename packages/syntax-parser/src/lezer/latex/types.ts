@@ -386,9 +386,9 @@ export interface LatexParseError {
   from: number;
   /** 结束位置 */
   to: number;
-  /** 行号 */
+  /** 行号（从 1 计） */
   line: number;
-  /** 列号 */
+  /** 列号（从 0 计，UTF-16 码元） */
   column: number;
   /** 严重程度 */
   severity: 'error' | 'warning' | 'info';
