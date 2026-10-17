@@ -1,7 +1,7 @@
 // ================================
 // 拼写检查服务（渲染进程单例）
 // 负责：读取设置、经 IPC 读取词典文件并交给 Worker 解析、缓存检查结果、
-// 用户词典与会话内忽略、词典导入/删除/切换（热切换，无需重启）
+// 用户词典增删与会话内忽略、词典导入/删除/切换（热切换，无需重启）
 // ================================
 
 import type { SpellcheckDictionaryInfo } from '../types/electron';
@@ -16,6 +16,8 @@ export interface SpellcheckSnapshot {
   enabled: boolean;
   dictionaryId: string;
   dictionaries: SpellcheckDictionaryInfo[];
+  /** 个人词典中的单词（按添加顺序） */
+  userWords: string[];
   status: SpellcheckStatus;
   error: string | null;
 }
@@ -34,6 +36,7 @@ class SpellcheckService implements SpellChecker {
     enabled: false,
     dictionaryId: DEFAULT_SPELLCHECK_DICTIONARY,
     dictionaries: [],
+    userWords: [],
     status: 'idle',
     error: null,
   };
@@ -41,11 +44,12 @@ class SpellcheckService implements SpellChecker {
   private worker: Worker | null = null;
   private requestId = 0;
   private readonly pending = new Map<number, PendingRequest>();
-  /** 单词 → 是否正确；切换词典时清空 */
+  /** 单词 → 是否正确；词典或用户词变化时经 resetCache 清空 */
   private readonly cache = new Map<string, boolean>();
+  /** 缓存代次：每次清空缓存时递增，清空前发出的检查结果随之作废 */
+  private cacheGeneration = 0;
   /** 会话内忽略的单词 */
   private readonly ignored = new Set<string>();
-  private userWords: Promise<string[]> | null = null;
   /** 词典加载序号：只采用最后一次加载的结果 */
   private loadSeq = 0;
   private initialized: Promise<void> | null = null;
@@ -77,11 +81,15 @@ class SpellcheckService implements SpellChecker {
     if (!this.initialized) {
       this.initialized = (async () => {
         const settings = await settingsService.get();
-        const dictionaries = await window.electron.spellcheck.listDictionaries();
+        const [dictionaries, userWords] = await Promise.all([
+          window.electron.spellcheck.listDictionaries(),
+          window.electron.spellcheck.getUserWords(),
+        ]);
         this.setSnapshot({
           enabled: settings.spellCheck,
           dictionaryId: settings.spellCheckDictionary,
           dictionaries,
+          userWords,
         });
         if (settings.spellCheck) await this.loadDictionary();
       })().catch((error) => {
@@ -107,12 +115,12 @@ class SpellcheckService implements SpellChecker {
   }
 
   async checkWords(words: string[]): Promise<void> {
-    const seq = this.loadSeq;
+    const generation = this.cacheGeneration;
     const unknown = [...new Set(words)].filter((word) => this.lookup(word) === undefined);
     if (unknown.length === 0) return;
     const misspelled = new Set(await this.call('check', { words: unknown }));
-    // 检查期间切换了词典：结果作废
-    if (seq !== this.loadSeq) return;
+    // 检查期间词典或用户词发生变化：结果作废
+    if (generation !== this.cacheGeneration) return;
     for (const word of unknown) this.cache.set(word, !misspelled.has(word));
   }
 
@@ -122,10 +130,22 @@ class SpellcheckService implements SpellChecker {
 
   async addToDictionary(word: string): Promise<void> {
     await window.electron.spellcheck.addUserWord(word);
-    const words = await this.loadUserWords();
-    if (!words.includes(word)) words.push(word);
+    if (!this.snapshot.userWords.includes(word)) {
+      this.setSnapshot({ userWords: [...this.snapshot.userWords, word] });
+    }
     await this.call('addWords', { words: [word] });
     this.cache.set(word, true);
+    this.notify();
+  }
+
+  /** 从个人词典移除单词：同时从已加载的词典中移除并清空缓存，编辑器随即重新检查（无需重启） */
+  async removeFromDictionary(word: string): Promise<void> {
+    await this.init();
+    await window.electron.spellcheck.removeUserWord(word);
+    this.setSnapshot({ userWords: this.snapshot.userWords.filter((existing) => existing !== word) });
+    // 尚未创建 Worker 说明词典还没加载，之后加载时会使用更新后的词表
+    if (this.worker) await this.call('removeWords', { words: [word] });
+    this.resetCache();
     this.notify();
   }
 
@@ -173,9 +193,9 @@ class SpellcheckService implements SpellChecker {
 
   // ======= 词典加载 =======
 
-  private loadUserWords(): Promise<string[]> {
-    this.userWords ??= window.electron.spellcheck.getUserWords();
-    return this.userWords;
+  private resetCache(): void {
+    this.cacheGeneration++;
+    this.cache.clear();
   }
 
   private async loadDictionary(): Promise<void> {
@@ -185,13 +205,11 @@ class SpellcheckService implements SpellChecker {
     const id = dictionaries.some((d) => d.id === dictionaryId) ? dictionaryId : DEFAULT_SPELLCHECK_DICTIONARY;
     this.setSnapshot({ status: 'loading', error: null });
     try {
-      const [files, userWords] = await Promise.all([
-        window.electron.spellcheck.readDictionary(id),
-        this.loadUserWords(),
-      ]);
-      await this.call('load', { aff: files.aff, dic: files.dic, userWords });
+      const files = await window.electron.spellcheck.readDictionary(id);
+      // 词表在读取词典文件之后取：期间增删的用户词也会生效；之后的增删按消息顺序在 load 之后执行
+      await this.call('load', { aff: files.aff, dic: files.dic, userWords: this.snapshot.userWords });
       if (seq !== this.loadSeq) return;
-      this.cache.clear();
+      this.resetCache();
       this.setSnapshot({ status: 'ready', dictionaryId: id });
     } catch (error) {
       if (seq !== this.loadSeq) return;
@@ -235,7 +253,7 @@ class SpellcheckService implements SpellChecker {
       this.pending.clear();
       this.worker?.terminate();
       this.worker = null;
-      this.cache.clear();
+      this.resetCache();
       this.setSnapshot({ status: 'error', error: error.message });
     };
     return worker;

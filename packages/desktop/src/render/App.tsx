@@ -1031,6 +1031,7 @@ const App: React.FC = () => {
             )}
             </div>
             <EditorFooter
+              hasDocument={editorTabs.activeDocId !== null && editorTabs.activeDocId === selectedDocId}
               charCount={focusCharCount}
               wordCount={focusWordCount}
               isDirty={editorDirty}

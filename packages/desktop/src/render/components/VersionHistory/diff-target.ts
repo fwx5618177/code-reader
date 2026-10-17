@@ -18,15 +18,17 @@ export interface VersionDiff {
 const versionLabel = (version: DocumentVersion) => `版本 ${version.versionNumber}`;
 
 /**
- * 计算对比内容；versions 按版本号倒序（与历史列表一致）
- * 上一版本不在已加载列表中时返回 null
+ * 计算对比内容；versions 按版本号倒序（与历史列表一致）。
+ * 对比上一版时优先使用已加载的相邻条目，上一版本尚未分页加载时通过 fetchPrevious 按需读取；
+ * 索引越界或上一版本不存在（第一版、已被清理）时返回 null
  */
-export function buildVersionDiff(
+export async function resolveVersionDiff(
   versions: readonly DocumentVersion[],
   index: number,
   mode: VersionDiffMode,
-  currentContent: string
-): VersionDiff | null {
+  currentContent: string,
+  fetchPrevious: (version: DocumentVersion) => Promise<DocumentVersion | null>
+): Promise<VersionDiff | null> {
   const version = versions[index];
   if (!version) return null;
 
@@ -40,7 +42,7 @@ export function buildVersionDiff(
     };
   }
 
-  const previous = versions[index + 1];
+  const previous = versions[index + 1] ?? (await fetchPrevious(version));
   if (!previous) return null;
   return {
     version,

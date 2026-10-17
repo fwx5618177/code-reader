@@ -1250,6 +1250,25 @@
 }
 
 // ================================
+// 个人词典
+// ================================
+
+.userWordSearch {
+  margin-bottom: var(--spacing-3);
+}
+
+// 单词较多时列表内部滚动，不撑高设置页
+.userWordList {
+  max-height: 320px;
+  overflow-y: auto;
+  @include scrollbar;
+
+  .settingLabel {
+    word-break: break-all;
+  }
+}
+
+// ================================
 // 亮色主题调整
 // ================================
 

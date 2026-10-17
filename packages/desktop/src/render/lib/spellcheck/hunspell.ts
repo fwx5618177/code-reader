@@ -9,6 +9,9 @@ import { decodeDictionaryFile, detectEncoding } from './encoding';
 
 type Flags = readonly string[];
 
+/** 用户词共用的空标记对象：以引用区分用户词与词典自带的无标记词条，删除用户词时不会误删词典词条 */
+const USER_FLAGS: Flags = Object.freeze([]);
+
 /** 一种词形分析：词根的标记 + 依次去掉的词缀 */
 interface Analysis {
   flags: Flags;
@@ -133,7 +136,17 @@ export class Hunspell {
   /** 添加无词缀的单词（用户词典） */
   addWord(word: string): void {
     const normalized = this.normalize(word);
-    if (normalized) this.addEntry(normalized, []);
+    if (normalized) this.addEntry(normalized, USER_FLAGS);
+  }
+
+  /** 移除由 addWord 添加的用户词；词典自带的同名词条保留 */
+  removeWord(word: string): void {
+    const normalized = this.normalize(word);
+    const entries = this.words.get(normalized);
+    if (!entries) return;
+    const remaining = entries.filter((flags) => flags !== USER_FLAGS);
+    if (remaining.length === 0) this.words.delete(normalized);
+    else this.words.set(normalized, remaining);
   }
 
   /** 输入转换与忽略字符处理 */

@@ -36,14 +36,23 @@ export function normalizeRecentDocuments(payload: unknown): RecentDocument[] {
   return documents;
 }
 
+/**
+ * 菜单项文字转义：Windows / Linux 把 & 当作助记键前缀（不显示并给后一个字符加下划线），
+ * 需写成 && 才能显示字面的 &；macOS 不处理 &，转义反而会显示两个
+ */
+export function escapeMenuLabel(label: string, platform: NodeJS.Platform): string {
+  return platform === 'darwin' ? label : label.replace(/&/g, '&&');
+}
+
 /** 生成“最近打开”的子菜单项；没有文档时显示不可点的提示 */
 export function buildRecentSubmenu(
   documents: readonly RecentDocument[],
-  onOpen: (id: string) => void
+  onOpen: (id: string) => void,
+  platform: NodeJS.Platform
 ): MenuItemConstructorOptions[] {
   if (documents.length === 0) return [{ label: '暂无文档', enabled: false }];
   return documents.map((document) => ({
-    label: document.title,
+    label: escapeMenuLabel(document.title, platform),
     click: () => onOpen(document.id),
   }));
 }

@@ -1,6 +1,6 @@
 // ================================
 // 拼写检查 ProseMirror 插件
-// - 错误单词以波浪线装饰标出；右键弹出建议、添加到词典、忽略
+// - 错误单词以波浪线装饰标出；右键弹出建议、添加到词典、本次忽略（仅当前会话有效，不持久化）
 // - 增量检查：插件状态记录“待检查区间”，编辑只会把改动区间标为待检查；
 //   每次只检查视口内与待检查区间相交的文本块，滚动时继续检查新进入视口的部分
 // - 跳过代码块、行内代码、链接与行内原子节点（公式、双向链接），分词规则见 tokenize.ts
@@ -280,7 +280,7 @@ class SpellcheckView {
           checker.addToDictionary(word).catch((error: unknown) => console.error('[Spellcheck] 添加到词典失败:', error));
         },
       },
-      { type: 'item', label: '忽略', hint: '本次会话', run: () => checker.ignore(word) },
+      { type: 'item', label: '本次忽略', run: () => checker.ignore(word) },
     ];
 
     this.menu.open(event.clientX, event.clientY, [{ type: 'heading', label: '正在查找建议…' }, ...actions]);

@@ -3,6 +3,8 @@ import { FileText, Loader2, Check } from 'lucide-react';
 import styles from './EditorFooter.module.scss';
 
 export interface EditorFooterProps {
+  /** 是否有正在编辑的文档；为 false 时不显示字数与保存状态（以免展示已关闭文档的数据），只显示中性提示 */
+  hasDocument?: boolean;
   /** Character count */
   charCount: number;
   /** Word count (Chinese chars + English words) */
@@ -49,6 +51,7 @@ function formatRelativeTime(date: Date): string {
 const DEFAULT_HINTS = [{ key: '⌘S', label: '保存' }];
 
 export const EditorFooter: React.FC<EditorFooterProps> = ({
+  hasDocument = true,
   charCount,
   wordCount,
   isDirty = false,
@@ -89,14 +92,23 @@ export const EditorFooter: React.FC<EditorFooterProps> = ({
   return (
     <div className={`${styles.editorFooter} ${className || ''}`}>
       <div className={styles.stats}>
-        <span className={styles.statItem}>
-          <FileText size={12} />
-          <span>{charCount} 字符</span>
-        </span>
-        <span className={styles.statItem}>
-          <span>{wordCount} 字</span>
-        </span>
-        {renderSaveStatus()}
+        {hasDocument ? (
+          <>
+            <span className={styles.statItem}>
+              <FileText size={12} />
+              <span>{charCount} 字符</span>
+            </span>
+            <span className={styles.statItem}>
+              <span>{wordCount} 字</span>
+            </span>
+            {renderSaveStatus()}
+          </>
+        ) : (
+          <span className={styles.statItem}>
+            <FileText size={12} />
+            <span>未打开文档</span>
+          </span>
+        )}
       </div>
 
       {/* Custom action buttons */}

@@ -1,5 +1,5 @@
 // ================================
-// 版本保留策略测试：新增版本后自动清理，只保留最近 50 个
+// 版本服务测试：新增版本后自动清理（只保留最近 50 个）、按需获取上一版本
 // ================================
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ vi.mock('../repository', () => ({
     autoSave: vi.fn(),
     restore: vi.fn(),
     prune: vi.fn(),
+    getByNumber: vi.fn(),
   },
 }));
 
@@ -51,5 +52,26 @@ describe('versionService 自动清理旧版本', () => {
     vi.mocked(versionRepository.create).mockResolvedValue(version);
     vi.mocked(versionRepository.prune).mockRejectedValue(new Error('db busy'));
     await expect(versionService.createSaveVersion('doc', '内容')).resolves.toBe(version);
+  });
+});
+
+describe('versionService.getVersionBefore', () => {
+  it('按版本号减 1 从仓库读取上一版本', async () => {
+    const previous = { id: 'v4', itemId: 'doc', versionNumber: 4 } as DocumentVersion;
+    vi.mocked(versionRepository.getByNumber).mockResolvedValue(previous);
+    const current = { id: 'v5', itemId: 'doc', versionNumber: 5 } as DocumentVersion;
+    await expect(versionService.getVersionBefore(current)).resolves.toBe(previous);
+    expect(versionRepository.getByNumber).toHaveBeenCalledWith('doc', 4);
+  });
+
+  it('第一版没有上一版本，不查询仓库', async () => {
+    await expect(versionService.getVersionBefore(version)).resolves.toBeNull();
+    expect(versionRepository.getByNumber).not.toHaveBeenCalled();
+  });
+
+  it('上一版本已被清理时返回 null', async () => {
+    vi.mocked(versionRepository.getByNumber).mockResolvedValue(null);
+    const oldestKept = { id: 'v51', itemId: 'doc', versionNumber: 51 } as DocumentVersion;
+    await expect(versionService.getVersionBefore(oldestKept)).resolves.toBeNull();
   });
 });

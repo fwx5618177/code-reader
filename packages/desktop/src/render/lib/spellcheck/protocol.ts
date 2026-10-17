@@ -10,6 +10,8 @@ export interface SpellWorkerMethods {
   suggest: { params: { word: string }; result: string[] };
   /** 向当前词典追加用户词 */
   addWords: { params: { words: string[] }; result: void };
+  /** 从当前词典移除用户词（词典自带的词条不受影响）；尚未加载词典时无需处理 */
+  removeWords: { params: { words: string[] }; result: void };
 }
 
 export type SpellWorkerMethod = keyof SpellWorkerMethods;

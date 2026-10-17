@@ -524,6 +524,7 @@ interface ElectronAPI {
     removeDictionary: (id: string) => Promise<void>;
     getUserWords: () => Promise<string[]>;
     addUserWord: (word: string) => Promise<void>;
+    removeUserWord: (word: string) => Promise<void>;
   };
 
   /** 托盘菜单：on* 订阅菜单动作并返回取消订阅函数；setRecentDocuments 更新“最近打开”子菜单 */

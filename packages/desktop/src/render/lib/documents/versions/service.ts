@@ -164,6 +164,16 @@ class VersionService {
   }
 
   /**
+   * 获取紧邻在指定版本之前的版本（不依赖历史列表是否已分页加载到该版本）。
+   * 版本号在同一文档内连续：新版本取当前最大号 +1，清理只删除最旧的版本且不支持单独删除，
+   * 因此上一版就是版本号减 1；已被清理或本身就是第一版时返回 null
+   */
+  async getVersionBefore(version: DocumentVersion): Promise<DocumentVersion | null> {
+    if (version.versionNumber <= 1) return null;
+    return versionRepository.getByNumber(version.itemId, version.versionNumber - 1);
+  }
+
+  /**
    * Get total version count for a document
    */
   async getVersionCount(itemId: string): Promise<number> {

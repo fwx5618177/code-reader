@@ -4,7 +4,7 @@
 // 使用 lib/documents/versions 模块进行状态管理
 // ================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   History,
   RotateCcw,
@@ -27,9 +27,10 @@ import {
   getChangeTypeLabel,
   getAuthorTypeLabel,
   formatContentSize,
+  versionService,
 } from '../../lib/documents/versions';
 import { DiffViewer } from '../../lib/writing/components/DiffViewer';
-import { buildVersionDiff, type VersionDiff, type VersionDiffMode } from './diff-target';
+import { resolveVersionDiff, type VersionDiff, type VersionDiffMode } from './diff-target';
 import styles from './VersionHistory.module.scss';
 
 // ================================
@@ -191,7 +192,7 @@ function VersionDiffModal({
 interface VersionItemProps {
   version: DocumentVersion;
   isFirst: boolean;
-  /** 上一版本已加载，可以对比 */
+  /** 存在上一版本（已加载，或列表后面还有未加载的更旧版本），可以对比 */
   hasPrevious: boolean;
   onPreview: () => void;
   onCompare: (mode: VersionDiffMode) => void;
@@ -364,6 +365,9 @@ export function VersionHistory({
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   // 本地状态 - 对比模态框（内容在打开时确定，不随后续编辑变化）
   const [activeDiff, setActiveDiff] = useState<VersionDiff | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  /** 对比请求序号：按需读取上一版本期间又发起对比或关闭面板时，丢弃过时的结果 */
+  const compareSeq = useRef(0);
 
   // 面板打开时加载版本
   useEffect(() => {
@@ -371,9 +375,30 @@ export function VersionHistory({
       openPanel(itemId);
       loadVersions(itemId);
     } else if (!isOpen) {
+      compareSeq.current++;
       closePanel();
     }
   }, [isOpen, itemId, openPanel, closePanel, loadVersions]);
+
+  // 处理对比：上一版本未分页加载时从版本服务按需读取
+  const handleCompare = useCallback(
+    async (index: number, mode: VersionDiffMode) => {
+      const seq = ++compareSeq.current;
+      setCompareError(null);
+      try {
+        const diff = await resolveVersionDiff(versions, index, mode, currentContent, (version) =>
+          versionService.getVersionBefore(version)
+        );
+        if (seq !== compareSeq.current) return;
+        if (diff) setActiveDiff(diff);
+        else setCompareError('上一版本已不存在（可能已被自动清理）');
+      } catch (error) {
+        if (seq !== compareSeq.current) return;
+        setCompareError(`读取上一版本失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [versions, currentContent]
+  );
 
   // 处理预览点击
   const handlePreview = useCallback(
@@ -425,7 +450,7 @@ export function VersionHistory({
   }, [closePanel, onClose]);
 
   // 合并错误信息
-  const errorMessage = listError || restoreError;
+  const errorMessage = listError || restoreError || compareError;
 
   if (!isOpen) return null;
 
@@ -468,11 +493,9 @@ export function VersionHistory({
                 key={version.id}
                 version={version}
                 isFirst={index === 0}
-                hasPrevious={index + 1 < versions.length}
+                hasPrevious={index + 1 < versions.length || hasMore}
                 onPreview={() => handlePreview(version.id)}
-                onCompare={(mode) =>
-                  setActiveDiff(buildVersionDiff(versions, index, mode, currentContent))
-                }
+                onCompare={(mode) => void handleCompare(index, mode)}
                 onRestore={() => handleRestoreFromList(version.id)}
                 restoring={restoring}
               />

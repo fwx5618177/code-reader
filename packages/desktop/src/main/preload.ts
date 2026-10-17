@@ -105,6 +105,7 @@ const validChannels = [
   'spellcheck:removeDictionary',
   'spellcheck:getUserWords',
   'spellcheck:addUserWord',
+  'spellcheck:removeUserWord',
 
 ];
 
@@ -314,6 +315,7 @@ contextBridge.exposeInMainWorld('electron', {
     removeDictionary: (id: string) => ipcRenderer.invoke('spellcheck:removeDictionary', id),
     getUserWords: () => ipcRenderer.invoke('spellcheck:getUserWords'),
     addUserWord: (word: string) => ipcRenderer.invoke('spellcheck:addUserWord', word),
+    removeUserWord: (word: string) => ipcRenderer.invoke('spellcheck:removeUserWord', word),
   },
 
   // 托盘菜单：动作由主进程推送；最近文档列表由渲染进程提供

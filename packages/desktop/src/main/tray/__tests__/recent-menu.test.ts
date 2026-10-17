@@ -3,7 +3,7 @@
 // ================================
 
 import { describe, expect, it, vi } from 'vitest';
-import { buildRecentSubmenu, normalizeRecentDocuments, RECENT_DOCUMENTS_LIMIT } from '../recent-menu';
+import { buildRecentSubmenu, escapeMenuLabel, normalizeRecentDocuments, RECENT_DOCUMENTS_LIMIT } from '../recent-menu';
 
 describe('normalizeRecentDocuments', () => {
   it('非数组或非法项被丢弃，重复 id 只保留第一项', () => {
@@ -32,9 +32,20 @@ describe('normalizeRecentDocuments', () => {
   });
 });
 
+describe('escapeMenuLabel', () => {
+  it('Windows / Linux 上 & 转义为 &&，避免被当作助记键前缀', () => {
+    expect(escapeMenuLabel('Q&A & 笔记', 'win32')).toBe('Q&&A && 笔记');
+    expect(escapeMenuLabel('a&&b', 'linux')).toBe('a&&&&b');
+  });
+
+  it('macOS 保持原样', () => {
+    expect(escapeMenuLabel('Q&A', 'darwin')).toBe('Q&A');
+  });
+});
+
 describe('buildRecentSubmenu', () => {
   it('没有文档时显示不可点击的提示', () => {
-    expect(buildRecentSubmenu([], vi.fn())).toEqual([{ label: '暂无文档', enabled: false }]);
+    expect(buildRecentSubmenu([], vi.fn(), 'darwin')).toEqual([{ label: '暂无文档', enabled: false }]);
   });
 
   it('点击菜单项回调对应文档 id', () => {
@@ -44,10 +55,17 @@ describe('buildRecentSubmenu', () => {
         { id: 'a', title: 'A' },
         { id: 'b', title: 'B' },
       ],
-      onOpen
+      onOpen,
+      'darwin'
     );
     expect(items.map((item) => item.label)).toEqual(['A', 'B']);
     items[1].click?.(undefined as never, undefined, undefined as never);
     expect(onOpen).toHaveBeenCalledWith('b');
+  });
+
+  it('按平台转义标题中的 &', () => {
+    const documents = [{ id: 'a', title: 'R&D' }];
+    expect(buildRecentSubmenu(documents, vi.fn(), 'win32')[0].label).toBe('R&&D');
+    expect(buildRecentSubmenu(documents, vi.fn(), 'darwin')[0].label).toBe('R&D');
   });
 });

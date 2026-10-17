@@ -322,10 +322,14 @@ export class TrayManager {
       },
       {
         label: '最近打开',
-        submenu: buildRecentSubmenu(this.recentDocuments, (id) => {
-          this.showAndFocusWindow();
-          this.mainWindow?.webContents.send('tray:open-document', id);
-        }),
+        submenu: buildRecentSubmenu(
+          this.recentDocuments,
+          (id) => {
+            this.showAndFocusWindow();
+            this.mainWindow?.webContents.send('tray:open-document', id);
+          },
+          process.platform
+        ),
       },
       { type: 'separator' },
 

@@ -1,9 +1,9 @@
 // ================================
-// 编辑器设置：拼写检查开关、当前词典、导入/删除词典
-// 状态来自 spellcheckService，切换词典即时生效（热切换）
+// 编辑器设置：拼写检查开关、当前词典、导入/删除词典、个人词典管理
+// 状态来自 spellcheckService，切换词典与删除个人词典中的单词均即时生效（热切换）
 // ================================
 
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AlertCircle, Plus, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '../InputDialog';
 import { spellcheckService, type SpellcheckStatus } from '../../services/spellcheckService';
@@ -44,10 +44,19 @@ export const SpellCheckSettings: React.FC = () => {
   const snapshot = useSyncExternalStore(spellcheckService.subscribe, spellcheckService.getSnapshot);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<SpellcheckDictionaryInfo | null>(null);
+  const [wordQuery, setWordQuery] = useState('');
 
   useEffect(() => {
     void spellcheckService.init();
   }, []);
+
+  // 按字母顺序展示，搜索忽略大小写
+  const visibleWords = useMemo(() => {
+    const keyword = wordQuery.trim().toLowerCase();
+    return snapshot.userWords
+      .filter((word) => word.toLowerCase().includes(keyword))
+      .sort((a, b) => a.localeCompare(b));
+  }, [snapshot.userWords, wordQuery]);
 
   const run = (action: () => Promise<unknown>) => {
     setActionError(null);
@@ -116,6 +125,50 @@ export const SpellCheckSettings: React.FC = () => {
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>个人词典（{snapshot.userWords.length}）</h3>
+        <p className={styles.sectionDescription}>
+          在编辑器中右键「添加到词典」的单词保存在这里，对所有词典生效；删除后立即重新检查。
+          右键「本次忽略」的单词只在本次运行中有效，不会保存。
+        </p>
+        {snapshot.userWords.length === 0 ? (
+          <div className={styles.emptyState}>
+            <p>个人词典为空</p>
+          </div>
+        ) : (
+          <>
+            <input
+              className={`${styles.formInput} ${styles.userWordSearch}`}
+              value={wordQuery}
+              placeholder="搜索单词"
+              aria-label="搜索个人词典"
+              onChange={(event) => setWordQuery(event.target.value)}
+            />
+            {visibleWords.length === 0 ? (
+              <div className={styles.emptyState}>
+                <p>没有匹配的单词</p>
+              </div>
+            ) : (
+              <div className={`${styles.settingsList} ${styles.userWordList}`}>
+                {visibleWords.map((word) => (
+                  <div key={word} className={styles.settingItem}>
+                    <span className={styles.settingLabel}>{word}</span>
+                    <button
+                      className={`${styles.actionButton} ${styles.deleteBtn}`}
+                      aria-label={`从个人词典删除 ${word}`}
+                      onClick={() => run(() => spellcheckService.removeFromDictionary(word))}
+                    >
+                      <Trash2 size={14} />
+                      <span>删除</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 

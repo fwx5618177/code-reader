@@ -33,6 +33,10 @@ function handle(request: SpellWorkerRequest): unknown {
       for (const word of request.params.words) dictionary.addWord(word);
       return undefined;
     }
+    case 'removeWords':
+      // 尚未加载词典时无需处理：下次加载会使用已更新的用户词表
+      for (const word of request.params.words) hunspell?.removeWord(word);
+      return undefined;
   }
 }
 

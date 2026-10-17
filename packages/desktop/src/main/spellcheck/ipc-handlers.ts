@@ -42,6 +42,33 @@ function userWordsFile(): string {
   return join(spellcheckDataDir(), 'user-words.txt');
 }
 
+/** 读取用户词表（去重、保持添加顺序）；文件不存在视为空表，其他读取错误抛出，避免后续改写时覆盖原文件 */
+async function readUserWords(): Promise<string[]> {
+  let text: string;
+  try {
+    text = await readFile(userWordsFile(), 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  return [...new Set(text.split(/\r?\n/).filter((word) => word.length > 0))];
+}
+
+function assertUserWord(word: unknown): asserts word is string {
+  if (typeof word !== 'string' || !word || word.length > MAX_USER_WORD_LENGTH || /\s/.test(word)) {
+    throw new Error('单词无效');
+  }
+}
+
+/** 用户词表的写操作串行执行：删除是“读取 → 改写”，与并发的追加交错会丢失词 */
+let userWordsQueue: Promise<unknown> = Promise.resolve();
+
+function serializeUserWords<T>(operation: () => Promise<T>): Promise<T> {
+  const result = userWordsQueue.then(operation);
+  userWordsQueue = result.catch(() => undefined);
+  return result;
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -173,20 +200,23 @@ export function registerSpellcheckHandlers(packageRoot: string): void {
     await rm(join(userDictionariesDir(), match[2]), { recursive: true, force: true });
   });
 
-  ipcMain.handle('spellcheck:getUserWords', async (): Promise<string[]> => {
-    try {
-      const text = await readFile(userWordsFile(), 'utf-8');
-      return text.split(/\r?\n/).filter((word) => word.length > 0);
-    } catch {
-      return [];
-    }
-  });
+  ipcMain.handle('spellcheck:getUserWords', (): Promise<string[]> => serializeUserWords(readUserWords));
 
   ipcMain.handle('spellcheck:addUserWord', async (_event, word: unknown): Promise<void> => {
-    if (typeof word !== 'string' || !word || word.length > MAX_USER_WORD_LENGTH || /\s/.test(word)) {
-      throw new Error('单词无效');
-    }
-    await mkdir(spellcheckDataDir(), { recursive: true });
-    await appendFile(userWordsFile(), `${word}\n`, 'utf-8');
+    assertUserWord(word);
+    await serializeUserWords(async () => {
+      await mkdir(spellcheckDataDir(), { recursive: true });
+      await appendFile(userWordsFile(), `${word}\n`, 'utf-8');
+    });
+  });
+
+  ipcMain.handle('spellcheck:removeUserWord', async (_event, word: unknown): Promise<void> => {
+    assertUserWord(word);
+    await serializeUserWords(async () => {
+      const words = await readUserWords();
+      const remaining = words.filter((existing) => existing !== word);
+      if (remaining.length === words.length) return;
+      await writeFile(userWordsFile(), remaining.map((existing) => `${existing}\n`).join(''), 'utf-8');
+    });
   });
 }

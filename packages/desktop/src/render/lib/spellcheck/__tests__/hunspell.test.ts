@@ -121,6 +121,17 @@ describe('Hunspell 词缀', () => {
     local.addWord('zed');
     expect(local.check('Zed')).toBe(true);
   });
+
+  it('移除用户词：只移除用户添加的词条，词典自带的同名词条保留', () => {
+    const local = new Hunspell(AFF, '1\nParis');
+    local.addWord('zed');
+    local.addWord('Paris');
+    local.removeWord('zed');
+    local.removeWord('Paris');
+    local.removeWord('missing');
+    expect(local.check('zed')).toBe(false);
+    expect(local.check('Paris')).toBe(true);
+  });
 });
 
 describe('Hunspell FLAG 模式与别名', () => {
