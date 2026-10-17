@@ -23,6 +23,7 @@ export {
   renderContentToHtml,
   renderWikiEmbed,
   wikiLinkClickTarget,
+  linkAnchorId,
   MAX_EMBED_DEPTH,
   EMBED_IMAGE_PATH_ATTR,
   EMBED_IMAGE_MIME_ATTR,
@@ -37,6 +38,7 @@ export {
   extractHeadings,
   extractSection,
   findHeadingInDoc,
+  findLinkTargetInDoc,
   markdownToPlainText,
   stripMarkup,
   type WikiLinkReference,
@@ -50,8 +52,30 @@ export {
   headingOccurrence,
   type WikiLinkParts,
 } from './wiki-link';
+export {
+  isBlockId,
+  blockRefId,
+  stripBlockMarker,
+  collectDocBlocks,
+  findBlockInDoc,
+  findSlotNode,
+  extractBlock,
+  summarizeBlocks,
+  summarizeDocBlocks,
+  blockKindLabel,
+  generateBlockId,
+  type DocBlock,
+  type BlockRelation,
+  type BlockSummary,
+  type BlockIdSlot,
+} from './block-ref';
+export { createBlockIdPlugin } from './block-id-plugin';
 export { createLivePreviewPlugin, livePreviewKey } from './live-preview';
-export { SlashCommandProvider, WikiLinkCompletionProvider } from './completion';
+export {
+  SlashCommandProvider,
+  WikiLinkCompletionProvider,
+  type CompletionBlockSource,
+} from './completion';
 export { createTableKeymap } from './table-keymap';
 
 /**

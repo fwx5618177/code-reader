@@ -32,15 +32,18 @@ import {
   createTableKeymap,
   SlashCommandProvider,
   WikiLinkCompletionProvider,
+  createBlockIdPlugin,
   extractHeadings,
-  findHeadingInDoc,
+  findLinkTargetInDoc,
+  summarizeDocBlocks,
   parseWikiLinkInner,
   wikiLinkRef,
   wikiLinkRefOf,
+  type BlockIdSlot,
   type ContentFormat,
   type WikiLinkParts,
 } from '../../lib/markdown';
-import { useLinkResolver } from '../../lib/links';
+import { normalizeLinkTarget, useLinkResolver } from '../../lib/links';
 import {
   Bold,
   Italic,
@@ -78,6 +81,7 @@ import { LatexEditor } from './LatexEditor';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
 import { createBlockKeymap } from '../../lib/editor/block-commands';
 import { createBlockHandlePlugin } from '../../lib/editor/block-handle';
+import { createRevealHighlightPlugin, flashNode } from '../../lib/editor/reveal-highlight';
 import { createTypewriterPlugin, setTypewriterEnabled } from '../../lib/editor/typewriter';
 import type { PopupMenuClasses } from '../../lib/editor/popup-menu';
 import { createSpellcheckPlugin } from '../../lib/spellcheck/prosemirror-plugin';
@@ -136,8 +140,13 @@ export interface RichEditorProps {
   linkTargets?: string[];
   /** 点击双向链接（参数为 目标#标题 形式的引用） */
   onWikiLinkClick?: (target: string) => void;
-  /** 滚动到指定标题（occurrence 为同名标题中的第几个，从 0 计，默认第一个；每个请求对象只执行一次） */
+  /**
+   * 滚动到指定标题或块（heading 为 ^id 时是块；occurrence 为同名标题中的第几个，从 0 计，默认第一个）
+   * 每个请求对象只执行一次
+   */
   revealHeading?: { heading: string; occurrence?: number } | null;
+  /** [[文档#^ 补全选中其他文档中没有 ID 的块：在写入位置写入块 ID */
+  onAssignBlockId?: (target: string, slot: BlockIdSlot, id: string) => void;
 }
 
 /**
@@ -185,6 +194,7 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
   if (prevProps.linkTargets !== nextProps.linkTargets) return false;
   if (prevProps.onWikiLinkClick !== nextProps.onWikiLinkClick) return false;
   if (prevProps.revealHeading !== nextProps.revealHeading) return false;
+  if (prevProps.onAssignBlockId !== nextProps.onAssignBlockId) return false;
 
   // Note: We DON'T compare onChange, onTitleChange, title, titlePlaceholder, linkTargets, onWikiLinkClick
   // - 回调与链接目标通过 ref 读取最新值
@@ -549,13 +559,17 @@ const StatusBar: React.FC<StatusBarProps> = ({ wordCount, charCount }) => (
 // RichEditor Component
 // ================================
 
-/** 选中文档中的标题并滚动到视口顶部；找不到标题时不做任何事 */
-function revealHeadingInView(view: EditorView, heading: string, occurrence = 0): void {
-  const pos = findHeadingInDoc(view.state.doc, heading, occurrence);
+/**
+ * 选中链接指向的标题或块（#^id），滚动到视口顶部并短暂高亮；找不到时不做任何事
+ * occurrence 为同名标题中的第几个（从 0 计）
+ */
+function revealLinkTargetInView(view: EditorView, subpath: string, occurrence = 0): void {
+  const pos = findLinkTargetInDoc(view.state.doc, subpath, occurrence);
   if (pos === null) return;
-  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos + 1)));
+  view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos + 1))));
   view.focus();
   (view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  flashNode(view, pos);
 }
 
 /** 已执行过的标题定位请求（编辑器重新挂载时不重复滚动） */
@@ -584,6 +598,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   linkTargets,
   onWikiLinkClick,
   revealHeading,
+  onAssignBlockId,
 }) => {
   // Use refs for callbacks to avoid closure issues and unnecessary re-renders
   // This is critical for preventing cursor loss during auto-save
@@ -595,6 +610,9 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
 
   const onWikiLinkClickRef = useRef(onWikiLinkClick);
   onWikiLinkClickRef.current = onWikiLinkClick;
+
+  const onAssignBlockIdRef = useRef(onAssignBlockId);
+  onAssignBlockIdRef.current = onAssignBlockId;
 
   // 链接解析（嵌入内容与 [[文档# 标题补全）与当前文档标题（嵌入的循环检测）
   const linkResolver = useLinkResolver();
@@ -765,6 +783,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     });
 
     // 补全：Markdown 文档支持斜杠命令与 [[ 双向链接；纯文本只保留 Emoji
+    const isCurrentDocument = (target: string) =>
+      !target || normalizeLinkTarget(target) === normalizeLinkTarget(documentTitleRef.current);
     const providers: CompletionProvider[] = [new EmojiCompletionProvider()];
     if (isMarkdown) {
       providers.unshift(
@@ -777,6 +797,16 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
             // [[#… 补全当前文档的标题
             const current = editorViewRef.current;
             return current ? extractHeadings(serializeContent(current.state.doc, format)) : [];
+          },
+          {
+            // 当前文档（[[#^ 或链接到自身标题）的块取自编辑器，其余取自已保存的条目
+            isCurrent: isCurrentDocument,
+            blocks: (target) => {
+              const current = editorViewRef.current;
+              if (!isCurrentDocument(target)) return linkResolverRef.current?.blocks(target) ?? [];
+              return current ? summarizeDocBlocks(current.state.doc) : [];
+            },
+            assignId: (target, slot, id) => onAssignBlockIdRef.current?.(target, slot, id),
           }
         ),
         new LaTeXCompletionProvider()
@@ -790,10 +820,10 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       container: editorContainerRef.current,
     });
 
-    // 点击双向链接：[[#标题]] 在当前文档内跳转，其余交给上层打开
+    // 点击双向链接：[[#标题]] / [[#^块]] 在当前文档内跳转，其余交给上层打开
     const openWikiRef = (editorView: EditorView, ref: string) => {
       const parts = parseWikiLinkInner(ref);
-      if (parts && !parts.target && parts.heading) revealHeadingInView(editorView, parts.heading);
+      if (parts && !parts.target && parts.heading) revealLinkTargetInView(editorView, parts.heading);
       else onWikiLinkClickRef.current?.(ref);
     };
     const wikiLinkClickPlugin = new Plugin({
@@ -845,6 +875,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     if (isMarkdown) {
       plugins.push(
         createLivePreviewPlugin(schema),
+        createBlockIdPlugin(styles.blockIdMarker),
+        createRevealHighlightPlugin(),
         createBlockHandlePlugin({
           handleClass: popupStyles.blockHandle,
           handleVisibleClass: popupStyles.blockHandleVisible,
@@ -989,7 +1021,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     if (!view || !revealHeading || revealedHeadingRequests.has(revealHeading)) return;
     const frame = requestAnimationFrame(() => {
       revealedHeadingRequests.add(revealHeading);
-      revealHeadingInView(view, revealHeading.heading, revealHeading.occurrence);
+      revealLinkTargetInView(view, revealHeading.heading, revealHeading.occurrence);
     });
     return () => cancelAnimationFrame(frame);
   }, [revealHeading]);

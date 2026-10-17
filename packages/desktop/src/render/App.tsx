@@ -71,7 +71,7 @@ import {
 import { ensureExtension } from './lib/documents/file-types';
 import { pickRecentDocuments, sortByRecentUpdate } from './lib/documents/recent';
 import { isWritingDocument } from './lib/documents/constants';
-import { itemOpenTarget } from './lib/knowledge/open-target';
+import { isReadableItem, itemOpenTarget } from './lib/knowledge/open-target';
 import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
 import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
@@ -85,10 +85,11 @@ import {
   LinkResolverContext,
   normalizeLinkTarget,
   planLinkRename,
+  addBlockIdToMarkdown,
   useLinkIndex,
   useRelatedLinks,
 } from './lib/links';
-import { extractWikiLinks, parseWikiLinkInner } from './lib/markdown';
+import { extractWikiLinks, parseWikiLinkInner, type BlockIdSlot } from './lib/markdown';
 import {
   ChevronDown,
   ChevronRight,
@@ -107,9 +108,9 @@ import {
   getActiveSidebarPanel,
 } from './types/app-modes';
 import { aiConfigService } from './services/aiConfigService';
-import { pickRecentlyRead } from './lib/reading';
 import { registerFlush } from './services/flushRegistry';
 import { getEditorManager } from './lib/core';
+import { pickRecentlyRead, resolveArticle } from './lib/reading';
 import './App.scss';
 
 const App: React.FC = () => {
@@ -757,14 +758,21 @@ const App: React.FC = () => {
     [createDocument, kb.refreshItem]
   );
 
-  /** 通过 [[文档#标题]] 或大纲打开写作文档后要定位的标题（occurrence 为同名标题序号） */
+  /**
+   * 通过 [[文档#标题]] / [[文档#^块]] 或大纲打开文档后要定位的标题或块（occurrence 为同名标题序号）
+   * view 为负责定位的视图：写作编辑器或阅读视图
+   */
   const [headingRequest, setHeadingRequest] = useState<{
+    view: 'writing' | 'reading';
     docId: string;
     heading: string;
     occurrence?: number;
   } | null>(null);
 
-  /** 点击 [[双向链接]]（目标#标题）：目标存在则打开并定位标题，否则创建 */
+  /**
+   * 点击 [[双向链接]]（目标#标题）：目标存在则打开并定位标题或块，否则创建
+   * 阅读模式下目标可在阅读视图中呈现时留在阅读模式，由阅读视图定位
+   */
   const openWikiTarget = useCallback(
     (ref: string) => {
       const parts = parseWikiLinkInner(ref);
@@ -775,14 +783,42 @@ const App: React.FC = () => {
         void createNoteFromLink(parts.target);
         return;
       }
-      openItem(item.id);
-      if (parts.heading && isWritingDocument(item)) {
-        setHeadingRequest({ docId: item.id, heading: parts.heading });
+      const readInPlace = appState.mode === 'reading' && (isReadableItem(item) || resolveArticle(item) !== null);
+      if (readInPlace) openInReading(item.id);
+      else openItem(item.id);
+      if (!parts.heading) return;
+      if (readInPlace) setHeadingRequest({ view: 'reading', docId: item.id, heading: parts.heading });
+      else if (isWritingDocument(item)) setHeadingRequest({ view: 'writing', docId: item.id, heading: parts.heading });
+    },
+    [linkIndex, appState.mode, openInReading, openItem, createNoteFromLink]
+  );
+  const revealHeading =
+    headingRequest?.view === 'writing' && headingRequest.docId === selectedDocId ? headingRequest : null;
+  const revealReading =
+    headingRequest?.view === 'reading' && headingRequest.docId === readingItemId ? headingRequest : null;
+
+  /**
+   * [[文档#^ 补全选中其他文档中没有 ID 的块：在目标文档源码中写入 ^id 并保存
+   * （段落/标题末尾追加，表格/代码块之后插入独立一段）
+   * 链接已先插入，写回失败时提示（链接将显示为“块不存在”）
+   */
+  const assignBlockId = useCallback(
+    async (target: string, slot: BlockIdSlot, id: string) => {
+      const item = linkIndex.resolve(target);
+      const content = item?.type === 'note' ? addBlockIdToMarkdown(item.content ?? '', slot, id) : null;
+      if (!item || content === null) {
+        setNotice(`无法为「${target}」中的块写入 ID ^${id}`);
+        return;
+      }
+      try {
+        await kb.updateItem(item.id, { content });
+      } catch (error) {
+        console.error('写入块 ID 失败:', error);
+        setNotice(`写入块 ID 失败：${error instanceof Error ? error.message : String(error)}`);
       }
     },
-    [linkIndex, openItem, createNoteFromLink]
+    [linkIndex, kb.updateItem]
   );
-  const revealHeading = headingRequest?.docId === selectedDocId ? headingRequest : null;
 
   /** 写作编辑器 [[ 补全的候选标题 */
   const linkTargets = useMemo(
@@ -994,7 +1030,7 @@ const App: React.FC = () => {
   /** 写作大纲：在编辑器中定位到当前文档的第 occurrence 个同名标题 */
   const revealWritingHeading = useCallback(
     (heading: string, occurrence: number) => {
-      if (selectedDocId) setHeadingRequest({ docId: selectedDocId, heading, occurrence });
+      if (selectedDocId) setHeadingRequest({ view: 'writing', docId: selectedDocId, heading, occurrence });
     },
     [selectedDocId]
   );
@@ -1237,6 +1273,7 @@ const App: React.FC = () => {
               onCreateExcerpt={handleCreateExcerpt}
               onOpenInWriting={openInWriting}
               onWikiLinkClick={openWikiTarget}
+              revealTarget={revealReading}
               navPanel={readingNavPanel}
               navTarget={readingNavTarget}
             />
@@ -1296,6 +1333,7 @@ const App: React.FC = () => {
                     linkTargets={linkTargets}
                     onWikiLinkClick={openWikiTarget}
                     revealHeading={revealHeading}
+                    onAssignBlockId={assignBlockId}
                     options={{
                       placeholder: PLACEHOLDERS.CONTENT,
                       showWordCount: false,
@@ -1433,6 +1471,7 @@ const App: React.FC = () => {
                   linkTargets={linkTargets}
                   onWikiLinkClick={openWikiTarget}
                   revealHeading={revealHeading}
+                  onAssignBlockId={assignBlockId}
                   options={{
                     placeholder: PLACEHOLDERS.FOCUS_CONTENT,
                     showWordCount: false,

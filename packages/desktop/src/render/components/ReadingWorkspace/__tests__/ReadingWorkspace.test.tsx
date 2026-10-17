@@ -222,6 +222,37 @@ describe('ReadingView', () => {
     expect(container.querySelector('.wiki-embed-missing')?.textContent).toBe('未找到「不存在」');
   });
 
+  it('定位请求：滚动到同名标题中的第 N 个或块锚点并短暂高亮，同一请求只执行一次', () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    });
+    const props = handlers();
+    const item = makeItem({
+      content: '# 小结\n\n正文\n\n## 小结\n\n![[不存在]]\n\n^emb\n\n| a |\n| --- |\n| 1 |\n\n^tbl\n',
+    });
+    const scrolled = () => scrollIntoView.mock.instances as unknown as HTMLElement[];
+
+    const heading = { heading: '小结', occurrence: 1 };
+    const { rerender } = render(<ReadingView item={item} {...props} revealTarget={heading} />);
+    expect(scrolled().map((el) => el.id)).toEqual(['heading-1']);
+    expect(scrolled()[0].className).toMatch(/revealFlash/);
+
+    rerender(<ReadingView item={item} {...props} revealTarget={heading} />);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+
+    // 独立标记跟在嵌入后：锚点在展开后的嵌入上
+    rerender(<ReadingView item={item} {...props} revealTarget={{ heading: '^emb' }} />);
+    rerender(<ReadingView item={item} {...props} revealTarget={{ heading: '^tbl' }} />);
+    const [, embed, table] = scrolled();
+    expect(embed.id).toBe('block-emb');
+    expect(embed.classList.contains('wiki-embed')).toBe(true);
+    expect(table.tagName).toBe('TABLE');
+    expect(table.className).toMatch(/revealFlash/);
+  });
+
   it('删除高亮与标记已读时只替换 reading 元数据', () => {
     const props = handlers();
     const item = makeItem({

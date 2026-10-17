@@ -42,7 +42,7 @@ export function isLinkableTitle(title: string): boolean {
 }
 
 /** 源码按行切分（与 markdown-it 的换行规则一致），记录每行起始偏移 */
-function splitLines(markdown: string): { lines: string[]; starts: number[] } {
+export function splitLines(markdown: string): { lines: string[]; starts: number[] } {
   const lines: string[] = [];
   const starts: number[] = [];
   const pattern = /\r\n?|\n/g;

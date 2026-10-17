@@ -6,6 +6,7 @@
 
 import { DOMSerializer, type Node as PMNode } from 'prosemirror-model';
 import { renderMath } from '../math';
+import { blockRefId, collectDocBlocks, extractBlock, findBlockInDoc, stripBlockMarker } from './block-ref';
 import { extractHeadings, extractSection } from './extract';
 import { parseContent, type ContentFormat } from './parser';
 import { markdownSchema } from './schema';
@@ -68,6 +69,14 @@ export const MAX_EMBED_DEPTH = 4;
 export const EMBED_IMAGE_PATH_ATTR = 'data-embed-path';
 export const EMBED_IMAGE_MIME_ATTR = 'data-embed-mime';
 
+/** 带块 ID 的元素属性（顶层文档中同时获得 block-<id> 锚点） */
+const BLOCK_ID_ATTR = 'data-block-id';
+
+/** 块锚点 id（标题块沿用 heading-序号） */
+function blockAnchorId(id: string): string {
+  return `block-${id}`;
+}
+
 interface EmbedContext {
   resolve: EmbedResolver | undefined;
   self: NoteEmbedSource;
@@ -75,10 +84,12 @@ interface EmbedContext {
   visited: ReadonlySet<string>;
 }
 
-/** 文档节点 → DOM，公式节点替换为自研渲染器的输出 */
+/** 文档节点 → DOM，公式节点替换为自研渲染器的输出，块 ID 标记转为块元素上的属性 */
 function renderNodes(doc: PMNode): HTMLElement {
   const container = document.createElement('div');
   container.appendChild(DOMSerializer.fromSchema(markdownSchema).serializeFragment(doc.content));
+  // 段落与标题元素按文档顺序对应块的 anchorIndex（在公式替换前收集）
+  const anchors = container.querySelectorAll<HTMLElement>('p, h1, h2, h3, h4, h5, h6');
 
   container.querySelectorAll<HTMLElement>('[data-math-inline]').forEach((el) => {
     const wrapper = document.createElement('span');
@@ -98,7 +109,30 @@ function renderNodes(doc: PMNode): HTMLElement {
     el.replaceWith(wrapper);
   });
 
+  applyBlockMarkers(doc, anchors);
   return container;
+}
+
+/**
+ * 去掉渲染结果中的 ^id 标记，并把 ID 记在对应的块元素上：
+ * 段尾标记从文本中删除，独占一段的标记整段删除并作用于前一个元素，列表项首段的标记作用于 li
+ */
+function applyBlockMarkers(doc: PMNode, anchors: NodeListOf<HTMLElement>): void {
+  for (const block of collectDocBlocks(doc)) {
+    const anchor = block.marker ? anchors[block.marker.anchorIndex] : undefined;
+    if (!block.id || !block.marker || !anchor) continue;
+    let element: Element | null = anchor;
+    if (block.marker.standalone) {
+      element = anchor.previousElementSibling;
+      anchor.remove();
+    } else if (anchor.lastChild?.nodeType === Node.TEXT_NODE) {
+      const text = anchor.lastChild as Text;
+      text.data = stripBlockMarker(text.data);
+      if (!text.data) text.remove();
+    }
+    if (block.relation === 'list-item') element = element?.parentElement ?? null;
+    element?.setAttribute(BLOCK_ID_ATTR, block.id);
+  }
 }
 
 /** 嵌入内容无法展开时的提示 */
@@ -148,13 +182,18 @@ function renderEmbed(parts: WikiLinkParts, ctx: EmbedContext): HTMLElement {
     return wrapper;
   }
 
+  const blockId = blockRefId(parts.heading);
   const content = parts.heading
     ? source.format === 'markdown'
-      ? extractSection(source.content, parts.heading)
+      ? blockId
+        ? extractBlock(source.content, blockId)
+        : extractSection(source.content, parts.heading)
       : null
     : source.content;
   if (content === null) {
-    wrapper.appendChild(embedNotice(`未找到标题「${parts.heading}」`));
+    wrapper.appendChild(
+      embedNotice(blockId ? `块「^${blockId}」不存在` : `未找到标题「${parts.heading}」`)
+    );
     return wrapper;
   }
 
@@ -182,7 +221,13 @@ function expandEmbeds(container: HTMLElement, ctx: EmbedContext): void {
       heading: el.getAttribute('data-wiki-heading'),
       alias: el.getAttribute('data-wiki-alias'),
     };
-    el.replaceWith(renderEmbed(parts, ctx));
+    const embed = renderEmbed(parts, ctx);
+    // 独立标记为嵌入命名时，块 ID 与锚点转移到展开后的元素
+    for (const name of [BLOCK_ID_ATTR, 'id']) {
+      const value = el.getAttribute(name);
+      if (value !== null) embed.setAttribute(name, value);
+    }
+    el.replaceWith(embed);
   });
 }
 
@@ -206,7 +251,7 @@ export function renderWikiEmbed(parts: WikiLinkParts, host: EmbedHost): HTMLElem
 /**
  * 将文档节点渲染为 HTML 容器
  * - 数学公式节点替换为自研渲染器的输出
- * - 标题添加锚点 id，供目录跳转（嵌入内容中的标题不计入目录）
+ * - 标题添加锚点 id，供目录跳转（嵌入内容中的标题不计入目录）；其余带 ID 的块添加 block-<id> 锚点
  * - 展开 ![[嵌入]]
  */
 function renderDocToElement(
@@ -220,6 +265,9 @@ function renderDocToElement(
     const id = `heading-${index}`;
     el.id = id;
     headings.push({ id, level: Number(el.tagName.slice(1)), text: el.textContent || '' });
+  });
+  container.querySelectorAll<HTMLElement>(`[${BLOCK_ID_ATTR}]:not([id])`).forEach((el) => {
+    el.id = blockAnchorId(el.getAttribute(BLOCK_ID_ATTR)!);
   });
 
   expandEmbeds(container, rootContext(host));
@@ -250,7 +298,8 @@ export type WikiLinkClickTarget =
 
 /**
  * 解析 renderContentToHtml 结果中被点击的双向链接
- * 锚点按标题序号对应 heading-序号，标题文本的匹配规则与编辑器、补全一致
+ * 锚点按标题序号对应 heading-序号，标题文本的匹配规则与编辑器、补全一致；
+ * [[#^id]] 对应 block-<id>（块本身是标题时为该标题的锚点）
  */
 export function wikiLinkClickTarget(
   link: HTMLElement,
@@ -260,7 +309,35 @@ export function wikiLinkClickTarget(
   const target = link.dataset.wikiTarget || '';
   const heading = link.dataset.wikiHeading || null;
   if (target || !heading) return { kind: 'open', ref: wikiLinkRefOf(link) };
-  if (format !== 'markdown') return { kind: 'anchor', id: null };
-  const index = findHeadingIndex(extractHeadings(content), heading);
-  return { kind: 'anchor', id: index === -1 ? null : `heading-${index}` };
+  return { kind: 'anchor', id: linkAnchorId(content, format, heading) };
+}
+
+/**
+ * 链接 #… 部分在 renderContentToHtml 结果中的锚点 id；找不到时返回 null
+ * #^id 为块，其余为标题（occurrence 为同名标题序号），匹配规则与编辑器、补全一致
+ */
+export function linkAnchorId(
+  content: string,
+  format: ContentFormat,
+  subpath: string,
+  occurrence = 0
+): string | null {
+  if (format !== 'markdown') return null;
+  const blockId = blockRefId(subpath);
+  if (blockId) return blockAnchorTarget(parseContent(content, format), blockId);
+  const index = findHeadingIndex(extractHeadings(content), subpath, occurrence);
+  return index === -1 ? null : `heading-${index}`;
+}
+
+/** 块在渲染结果中的锚点 id */
+function blockAnchorTarget(doc: PMNode, blockId: string): string | null {
+  const block = findBlockInDoc(doc, blockId);
+  if (!block) return null;
+  if (block.node.type !== markdownSchema.nodes.heading) return blockAnchorId(blockId);
+  let index = 0;
+  doc.nodesBetween(0, block.pos, (node) => {
+    if (node.type === markdownSchema.nodes.heading) index++;
+    return !node.isTextblock;
+  });
+  return `heading-${index}`;
 }

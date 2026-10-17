@@ -5,6 +5,7 @@
 
 import type { Node as PMNode } from 'prosemirror-model';
 import type Token from 'markdown-it/lib/token.mjs';
+import { blockRefId, findBlockInDoc, stripBlockMarker } from './block-ref';
 import { markdownTokenizer } from './parser';
 import { serializeMarkdown } from './serializer';
 import { findHeadingIndex, wikiLinkRef } from './wiki-link';
@@ -55,7 +56,7 @@ export function extractWikiLinks(markdown: string): WikiLinkReference[] {
     if (token.type !== 'inline' || !token.children) continue;
     const links = token.children.filter((child) => child.type === 'wiki_link');
     if (links.length === 0) continue;
-    const context = inlineText(token.children);
+    const context = stripBlockMarker(inlineText(token.children));
     for (const link of links) {
       const { target, heading, alias } = link.meta;
       references.push({ target, heading, alias, context });
@@ -66,6 +67,7 @@ export function extractWikiLinks(markdown: string): WikiLinkReference[] {
 
 /**
  * 提取全部标题（含引用块、列表中的标题），按文档顺序
+ * 标题末尾的块 ID 标记不属于标题文本
  */
 export function extractHeadings(markdown: string): MarkdownHeading[] {
   const tokens = markdownTokenizer.parse(markdown, {});
@@ -74,7 +76,7 @@ export function extractHeadings(markdown: string): MarkdownHeading[] {
     if (token.type !== 'heading_open') return;
     headings.push({
       level: Number(token.tag.slice(1)),
-      text: inlineText(tokens[index + 1]?.children ?? []),
+      text: stripBlockMarker(inlineText(tokens[index + 1]?.children ?? [])),
       line: token.map?.[0] ?? 0,
     });
   });
@@ -113,6 +115,15 @@ export function findHeadingInDoc(doc: PMNode, heading: string, occurrence = 0): 
     return false;
   });
   return found;
+}
+
+/**
+ * 链接 #… 部分在文档节点中的位置：#^id 为块，其余为标题（occurrence 为同名标题序号）；找不到时返回 null
+ */
+export function findLinkTargetInDoc(doc: PMNode, subpath: string, occurrence = 0): number | null {
+  const id = blockRefId(subpath);
+  if (id) return findBlockInDoc(doc, id)?.pos ?? null;
+  return findHeadingInDoc(doc, subpath, occurrence);
 }
 
 /**

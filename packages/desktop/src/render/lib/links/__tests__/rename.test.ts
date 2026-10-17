@@ -11,6 +11,12 @@ function rewrite(markdown: string, oldTitle = 'Old', newTitle = 'New'): string {
 }
 
 describe('重命名改写链接', () => {
+  it('块引用 [[旧名#^id]] 与 ![[旧名#^id]] 一并更新，块 ID 不变', () => {
+    expect(rewrite('见 [[Old#^abc]] 与 [[Old#^abc|别名]]\n\n![[Old#^def]]\n')).toBe(
+      '见 [[New#^abc]] 与 [[New#^abc|别名]]\n\n![[New#^def]]\n'
+    );
+  });
+
   it('保留别名、标题与嵌入标记', () => {
     const source = '见 [[Old]]、[[Old|别名]]、[[Old#第一节]]、[[Old#第一节|别名]]\n\n![[Old]]\n\n![[Old#h|x]]\n';
     const result = rewriteLinksForRename(source, 'Old', 'New');

@@ -3054,3 +3054,11 @@ $page-rule-rows: repeating-linear-gradient(
     }
   }
 }
+
+// 块 ID 标记（^block-id）：保留在正文中，弱化显示
+.blockIdMarker {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  opacity: 0.6;
+}

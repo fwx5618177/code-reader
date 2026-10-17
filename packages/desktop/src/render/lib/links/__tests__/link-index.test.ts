@@ -44,9 +44,22 @@ describe('LinkIndex', () => {
     const index = new LinkIndex();
     index.update(ITEMS);
     expect(index.backlinks('b')).toEqual([
-      { sourceId: 'a', sourceTitle: '机器学习', context: '入门见 线性代数，进阶见 概率。' },
+      { sourceId: 'a', sourceTitle: '机器学习', context: '入门见 线性代数，进阶见 概率。', blockId: null },
     ]);
     expect(index.backlinks('a').map((l) => l.sourceId)).toEqual(['b']);
+  });
+
+  it('块引用记录块 ID，上下文不含来源段落的块标记', () => {
+    const index = new LinkIndex();
+    index.update([
+      note('x', '源.md', '引用 [[目标#^abc]] ^self\n\n![[目标#^def]]\n\n[[目标#标题]]'),
+      note('y', '目标.md', '段落 ^abc'),
+    ]);
+    expect(index.backlinks('y').map((l) => [l.blockId, l.context])).toEqual([
+      ['abc', '引用 目标#^abc'],
+      ['def', '![[目标#^def]]'],
+      [null, '目标#标题'],
+    ]);
   });
 
   it('标题链接与嵌入计入目标笔记，[[#标题]] 不计入任何条目', () => {

@@ -1,12 +1,12 @@
 // ================================
 // 写作编辑器补全提供者
 // - / 斜杠命令：插入标题、列表、表格、公式等结构化块
-// - [[ 双向链接：补全已有文档标题，或创建指向新文档的链接；[[文档# 补全该文档的标题
+// - [[ 双向链接：补全已有文档标题，或创建指向新文档的链接；[[文档# 补全该文档的标题，[[文档#^ 补全块
 //   独占一段的 ![[ 插入块级嵌入
 // ================================
 
 import type { Node as PMNode, Schema } from 'prosemirror-model';
-import { NodeSelection, TextSelection, type Command } from 'prosemirror-state';
+import { NodeSelection, TextSelection, type Command, type Transaction } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { setBlockType, wrapIn, toggleMark } from 'prosemirror-commands';
 import { wrapInList } from 'prosemirror-schema-list';
@@ -16,6 +16,13 @@ import type {
   CompletionProvider,
   CompletionType,
 } from '../editor/prosemirror-autocomplete';
+import {
+  blockKindLabel,
+  findSlotNode,
+  generateBlockId,
+  type BlockIdSlot,
+  type BlockSummary,
+} from './block-ref';
 import { isEmbedParagraph, parseWikiLinkInner, type WikiLinkParts } from './wiki-link';
 
 /** 删除触发文本后执行命令 */
@@ -216,6 +223,39 @@ export interface CompletionHeading {
   text: string;
 }
 
+/** [[文档#^ 块补全的数据来源 */
+export interface CompletionBlockSource {
+  /** 目标文档的块（空字符串表示当前文档） */
+  blocks(target: string): ReadonlyArray<BlockSummary>;
+  /** 目标是否为当前编辑的文档（块 ID 直接写入编辑器） */
+  isCurrent(target: string): boolean;
+  /** 在其他文档的写入位置写入块 ID（经由文档的保存流程） */
+  assignId(target: string, slot: BlockIdSlot, id: string): void;
+}
+
+/** 补全列表中块文本的最大长度 */
+const BLOCK_LABEL_LENGTH = 60;
+
+/**
+ * 在编辑器中写入 ^id：段落/标题末尾追加，表格/代码块之后插入独立一段
+ * 返回该事务（用于映射后续位置）
+ */
+function writeBlockId(view: EditorView, slot: BlockIdSlot, id: string): Transaction | null {
+  const found = findSlotNode(view.state.doc, slot);
+  if (!found) return null;
+  const { node, pos } = found;
+  const { schema } = view.state;
+  let tr: Transaction;
+  if (slot.kind === 'append') {
+    const separator = node.content.size === 0 || /\s$/.test(node.textContent) ? '' : ' ';
+    tr = view.state.tr.insertText(`${separator}^${id}`, pos + node.nodeSize - 1);
+  } else {
+    tr = view.state.tr.insert(pos + node.nodeSize, schema.nodes.paragraph.create(null, schema.text(`^${id}`)));
+  }
+  view.dispatch(tr);
+  return tr;
+}
+
 /**
  * [[ 双向链接补全
  */
@@ -228,11 +268,13 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
    * @param schema 文档 Schema
    * @param getTargets 返回可链接的文档标题（每次补全时读取最新值）
    * @param getHeadings 返回目标文档的标题（空字符串表示当前文档）
+   * @param blockSource [[文档#^ 块补全（未提供时 #^ 按标题处理）
    */
   constructor(
     private readonly schema: Schema,
     private readonly getTargets: () => string[],
-    private readonly getHeadings: (target: string) => ReadonlyArray<CompletionHeading>
+    private readonly getHeadings: (target: string) => ReadonlyArray<CompletionHeading>,
+    private readonly blockSource?: CompletionBlockSource
   ) {}
 
   shouldActivate(context: CompletionContext): boolean {
@@ -241,6 +283,9 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
 
   getCompletions(context: CompletionContext): CompletionItem[] {
     const hash = context.query.indexOf('#');
+    if (hash !== -1 && this.blockSource && context.query[hash + 1] === '^') {
+      return this.blockCompletions(context.query, hash, this.blockSource);
+    }
     if (hash !== -1) return this.headingCompletions(context.query, hash);
 
     const query = context.query.trim();
@@ -286,6 +331,62 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
       items.push(this.newLinkItem(rawQuery.trim(), parts));
     }
     return items;
+  }
+
+  /**
+   * [[文档#^… 补全该文档的块
+   * 没有 ID 的块选中时先生成 ID：当前文档直接写入编辑器，其他文档交给 blockSource 写回
+   */
+  private blockCompletions(rawQuery: string, hash: number, source: CompletionBlockSource): CompletionItem[] {
+    const target = rawQuery.slice(0, hash).trim();
+    const prefix = rawQuery.slice(0, hash + 2);
+    const blocks = source.blocks(target);
+    const where = target || '当前文档';
+    return blocks.map((block, index) => {
+      const text =
+        block.text.length > BLOCK_LABEL_LENGTH ? `${block.text.slice(0, BLOCK_LABEL_LENGTH)}…` : block.text;
+      return {
+        id: `wiki-block:${index}`,
+        label: text || `^${block.id}`,
+        insertText: '',
+        type: this.type,
+        icon: '^',
+        detail: `${block.id ? `^${block.id}` : '选中后生成块 ID'} · ${blockKindLabel(block.kind)} · ${where}`,
+        // 保持文档中的块顺序
+        priority: blocks.length - index,
+        // 可按块 ID 或块文本过滤
+        filterText: `${prefix}${block.id ?? ''}\n${prefix}${block.text}`,
+        apply: (view, from, to) => this.insertBlockLink(view, from, to, target, block, blocks, source),
+      };
+    });
+  }
+
+  private insertBlockLink(
+    view: EditorView,
+    from: number,
+    to: number,
+    target: string,
+    block: BlockSummary,
+    blocks: ReadonlyArray<BlockSummary>,
+    source: CompletionBlockSource
+  ): void {
+    const link = (id: string): WikiLinkParts => ({ target, heading: `^${id}`, alias: null });
+    if (block.id) {
+      this.insertLink(view, from, to, link(block.id));
+      return;
+    }
+    // 没有 ID 的块总有写入位置
+    const slot = block.slot!;
+    const id = generateBlockId(new Set(blocks.flatMap((b) => (b.id ? [b.id] : []))));
+    if (!source.isCurrent(target)) {
+      this.insertLink(view, from, to, link(id));
+      source.assignId(target, slot, id);
+      return;
+    }
+    // 当前文档：先写入标记；标记可能恰好位于正在输入的链接之后，映射时不把它并入替换范围
+    const tr = writeBlockId(view, slot, id);
+    const map = (pos: number) => (tr ? tr.mapping.map(pos, -1) : pos);
+    this.insertLink(view, map(from), map(to), link(id));
   }
 
   /** 目标尚不存在时仍可创建链接 */

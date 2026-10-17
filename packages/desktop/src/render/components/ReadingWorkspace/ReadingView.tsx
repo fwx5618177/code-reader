@@ -30,7 +30,9 @@ import {
 } from 'lucide-react';
 import type { UpdateKnowledgeItemInput } from '../../lib/knowledge/repository';
 import { displayTitle, useEmbedResolver } from '../../lib/links';
+import { flashElement } from '../../lib/editor/reveal-highlight';
 import {
+  linkAnchorId,
   renderContentToHtml,
   wikiLinkClickTarget,
   type RenderedDocument,
@@ -107,6 +109,11 @@ export interface ReadingViewProps {
   onOpenInWriting?: (itemId: string) => void;
   /** 点击正文中的 [[双向链接]] */
   onWikiLinkClick?: (target: string) => void;
+  /**
+   * 通过 [[文档#标题]] / [[文档#^块]] 打开时要定位的标题（occurrence 为同名标题序号）或 ^块 ID；
+   * 每个请求对象只定位一次
+   */
+  revealTarget?: { heading: string; occurrence?: number } | null;
   /** 应用侧栏当前显示的阅读导航面板；设置且有挂载点时导航渲染到侧栏，视图内侧栏隐藏 */
   navPanel?: ReadingSidebarPanel | null;
   /** 应用侧栏中的导航挂载点 */
@@ -121,6 +128,17 @@ const PROGRESS_SAVE_DELAY = 1500;
 const TOOLBAR_HALF_WIDTH = 160;
 const NO_HIGHLIGHTS: ReadingHighlight[] = [];
 const NO_BOOKMARKS: ReadingBookmark[] = [];
+
+/** 已执行的定位请求（视图重建或正文更新后不重复滚动） */
+const revealedRequests = new WeakSet<object>();
+
+/** 滚动到正文中的锚点并短暂高亮 */
+function revealAnchor(articleEl: HTMLElement, id: string): void {
+  const element = articleEl.querySelector<HTMLElement>(`[id="${id}"]`);
+  if (!element) return;
+  element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  flashElement(element);
+}
 
 /** EPUB 章节写入后滚动到目标元素或章节内比例位置 */
 function scrollToEpubTarget(scroller: HTMLElement, articleEl: HTMLElement, target: EpubScrollTarget): void {
@@ -167,6 +185,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
   onCreateExcerpt,
   onOpenInWriting,
   onWikiLinkClick,
+  revealTarget,
   navPanel,
   navTarget,
 }) => {
@@ -290,6 +309,16 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     clearHighlightMarks(articleEl);
     setLocatedHighlightIds(applyHighlightMarks(articleEl, highlights, styles.highlightMark));
   }, [rendered, highlights]);
+
+  // 通过 [[文档#标题]] / [[文档#^块]] 打开时定位锚点（在写入正文与恢复阅读位置之后执行）
+  useEffect(() => {
+    const articleEl = articleRef.current;
+    if (!articleEl || !markdownRendered || !revealTarget || revealedRequests.has(revealTarget)) return;
+    revealedRequests.add(revealTarget);
+    const article = resolveArticle(itemRef.current);
+    const id = article && linkAnchorId(article.content, article.format, revealTarget.heading, revealTarget.occurrence);
+    if (id) revealAnchor(articleEl, id);
+  }, [markdownRendered, revealTarget, itemRef]);
 
   // ---------- 目录滚动联动 ----------
 
@@ -578,13 +607,13 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
         const article = resolveArticle(itemRef.current);
         const click = wikiLinkClickTarget(anchor, article?.content ?? '', article?.format ?? 'markdown');
         if (click.kind === 'open') onWikiLinkClick?.(click.ref);
-        else if (click.id) scrollToHeading(click.id);
+        else if (click.id && articleRef.current) revealAnchor(articleRef.current, click.id);
         return;
       }
       const href = anchor.getAttribute('href') ?? '';
       if (/^(https?:|mailto:)/i.test(href)) openExternal(href);
     },
-    [onWikiLinkClick, itemRef, epubRef, scrollToHeading]
+    [onWikiLinkClick, itemRef, epubRef]
   );
 
   // ---------- 渲染 ----------

@@ -10,6 +10,7 @@
 
 import type { KnowledgeItem } from '../../types/knowledge';
 import { extractWikiLinks, type WikiLinkReference } from '../markdown/extract';
+import { blockRefId } from '../markdown/block-ref';
 
 /** 一条反向链接 */
 export interface Backlink {
@@ -17,6 +18,8 @@ export interface Backlink {
   sourceTitle: string;
   /** 链接所在段落文本 */
   context: string;
+  /** 块引用 [[笔记#^id]] 指向的块 ID；引用整篇或标题时为 null */
+  blockId: string | null;
 }
 
 /** 图谱节点 */
@@ -144,7 +147,12 @@ export class LinkIndex {
       if (!source) continue;
       for (const link of links) {
         if (normalizeLinkTarget(link.target) === key) {
-          result.push({ sourceId, sourceTitle: displayTitle(source.title), context: link.context });
+          result.push({
+            sourceId,
+            sourceTitle: displayTitle(source.title),
+            context: link.context,
+            blockId: blockRefId(link.heading),
+          });
         }
       }
     }

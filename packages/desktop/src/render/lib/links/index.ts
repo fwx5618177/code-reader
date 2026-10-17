@@ -26,6 +26,7 @@ export {
   type LinkResolver,
 } from './embed';
 export { planLinkRename, isLinkableTitle } from './rename';
+export { addBlockIdToMarkdown } from './block-id';
 
 /** 全局共享的解析缓存：未修改的笔记不会被重复解析 */
 const sharedCache: LinkParseCache = new Map();

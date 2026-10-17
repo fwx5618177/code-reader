@@ -1,6 +1,6 @@
 // ================================
 // 反向链接面板（写作模式右侧）
-// - 反向链接：哪些笔记通过 [[ ]] 引用了当前文档（带上下文）
+// - 反向链接：哪些笔记通过 [[ ]] 引用了当前文档（带上下文；块引用显示被引用的块）
 // - 出链：当前文档引用的笔记，未创建的目标可一键创建
 // - 未链接提及：正文提到了当前标题但尚未建立链接的笔记
 // - 局部图谱：以当前文档为中心的关系网
@@ -9,7 +9,7 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowUpRight, Link2, Plus, Quote, Share2, X } from 'lucide-react';
 import KnowledgeGraph from '../KnowledgeGraph';
-import { displayTitle, type LinkIndex, type RelatedLink } from '../../lib/links';
+import { displayTitle, useLinkResolver, type LinkIndex, type RelatedLink } from '../../lib/links';
 import type { KnowledgeItem } from '../../types/knowledge';
 import styles from './BacklinksPanel.module.scss';
 
@@ -50,6 +50,14 @@ const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
   const title = displayTitle(item.title);
 
   const backlinks = useMemo(() => linkIndex.backlinks(item.id), [linkIndex, item.id]);
+
+  // 块引用指向的块文本（块 ID → 文本）
+  const linkResolver = useLinkResolver();
+  const blockTexts = useMemo(() => {
+    if (!backlinks.some((link) => link.blockId)) return new Map<string, string>();
+    const blocks = linkResolver?.blocks(item.title) ?? [];
+    return new Map(blocks.flatMap((block) => (block.id ? [[block.id, block.text] as const] : [])));
+  }, [backlinks, linkResolver, item.title]);
 
   const outgoing = useMemo(() => {
     const seen = new Set<string>();
@@ -130,6 +138,14 @@ const BacklinksPanel: React.FC<BacklinksPanelProps> = ({
                     onClick={() => onOpenItem(link.sourceId)}
                   >
                     <span className={styles.entryTitle}>{link.sourceTitle}</span>
+                    {link.blockId && (
+                      <span className={styles.blockRef}>
+                        <span className={styles.blockId}>^{link.blockId}</span>
+                        <span className={styles.blockText}>
+                          {blockTexts.get(link.blockId) ?? '块不存在'}
+                        </span>
+                      </span>
+                    )}
                     <span className={styles.entryContext}>{link.context}</span>
                   </button>
                 </li>
