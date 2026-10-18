@@ -27,27 +27,29 @@
 │  plugins/   插件目录管理（列出 / 读取入口 / 卸载）            │
 │  tray/      托盘（含最近打开）                               │
 ├──────────────────────────────────────────────────────────────┤
-│ 可复用子包 packages/*（与 UI 无关的算法与服务，desktop 全部引用）│
+│ 可复用子包 packages/*（与 UI 无关的算法与服务）              │
 │  text-buffer  diff-algorithm  search-service                  │
 │  autocomplete-service  fuzzy-match-algorithm                  │
 │  syntax-parser  format-parser  plugin-system                  │
+│  diff-algorithm-extras（未使用的差分算法，桌面端不引用）     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；LaTeX 渲染链路（`lib/latex/parser.ts` 起）只依赖 `@code-reader/text-buffer`，LaTeX 诊断 / 折叠 / 大纲（`lib/latex/analysis.ts`）使用 `syntax-parser` 与 `format-parser`，LaTeX 源码编辑器的注释与自动配对取自 `syntax-parser` 的语言配置；桌面端插件系统 `lib/plugins` 使用 `plugin-system` 的贡献点类型、`lifecycle` 模块与扩展点注册表；命令面板用 `fuzzy-match-algorithm` 排序与高亮。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
 
-**子包接入对照**（“未接入导出”为从桌面端入口沿引用关系到达不了的导出数，含类型）：
+**子包接入对照**（桌面端的实际导入可用 `packages/desktop/.e2e` 外的脚本统计：遍历 `src` 中来自 `@code-reader/*` 的 import）：
 
-| 子包 | 桌面端用到的能力 → 接入位置 | 未接入导出 | 未接入部分与状态 |
-|------|------|------|------|
-| `syntax-parser` | `LatexLezerParser` 语法诊断与 AST（折叠 / 大纲）→ `lib/latex/analysis.ts`；`LATEX_LANGUAGE_CONFIGURATION`（`%` 行注释、自动配对）→ `lib/latex/codemirror-latex.ts` | 101 | 语言注册表 / 高亮引擎（编辑器高亮由 CodeMirror StreamLanguage 承担）、`LezerIncrementalParser` 与 `ASTCache`（可用于按块增量分析，待做；包内 `parseIncremental` 实际仍整篇重解析）、正则块扫描器（与渲染链路的 `block-segmenter` 职责重叠）、各类便捷工厂函数 |
-| `format-parser` | LaTeX 交叉引用索引与文档元数据 → `analysis.ts` 的 `checkCrossReferences` 与 `info` | 53 | Markdown 解析（CommonMark / 增量 / 流式）：经评估不接入编辑器——不识别 setext 标题与引用 / 列表中的标题、把缩进代码当标题，单字符编辑仍整篇重解析，大纲必须与编辑器使用的 markdown-it 一致；按内容判断格式（`isLaTeXDocument` 在任意位置出现 `\section{` 即判为 LaTeX，对含代码块的 Markdown 会误判）暂不接入 |
-| `plugin-system` | 贡献点类型、`lifecycle`（版本范围 / 依赖 / 激活事件）→ `lib/plugins/*`、`services/pluginService.ts`；`ExtensionRegistry`（写时复制快照、按优先级与插件 ID 排序、贡献校验）→ `lib/plugins/extension-registry.ts`（状态栏项、侧栏视图内容） | 55 | `PluginManager` / `PluginSandbox`：在主线程执行插件代码，桌面端保留每插件独占 Worker 的隔离；语言 / 主题 / 文件类型贡献点需要在 Worker 外执行代码或加载资源，暂不开放 |
-| `fuzzy-match-algorithm` | `damerauLevenshteinDistance` → 拼写建议；`fuzzyScore` → 命令面板排序与命中高亮（`PluginHost/CommandPalette.tsx`） | 37 | Radix 树、Levenshtein 变体、批量 / 快速版本与算法登记表 |
-| `diff-algorithm` | `DiffEngine` / `TextDiff` / `AsyncDiffEngine` / `DiffCache` → 版本历史、保存引擎、写作服务的差分 | 234 | bsdiff / vcdiff / rsync / 滚动哈希 / 流式差分 / patience / histogram / LCS 等替代算法、CRDT 接口定义、各类 `quick*` 快捷函数。桌面端 `lib/writing/{diff-worker-complete,worker-script-generator,enhanced-worker-pool,benchmark}.ts` 另有一套重复的差分 Worker，只经 `lib/writing/index.ts` 转出、没有调用方 |
-| `search-service` | `SearchIndex` → 写作全文搜索 | 18 | `FileSearcher`（逐行正则 / 内容搜索）、中文 / 代码预设索引 |
-| `autocomplete-service` | `AutocompleteService` + `CodeMirrorAdapter` → 代码块补全 | 20 | `ProseMirrorAdapter`（Markdown 编辑器的斜杠 / 补全是桌面端自己的实现）、Markdown / Emoji / 片段补全源 |
-| `text-buffer` | `createTextBuffer` / `selectBufferType` → LaTeX 文档模型 | 15 | `createAutoBuffer`、性能档案与内部配置类型 |
+| 子包 | 桌面端用到的能力 → 接入位置 | 未接入部分与处理 |
+|------|------|------|
+| `syntax-parser` | `LatexLezerParser` 语法诊断与 AST（折叠 / 大纲）→ `lib/latex/analysis.ts`（`LatexAnalyzer` 按块增量调用）；`LATEX_LANGUAGE_CONFIGURATION`（`%` 行注释、自动配对）→ `lib/latex/codemirror-latex.ts` | 语言注册表 / 高亮引擎（编辑器高亮由 CodeMirror StreamLanguage 承担）、`LezerIncrementalParser`（包内 `parseIncremental` 实际整篇重解析）、`ASTCache`（缓存整棵 `ASTRoot` 与节点表；按块增量分析缓存的是每块的分析摘要，改用自己的代际缓存）、正则块扫描器（与 `block-segmenter` 重叠）。保留在包内，与正在用的解析器同属一个模型，尚未拆分 |
+| `format-parser` | LaTeX 交叉引用索引与文档元数据 → `analysis.ts` | Markdown 解析（CommonMark / 增量 / 流式）：规范一致性 58.9%，不接入编辑器，调研与路线见 [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md)；`isLaTeXDocument` 对含代码块的 Markdown 会误判，不接入 |
+| `plugin-system` | 贡献点类型（含主题、语言）、`lifecycle`（版本范围 / 依赖 / 激活事件，含 `onStartupFinished` 与 `matchedActivationEvent`）→ `lib/plugins/*`、`services/pluginService.ts`；`ExtensionRegistry` → `lib/plugins/extension-registry.ts` | `PluginManager` / `PluginSandbox`：在主线程执行插件代码，桌面端保留每插件独占 Worker 的隔离；文件类型贡献点未开放 |
+| `fuzzy-match-algorithm` | `damerauLevenshteinDistance` → 拼写建议；`fuzzyScore` → 命令面板排序与高亮 | `RadixTree` 与 Levenshtein 变体由 `autocomplete-service` 内部使用；全包已有行为测试（前缀搜索丢字符、模糊搜索滤掉拼写错误两处缺陷已修复） |
+| `diff-algorithm` | `DiffEngine` / `TextDiff` / `AsyncDiffEngine` / `DiffCache` → 保存引擎、历史管理、写作服务；`quickHistogramDiff`（`./algorithms`）→ 版本对比按行对齐（`lib/writing/components/diff-lines.ts`） | 未使用的算法已迁到 `diff-algorithm-extras`，核心包只留正在使用的能力与其内部依赖（二进制差分、编辑距离、模糊匹配供统一差分引擎使用） |
+| `diff-algorithm-extras` | 桌面端不引用 | rsync / 滚动哈希、Patience、LCS、VCDIFF / BSDiff 适配器、CRDT 接口、流式哈希与流式差分、独立的 diff-match-patch Worker（`dmp-standalone`，原桌面端 `lib/writing` 中与核心库重复的实现）。导出保持可用并有行为测试，需要时单独引入 |
+| `search-service` | `SearchIndex` → 写作全文搜索 | `FileSearcher`（逐行正则 / 全词 / 大小写，带行号与上下文，经 `IFileProvider` 读内容）：可用于全局搜索的“精确查找”，需要笔记正文的内容来源与搜索面板的模式切换，待做；中文 / 代码预设索引 |
+| `autocomplete-service` | `AutocompleteService` + `CodeMirrorAdapter` → 代码块补全 | `ProseMirrorAdapter`（Markdown 编辑器的斜杠菜单与 `[[` 补全是桌面端自己的实现，功能重叠）、Markdown / Emoji / 片段补全源；包内没有测试 |
+| `text-buffer` | `createTextBuffer` / `selectBufferType` → LaTeX 文档模型 | `createAutoBuffer`、性能档案与内部配置类型 |
 
 ## 2. 主进程
 
@@ -95,10 +97,10 @@
 | `lib/editor-tabs` | 写作标签页与分栏的纯状态逻辑（打开 / 关闭 / 重开 / 排序 / 跨窗格移动 / 清理已删除文档）与 localStorage 持久化；`hooks/useEditorTabs.ts` 让聚焦窗格的活动标签驱动 `useDocuments` 的当前文档（底栏、版本历史、反链、大纲作用于它），两栏编辑器各自写入各自的文档 |
 | `lib/spellcheck` | 自研 Hunspell 拼写检查：词缀解析与查词（含复合词与 COMPOUNDRULE，`compound-rule.ts`）、建议、分词跳过规则、Worker 协议，ProseMirror 插件只检查可见且有变化的块；`services/spellcheckService.ts` 管理 Worker、词典热切换与个人词典 |
 | `lib/core` | 版本化编辑基础：EditorModel（versionId + contentHash）、拉取式 SaveEngine、`DocumentEditorManager`（按文档 ID 唯一的实例，引用计数 + 缓存；实例自身连接自动保存与保存后标记，`flushAll` 写回全部实例）、`useManagedEditor`（每个持有方各自订阅 / 取消）、撤销重做（`delta/history-manager.ts`，差分直接引用 `@code-reader/diff-algorithm`）、IndexedDB 离线存储、操作日志与同步接口（仅类型） |
-| `lib/writing` | 写作服务：全文索引、搜索建议、差分（Worker 池）、索引持久化（IndexedDB）、性能监控，以及 DiffViewer 组件（用于版本对比，`diff-lines.ts` 把字符级差分重建为行） |
+| `lib/writing` | 写作服务：全文索引、搜索建议、差分（`@code-reader/diff-algorithm` 的 Worker 与缓存）、索引持久化（IndexedDB）、性能监控，以及 DiffViewer 组件（版本对比：`diff-lines.ts` 先用 Histogram Diff 按行对齐，再对配对行做字符级高亮） |
 | `lib/file-system`、`lib/folders` | 写作文件树模型、拖拽、文件夹（知识库与写作共用 `folders` 表；`moveFolder` 校验循环与同名，删除时子文件夹上移一级） |
 | `lib/editor` | 语言注册表、ProseMirror 输入规则与块级回车转换、视口懒渲染（`lazy-visibility.ts`）、块拖拽手柄与块菜单（`block-handle.ts`、`block-commands.ts`、`popup-menu.ts`）、页面设置模型（`page-settings.ts`，localStorage `writing-page-settings`）、打字机模式插件（`typewriter.ts`）、定位高亮（`reveal-highlight.ts`，编辑器与阅读视图共用） |
-| `lib/plugins` | 桌面端插件系统：manifest 校验（`manifest.ts`）、权限与按权限过滤的上下文（`sandbox.ts`）、每个插件独占的 Worker 运行时（`plugin-runtime.worker.ts`，移除网络 / 持久化 / 动态求值等全局能力）与宿主侧代理（`worker-plugin.ts`、`plugin-protocol.ts`）、加载与生命周期（`plugin-loader.ts`）、宿主扩展点（`extension-registry.ts`：在 `plugin-system` 的 `ExtensionRegistry` 上定义状态栏项、侧栏视图内容两个扩展点及校验；`PluginLoader` 按插件持有贡献句柄，重新设置时替换、停用时整体注销）、快捷键解析与冲突检测（`keybindings.ts`）、偏好 / 配置与存储（`preferences.ts`、`storage.ts`）、编辑器桥接（`editor-bridge.ts`：已注册编辑器按最近活动排列，聚焦栏调用 `activate`；Markdown 编辑器与 LaTeX 源码编辑器都会注册，带 `language`）；`services/pluginService.ts` 组合主进程插件目录与以上模块，并用 `plugin-system/lifecycle` 编排激活：授权 → 依赖解析（依赖先激活，缺失 / 未启用 / 版本不满足 / 循环时拒绝）→ 激活事件（onStartup 推迟到首屏后的空闲时刻，`requestIdleCallback` 最长 2 秒，等待期间操作队列不被占用 / onLanguage / onView；执行命令时按需激活），manifest 声明的命令、快捷键、斜杠菜单、标签栏按钮、侧栏视图从快照的 `contributions` 提供给界面 |
+| `lib/plugins` | 桌面端插件系统：manifest 校验（`manifest.ts`）、权限与按权限过滤的上下文（`sandbox.ts`）、每个插件独占的 Worker 运行时（`plugin-runtime.worker.ts`，移除网络 / 持久化 / 动态求值等全局能力）与宿主侧代理（`worker-plugin.ts`、`plugin-protocol.ts`）、加载与生命周期（`plugin-loader.ts`）、宿主扩展点（`extension-registry.ts`：在 `plugin-system` 的 `ExtensionRegistry` 上定义状态栏项、侧栏视图内容两个扩展点及校验；`PluginLoader` 按插件持有贡献句柄，重新设置时替换、停用时整体注销）、快捷键解析与冲突检测（`keybindings.ts`）、偏好 / 配置与存储（`preferences.ts`、`storage.ts`）、编辑器桥接（`editor-bridge.ts`：已注册编辑器按最近活动排列，聚焦栏调用 `activate`；Markdown 编辑器与 LaTeX 源码编辑器都会注册，带 `language`）；`services/pluginService.ts` 组合主进程插件目录与以上模块，并用 `plugin-system/lifecycle` 编排激活：授权 → 依赖解析（依赖先激活，缺失 / 未启用 / 版本不满足 / 循环时拒绝）→ 激活事件（onStartup 在首屏后的第一个空闲时刻、onStartupFinished 在全部启动插件激活后的下一个空闲时刻，`requestIdleCallback` 最长 2 秒 / onLanguage / onView；执行命令时按需激活，激活原因与耗时记在快照里），manifest 声明的命令、快捷键、斜杠菜单、标签栏按钮、侧栏视图从快照的 `contributions` 提供给界面。插件之间经 `commands.execute('<插件>.<命令>')` 调用，沙箱只放行本插件与声明的依赖。声明式贡献（不运行插件代码，启用即生效）：`themes.ts`（只允许覆盖白名单中的颜色变量，值须为颜色字面量；`ThemeProvider` 在内置配色之上应用）与 `languages.ts`（代码块语言注册到 `lib/editor/languages.ts`，复用内置语法，不覆盖内置别名，停用时移除）。主进程市场经 `MarketProvider` 接口取得列表与插件包（当前实现为静态 JSON 索引，官方市场服务器上线后实现同一接口），校验、验签与安装与来源无关 |
 | `services/` | `database.ts`（渲染侧 SQL 通道，含 `transaction`）、`settingsService.ts`（`settings.json`）、`aiConfigService.ts`（主进程 AI 配置的客户端）、`spellcheckService.ts`、`workspaceService.ts`（知识库）、`flushRegistry.ts`（渲染进程落盘的唯一入口：持有防抖写入的模块注册回调，响应主进程请求并发执行后 ack）、`pluginService.ts`、`ocrLanguageService.ts` |
 | `theme/` | ThemeProvider：light / dark / system，强调色，字体，写入 CSS 变量 |
 
@@ -179,7 +181,7 @@ HeightMap（height-map.ts）── 源码行 ↔ 块 ↔ 实测位置；块内�
 分栏滚动同步（LatexEditor + scroll-sync.ts 的 ScrollSyncLock）
 ```
 
-`lib/latex` 不设汇总入口（无 `index.ts`），全部 17 个模块都从 `LatexEditor.tsx` 可达：它直接使用 `codemirror-latex`、`codemirror-analysis`、`analysis-client`、`latex-document`、`incremental-engine`、`render-pipeline`、`scroll-sync`；分析客户端在 `analysis.worker` 中调用 `analysis`（`syntax-parser` 语法诊断与结构 + `format-parser` 交叉引用与元数据，写作侧栏 `LatexOutline` 共用同一客户端，同一内容只分析一次）；引擎内部依赖 `block-segmenter`、`parser`、`renderer`（数学环境由 `math-env-handler` 处理）；管线内部依赖 `frame-scheduler`、`height-map`、`worker`；类型统一在 `types.ts`。早期并行的链路（基于内容比较的 `parseAndRender`、`RealHeightMap`、按比例换算的滚动同步、`useLatexPipeline` / `useScrollSync`、`syntax-parser` 解析器选择、AST 缓存管理器与 math-worker 等）已删除。
+`lib/latex` 不设汇总入口（无 `index.ts`），全部模块都从 `LatexEditor.tsx` 可达：它直接使用 `codemirror-latex`、`codemirror-analysis`、`analysis-client`、`latex-document`、`incremental-engine`、`render-pipeline`、`scroll-sync`；分析客户端在 `analysis.worker` 中用 `LatexAnalyzer` 按块增量分析（与渲染引擎同一套 `block-segmenter` 切块，每块的 `syntax-parser` 语法诊断与结构、`format-parser` 交叉引用按块文本缓存，只重新分析改动的块；有未闭合结构、块内语法错误或 document 标记不止一对时回退整篇，随机编辑对比测试保证与整篇结果一致；80 万字符改一段约 9ms，整篇约 120ms），写作侧栏 `LatexOutline` 共用同一客户端；引擎内部依赖 `block-segmenter`、`parser`、`renderer`（数学环境由 `math-env-handler` 处理；正文命令→Unicode 符号、重音与连字由 `text-symbols` 提供，大纲 / 目录标题的纯文本也用它；未识别的命令连同参数原样保留并以 `latex-unknown-command` 标出）；管线内部依赖 `frame-scheduler`、`height-map`、`worker`；类型统一在 `types.ts`。早期并行的链路（基于内容比较的 `parseAndRender`、`RealHeightMap`、按比例换算的滚动同步、`useLatexPipeline` / `useScrollSync`、`syntax-parser` 解析器选择、AST 缓存管理器与 math-worker 等）已删除。
 
 滚动同步规则（`scroll-sync.ts`）：只有用户真实操作的一侧拥有滚动所有权（时间窗 `SCROLL_OWNER_WINDOW_MS = 150`）。源码滚动（含光标带动）同步预览；预览只有在用户滚轮 / 触摸 / 指针 / 键盘输入后的时间窗内滚动才同步源码；程序设置 `scrollTop` 或内容重排引起的预览滚动一律忽略；预览刷新或测量后只允许“源码 → 预览”。查询返回 `null`（块尚未测量）时等下一次测量再同步。
 
@@ -237,7 +239,10 @@ onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（Edito
 | 数学环境渲染缺属性 | `renderMathEnvironment` 使用了未定义的 `blockAttrs` | 方法内调用 `getBlockAttributes(node)` 生成 |
 | 极限下标显示在右下角 | `math-limit-style` 的 CSS 结构与渲染器输出不一致 | 改为纵向 inline-flex，上下标居中排列 |
 | 预览中的“黑色方块” | 不是 bug：是 `\blacksquare`（QED 符号）的正确渲染 | 无需修复；空数学块用 `.latex-math-empty` 隐藏 |
-| `\lim`、`\frac` 显示为原文 | 数学命令写在数学模式之外（未用 `$...$`、`\[...\]` 或数学环境包裹） | 属于输入问题，非渲染缺陷 |
+| `\lim`、`\frac` 显示为原文 | 数学命令写在数学模式之外（未用 `$...$`、`\[...\]` 或数学环境包裹） | 正文中直接出现的数学命令连同上下标按行内公式渲染（`renderer.ts` 的 `TEXT_MATH_COMMANDS`）；其余没有对应渲染的命令原样保留并标出 |
+| 启动插件总在启动后约 2 秒才激活；主线程持续空转 | `diff-algorithm` 与桌面端各有一个 Worker 入口以 `typeof self.postMessage === 'function'` 判断自己在 Worker 中，而主线程的 `self` 就是 `window`，同样有 `postMessage`。两个模块被打包进主线程后各自执行 `self.onmessage = (e) => self.postMessage(...)`，window 消息“收到即回发”，每秒约 6 万次，占满空闲时段，`requestIdleCallback` 永远等到 2 秒超时。定位方法：同一窗口对照 `about:blank`（rIC 立即触发），再注入探针统计任务来源 | 改为 `self instanceof WorkerGlobalScope` 判断，并加回归测试；桌面端的重复 Worker 实现迁到 `diff-algorithm-extras`。启动插件现在约 150–290ms 激活 |
+| LaTeX 诊断在输入 `$` 后出现远处的引用误报 | `format-parser` 与 `syntax-parser` 都把未闭合的 `$` 延伸到下一个 `$`：前者跨过空行吞掉后文的 `\label` 与 `\bibitem`，后者的词法 `$` 状态越过分组（`\label{a$b}` 之后的 `$$` 被配错） | 未闭合的公式在空行与关闭外层分组的 `}` 处结束（与 TeX 的 Missing $ 行为一致）。由按块增量分析的随机编辑对比测试发现 |
+| 正文空格被吞、`\LaTeX` 后的空行丢失、嵌套列表错乱 | 正文解析循环每轮先跳过全部空白（含换行）；命令后读取参数时跨过空行；环境以第一个 `\end{name}` 结束；列表按所有 `\item` 切分（含子列表与 `\itemsep`） | 只跳过段首空白；参数前至多跨一个换行；同名环境按深度配对；只在本层切分 `\item` |
 | 保存 `.tex` 后变成 `.md` | 修改标题时可能丢掉扩展名，导致文件类型改变 | 所有标题编辑入口（各栏编辑器、专注模式标题栏）经 `keepFileExtension` 自动保留原扩展名 |
 | 源码视图挡住文件树点击 | 全文源码编辑器层级高于侧边栏 | 源码编辑器与 RichEditor 处于同一层级（`position: relative; z-index: 0`） |
 | Light 模式文字不可见 | 组件颜色使用 SCSS 变量，编译期固定为深色值 | 颜色统一改为 CSS 变量 |

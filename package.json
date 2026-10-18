@@ -16,6 +16,8 @@
     "watch:diff-algorithm": "pnpm --filter @code-reader/diff-algorithm dev",
     "test:diff-algorithm": "pnpm --filter @code-reader/diff-algorithm test",
     "benchmark:diff-algorithm": "pnpm --filter @code-reader/diff-algorithm benchmark",
+    "build:diff-algorithm-extras": "pnpm --filter @code-reader/diff-algorithm-extras build",
+    "test:diff-algorithm-extras": "pnpm --filter @code-reader/diff-algorithm-extras test",
     "build:fuzzy-match-algorithm": "pnpm --filter @code-reader/fuzzy-match-algorithm build",
     "watch:fuzzy-match-algorithm": "pnpm --filter @code-reader/fuzzy-match-algorithm dev",
     "test:fuzzy-match-algorithm": "pnpm --filter @code-reader/fuzzy-match-algorithm test",
