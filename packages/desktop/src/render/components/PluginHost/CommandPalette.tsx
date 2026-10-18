@@ -1,10 +1,13 @@
 // ================================
 // 命令面板
-// ⌘⇧P 打开，列出已启用插件注册的命令；插件调用 showQuickPick 时也复用这里的列表选择
+// ⌘⇧P 打开，列出已启用插件注册的命令；插件调用 showQuickPick 时也复用这里的列表选择。
+// 输入按模糊匹配（@code-reader/fuzzy-match-algorithm）排序：字符依次出现即可，连续、词首与开头匹配优先；
+// 标题未匹配时再匹配说明（插件名），排在标题匹配之后。命中的字符高亮显示
 // ================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { fuzzyScore } from '@code-reader/fuzzy-match-algorithm';
 import styles from './CommandPalette.module.scss';
 
 export interface PaletteItem {
@@ -24,16 +27,53 @@ export interface CommandPaletteProps {
   onClose: () => void;
 }
 
+interface RankedItem {
+  item: PaletteItem;
+  /** 标题 / 说明中命中的字符位置 */
+  labelPositions: number[];
+  detailPositions: number[];
+}
+
+/** 按模糊匹配筛选并排序；分数相同时保持原有顺序 */
+export function rankPaletteItems(items: readonly PaletteItem[], query: string): RankedItem[] {
+  const pattern = query.replace(/\s+/g, '');
+  if (!pattern) return items.map((item) => ({ item, labelPositions: [], detailPositions: [] }));
+  const ranked: Array<RankedItem & { rank: number }> = [];
+  for (const item of items) {
+    const label = fuzzyScore(pattern, item.label);
+    if (label.matched) {
+      ranked.push({ item, rank: 100 + label.score, labelPositions: label.positions, detailPositions: [] });
+      continue;
+    }
+    const detail = item.detail ? fuzzyScore(pattern, item.detail) : null;
+    if (detail?.matched) ranked.push({ item, rank: detail.score, labelPositions: [], detailPositions: detail.positions });
+  }
+  return ranked.sort((a, b) => b.rank - a.rank);
+}
+
+/** 命中字符用 <mark> 包裹（React 节点，文本不作为 HTML 解析） */
+function Highlighted({ text, positions }: { text: string; positions: readonly number[] }) {
+  if (positions.length === 0) return <>{text}</>;
+  const hit = new Set(positions);
+  const parts: React.ReactNode[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const matched = hit.has(start);
+    let end = start + 1;
+    while (end < text.length && hit.has(end) === matched) end++;
+    const slice = text.slice(start, end);
+    parts.push(matched ? <mark key={start} className={styles.match}>{slice}</mark> : slice);
+    start = end;
+  }
+  return <>{parts}</>;
+}
+
 const CommandPalette: React.FC<CommandPaletteProps> = ({ items, placeholder, emptyText, onSelect, onClose }) => {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
 
-  const filtered = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    if (!keyword) return items;
-    return items.filter((item) => `${item.label} ${item.detail ?? ''}`.toLowerCase().includes(keyword));
-  }, [items, query]);
+  const filtered = useMemo(() => rankPaletteItems(items, query), [items, query]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -52,8 +92,8 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ items, placeholder, emp
       setActiveIndex((index) => Math.max(index - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const item = filtered[activeIndex];
-      if (item) onSelect(item);
+      const ranked = filtered[activeIndex];
+      if (ranked) onSelect(ranked.item);
     } else if (e.key === 'Escape') {
       e.preventDefault();
       onClose();
@@ -81,7 +121,7 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ items, placeholder, emp
           <div className={styles.empty}>{items.length === 0 ? emptyText : '没有匹配的条目'}</div>
         ) : (
           <ul ref={listRef} className={styles.list} role="listbox">
-            {filtered.map((item, index) => (
+            {filtered.map(({ item, labelPositions, detailPositions }, index) => (
               <li
                 key={item.key}
                 role="option"
@@ -90,8 +130,14 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ items, placeholder, emp
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => onSelect(item)}
               >
-                <span className={styles.label}>{item.label}</span>
-                {item.detail && <span className={styles.detail}>{item.detail}</span>}
+                <span className={styles.label}>
+                  <Highlighted text={item.label} positions={labelPositions} />
+                </span>
+                {item.detail && (
+                  <span className={styles.detail}>
+                    <Highlighted text={item.detail} positions={detailPositions} />
+                  </span>
+                )}
                 {item.shortcut && <kbd className={styles.shortcut}>{item.shortcut}</kbd>}
               </li>
             ))}
