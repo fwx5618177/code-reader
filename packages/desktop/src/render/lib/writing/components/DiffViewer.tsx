@@ -6,7 +6,7 @@
 import React, { useMemo, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import { useContentDiff } from '../useWritingService';
 import type { DiffStats } from '@code-reader/diff-algorithm';
-import { diffsToLines, type Diff, type DiffLine } from './diff-lines';
+import { lineDiff, type DiffLine } from './diff-lines';
 import styles from './DiffViewer.module.scss';
 
 // ================================
@@ -208,11 +208,8 @@ export const DiffViewer = forwardRef<DiffViewerHandle, DiffViewerProps>(
       }
     }, [source, target, isInitialized, compare, onDiffComputed]);
 
-    // 将差分转换为行
-    const diffLines = useMemo(() => {
-      if (!lastDiff?.diffs) return [];
-      return diffsToLines(lastDiff.diffs as readonly Diff[]);
-    }, [lastDiff]);
+    // 按行对齐的差分（统计信息仍来自写作服务的字符级差分）
+    const diffLines = useMemo(() => lineDiff(source ?? '', target ?? ''), [source, target]);
 
     // 应用折叠
     const displayLines = useMemo(() => {

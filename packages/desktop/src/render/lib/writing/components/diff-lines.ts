@@ -1,15 +1,12 @@
 // ================================
-// 字符级差分 → 按行展示
-// 差分算法输出的是字符级片段，同一行内可能混有相等、删除、插入片段；
-// 这里按换行重新组装：未变化的行合并为一行，有变化的行拆成“删除行（旧）+ 插入行（新）”，
-// 行内真正变化的片段单独标记，便于高亮
+// 版本对比的按行差分（与 git diff --histogram 相同的思路）
+// 1. 先按行对齐：Histogram Diff（@code-reader/diff-algorithm/algorithms）以低频行为锚点，
+//    段落改写、移动时不会像字符级差分那样把新旧内容交错拆碎；
+// 2. 再对相邻的“删除块 + 插入块”逐行配对，用字符级差分标出行内真正变化的片段，便于高亮
 // ================================
 
-export type DiffOp = -1 | 0 | 1;
-export type Diff = readonly [DiffOp, string];
-
-const DIFF_DELETE = -1;
-const DIFF_INSERT = 1;
+import { DIFF_DELETE, DIFF_INSERT, quickDiff } from '@code-reader/diff-algorithm';
+import { quickHistogramDiff } from '@code-reader/diff-algorithm/algorithms';
 
 export interface LineSegment {
   text: string;
@@ -24,63 +21,72 @@ export interface DiffLine {
   targetLineNum?: number;
 }
 
-const lineText = (segments: LineSegment[]) => segments.map((segment) => segment.text).join('');
+/** 行内容（去掉行尾换行） */
+const stripNewline = (line: string) => (line.endsWith('\n') ? line.slice(0, -1) : line);
 
-export function diffsToLines(diffs: readonly Diff[]): DiffLine[] {
-  const lines: DiffLine[] = [];
-  let sourceLineNum = 1;
-  let targetLineNum = 1;
-  // null 表示该侧当前行尚未开始（避免把末尾换行之后的空串当成一行）
-  let source: LineSegment[] | null = null;
-  let target: LineSegment[] | null = null;
-
-  const append = (segments: LineSegment[] | null, text: string, changed: boolean) => {
-    const next = segments ?? [];
-    if (text) next.push({ text, changed });
-    return next;
-  };
-
-  const endSourceLine = () => {
-    lines.push({ type: 'delete', segments: source ?? [], sourceLineNum: sourceLineNum++ });
-    source = null;
-  };
-
-  const endTargetLine = () => {
-    lines.push({ type: 'insert', segments: target ?? [], targetLineNum: targetLineNum++ });
-    target = null;
-  };
-
-  // 两侧同时换行：文本相同则为未变化行，否则旧行删除、新行插入
-  const endBothLines = () => {
-    if (source && target && lineText(source) === lineText(target)) {
-      lines.push({
-        type: 'equal',
-        segments: [{ text: lineText(source), changed: false }],
-        sourceLineNum: sourceLineNum++,
-        targetLineNum: targetLineNum++,
-      });
-      source = target = null;
-      return;
+/**
+ * 一对新旧行的行内片段：删除侧保留相等与删除的片段，插入侧保留相等与插入的片段
+ */
+function intraLineSegments(oldLine: string, newLine: string): { source: LineSegment[]; target: LineSegment[] } {
+  const source: LineSegment[] = [];
+  const target: LineSegment[] = [];
+  for (const [op, text] of quickDiff(oldLine, newLine).diffs) {
+    if (!text) continue;
+    if (op === DIFF_DELETE) source.push({ text, changed: true });
+    else if (op === DIFF_INSERT) target.push({ text, changed: true });
+    else {
+      source.push({ text, changed: false });
+      target.push({ text, changed: false });
     }
-    if (source) endSourceLine();
-    if (target) endTargetLine();
-  };
+  }
+  return { source, target };
+}
 
-  for (const [op, text] of diffs) {
-    const pieces = text.split('\n');
-    pieces.forEach((piece, index) => {
-      const isLast = index === pieces.length - 1;
-      if (!isLast || piece) {
-        if (op !== DIFF_INSERT) source = append(source, piece, op === DIFF_DELETE);
-        if (op !== DIFF_DELETE) target = append(target, piece, op === DIFF_INSERT);
-      }
-      if (isLast) return;
-      if (op === DIFF_DELETE) endSourceLine();
-      else if (op === DIFF_INSERT) endTargetLine();
-      else endBothLines();
+/**
+ * 计算按行展示的差分
+ */
+export function lineDiff(source: string, target: string): DiffLine[] {
+  // 统一以换行结尾，最后一行有无换行不影响行的匹配
+  const withNewline = (text: string) => (text === '' || text.endsWith('\n') ? text : `${text}\n`);
+  const { hunks } = quickHistogramDiff(withNewline(source), withNewline(target));
+  const lines: DiffLine[] = [];
+
+  for (let i = 0; i < hunks.length; ) {
+    const hunk = hunks[i]!;
+    if (hunk.op === 'equal') {
+      hunk.lines.forEach((line, k) => {
+        lines.push({
+          type: 'equal',
+          segments: [{ text: stripNewline(line), changed: false }],
+          sourceLineNum: hunk.oldStart + k + 1,
+          targetLineNum: hunk.newStart + k + 1,
+        });
+      });
+      i++;
+      continue;
+    }
+
+    // 相邻的删除块与插入块合并为一个变更区
+    const deleted: Array<{ text: string; num: number }> = [];
+    const inserted: Array<{ text: string; num: number }> = [];
+    for (; i < hunks.length && hunks[i]!.op !== 'equal'; i++) {
+      const change = hunks[i]!;
+      const bucket = change.op === 'delete' ? deleted : inserted;
+      const start = change.op === 'delete' ? change.oldStart : change.newStart;
+      change.lines.forEach((line, k) => bucket.push({ text: stripNewline(line), num: start + k + 1 }));
+    }
+
+    // 按顺序配对的新旧行做行内高亮，多出的行整行标记
+    const paired = deleted.map((line, k) =>
+      k < inserted.length ? intraLineSegments(line.text, inserted[k]!.text) : null
+    );
+    deleted.forEach((line, k) => {
+      lines.push({ type: 'delete', segments: paired[k]?.source ?? [{ text: line.text, changed: true }], sourceLineNum: line.num });
+    });
+    inserted.forEach((line, k) => {
+      lines.push({ type: 'insert', segments: paired[k]?.target ?? [{ text: line.text, changed: true }], targetLineNum: line.num });
     });
   }
-  endBothLines();
 
   return lines;
 }
