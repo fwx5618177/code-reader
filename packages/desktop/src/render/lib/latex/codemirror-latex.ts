@@ -16,6 +16,22 @@ import {
   type StringStream,
   type StreamParser,
 } from '@codemirror/language';
+import { LATEX_LANGUAGE_CONFIGURATION } from '@code-reader/syntax-parser';
+
+/**
+ * 编辑行为来自 syntax-parser 的 LaTeX 语言配置：
+ * - 行注释 % （⌘/ / Ctrl+/ 切换注释）
+ * - 自动配对 { [ ( $；LaTeX 的引号是 ``…'' ，不配对 ' 与 "。
+ *   \( \[ 等多字符配对 CodeMirror 不支持，由补全片段提供
+ */
+const LATEX_LANGUAGE_DATA = {
+  commentTokens: { line: LATEX_LANGUAGE_CONFIGURATION.lineComment },
+  closeBrackets: {
+    brackets: (LATEX_LANGUAGE_CONFIGURATION.autoClosingPairs ?? [])
+      .filter((pair) => pair.open.length === 1)
+      .map((pair) => pair.open),
+  },
+};
 
 // ================================
 // LaTeX 语法定义
@@ -115,6 +131,8 @@ const VERBATIM_ENVIRONMENTS = ['verbatim', 'lstlisting', 'minted', 'alltt'];
 /** LaTeX 流解析器 */
 const latexStreamParser: StreamParser<LatexState> = {
   name: 'latex',
+
+  languageData: LATEX_LANGUAGE_DATA,
 
   startState: createInitialState,
 
