@@ -2,12 +2,15 @@
 // 插件清单（manifest.json）校验
 // 目录名即插件 ID（格式由主进程列目录时约束），清单中的 id 必须与目录名一致。
 // 贡献点的数据结构沿用 @code-reader/plugin-system 的定义，这里只接受桌面端已有界面入口的部分：
-// commands、keybindings、menus["editor/context"]（斜杠菜单）、toolbar（标签栏按钮）、views（侧栏视图）、configuration
+// commands、keybindings、menus["editor/context"]（斜杠菜单）、toolbar（标签栏按钮）、views（侧栏视图）、configuration、
+// themes（外观设置中可选的配色）、languages（代码块语言）
 // ================================
 
 import { isValidVersionRange, parseActivationEvent } from '@code-reader/plugin-system/lifecycle';
+import { isLanguageSupported } from '../editor/languages';
 import { parseKeybinding, type Platform } from './keybindings';
 import { isPermission, type Permission } from './sandbox';
+import { isColorValue, isThemeColorVariable } from './themes';
 import type {
   CommandContribution,
   EditorLanguage,
@@ -15,8 +18,10 @@ import type {
   PluginConfigurationProperty,
   PluginDependency,
   PluginKeybinding,
+  PluginLanguage,
   PluginManifest,
   PluginMenuItem,
+  PluginTheme,
   PluginToolbarItem,
   PluginView,
 } from './types';
@@ -60,6 +65,9 @@ const MAX_TOOLBAR_ITEMS = 3;
 const MAX_VIEWS = 5;
 const MAX_CONFIGURATION_PROPERTIES = 50;
 const MAX_ENUM_VALUES = 50;
+const MAX_THEMES = 5;
+const MAX_LANGUAGES = 10;
+const LANGUAGE_NAME = /^[A-Za-z0-9][\w+#.-]{0,31}$/;
 const PLATFORMS: readonly Platform[] = ['mac', 'win', 'linux'];
 
 export type ManifestValidation = { manifest: PluginManifest; errors: [] } | { manifest: null; errors: string[] };
@@ -350,6 +358,91 @@ function validateConfiguration(raw: unknown, errors: string[]): PluginConfigurat
   return { title: title.trim(), properties };
 }
 
+function validateThemes(raw: unknown, errors: string[]): PluginTheme[] {
+  const seen = new Set<string>();
+  return validateList(
+    raw,
+    'contributes.themes',
+    errors,
+    (item, label) => {
+      const { id, label: name, type, colors } = item;
+      if (typeof id !== 'string' || !IDENTIFIER.test(id) || seen.has(id)) {
+        errors.push(`${label}.id 必须是不重复的标识符`);
+        return null;
+      }
+      seen.add(id);
+      if (typeof name !== 'string' || !name.trim() || name.length > MAX_VIEW_NAME_LENGTH) {
+        errors.push(`${label}.label 必须是 1～${MAX_VIEW_NAME_LENGTH} 个字符`);
+        return null;
+      }
+      if (type !== 'dark' && type !== 'light') {
+        errors.push(`${label}.type 必须是 dark 或 light`);
+        return null;
+      }
+      if (!isRecord(colors) || Object.keys(colors).length === 0) {
+        errors.push(`${label}.colors 必须是非空对象（CSS 颜色变量 → 颜色）`);
+        return null;
+      }
+      const validColors: Record<string, string> = {};
+      for (const [variable, value] of Object.entries(colors)) {
+        if (!isThemeColorVariable(variable)) {
+          errors.push(`${label}.colors 中的 ${variable} 不是可覆盖的颜色变量`);
+          return null;
+        }
+        if (typeof value !== 'string' || !isColorValue(value)) {
+          errors.push(`${label}.colors.${variable} 必须是颜色（#rrggbb、rgb()、hsl()）`);
+          return null;
+        }
+        validColors[variable] = value.trim();
+      }
+      return { id, label: name.trim(), type, colors: validColors };
+    },
+    MAX_THEMES
+  );
+}
+
+function validateLanguages(raw: unknown, errors: string[]): PluginLanguage[] {
+  const seen = new Set<string>();
+  const names = (value: unknown, label: string): string[] | null => {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > 10 || !value.every((name) => typeof name === 'string' && LANGUAGE_NAME.test(name))) {
+      errors.push(`${label} 必须是不超过 10 项的名称数组（字母、数字与 + # . - _）`);
+      return null;
+    }
+    return [...new Set(value as string[])];
+  };
+  return validateList(
+    raw,
+    'contributes.languages',
+    errors,
+    (item, label) => {
+      const { id, name, grammar } = item;
+      if (typeof id !== 'string' || !LANGUAGE_NAME.test(id) || seen.has(id.toLowerCase())) {
+        errors.push(`${label}.id 必须是不重复的语言名`);
+        return null;
+      }
+      seen.add(id.toLowerCase());
+      if (isLanguageSupported(id)) {
+        errors.push(`${label}.id 「${id}」与内置语言重名`);
+        return null;
+      }
+      if (typeof name !== 'string' || !name.trim() || name.length > MAX_VIEW_NAME_LENGTH) {
+        errors.push(`${label}.name 必须是 1～${MAX_VIEW_NAME_LENGTH} 个字符`);
+        return null;
+      }
+      if (typeof grammar !== 'string' || !isLanguageSupported(grammar)) {
+        errors.push(`${label}.grammar 必须是内置语言（如 javascript、python、markdown）`);
+        return null;
+      }
+      const aliases = names(item.aliases, `${label}.aliases`);
+      const extensions = names(item.extensions, `${label}.extensions`);
+      if (!aliases || !extensions) return null;
+      return { id, name: name.trim(), grammar, aliases, extensions };
+    },
+    MAX_LANGUAGES
+  );
+}
+
 function validateDependencies(raw: unknown, selfId: string, errors: string[]): PluginDependency[] {
   const seen = new Set<string>();
   return validateList(raw, 'dependencies', errors, (item, label) => {
@@ -386,7 +479,7 @@ function validateActivationEvents(
   for (const event of raw) {
     const parsed = typeof event === 'string' ? parseActivationEvent(event) : null;
     if (!parsed) {
-      errors.push(`未知的激活事件：${String(event)}（支持 onStartup、onCommand:、onLanguage:、onView:）`);
+      errors.push(`未知的激活事件：${String(event)}（支持 onStartup、onStartupFinished、onCommand:、onLanguage:、onView:）`);
       continue;
     }
     const { kind, argument = '' } = parsed;
@@ -447,6 +540,8 @@ export function validateManifest(raw: unknown, directoryName: string): ManifestV
     menus: validateMenus(source.menus, commandIds, errors),
     toolbar: validateToolbar(source.toolbar, commandIds, errors),
     views,
+    themes: validateThemes(source.themes, errors),
+    languages: validateLanguages(source.languages, errors),
   };
   const configuration = validateConfiguration(source.configuration, errors);
   if (configuration) contributions.configuration = configuration;

@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
   failing: new Set<string>(),
   /** 运行中的插件收到的配置变更：插件:键=新值 */
   configChanges: [] as string[],
+  /** 已激活插件的上下文（模拟插件代码调用宿主 API） */
+  contexts: new Map<string, PluginContext>(),
 }));
 
 vi.mock('../settingsService', () => ({
@@ -37,6 +39,7 @@ vi.mock('../../lib/plugins/worker-plugin', () => ({
     activate: (context: PluginContext) => {
       if (state.failing.has(manifest.id)) throw new Error('初始化失败');
       state.activated.push(manifest.id);
+      state.contexts.set(manifest.id, context);
       for (const command of manifest.contributes.commands) {
         context.subscriptions.push(context.commands.register(command.id, () => `${manifest.id}:${command.id}`));
       }
@@ -228,31 +231,62 @@ describe('pluginService 生命周期编排', () => {
 
     expect(state.activated).toEqual(['lib', 'app']);
     expect(status(service, 'app')?.status).toBe('active');
+    expect(status(service, 'lib')?.activation?.reason).toBe('onStartup');
   });
 
-  it('onStartup 推迟到空闲时激活：等待期间已初始化、状态为等待激活，操作队列不被阻塞', async () => {
-    let onIdle: (() => void) | undefined;
+  it('插件调用依赖插件的命令（依赖随调用方先激活）；不能调用未声明的插件', async () => {
+    state.packages = [
+      pluginPackage([], 'app', { dependencies: [{ id: 'lib', version: '*', optional: true }] }),
+      pluginPackage([], 'lib', { activationEvents: ['onCommand:hello'] }),
+      pluginPackage([], 'other', { activationEvents: ['onCommand:hello'] }),
+    ];
+    state.settings.plugins = enabled('app', 'lib', 'other');
+    state.contexts.clear();
+    const service = await loadService();
+    await service.init();
+
+    const app = state.contexts.get('app')!;
+    expect(status(service, 'lib')).toMatchObject({ status: 'active', activation: { reason: 'dependency:app' } });
+    await expect(app.commands.execute('lib.hello', [])).resolves.toBe('lib:hello');
+    expect(() => app.commands.execute('other.hello', [])).toThrow('未声明');
+    expect(status(service, 'other')?.status).toBe('idle');
+  });
+
+  it('onStartup 推迟到空闲时激活：等待期间已初始化、状态为等待激活，操作队列不被阻塞；onStartupFinished 在其后的空闲时刻激活', async () => {
+    const idle: Array<() => void> = [];
     vi.stubGlobal('requestIdleCallback', (callback: () => void) => {
-      onIdle = callback;
-      return 1;
+      idle.push(callback);
+      return idle.length;
     });
     try {
-      state.packages = [pluginPackage([], 'demo'), pluginPackage([], 'tex-tools', { activationEvents: ['onCommand:hello'] })];
-      state.settings.plugins = enabled('demo', 'tex-tools');
+      state.packages = [
+        pluginPackage([], 'demo'),
+        pluginPackage([], 'tex-tools', { activationEvents: ['onCommand:hello'] }),
+        pluginPackage([], 'later', { activationEvents: ['onStartupFinished'] }),
+      ];
+      state.settings.plugins = enabled('demo', 'tex-tools', 'later');
       const service = await loadService();
       const initializing = service.init();
 
-      await vi.waitFor(() => expect(onIdle).toBeDefined());
+      await vi.waitFor(() => expect(idle).toHaveLength(1));
       expect(service.getSnapshot().initialized).toBe(true);
       expect(status(service, 'demo')?.status).toBe('idle');
       expect(state.activated).toEqual([]);
       // 空闲前按需激活仍然可用
       await expect(service.executeCommand('tex-tools', 'hello')).resolves.toBe('tex-tools:hello');
+      expect(status(service, 'tex-tools')?.activation).toMatchObject({ reason: 'onCommand:hello' });
 
-      onIdle!();
-      await initializing;
+      idle[0]!();
+      await vi.waitFor(() => expect(idle).toHaveLength(2));
       expect(state.activated).toEqual(['tex-tools', 'demo']);
-      expect(status(service, 'demo')?.status).toBe('active');
+      expect(status(service, 'demo')).toMatchObject({ status: 'active', activation: { reason: 'onStartup' } });
+      expect(status(service, 'demo')?.activation?.durationMs).toBeGreaterThanOrEqual(0);
+      expect(status(service, 'later')?.status).toBe('idle');
+
+      idle[1]!();
+      await initializing;
+      expect(state.activated).toEqual(['tex-tools', 'demo', 'later']);
+      expect(status(service, 'later')?.activation?.reason).toBe('onStartupFinished');
     } finally {
       vi.unstubAllGlobals();
     }

@@ -730,6 +730,7 @@ export function deactivate() {}
 | API | 说明 |
 |-----|------|
 | `app.commands.register(id, handler)` | 注册 manifest 中声明过的命令；从侧栏视图执行时 `handler` 收到该项的 `args` |
+| `app.commands.execute('<插件 ID>.<命令 ID>', ...args)` | 调用本插件或 **`dependencies` 中声明的插件** 的命令并拿到返回值（插件之间的 API）；对方尚未启动时先启动。没声明依赖的插件不能调用。参数与返回值须是可复制的数据（数字、字符串、数组、普通对象） |
 | `app.editor.getContent()` / `setContent(text)` | 读取 / 替换当前文档全文（Markdown、纯文本或 LaTeX 源码） |
 | `app.editor.getLanguage()` | 当前文档类型：`markdown` / `latex` / `plain` |
 | `app.editor.getSelection()` / `replaceSelection(text)` / `insertText(text)` | 选中文本、替换选区、在光标处插入 |
@@ -755,6 +756,8 @@ export function deactivate() {}
     "menus": { "editor/context": [{ "command": "insert-rule", "order": 1 }] },
     "toolbar": [{ "command": "insert-rule", "icon": "zap", "tooltip": "插入分隔线" }],
     "views": [{ "id": "stats", "name": "我的统计" }],
+    "themes": [{ "id": "sepia", "label": "护眼", "type": "light", "colors": { "--bg-primary": "#f4ecd8", "--text-primary": "#3b3024" } }],
+    "languages": [{ "id": "dataview", "name": "Dataview", "aliases": ["dv"], "grammar": "sql" }],
     "configuration": {
       "title": "我的插件",
       "properties": {
@@ -770,12 +773,14 @@ export function deactivate() {}
 | 字段 | 说明 |
 |------|------|
 | `dependencies` | 依赖的其他插件与版本范围（`1.2.3`、`^1.2.0`、`~1.2.0`、`>=1.0.0 <2.0.0`、`1.x`、`*`，多个范围可用双竖线连接表示“或”）；`optional: true` 的依赖缺失时忽略 |
-| `activationEvents` | 何时启动：`onStartup`（省略本字段时的默认值；在应用首屏显示后的空闲时刻启动，最多等待约 2 秒，不拖慢启动）、`onLanguage:markdown` / `latex` / `plain`（首次打开该类文档）、`onView:<视图 ID>`（首次显示插件视图）、`onCommand:<命令 ID>`（可省略：执行插件的任何命令都会先启动它）。只在特定场景使用的插件应声明具体事件，不用 `onStartup` |
+| `activationEvents` | 何时启动：`onStartup`（省略本字段时的默认值；在应用首屏显示后的空闲时刻启动，通常在打开应用后 0.2 秒内）、`onStartupFinished`（所有 `onStartup` 插件启动完、应用再次空闲之后；不急于就绪的后台插件用它）、`onLanguage:markdown` / `latex` / `plain`（首次打开该类文档）、`onView:<视图 ID>`（首次显示插件视图）、`onCommand:<命令 ID>`（可省略：执行插件的任何命令都会先启动它）。只在特定场景使用的插件应声明具体事件，不用 `onStartup`。插件卡片的「生命周期」中显示本次是因为什么启动的、启动用了多少毫秒 |
 | `keybindings` | `key` 用 `+` 连接，修饰键 `Ctrl` / `Cmd` / `Alt`（`Option`）/ `Shift` / `Mod`（macOS 为 ⌘，其他为 Ctrl），按键为字母、数字、`F1`–`F12`、符号键 `[` `]` `;` `'` `,` `.` `/` `\` `-` `=` 与反引号、`Space`、`Enter`、方向键；必须含 Ctrl / Cmd / Alt 之一（F 键除外）。`mac` / `win` / `linux` 覆盖对应平台的写法；`when: "editorFocus"` 只在焦点位于编辑器时生效 |
 | `menus["editor/context"]` | 加入 Markdown 斜杠菜单（目前只支持这一个位置），`order` 小的在前 |
 | `toolbar` | 标签栏按钮（每个插件最多 3 个），`icon` 取 `calendar` `clock` `chart` `hash` `type` `list` `check` `star` `bookmark` `tag` `zap` `wand` `sparkles` `quote` `link` `sigma` `puzzle` |
 | `views` | 侧栏「插件视图」中的视图（每个插件最多 5 个），内容由 `app.views.set` 提供 |
 | `configuration` | 配置项，类型为 `string` / `number` / `boolean`，必须给出 `default`；可选 `description`、`enum`（及等长的 `enumDescriptions`）、`minimum` / `maximum`（仅数字） |
+| `themes` | 配色主题（每个插件最多 5 个，不运行插件代码）：`type` 为 `dark` / `light`（决定基础配色），`colors` 覆盖界面颜色变量（`--bg-primary` `--bg-secondary` `--bg-tertiary` `--bg-quaternary` `--bg-hover` `--bg-active` `--bg-selected` `--bg-highlight` `--border-*` `--text-*` `--accent-*` `--color-success/warning/error/info`（及 `-bg`）`--scrollbar-thumb*`），值只能是 `#rrggbb`、`rgb()`、`hsl()` 这类颜色。启用插件后在 **设置 → 外观 → 插件主题** 选用，再点一次或选择内置模式即取消 |
+| `languages` | 代码块语言（每个插件最多 10 个，不运行插件代码）：加入代码块的语言列表，写 ` ```dataview ` 或别名 ` ```dv ` 时按 `grammar` 指定的内置语言（如 `javascript` `python` `sql` `markdown`）高亮。不能与内置语言重名，已被内置语言占用的别名会被忽略 |
 
 贡献中引用的命令必须先在 `contributes.commands` 中声明。manifest 有任何不合法的地方，插件卡片会逐条列出原因且不能启用。
 

@@ -30,10 +30,13 @@ const LANGUAGE_NAMES: Record<string, string> = { markdown: 'Markdown', latex: 'L
 
 /** 激活事件的说明 */
 function describeActivationEvent(event: string, manifest: PluginManifest): string {
+  if (event.startsWith('dependency:')) return `被依赖它的「${event.slice('dependency:'.length)}」带动`;
   const parsed = parseActivationEvent(event);
   switch (parsed?.kind) {
     case 'onStartup':
       return '启动时';
+    case 'onStartupFinished':
+      return '启动完成后';
     case 'onCommand':
       return `执行「${manifest.contributes.commands.find((command) => command.id === parsed.argument)?.title ?? parsed.argument}」时`;
     case 'onLanguage':
@@ -289,7 +292,7 @@ const PluginCard: React.FC<{
         </div>
       )}
 
-      {manifest && (manifest.contributes.menus['editor/context'].length > 0 || manifest.contributes.toolbar.length > 0 || manifest.contributes.views.length > 0) && (
+      {manifest && (manifest.contributes.menus['editor/context'].length > 0 || manifest.contributes.toolbar.length > 0 || manifest.contributes.views.length > 0 || manifest.contributes.themes.length > 0 || manifest.contributes.languages.length > 0) && (
         <div className={pluginStyles.group}>
           <span className={pluginStyles.groupLabel}>入口</span>
           <ul className={pluginStyles.chips}>
@@ -308,14 +311,32 @@ const PluginCard: React.FC<{
                 侧栏视图：{view.name}
               </li>
             ))}
+            {manifest.contributes.themes.map((theme) => (
+              <li key={`theme-${theme.id}`} className={pluginStyles.chip} title="在「外观」中选用">
+                主题：{theme.label}
+              </li>
+            ))}
+            {manifest.contributes.languages.map((language) => (
+              <li key={`language-${language.id}`} className={pluginStyles.chip} title={`代码块语言，按 ${language.grammar} 高亮`}>
+                代码块语言：{language.name}
+              </li>
+            ))}
           </ul>
         </div>
       )}
 
-      {manifest && (manifest.dependencies.length > 0 || manifest.activationEvents) && (
+      {manifest && (manifest.dependencies.length > 0 || manifest.activationEvents || entry.activation) && (
         <div className={pluginStyles.group}>
           <span className={pluginStyles.groupLabel}>生命周期</span>
           <ul className={pluginStyles.chips}>
+            {entry.activation && (
+              <li
+                className={`${pluginStyles.chip} ${pluginStyles.granted}`}
+                title="读取入口、创建 Worker 与执行 activate() 的总耗时"
+              >
+                本次{describeActivationEvent(entry.activation.reason, manifest)}激活 · {entry.activation.durationMs} ms
+              </li>
+            )}
             {manifest.dependencies.map((dependency) => (
               <li key={`dep-${dependency.id}`} className={pluginStyles.chip}>
                 依赖 {dependency.id} {dependency.version}

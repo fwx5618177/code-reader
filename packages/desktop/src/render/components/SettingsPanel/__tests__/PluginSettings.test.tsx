@@ -61,6 +61,7 @@ function entry(configuration: PluginEntry['configuration']): PluginEntry {
     signature: { status: 'unsigned' },
     blocked: null,
     configuration,
+    activation: null,
   };
 }
 
@@ -79,6 +80,8 @@ function setSnapshot(configuration: PluginEntry['configuration']) {
       slashItems: [],
       toolbar: [],
       views: [],
+      themes: [],
+      languages: [],
     },
   };
   fake.snapshot = snapshot;

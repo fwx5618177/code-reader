@@ -6,6 +6,7 @@
 /** Worker 可调用的宿主方法 */
 export const HOST_METHODS = [
   'commands.register',
+  'commands.execute',
   'editor.getContent',
   'editor.getSelection',
   'editor.getCursorPosition',

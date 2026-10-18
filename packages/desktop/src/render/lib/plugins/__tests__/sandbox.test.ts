@@ -21,6 +21,8 @@ function manifest(permissions: Permission[]): PluginManifest {
       menus: { 'editor/context': [] },
       toolbar: [],
       views: [{ id: 'list', name: '列表' }],
+      themes: [],
+      languages: [],
       configuration: { title: 'Demo', properties: { size: { type: 'number', default: 1 } } },
     },
   };
@@ -50,6 +52,7 @@ function createHost(): SandboxHost {
     views: { set: vi.fn() },
     configuration: { get: vi.fn(() => 3), onDidChange: vi.fn(() => ({ dispose: vi.fn() })) },
     registerCommand: vi.fn(() => ({ dispose: vi.fn() })),
+    executeCommand: vi.fn(async () => 'done'),
   };
 }
 
@@ -80,6 +83,21 @@ describe('createSandboxedContext', () => {
     context.commands.register('run', () => undefined);
     expect(host.registerCommand).toHaveBeenCalledWith('run', expect.any(Function));
     expect(() => context.commands.register('other', () => undefined)).toThrow('未在插件 demo');
+  });
+
+  it('只能调用本插件与声明的依赖插件的命令（插件 ID 可含点）', async () => {
+    const host = createHost();
+    const withDependency = { ...manifest([]), dependencies: [{ id: 'com.example.lib', version: '^1.0.0' }] };
+    const context = createSandboxedContext(withDependency, [], host);
+
+    await expect(context.commands.execute('com.example.lib.format', [1, 'a'])).resolves.toBe('done');
+    expect(host.executeCommand).toHaveBeenCalledWith('com.example.lib', 'format', [1, 'a']);
+    await context.commands.execute('demo.run', []);
+    expect(host.executeCommand).toHaveBeenLastCalledWith('demo', 'run', []);
+
+    expect(() => context.commands.execute('other.run', [])).toThrow('未声明');
+    expect(() => context.commands.execute('norun', [])).toThrow('格式');
+    expect(() => context.commands.execute('demo.run', 'x' as unknown as unknown[])).toThrow('数组');
   });
 
   it('状态栏项校验文本长度与命令', () => {

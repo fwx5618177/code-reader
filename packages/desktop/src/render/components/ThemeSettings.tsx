@@ -4,7 +4,7 @@
 // ================================
 
 import React, { useCallback } from 'react';
-import { Sun, Moon, Monitor, Check, Palette, Type, Minus, Plus, RotateCcw } from 'lucide-react';
+import { Sun, Moon, Monitor, Check, Palette, Type, Minus, Plus, RotateCcw, Puzzle } from 'lucide-react';
 import {
   useTheme,
   useThemeMode,
@@ -22,7 +22,8 @@ import styles from './ThemeSettings.module.scss';
 // ================================
 
 interface ThemeModeSelectorProps {
-  value: ThemeMode;
+  /** null：当前由插件主题决定，内置模式均未选中 */
+  value: ThemeMode | null;
   onChange: (mode: ThemeMode) => void;
 }
 
@@ -226,7 +227,8 @@ export interface ThemeSettingsProps {
 }
 
 export function ThemeSettings({ className }: ThemeSettingsProps): React.ReactElement {
-  const { config, resetTheme, setReduceMotion, setReduceTransparency } = useTheme();
+  const { config, resetTheme, setReduceMotion, setReduceTransparency, pluginThemes, activePluginTheme, setPluginTheme } =
+    useTheme();
   const { mode, setMode } = useThemeMode();
   const { colorId, isCustom, setAccent, setCustom } = useAccentColor();
   const { fonts, setFonts } = useFonts();
@@ -239,8 +241,37 @@ export function ThemeSettings({ className }: ThemeSettingsProps): React.ReactEle
           <Sun size={16} />
           <span>外观模式</span>
         </h3>
-        <ThemeModeSelector value={mode} onChange={setMode} />
+        <ThemeModeSelector value={activePluginTheme ? null : mode} onChange={setMode} />
       </section>
+
+      {/* 插件主题：已启用插件声明的配色 */}
+      {pluginThemes.length > 0 && (
+        <section className={styles.settingsSection}>
+          <h3 className={styles.sectionTitle}>
+            <Puzzle size={16} />
+            <span>插件主题</span>
+          </h3>
+          <div className={styles.themeModeSelector}>
+            {pluginThemes.map((theme) => (
+              <button
+                key={theme.key}
+                className={`${styles.modeOption} ${activePluginTheme?.key === theme.key ? styles.modeOptionActive : ''}`}
+                onClick={() => setPluginTheme(activePluginTheme?.key === theme.key ? undefined : theme.key)}
+                title={`来自插件「${theme.pluginName}」（${theme.type === 'dark' ? '深色' : '浅色'}），再次点击取消`}
+              >
+                <span
+                  className={styles.pluginThemeSwatch}
+                  style={{ '--swatch-color': theme.colors['--bg-primary'] ?? 'transparent' } as React.CSSProperties}
+                />
+                <span>{theme.label}</span>
+              </button>
+            ))}
+          </div>
+          {config.pluginTheme && !activePluginTheme && (
+            <p className={styles.pluginThemeNotice}>选用的插件主题当前不可用（插件已停用或卸载），正在使用内置配色</p>
+          )}
+        </section>
+      )}
 
       {/* 强调色 */}
       <section className={styles.settingsSection}>

@@ -31,6 +31,8 @@ const manifest: PluginManifest = {
     menus: { 'editor/context': [] },
     toolbar: [],
     views: [{ id: 'list', name: '列表' }],
+    themes: [],
+    languages: [],
     configuration: { title: 'Demo', properties: { greeting: { type: 'string', default: '你好' } } },
   },
 };

@@ -121,6 +121,11 @@ const app = Object.freeze({
         throw error;
       }
     },
+    /**
+     * 执行命令：`<插件 ID>.<命令 ID>`，只能调用本插件与 manifest.dependencies 中声明的插件；
+     * 被调用的插件尚未激活时先激活。参数与返回值须可结构化克隆
+     */
+    execute: (command: string, ...args: unknown[]) => call('commands.execute', command, args),
   }),
   editor: Object.freeze({
     getContent: () => call('editor.getContent'),

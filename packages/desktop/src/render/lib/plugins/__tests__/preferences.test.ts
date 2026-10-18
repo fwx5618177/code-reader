@@ -29,6 +29,8 @@ function manifest(permissions: PluginManifest['permissions']): PluginManifest {
       menus: { 'editor/context': [] },
       toolbar: [],
       views: [],
+      themes: [],
+      languages: [],
       configuration: {
         title: 'Demo',
         properties: {

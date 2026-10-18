@@ -19,6 +19,8 @@ export {
   activationEvent,
   parseActivationEvent,
   shouldActivate,
+  matchedActivationEvent,
   type ActivationEventKind,
+  type BareActivationEventKind,
   type ParsedActivationEvent,
 } from './activation-events';

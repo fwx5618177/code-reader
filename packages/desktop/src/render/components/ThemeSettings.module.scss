@@ -94,6 +94,21 @@
   }
 }
 
+// 插件主题：色块预览主题背景色（颜色由 --swatch-color 传入）
+.pluginThemeSwatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--border-primary);
+  background: var(--swatch-color);
+}
+
+.pluginThemeNotice {
+  margin: $spacing-2 0 0;
+  font-size: $font-size-xs;
+  color: var(--text-muted);
+}
+
 // ================================
 // 强调色选择器
 // ================================

@@ -84,6 +84,8 @@ export interface ThemeConfig {
   customAccent?: AccentColor;
   reduceMotion: boolean;
   reduceTransparency: boolean;
+  /** 选用的插件主题（<插件 ID>/<主题 ID>）；插件不可用时回到内置配色 */
+  pluginTheme?: string;
 }
 
 export interface ComputedTheme {

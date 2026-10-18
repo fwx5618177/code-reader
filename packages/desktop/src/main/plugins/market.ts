@@ -237,7 +237,7 @@ function writeRegistries(registries: string[]): string[] {
 }
 
 // ================================
-// 网络
+// 网络与市场来源
 // ================================
 
 async function download(url: string, maxBytes: number): Promise<Buffer> {
@@ -250,15 +250,44 @@ async function download(url: string, maxBytes: number): Promise<Buffer> {
   return data;
 }
 
-async function fetchRegistry(url: string): Promise<{ name: string; plugins: RegistryPlugin[] }> {
-  const data = await download(url, MAX_REGISTRY_BYTES);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(data.toString('utf-8'));
-  } catch {
-    throw new Error('插件市场索引不是有效的 JSON');
+/**
+ * 插件市场来源：只负责“有哪些插件”与“下载插件包”。
+ * 安装流程（校验 SHA-256、按信任策略验签、替换目录）与来源无关，统一在 installFromMarket 中完成，
+ * 因此来源不必可信。当前实现为 RegistryMarketProvider（静态 JSON 索引）；
+ * 官方市场服务器（搜索、分页、下载统计等）上线后实现同一接口，并在 marketProvider() 中按地址选择
+ */
+export interface MarketProvider {
+  /** 市场地址（用户添加的地址，作为市场的唯一标识） */
+  readonly url: string;
+  /** 市场名称与插件列表（下载地址已解析为绝对地址） */
+  fetchListing(): Promise<{ name: string; plugins: RegistryPlugin[] }>;
+  /** 下载插件包（zip，不超过 MAX_PACKAGE_BYTES） */
+  downloadPackage(entry: RegistryPlugin): Promise<Buffer>;
+}
+
+/** 静态 JSON 索引市场（格式见文件头） */
+class RegistryMarketProvider implements MarketProvider {
+  constructor(readonly url: string) {}
+
+  async fetchListing(): Promise<{ name: string; plugins: RegistryPlugin[] }> {
+    const data = await download(this.url, MAX_REGISTRY_BYTES);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(data.toString('utf-8'));
+    } catch {
+      throw new Error('插件市场索引不是有效的 JSON');
+    }
+    return parseRegistry(raw, this.url);
   }
-  return parseRegistry(raw, url);
+
+  downloadPackage(entry: RegistryPlugin): Promise<Buffer> {
+    return download(entry.download, MAX_PACKAGE_BYTES);
+  }
+}
+
+/** 按市场地址取得来源 */
+function marketProvider(url: string): MarketProvider {
+  return new RegistryMarketProvider(url);
 }
 
 /** 已安装插件的版本（用户插件优先） */
@@ -288,7 +317,7 @@ async function listMarket(builtinDir: string): Promise<MarketListing> {
   const errors: MarketListing['errors'] = [];
   for (const registry of registries) {
     try {
-      const { name, plugins: entries } = await fetchRegistry(registry);
+      const { name, plugins: entries } = await marketProvider(registry).fetchListing();
       for (const entry of entries) {
         const installed = await installedVersion(entry.id, builtinDir);
         plugins.push({
@@ -310,10 +339,12 @@ async function listMarket(builtinDir: string): Promise<MarketListing> {
 async function installFromMarket(registry: string, id: string): Promise<{ id: string; version: string; signature: SignatureCheck }> {
   assertPluginId(id);
   if (!readRegistries().includes(registry)) throw new Error('该市场不在已添加的列表中');
-  const entry = (await fetchRegistry(registry)).plugins.find((plugin) => plugin.id === id);
+  const provider = marketProvider(registry);
+  const entry = (await provider.fetchListing()).plugins.find((plugin) => plugin.id === id);
   if (!entry) throw new Error(`市场中没有插件 ${id}`);
 
-  const data = await download(entry.download, MAX_PACKAGE_BYTES);
+  const data = await provider.downloadPackage(entry);
+  if (data.length > MAX_PACKAGE_BYTES) throw new Error('插件包超过大小限制');
   if (sha256Hex(data) !== entry.sha256) throw new Error('插件包校验失败（SHA-256 与市场索引不一致）');
   const { files, signature } = preparePackage(await readPackageZip(data), entry);
   const rejection = signatureRejection(signature, readTrustSettings().policy);
@@ -349,8 +380,8 @@ export function registerMarketHandlers(builtinDir: string): void {
   ipcMain.handle('plugins:marketAddRegistry', async (_event, url: unknown) => {
     if (typeof url !== 'string') throw new Error('市场地址无效');
     const normalized = normalizeRegistryUrl(url);
-    // 添加前先读取一次，确认是有效的索引
-    await fetchRegistry(normalized);
+    // 添加前先读取一次，确认是有效的市场
+    await marketProvider(normalized).fetchListing();
     const registries = readRegistries();
     return registries.includes(normalized) ? registries : writeRegistries([...registries, normalized]);
   });

@@ -165,6 +165,8 @@ class WorkerPlugin implements Plugin {
         context.subscriptions.push(context.commands.register(command, (...commandArgs) => this.runCommand(command, commandArgs)));
         return undefined;
       }
+      case 'commands.execute':
+        return context.commands.execute(first, second);
       case 'editor.getContent':
         return context.editor.getContent();
       case 'editor.getSelection':

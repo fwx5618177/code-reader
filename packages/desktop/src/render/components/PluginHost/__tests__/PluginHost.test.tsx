@@ -39,7 +39,15 @@ const { PluginHost } = await import('../index');
 const { default: PluginViewsPanel } = await import('../PluginViews');
 const { default: PluginToolbar } = await import('../PluginToolbar');
 
-const EMPTY: PluginContributions = { commands: [], keybindings: [], slashItems: [], toolbar: [], views: [] };
+const EMPTY: PluginContributions = {
+  commands: [],
+  keybindings: [],
+  slashItems: [],
+  toolbar: [],
+  views: [],
+  themes: [],
+  languages: [],
+};
 
 function setContributions(contributions: Partial<PluginContributions>) {
   fake.snapshot = {

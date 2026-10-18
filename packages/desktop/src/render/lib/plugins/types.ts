@@ -7,9 +7,11 @@
 import type {
   ConfigurationContribution,
   KeybindingContribution,
+  LanguageContribution,
   MenuItemContribution,
   PluginDependency,
   SidebarViewContribution,
+  ThemeContribution,
   ToolbarItemContribution,
 } from '@code-reader/plugin-system';
 import type { Permission } from './sandbox';
@@ -49,6 +51,25 @@ export type PluginToolbarItem = Pick<ToolbarItemContribution, 'command' | 'icon'
 
 /** 侧栏「插件视图」中的一个视图；内容由插件用 app.views.set 提供 */
 export type PluginView = Pick<SidebarViewContribution, 'id' | 'name'>;
+
+/**
+ * 主题（声明式，不执行插件代码）：在亮 / 暗基础配色上覆盖界面颜色变量。
+ * colors 的键只能是 THEME_COLOR_VARIABLES 中的变量，值只能是颜色（#rgb、rgb()、hsl()）
+ */
+export type PluginTheme = Pick<ThemeContribution, 'id' | 'label'> & {
+  type: 'dark' | 'light';
+  colors: Record<string, string>;
+};
+
+/**
+ * 代码块语言（声明式）：新的语言名与别名，使用已有语言的语法高亮（grammar）
+ */
+export type PluginLanguage = Pick<LanguageContribution, 'id' | 'name'> & {
+  aliases: string[];
+  extensions: string[];
+  /** 复用的内置语法（如 javascript、python、markdown） */
+  grammar: string;
+};
 
 /** 插件配置项：只支持字符串、数字、布尔（可带枚举） */
 export interface PluginConfigurationProperty {
@@ -91,6 +112,8 @@ export interface PluginManifest {
     toolbar: PluginToolbarItem[];
     views: PluginView[];
     configuration?: PluginConfiguration;
+    themes: PluginTheme[];
+    languages: PluginLanguage[];
   };
 }
 
@@ -158,6 +181,11 @@ export interface PluginContext {
   readonly subscriptions: Disposable[];
   readonly commands: {
     register(id: string, handler: (...args: unknown[]) => unknown): Disposable;
+    /**
+     * 执行命令：`<插件 ID>.<命令 ID>`；只能调用本插件与 manifest.dependencies 中声明的插件的命令，
+     * 参数与返回值须可结构化克隆（插件之间的 API）
+     */
+    execute(command: string, args: unknown[]): Promise<unknown>;
   };
   readonly editor: EditorAPI;
   readonly ui: UIAPI;

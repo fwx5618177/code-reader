@@ -7,6 +7,7 @@ import {
   compareVersions,
   isValidVersionRange,
   parseActivationEvent,
+  matchedActivationEvent,
   resolveDependencies,
   satisfiesVersionRange,
   shouldActivate,
@@ -132,6 +133,8 @@ describe('依赖解析', () => {
 describe('激活事件', () => {
   it('解析支持的事件格式', () => {
     expect(parseActivationEvent('onStartup')).toEqual({ kind: 'onStartup' });
+    expect(parseActivationEvent('onStartupFinished')).toEqual({ kind: 'onStartupFinished' });
+    expect(parseActivationEvent('onStartupFinished:x')).toBeNull();
     expect(parseActivationEvent('onCommand:insert-date')).toEqual({ kind: 'onCommand', argument: 'insert-date' });
     expect(parseActivationEvent('onLanguage:latex')).toEqual({ kind: 'onLanguage', argument: 'latex' });
     expect(parseActivationEvent('onView:dates')).toEqual({ kind: 'onView', argument: 'dates' });
@@ -146,5 +149,14 @@ describe('激活事件', () => {
     expect(shouldActivate(['onLanguage:latex'], new Set(['onStartup']))).toBe(false);
     expect(shouldActivate(['onLanguage:latex'], new Set(['onStartup', 'onLanguage:latex']))).toBe(true);
     expect(shouldActivate([], new Set(['onStartup']))).toBe(false);
+  });
+
+  it('onStartupFinished 在启动完成事件发生后才激活；记录触发激活的事件', () => {
+    expect(shouldActivate(['onStartupFinished'], new Set(['onStartup']))).toBe(false);
+    expect(matchedActivationEvent(['onLanguage:latex', 'onStartupFinished'], new Set(['onStartup', 'onStartupFinished']))).toBe(
+      'onStartupFinished'
+    );
+    expect(matchedActivationEvent(undefined, new Set(['onStartup']))).toBe('onStartup');
+    expect(matchedActivationEvent(['onView:x'], new Set(['onStartup']))).toBeNull();
   });
 });

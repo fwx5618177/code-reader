@@ -13,14 +13,15 @@
 
 import {
   activationEvent,
+  matchedActivationEvent,
   resolveDependencies,
-  shouldActivate,
   type DependencyResolution,
 } from '@code-reader/plugin-system/lifecycle';
 import type { PluginPackage, PluginSignatureCheck } from '../types/electron';
 import { getEditorBridge } from '../lib/plugins/editor-bridge';
 import { createHostExtensionRegistry } from '../lib/plugins/extension-registry';
 import { currentPlatform, resolveKeybindings, type ResolvedKeybinding } from '../lib/plugins/keybindings';
+import { syncPluginLanguages } from '../lib/plugins/languages';
 import { validateManifest } from '../lib/plugins/manifest';
 import { PluginLoader } from '../lib/plugins/plugin-loader';
 import {
@@ -36,10 +37,12 @@ import {
 } from '../lib/plugins/preferences';
 import type { Permission } from '../lib/plugins/sandbox';
 import { clearPluginStorage } from '../lib/plugins/storage';
+import { pluginThemeKey, type AvailablePluginTheme } from '../lib/plugins/themes';
 import type {
   ConfigurationAPI,
   ConfigurationValue,
   PluginId,
+  PluginLanguage,
   PluginManifest,
   PluginSource,
   PluginView,
@@ -65,6 +68,14 @@ export interface PluginEntry {
   blocked: string | null;
   /** 当前配置值（用户设置优先，其余为默认值） */
   configuration: Record<string, ConfigurationValue>;
+  /** 最近一次激活：触发原因（激活事件，或 dependency:<依赖它的插件>）与耗时；未激活时为 null */
+  activation: PluginActivation | null;
+}
+
+export interface PluginActivation {
+  reason: string;
+  /** 读取入口、创建 Worker 与执行 activate() 的总耗时（毫秒） */
+  durationMs: number;
 }
 
 /** 等待用户确认的授权请求 */
@@ -100,6 +111,10 @@ export interface ViewContribution extends PluginView {
   pluginName: string;
 }
 
+export interface LanguageContributionItem extends PluginLanguage {
+  pluginId: PluginId;
+}
+
 /** 已启用插件（运行中或等待激活）贡献给界面的入口 */
 export interface PluginContributions {
   commands: ContributedCommand[];
@@ -108,6 +123,9 @@ export interface PluginContributions {
   slashItems: PluginCommand[];
   toolbar: ToolbarContributionItem[];
   views: ViewContribution[];
+  /** 声明式贡献：启用即可用，不必激活插件 */
+  themes: AvailablePluginTheme[];
+  languages: LanguageContributionItem[];
 }
 
 export interface PluginSnapshot {
@@ -119,7 +137,15 @@ export interface PluginSnapshot {
   contributions: PluginContributions;
 }
 
-const EMPTY_CONTRIBUTIONS: PluginContributions = { commands: [], keybindings: [], slashItems: [], toolbar: [], views: [] };
+const EMPTY_CONTRIBUTIONS: PluginContributions = {
+  commands: [],
+  keybindings: [],
+  slashItems: [],
+  toolbar: [],
+  views: [],
+  themes: [],
+  languages: [],
+};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -130,7 +156,7 @@ function byOrder<T>(items: Array<T & { order?: number }>): T[] {
   return items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
-/** onStartup 最多等待的空闲时间：主线程持续繁忙时也在此之后激活启动插件 */
+/** onStartup / onStartupFinished 最多等待的空闲时间：主线程持续繁忙时也在此之后激活 */
 const STARTUP_IDLE_TIMEOUT_MS = 2000;
 
 function waitForIdle(): Promise<void> {
@@ -146,6 +172,8 @@ class PluginService {
   private readonly loader = new PluginLoader({
     registry: this.registry,
     configurationFor: (manifest) => this.configurationFor(manifest),
+    // 插件之间的调用（沙箱已限定为本插件与声明的依赖）：目标尚在等待激活时先激活
+    executeCommand: (pluginId, commandId, args) => this.executeCommand(pluginId, commandId, ...args),
   });
 
   private snapshot: PluginSnapshot = {
@@ -184,7 +212,10 @@ class PluginService {
 
   private setSnapshot(patch: Partial<PluginSnapshot>): void {
     const next = { ...this.snapshot, ...patch };
-    if (patch.plugins) next.contributions = this.computeContributions(next.plugins);
+    if (patch.plugins) {
+      next.contributions = this.computeContributions(next.plugins);
+      syncPluginLanguages(next.contributions.languages);
+    }
     this.snapshot = next;
     for (const listener of this.listeners) listener();
   }
@@ -206,9 +237,15 @@ class PluginService {
   /**
    * 读取偏好、扫描插件目录，按激活事件启动已启用的插件（只执行一次）。
    * onStartup 推迟到首屏之后的空闲时刻触发：启动插件的入口读取与 Worker 创建不与首屏争抢主线程；
-   * 等待期间操作队列保持空闲（启用、执行命令等不被阻塞）。返回的 Promise 在启动插件激活后完成
+   * 全部 onStartup 插件激活后再等一次空闲，触发 onStartupFinished。
+   * 等待期间操作队列保持空闲（启用、执行命令等不被阻塞）。返回的 Promise 在两类启动插件都激活后完成
    */
   init(): Promise<void> {
+    const fire = (event: string) => () =>
+      this.serialize(async () => {
+        this.firedEvents.add(event);
+        await this.reconcile();
+      });
     this.initialized ??= this.serialize(async () => {
       this.preferences = { ...(await settingsService.get()).plugins };
       await this.scan();
@@ -226,12 +263,9 @@ class PluginService {
       this.setSnapshot({ initialized: true });
     })
       .then(waitForIdle)
-      .then(() =>
-        this.serialize(async () => {
-          this.firedEvents.add('onStartup');
-          await this.reconcile();
-        })
-      );
+      .then(fire('onStartup'))
+      .then(waitForIdle)
+      .then(fire('onStartupFinished'));
     return this.initialized;
   }
 
@@ -302,7 +336,7 @@ class PluginService {
   async executeCommand(pluginId: PluginId, commandId: string, ...args: unknown[]): Promise<unknown> {
     if (!this.loader.isActive(pluginId)) {
       if (this.findEntry(pluginId)?.status !== 'idle') throw new Error(`插件 ${pluginId} 未运行`);
-      const activated = await this.serialize(() => this.activate(pluginId));
+      const activated = await this.serialize(() => this.activate(pluginId, activationEvent('onCommand', commandId)));
       if (!activated) throw new Error(this.findEntry(pluginId)?.errors[0] ?? `插件 ${pluginId} 激活失败`);
     }
     return this.loader.executeCommand(pluginId, commandId, ...args);
@@ -396,6 +430,7 @@ class PluginService {
         this.patchEntry(entry.id, {
           status: problem || !entry.manifest || entry.blocked ? 'error' : 'disabled',
           errors: problem ? [problem] : (this.packageErrors.get(entry.id) ?? []),
+          activation: null,
         });
       }
     }
@@ -403,20 +438,21 @@ class PluginService {
     for (const id of order) {
       const manifest = usable.get(id)!;
       if (this.loader.isActive(id) || this.failed.has(id)) continue;
-      if (shouldActivate(manifest.activationEvents, this.firedEvents)) await this.activate(id);
+      const event = matchedActivationEvent(manifest.activationEvents, this.firedEvents);
+      if (event) await this.activate(id, event);
       else this.patchEntry(id, { status: 'idle', errors: [] });
     }
   }
 
-  /** 激活插件（依赖先激活）；失败时记录原因并返回 false */
-  private async activate(pluginId: PluginId): Promise<boolean> {
+  /** 激活插件（依赖先激活）；失败时记录原因并返回 false。reason 为触发激活的事件 */
+  private async activate(pluginId: PluginId, reason: string): Promise<boolean> {
     if (this.loader.isActive(pluginId)) return true;
     const entry = this.findEntry(pluginId);
     const manifest = entry && this.usableManifest(entry);
     if (!manifest || !this.resolution.order.includes(pluginId) || this.failed.has(pluginId)) return false;
 
     for (const dependency of manifest.dependencies) {
-      if (this.resolution.order.includes(dependency.id) && !(await this.activate(dependency.id))) {
+      if (this.resolution.order.includes(dependency.id) && !(await this.activate(dependency.id, `dependency:${pluginId}`))) {
         this.failed.add(pluginId);
         this.patchEntry(pluginId, { status: 'error', errors: [`依赖插件 ${dependency.id} 激活失败`] });
         return false;
@@ -424,10 +460,14 @@ class PluginService {
     }
 
     this.patchEntry(pluginId, { status: 'loading', errors: [] });
+    const started = performance.now();
     try {
       const code = await window.electron.plugins.readEntry(pluginId, manifest.main);
       await this.loader.activate(createWorkerPlugin(manifest, code), grantedPermissions(this.preferences, pluginId));
-      this.patchEntry(pluginId, { status: 'active' });
+      this.patchEntry(pluginId, {
+        status: 'active',
+        activation: { reason, durationMs: Math.round(performance.now() - started) },
+      });
       return true;
     } catch (error) {
       this.failed.add(pluginId);
@@ -473,6 +513,10 @@ class PluginService {
       .filter((entry): entry is PluginEntry & { manifest: PluginManifest } =>
         entry.manifest !== null && (entry.status === 'active' || entry.status === 'idle')
       )
+      .sort((a, b) => a.id.localeCompare(b.id));
+    // 声明式贡献（主题、语言）不运行插件代码：启用且未被签名策略阻止即可用
+    const declarative = plugins
+      .filter((entry): entry is PluginEntry & { manifest: PluginManifest } => entry.manifest !== null && entry.enabled && !entry.blocked)
       .sort((a, b) => a.id.localeCompare(b.id));
     // 运行中的插件只提供已注册处理器的命令；等待激活的插件提供全部声明的命令（执行时再激活）
     const available = (entry: PluginEntry, commandId: string) =>
@@ -534,6 +578,17 @@ class PluginService {
       views: usable.flatMap((entry) =>
         entry.manifest.contributes.views.map((view) => ({ ...view, pluginId: entry.id, pluginName: entry.manifest.name }))
       ),
+      themes: declarative.flatMap((entry) =>
+        entry.manifest.contributes.themes.map((theme) => ({
+          ...theme,
+          key: pluginThemeKey(entry.id, theme.id),
+          pluginId: entry.id,
+          pluginName: entry.manifest.name,
+        }))
+      ),
+      languages: declarative.flatMap((entry) =>
+        entry.manifest.contributes.languages.map((language) => ({ ...language, pluginId: entry.id }))
+      ),
     };
   }
 
@@ -561,6 +616,7 @@ class PluginService {
       signature: item.signature,
       blocked: item.blocked,
       configuration: validation.manifest ? configurationValues(this.preferences, validation.manifest) : {},
+      activation: active ? (this.findEntry(item.id)?.activation ?? null) : null,
     };
   }
 

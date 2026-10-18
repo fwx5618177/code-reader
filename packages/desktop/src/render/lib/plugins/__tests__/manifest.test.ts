@@ -32,8 +32,51 @@ describe('validateManifest', () => {
         menus: { 'editor/context': [] },
         toolbar: [],
         views: [],
+        themes: [],
+        languages: [],
       },
     });
+  });
+
+  it('主题：只接受可覆盖的颜色变量与颜色字面量', () => {
+    const base = { id: 't1', name: 'T', version: '1.0.0' };
+    const ok = validateManifest(
+      { ...base, contributes: { themes: [{ id: 'sepia', label: '护眼', type: 'light', colors: { '--bg-primary': '#f4ecd8', '--text-primary': 'rgb(60, 50, 40)' } }] } },
+      't1'
+    );
+    expect(ok.manifest?.contributes.themes).toEqual([
+      { id: 'sepia', label: '护眼', type: 'light', colors: { '--bg-primary': '#f4ecd8', '--text-primary': 'rgb(60, 50, 40)' } },
+    ]);
+    const injected = validateManifest(
+      { ...base, contributes: { themes: [{ id: 'x', label: 'X', type: 'dark', colors: { '--bg-primary': 'url(https://evil)' } }] } },
+      't1'
+    );
+    expect(injected.errors.join()).toContain('必须是颜色');
+    const unknownVar = validateManifest(
+      { ...base, contributes: { themes: [{ id: 'x', label: 'X', type: 'dark', colors: { '--font-family': '#000' } }] } },
+      't1'
+    );
+    expect(unknownVar.errors.join()).toContain('不是可覆盖的颜色变量');
+  });
+
+  it('语言：复用内置语法，不能与内置语言重名', () => {
+    const base = { id: 'l1', name: 'L', version: '1.0.0' };
+    const ok = validateManifest(
+      { ...base, contributes: { languages: [{ id: 'dataview', name: 'Dataview', aliases: ['dv'], grammar: 'sql' }] } },
+      'l1'
+    );
+    expect(ok.manifest?.contributes.languages).toEqual([{ id: 'dataview', name: 'Dataview', aliases: ['dv'], extensions: [], grammar: 'sql' }]);
+    expect(validateManifest({ ...base, contributes: { languages: [{ id: 'python', name: 'P', grammar: 'python' }] } }, 'l1').errors.join()).toContain(
+      '与内置语言重名'
+    );
+    expect(validateManifest({ ...base, contributes: { languages: [{ id: 'zz', name: 'Z', grammar: 'nope' }] } }, 'l1').errors.join()).toContain(
+      'grammar'
+    );
+  });
+
+  it('onStartupFinished 是合法的激活事件', () => {
+    const result = validateManifest({ id: 's1', name: 'S', version: '1.0.0', activationEvents: ['onStartupFinished'] }, 's1');
+    expect(result.manifest?.activationEvents).toEqual(['onStartupFinished']);
   });
 
   it('没有权限与贡献时得到空列表', () => {

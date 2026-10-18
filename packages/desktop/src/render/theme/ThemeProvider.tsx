@@ -10,8 +10,11 @@ import React, {
   useEffect,
   useCallback,
   useMemo,
+  useSyncExternalStore,
   ReactNode,
 } from 'react';
+import { applyPluginThemeColors, type AvailablePluginTheme } from '../lib/plugins/themes';
+import { pluginService } from '../services/pluginService';
 import {
   ThemeConfig,
   ThemeMode,
@@ -50,8 +53,14 @@ interface ThemeContextValue {
   // Available accent colors
   accentColors: readonly AccentColor[];
 
+  /** 已启用插件提供的主题 */
+  pluginThemes: readonly AvailablePluginTheme[];
+  /** 当前生效的插件主题（选用的主题不可用时为 null） */
+  activePluginTheme: AvailablePluginTheme | null;
+
   // Actions
   setThemeMode: (mode: ThemeMode) => void;
+  setPluginTheme: (key: string | undefined) => void;
   setAccentColor: (colorId: string) => void;
   setCustomAccentColor: (color: string) => void;
   setFonts: (fonts: Partial<FontConfig>) => void;
@@ -130,8 +139,16 @@ export function ThemeProvider({ children, defaultConfig }: ThemeProviderProps) {
   // Track system theme preference
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(resolveSystemTheme);
 
+  // 插件主题：选用的主题来自已启用的插件时生效，并决定亮 / 暗基础配色
+  const pluginThemes = useSyncExternalStore(pluginService.subscribe, () => pluginService.getSnapshot().contributions.themes);
+  const activePluginTheme = useMemo(
+    () => pluginThemes.find((theme) => theme.key === config.pluginTheme) ?? null,
+    [pluginThemes, config.pluginTheme]
+  );
+
   // Compute the resolved theme
   const computed = useMemo(() => {
+    if (activePluginTheme) return computeTheme({ ...config, mode: activePluginTheme.type });
     const resolved = computeTheme(config);
     // Override with current system theme if mode is 'system'
     if (config.mode === 'system') {
@@ -141,7 +158,7 @@ export function ThemeProvider({ children, defaultConfig }: ThemeProviderProps) {
       };
     }
     return resolved;
-  }, [config, systemTheme]);
+  }, [config, systemTheme, activePluginTheme]);
 
   // ================================
   // System Theme Detection
@@ -178,6 +195,7 @@ export function ThemeProvider({ children, defaultConfig }: ThemeProviderProps) {
     // Generate and apply CSS variables
     const variables = generateCSSVariables(computed);
     applyCSSVariables(variables);
+    if (activePluginTheme) applyPluginThemeColors(activePluginTheme.colors);
 
     // Set data attribute for theme mode
     document.documentElement.setAttribute('data-theme', computed.mode);
@@ -195,7 +213,7 @@ export function ThemeProvider({ children, defaultConfig }: ThemeProviderProps) {
     } else {
       document.documentElement.classList.remove('reduce-transparency');
     }
-  }, [computed, config.reduceMotion, config.reduceTransparency]);
+  }, [computed, activePluginTheme, config.reduceMotion, config.reduceTransparency]);
 
   // ================================
   // Persist Theme Changes
@@ -210,7 +228,11 @@ export function ThemeProvider({ children, defaultConfig }: ThemeProviderProps) {
   // ================================
 
   const setThemeMode = useCallback((mode: ThemeMode) => {
-    setConfig((prev) => ({ ...prev, mode }));
+    setConfig((prev) => ({ ...prev, mode, pluginTheme: undefined }));
+  }, []);
+
+  const setPluginTheme = useCallback((key: string | undefined) => {
+    setConfig((prev) => ({ ...prev, pluginTheme: key }));
   }, []);
 
   const setAccentColor = useCallback((colorId: string) => {
@@ -259,7 +281,10 @@ export function ThemeProvider({ children, defaultConfig }: ThemeProviderProps) {
       computed,
       isDark: computed.mode === 'dark',
       accentColors: ACCENT_COLORS,
+      pluginThemes,
+      activePluginTheme,
       setThemeMode,
+      setPluginTheme,
       setAccentColor,
       setCustomAccentColor,
       setFonts,
@@ -270,7 +295,10 @@ export function ThemeProvider({ children, defaultConfig }: ThemeProviderProps) {
     [
       config,
       computed,
+      pluginThemes,
+      activePluginTheme,
       setThemeMode,
+      setPluginTheme,
       setAccentColor,
       setCustomAccentColor,
       setFonts,

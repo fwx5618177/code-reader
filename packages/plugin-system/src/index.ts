@@ -132,9 +132,11 @@ export {
   activationEvent,
   parseActivationEvent,
   shouldActivate,
+  matchedActivationEvent,
   type DependencyNode,
   type DependencyResolution,
   type ActivationEventKind,
+  type BareActivationEventKind,
   type ParsedActivationEvent,
 } from './lifecycle';
 

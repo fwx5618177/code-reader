@@ -17,6 +17,8 @@ export interface PluginLoaderOptions {
   storageFor?: (pluginId: PluginId) => StorageAPI;
   /** 插件配置，默认只提供 manifest 中的默认值 */
   configurationFor?: (manifest: PluginManifest) => ConfigurationAPI;
+  /** 插件调用其他插件的命令（默认只能调用已激活插件；插件服务负责按需激活） */
+  executeCommand?: (pluginId: PluginId, commandId: string, args: unknown[]) => Promise<unknown>;
   /** 激活超时（毫秒） */
   activationTimeout?: number;
 }
@@ -44,6 +46,7 @@ export class PluginLoader {
   private readonly registry: ExtensionRegistry;
   private readonly storageFor: (pluginId: PluginId) => StorageAPI;
   private readonly configurationFor: (manifest: PluginManifest) => ConfigurationAPI;
+  private readonly executeExternal: (pluginId: PluginId, commandId: string, args: unknown[]) => Promise<unknown>;
   private readonly activationTimeout: number;
 
   constructor(options: PluginLoaderOptions) {
@@ -56,6 +59,8 @@ export class PluginLoader {
         return { get: (key) => defaults[key]!, onDidChange: () => ({ dispose: () => undefined }) };
       });
     this.activationTimeout = options.activationTimeout ?? DEFAULT_ACTIVATION_TIMEOUT;
+    this.executeExternal =
+      options.executeCommand ?? ((pluginId, commandId, args) => this.executeCommand(pluginId, commandId, ...args));
   }
 
   isActive(pluginId: PluginId): boolean {
@@ -112,6 +117,7 @@ export class PluginLoader {
           },
         };
       },
+      executeCommand: (targetId, commandId, args) => this.executeExternal(targetId, commandId, args),
     });
 
     this.active.set(pluginId, { plugin, context, commands, contributions });

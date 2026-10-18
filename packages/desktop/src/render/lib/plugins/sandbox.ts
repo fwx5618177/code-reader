@@ -79,6 +79,8 @@ export interface SandboxHost {
   configuration: ConfigurationAPI;
   /** 以插件内命令 ID 注册命令处理器 */
   registerCommand(id: string, handler: (...args: unknown[]) => unknown): Disposable;
+  /** 执行某个插件的命令（必要时先激活该插件） */
+  executeCommand(pluginId: string, commandId: string, args: unknown[]): Promise<unknown>;
 }
 
 export interface SandboxLimits {
@@ -96,6 +98,15 @@ const MAX_QUICK_PICK_ITEMS = 200;
 const MAX_VIEW_ITEMS = 200;
 const MAX_VIEW_LABEL_LENGTH = 120;
 const MAX_VIEW_ARGS_LENGTH = 2000;
+
+/**
+ * 拆分全局命令 ID `<插件 ID>.<命令 ID>`（插件 ID 可含点，命令 ID 不含点）
+ */
+export function splitCommandId(command: string): { pluginId: string; commandId: string } | null {
+  const dot = command.lastIndexOf('.');
+  if (dot <= 0 || dot === command.length - 1) return null;
+  return { pluginId: command.slice(0, dot), commandId: command.slice(dot + 1) };
+}
 
 function assertString(value: unknown, name: string, maxLength = Infinity): string {
   if (typeof value !== 'string') throw new TypeError(`${name} 必须是字符串`);
@@ -121,6 +132,7 @@ export function createSandboxedContext(
   const pluginId = manifest.id;
   const effective = new Set(manifest.permissions.filter((permission) => granted.includes(permission)));
   const declaredCommands = new Set(manifest.contributes.commands.map((command) => command.id));
+  const callablePlugins = new Set([pluginId, ...manifest.dependencies.map((dependency) => dependency.id)]);
   const declaredViews = new Set(manifest.contributes.views.map((view) => view.id));
   const configurationKeys = new Set(Object.keys(manifest.contributes.configuration?.properties ?? {}));
   const uiCallTimes: number[] = [];
@@ -170,6 +182,15 @@ export function createSandboxedContext(
         const command = assertDeclaredCommand(id);
         if (typeof handler !== 'function') throw new TypeError('命令处理器必须是函数');
         return host.registerCommand(command, handler);
+      },
+      execute(command, args) {
+        const target = splitCommandId(assertString(command, '命令'));
+        if (!target) throw new Error(`命令格式应为 <插件 ID>.<命令 ID>：${String(command)}`);
+        if (!callablePlugins.has(target.pluginId)) {
+          throw new Error(`插件 ${pluginId} 只能调用自己与 manifest.dependencies 中声明的插件的命令（${target.pluginId} 未声明）`);
+        }
+        if (!Array.isArray(args)) throw new TypeError('命令参数必须是数组');
+        return host.executeCommand(target.pluginId, target.commandId, args);
       },
     },
 
