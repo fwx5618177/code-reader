@@ -2108,20 +2108,17 @@ class BlockParser {
 
       if (this.isBlankLine(line)) break;
 
-      // 检查是否是其他块级元素的开始
-      if (/^#{1,6}[ \t]/.test(line)) break;
-      if (/^[ ]{0,3}([-*_][ ]*){3,}$/.test(line)) break;
-      if (/^[ ]{0,3}(`{3,}|~{3,})/.test(line)) break;
-      if (/^[ ]{0,3}>/.test(line)) break;
-      if (/^[ ]{0,3}[-*+][ \t]/.test(line)) break;
-      if (/^[ ]{0,3}\d{1,9}[.)][ \t]/.test(line)) break;
-
-      // 检查 Setext 标题下划线
-      if (paragraphLines.length > 0 && /^[ ]{0,3}(=+|-+)[ \t]*$/.test(line)) {
-        // 这是 Setext 标题，回退
-        this.lineIndex = startLineIndex;
-        return null;
+      // Setext 标题：段落（可以是多行）之后的 === / --- 下划线，整段成为标题；
+      // 须先于主题分隔线判断（段落后的 --- 是二级标题而不是分隔线）
+      const underline = paragraphLines.length > 0 ? /^[ ]{0,3}(=+|-+)[ \t]*$/.exec(line) : null;
+      if (underline) {
+        this.lineIndex++;
+        return this.createSetextHeading(paragraphLines, line, underline[1]!.startsWith('=') ? 1 : 2, startLineIndex);
       }
+
+      // 其他块级元素可以打断段落；第一行未被任何块规则接受时（如信息串含反引号的“围栏”）按段落文本处理，
+      // 保证解析总能前进
+      if (paragraphLines.length > 0 && this.interruptsParagraph(line)) break;
 
       paragraphLines.push(line);
       this.lineIndex++;
@@ -2141,6 +2138,32 @@ class BlockParser {
       raw,
       position: this.createMultiLinePosition(paragraphLines.length, startLineIndex),
       inline,
+    };
+  }
+
+  /** 能打断段落的块级元素开头 */
+  private interruptsParagraph(line: string): boolean {
+    return (
+      /^[ ]{0,3}#{1,6}([ \t]|$)/.test(line) ||
+      /^[ ]{0,3}([-*_][ ]*){3,}$/.test(line) ||
+      /^[ ]{0,3}(`{3,}(?!.*`)|~{3,})/.test(line) ||
+      /^[ ]{0,3}>/.test(line) ||
+      /^[ ]{0,3}[-*+][ \t]+\S/.test(line) ||
+      /^[ ]{0,3}1[.)][ \t]+\S/.test(line)
+    );
+  }
+
+  /** Setext 标题：标题内容为下划线之前的全部段落行 */
+  private createSetextHeading(contentLines: string[], underline: string, level: number, startLineIndex: number): BlockNode {
+    const content = contentLines.map((line) => line.trim()).join('\n');
+    const inlineParser = new InlineParser(this.options);
+    return {
+      type: BlockType.Heading,
+      level,
+      content,
+      raw: [...contentLines, underline].join('\n'),
+      position: this.createMultiLinePosition(contentLines.length + 1, startLineIndex),
+      inline: inlineParser.parse(content, startLineIndex + 1),
     };
   }
 
