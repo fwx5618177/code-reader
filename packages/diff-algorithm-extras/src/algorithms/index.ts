@@ -1,6 +1,7 @@
 // ================================
-// 差分算法库 - 算法模块索引
-// 导出所有底层算法实现
+// 差分算法扩展 - 算法模块索引
+// 桌面端当前不使用的底层算法：滚动哈希、rsync、Patience Diff、LCS、VCDIFF / BSDiff 适配器、CRDT 接口
+// （Histogram Diff 留在 @code-reader/diff-algorithm/algorithms，用于版本对比）
 // ================================
 
 // ================================
@@ -88,34 +89,6 @@ export type {
   PatienceDiffResult,
   PatienceDiffStats,
 } from './patience-diff';
-
-// ================================
-// Histogram Diff 算法
-// Git 默认算法
-// ================================
-
-export {
-  // 类
-  HistogramDiffEngine,
-  // 工厂函数
-  createHistogramDiffEngine,
-  createWhitespaceAgnosticDiffEngine,
-  // 便捷函数
-  quickHistogramDiff,
-  quickHistogramFormatUnified,
-  quickHistogramFormatHtml,
-  quickLineChanges,
-  resetDefaultHistogramDiffEngine,
-} from './histogram-diff';
-
-export type {
-  HistogramDiffOp,
-  DiffHunk,
-  HistogramDiffResult,
-  HistogramDiffStats,
-  HistogramDiffConfig,
-  LineChange,
-} from './histogram-diff';
 
 // ================================
 // LCS (最长公共子序列) 算法

@@ -19,10 +19,6 @@
       "import": "./dist/cache/index.js",
       "types": "./dist/cache/index.d.ts"
     },
-    "./streaming": {
-      "import": "./dist/streaming/index.js",
-      "types": "./dist/streaming/index.d.ts"
-    },
     "./worker": {
       "import": "./dist/worker/index.js",
       "types": "./dist/worker/index.d.ts"
@@ -50,10 +46,7 @@
     "binary-diff",
     "levenshtein",
     "fuzzy-match",
-    "rsync",
-    "patience-diff",
-    "histogram-diff",
-    "lcs"
+    "histogram-diff"
   ],
   "author": "",
   "license": "MIT",

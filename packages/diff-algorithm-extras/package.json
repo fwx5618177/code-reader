@@ -1,0 +1,57 @@
+{
+  "name": "@code-reader/diff-algorithm-extras",
+  "version": "0.1.0",
+  "description": "差分算法扩展：rsync、滚动哈希、Patience Diff、LCS、VCDIFF / BSDiff 适配器、CRDT 接口、流式哈希与流式差分、独立的 diff-match-patch Worker 实现（与 @code-reader/diff-algorithm 分开，按需引入）",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./algorithms": {
+      "import": "./dist/algorithms/index.js",
+      "types": "./dist/algorithms/index.d.ts"
+    },
+    "./streaming": {
+      "import": "./dist/streaming/index.js",
+      "types": "./dist/streaming/index.d.ts"
+    },
+    "./dmp-standalone": {
+      "import": "./dist/dmp-standalone/index.js",
+      "types": "./dist/dmp-standalone/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "diff",
+    "rsync",
+    "rolling-hash",
+    "patience-diff",
+    "lcs",
+    "vcdiff",
+    "bsdiff",
+    "crdt",
+    "streaming"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "fossil-delta": "^2.0.0"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "typescript": "^5.3.0",
+    "vitest": "^1.3.0"
+  }
+}

@@ -101,11 +101,14 @@ lib/writing/
 ├── writing-service.ts          # 核心服务
 ├── useWritingService.ts        # React Hook
 ├── index-storage.ts            # IndexedDB 持久化
-├── enhanced-worker-pool.ts     # Worker 池
-├── diff-worker-complete.ts     # 完整 diff 实现
-├── worker-script-generator.ts  # Worker 脚本生成
+├── performance-monitor.ts      # 性能监控
+├── benchmark.ts                # 基准测试工具
+├── components/                 # 差分视图（版本对比）
 └── README.md                   # 本文档
 ```
+
+差分计算与后台 Worker 使用 `@code-reader/diff-algorithm`（`AsyncDiffEngine`、`DiffCache`）；版本对比的按行差分用其中的 Histogram Diff。
+原先这里另有一套独立的 diff-match-patch Worker（`EnhancedWorkerPool` 等），与核心库重复，已移到 `@code-reader/diff-algorithm-extras` 的 `dmp-standalone`，需要时从该包引入。
 
 ## API 参考
 
@@ -214,32 +217,6 @@ const {
 } = useContentDiff();
 ```
 
-### EnhancedWorkerPool
-
-使用完整 diff-match-patch 的 Worker 池。
-
-```typescript
-const pool = await getDefaultEnhancedWorkerPool();
-
-// 文本差分
-const result = await pool.textDiff(source, target, options);
-
-// 计算哈希
-const hash = await pool.computeHash(data, 'xxhash');
-
-// 计算相似度
-const similarity = await pool.computeSimilarity(a, b);
-
-// 批量任务
-const results = await pool.batch([
-  { type: 'TEXT_DIFF', payload: { source, target } },
-  { type: 'COMPUTE_HASH', payload: { data } },
-]);
-
-// 查看状态
-const stats = pool.getStats();
-```
-
 ## Worker 完整实现
 
 本模块包含完整的 diff-match-patch 算法实现，在 Worker 中运行：
@@ -295,25 +272,10 @@ const results = await search('关键词', {
 });
 ```
 
-## 自定义 Worker 池与存储
+## 自定义存储
 
 ```typescript
-import {
-  createEnhancedWorkerPool,
-  createIndexStorage,
-  createMemoryIndexStorage,
-} from '../lib/writing';
-
-// 自定义 Worker 池（默认 minWorkers=1，maxWorkers=navigator.hardwareConcurrency）
-const pool = createEnhancedWorkerPool({
-  minWorkers: 2,
-  maxWorkers: 8,
-  taskTimeout: 60000,
-  idleTimeout: 120000,
-});
-await pool.initialize();
-const result = await pool.textDiff(source, target, { semanticCleanup: true });
-pool.terminate();
+import { createIndexStorage, createMemoryIndexStorage } from '../lib/writing';
 
 // IndexedDB 存储 / 内存存储（内存存储不跨会话）
 const idbStorage = createIndexStorage({ dbName: 'my-custom-index-db' });
@@ -394,14 +356,9 @@ const saveExecutor = {
 应用退出时释放资源：
 
 ```typescript
-import { 
-  resetDefaultWritingService, 
-  closeDefaultEnhancedWorkerPool,
-  closeDefaultIndexStorage,
-} from '../lib/writing';
+import { resetDefaultWritingService, closeDefaultIndexStorage } from '../lib/writing';
 
 // 清理所有资源
 resetDefaultWritingService();
-closeDefaultEnhancedWorkerPool();
 closeDefaultIndexStorage();
 ```

@@ -414,15 +414,6 @@ export function generateRandomContent(wordCount: number): string {
   return result.join(' ');
 }
 
-/**
- * Generate content of approximately the specified byte size
- */
-export function generateContentBySize(bytes: number): string {
-  // Each character is approximately 1 byte in UTF-8 for ASCII
-  const content = 'x'.repeat(bytes);
-  return content;
-}
-
 // ================================
 // Setup Global Mocks
 // ================================
