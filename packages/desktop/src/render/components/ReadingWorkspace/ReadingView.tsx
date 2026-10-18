@@ -67,7 +67,7 @@ import { bookProgress, EPUB_TARGET_ATTR } from '../../lib/reading/epub';
 import { registerFlush } from '../../services/flushRegistry';
 import type { KnowledgeItem } from '../../types/knowledge';
 import { useDismiss, useLatestRef, useReadingSettings } from './hooks';
-import { hydrateEmbedImages } from './embed-images';
+import { hydrateEmbedMedia } from './embed-media';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from './item-type';
 import { PdfAttachment, ReadingAttachment } from './ReadingAttachment';
 import type { PdfTextSelection } from './PdfReader';
@@ -294,12 +294,12 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     const scroller = scrollerRef.current;
     if (!articleEl || !scroller || !rendered) return;
     articleEl.innerHTML = rendered.html;
-    const disposeImages = hydrateEmbedImages(articleEl);
+    const disposeMedia = hydrateEmbedMedia(articleEl);
 
     // EPUB 每次切换章节都滚动到跳转目标
     if (isEpubChapterView(rendered)) scrollToEpubTarget(scroller, articleEl, rendered.scrollTarget);
     else restoreScroll();
-    return disposeImages;
+    return disposeMedia;
   }, [rendered, restoreScroll]);
 
   // 高亮变化时重新标记（必须在写入正文之后执行）

@@ -9,7 +9,7 @@ import { renderContentToHtml, wikiLinkClickTarget } from '../../lib/markdown';
 import { resolveArticle, resolveAttachmentKind, sourceHost, type ArticleSource } from '../../lib/reading';
 import { displayTitle } from '../../lib/links/link-index';
 import { useEmbedResolver } from '../../lib/links/embed';
-import { useEmbedImages } from '../ReadingWorkspace/embed-images';
+import { useEmbedMedia } from '../ReadingWorkspace/embed-media';
 import { ReadingAttachment } from '../ReadingWorkspace/ReadingAttachment';
 import { openExternal } from '../ReadingWorkspace/system';
 import readingStyles from '../ReadingWorkspace/ReadingView.module.scss';
@@ -43,7 +43,7 @@ export const InspectorContentTab: React.FC<InspectorContentTabProps> = ({ item, 
     () => (article ? renderContentToHtml(article.content, article.format, { resolveEmbed, title }).html : null),
     [article, resolveEmbed, title]
   );
-  useEmbedImages(articleRef, html);
+  useEmbedMedia(articleRef, html);
   const transcript = item.transcript?.trim();
 
   const handleClick = useCallback(

@@ -8,6 +8,7 @@ import { Schema, type NodeSpec, type MarkSpec } from 'prosemirror-model';
 import { schema as basicSchema } from 'prosemirror-schema-basic';
 import { addListNodes } from 'prosemirror-schema-list';
 import { formatWikiLink, wikiLinkRef, type WikiLinkParts } from './wiki-link';
+import { MEDIA_SRC_ATTR, isDirectMediaUrl, mediaKindOfPath } from './media';
 
 /** 表格单元格对齐方式 */
 export type CellAlign = 'left' | 'center' | 'right' | null;
@@ -210,6 +211,34 @@ export function createMarkdownSchema(): Schema {
       const checked = node.attrs.checked as boolean | null;
       if (checked === null) return ['li', 0];
       return ['li', { 'data-checked': String(checked), class: 'task-item' }, 0];
+    },
+  });
+
+  // 图片语法 ![](地址)：视频、音频文件渲染为播放器；本地文件不直接加载，记在 data-media-src 上由渲染层经知识库解析。
+  // Markdown 原文不变（仍是 image 节点），往返无损
+  const image = nodes.get('image')!;
+  const mediaAttrs = (dom: HTMLElement) => ({
+    src: dom.getAttribute(MEDIA_SRC_ATTR),
+    alt: dom.getAttribute('aria-label') ?? dom.getAttribute('alt'),
+    title: dom.getAttribute('title'),
+  });
+  nodes = nodes.update('image', {
+    ...image,
+    parseDOM: [
+      ...['img', 'video', 'audio'].map((tag) => ({ tag: `${tag}[${MEDIA_SRC_ATTR}]`, getAttrs: mediaAttrs })),
+      ...(image.parseDOM ?? []),
+    ],
+    toDOM(node) {
+      const { src, alt, title } = node.attrs as { src: string; alt: string | null; title: string | null };
+      const kind = mediaKindOfPath(src);
+      const direct = isDirectMediaUrl(src);
+      if (kind === 'image' && direct) return ['img', { src, alt, title }];
+      const attrs: Record<string, string> = { [MEDIA_SRC_ATTR]: src };
+      if (direct) attrs.src = src;
+      if (title) attrs.title = title;
+      if (kind === 'image') return ['img', { ...attrs, alt: alt ?? '' }];
+      if (alt) attrs['aria-label'] = alt;
+      return [kind, { ...attrs, class: `markdown-media markdown-${kind}`, controls: '', preload: 'metadata' }];
     },
   });
 

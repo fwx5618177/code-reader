@@ -10,7 +10,7 @@ import {
   type ContentFormat,
 } from '../../lib/markdown';
 import { useEmbedResolver } from '../../lib/links';
-import { useEmbedImages } from '../ReadingWorkspace/embed-images';
+import { useEmbedMedia } from '../ReadingWorkspace/embed-media';
 import styles from './RichEditor.module.scss';
 
 export interface DocumentPreviewProps {
@@ -42,7 +42,7 @@ export const DocumentPreview: React.FC<DocumentPreviewProps> = ({
     () => renderContentToHtml(content, format, { resolveEmbed, title }).html,
     [content, format, resolveEmbed, title]
   );
-  useEmbedImages(containerRef, html);
+  useEmbedMedia(containerRef, html);
 
   const handleClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {

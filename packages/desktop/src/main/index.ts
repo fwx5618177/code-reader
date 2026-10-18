@@ -192,7 +192,7 @@ function createWindow() {
 
   // 设置 Content-Security-Policy
   // - worker-src blob:：允许从 Blob URL 创建 Worker（用于差分计算等后台任务）
-  // - img-src https:：Markdown 与网页剪藏中的远程图片；media-src blob:：本地音视频附件以 Blob URL 播放
+  // - img-src https:：Markdown 与网页剪藏中的远程图片；media-src blob:：本地音视频附件以 Blob URL 播放，https:：Markdown 中远程音视频地址
   // - connect-src 不放行任何外部服务：AI 请求只由主进程发起，渲染进程不直连网络
   // - ocr-resource:：文字识别 Worker 从本地协议加载脚本（script-src）与语言数据（connect-src）；
   //   'wasm-unsafe-eval' 仅允许编译 WebAssembly（识别引擎），不放行 eval
@@ -202,8 +202,8 @@ function createWindow() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           process.env.NODE_ENV === 'development'
-            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob: ocr-resource:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* ocr-resource:"
-            : "default-src 'self'; script-src 'self' blob: ocr-resource: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ocr-resource:",
+            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob: ocr-resource:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* ocr-resource:"
+            : "default-src 'self'; script-src 'self' blob: ocr-resource: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' ocr-resource:",
         ],
       },
     });

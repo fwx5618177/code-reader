@@ -4,7 +4,7 @@
 // ================================
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { EMBED_IMAGE_PATH_ATTR, renderContentToHtml } from '../../markdown';
+import { EMBED_MEDIA_PATH_ATTR, renderContentToHtml } from '../../markdown';
 import { localizeClipImages } from '../clip-images';
 
 const DIR = '/data/attachments';
@@ -60,12 +60,12 @@ describe('localizeClipImages', () => {
     const { html } = renderContentToHtml(result.markdown, 'markdown', {
       resolveEmbed: (target) =>
         target === image.title
-          ? { kind: 'image', title: image.title, filePath: image.filePath, mimeType: image.mimeType }
+          ? { kind: 'media', media: 'image', title: image.title, filePath: image.filePath, mimeType: image.mimeType }
           : null,
     });
     const img = new DOMParser().parseFromString(html, 'text/html').querySelector('img');
 
-    expect(img?.getAttribute(EMBED_IMAGE_PATH_ATTR)).toBe(image.filePath);
+    expect(img?.getAttribute(EMBED_MEDIA_PATH_ATTR)).toBe(image.filePath);
     expect(img?.getAttribute('alt')).toBe('插图');
     expect(html).not.toContain('https://example.com/a.png');
   });

@@ -1,23 +1,29 @@
 // ================================
 // WikiEmbedView
-// 块级嵌入 ![[笔记#标题]] 的节点视图：只读渲染被引用的笔记/章节或图片，
-// 点击嵌入的标题打开原文（由编辑器的链接点击插件处理），点击正文选中整个嵌入
+// 块级嵌入 ![[笔记#标题]] 的节点视图：只读渲染被引用的笔记/章节，或显示图片、播放视频与音频，
+// 点击嵌入的标题打开原文（由编辑器的链接点击插件处理），点击正文选中整个嵌入；
+// 播放器上的操作交给播放器本身
 // ================================
 
 import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView as PMEditorView, NodeView } from 'prosemirror-view';
 import { renderWikiEmbed, type EmbedHost, type WikiLinkParts } from '../../lib/markdown';
-import { hydrateEmbedImages } from '../ReadingWorkspace/embed-images';
+import { hydrateEmbedMedia } from '../ReadingWorkspace/embed-media';
 
 /** 嵌入渲染所需的上下文（每次渲染时读取最新值） */
 export type EmbedHostProvider = (view: PMEditorView) => EmbedHost;
 
+/** 事件发生在音视频播放器上（播放、拖动进度、音量） */
+export function isMediaControlEvent(event: Event): boolean {
+  return event.target instanceof Element && event.target.closest('video, audio') !== null;
+}
+
 class WikiEmbedView implements NodeView {
   readonly dom: HTMLElement;
   private node: PMNode;
-  /** 上次渲染的 HTML：结果不变时保留现有 DOM，图片不会重新加载 */
+  /** 上次渲染的 HTML：结果不变时保留现有 DOM，媒体不会重新加载 */
   private html = '';
-  private disposeImages: (() => void) | null = null;
+  private disposeMedia: (() => void) | null = null;
 
   constructor(
     node: PMNode,
@@ -38,9 +44,13 @@ class WikiEmbedView implements NodeView {
     const html = element.outerHTML;
     if (html === this.html) return;
     this.html = html;
-    this.disposeImages?.();
+    this.disposeMedia?.();
     this.dom.replaceChildren(element);
-    this.disposeImages = hydrateEmbedImages(element);
+    this.disposeMedia = hydrateEmbedMedia(element);
+  }
+
+  stopEvent(event: Event): boolean {
+    return isMediaControlEvent(event);
   }
 
   update(node: PMNode): boolean {
@@ -53,7 +63,7 @@ class WikiEmbedView implements NodeView {
 
   destroy(): void {
     this.registry.delete(this);
-    this.disposeImages?.();
+    this.disposeMedia?.();
   }
 }
 

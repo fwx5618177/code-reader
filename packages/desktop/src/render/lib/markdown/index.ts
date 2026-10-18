@@ -25,14 +25,17 @@ export {
   wikiLinkClickTarget,
   linkAnchorId,
   MAX_EMBED_DEPTH,
-  EMBED_IMAGE_PATH_ATTR,
-  EMBED_IMAGE_MIME_ATTR,
+  EMBED_MEDIA_PATH_ATTR,
+  EMBED_MEDIA_MIME_ATTR,
+  createMediaElement,
   type RenderedDocument,
   type RenderedHeading,
   type EmbedHost,
   type EmbedResolver,
   type EmbedSource,
+  type MediaEmbedSource,
 } from './html';
+export { MEDIA_SRC_ATTR, mediaKindOfPath, isDirectMediaUrl, localMediaTarget, type MediaKind } from './media';
 export {
   extractWikiLinks,
   extractHeadings,

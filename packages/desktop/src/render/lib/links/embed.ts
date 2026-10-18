@@ -44,10 +44,11 @@ function createItemCache<T>(compute: (markdown: string) => T[]): (item: Knowledg
 const headingsOf = createItemCache(extractHeadings);
 const blocksOf = createItemCache(summarizeBlocks);
 
-/** 条目 → 嵌入内容：图片附件按文件嵌入，其余条目嵌入正文 */
+/** 条目 → 嵌入内容：图片 / 视频 / 音频附件按文件嵌入（显示或播放），其余条目嵌入正文 */
 function embedSourceOf(item: KnowledgeItem): EmbedSource {
-  if (item.filePath && resolveAttachmentKind(item) === 'image') {
-    return { kind: 'image', title: item.title, filePath: item.filePath, mimeType: item.mimeType };
+  const kind = item.filePath ? resolveAttachmentKind(item) : null;
+  if (item.filePath && (kind === 'image' || kind === 'video' || kind === 'audio')) {
+    return { kind: 'media', media: kind, title: item.title, filePath: item.filePath, mimeType: item.mimeType };
   }
   const article = resolveArticle(item);
   return {
@@ -82,12 +83,12 @@ export function createLinkResolver(index: LinkIndex): LinkResolver {
 export const LinkResolverContext = createContext<LinkResolver | null>(null);
 
 /**
- * 渲染正文使用的嵌入解析：只有包含 ![[嵌入]] 的内容才需要，
+ * 渲染正文使用的嵌入解析：只有包含 ![[嵌入]] 或 ![](媒体) 的内容才需要，
  * 其余内容返回 undefined，条目列表变化时不必重新渲染
  */
 export function useEmbedResolver(content: string | null | undefined): EmbedResolver | undefined {
   const resolver = useContext(LinkResolverContext);
-  return content?.includes('![[') ? resolver?.resolveEmbed : undefined;
+  return content?.includes('![') ? resolver?.resolveEmbed : undefined;
 }
 
 export function useLinkResolver(): LinkResolver | null {

@@ -569,13 +569,34 @@ $z-toast: 700;
     font-style: italic;
   }
 
-  :global(.wiki-embed-image) {
+  :global(.wiki-embed-media) {
     display: block;
     max-width: 100%;
-    height: auto;
     margin: 0;
     border-radius: var(--radius-md);
+  }
+
+  :global(img.wiki-embed-media) {
+    height: auto;
     cursor: pointer;
+  }
+
+  :global(audio.wiki-embed-media) {
+    width: 100%;
+  }
+
+  // ![](视频 / 音频)：正文中的播放器
+  :global(.markdown-media) {
+    display: block;
+    max-width: 100%;
+    margin: var(--spacing-2) 0;
+    border-radius: var(--radius-md);
+    background-color: var(--bg-tertiary);
+  }
+
+  :global(.markdown-audio) {
+    width: 100%;
+    background-color: transparent;
   }
 }
 

@@ -11,6 +11,7 @@ import { extractHeadings, extractSection } from './extract';
 import { parseContent, type ContentFormat } from './parser';
 import { markdownSchema } from './schema';
 import { embedKey, findHeadingIndex, wikiLinkRef, wikiLinkRefOf, type WikiLinkParts } from './wiki-link';
+import { MEDIA_SRC_ATTR, localMediaTarget, type MediaKind } from './media';
 
 /** 渲染后的标题（用于目录） */
 export interface RenderedHeading {
@@ -35,15 +36,16 @@ export interface NoteEmbedSource {
   format: ContentFormat;
 }
 
-/** 可嵌入的图片附件（文件由组件层读取后填入 src） */
-export interface ImageEmbedSource {
-  kind: 'image';
+/** 可嵌入的媒体附件：图片、视频、音频（文件由组件层读取后填入 src） */
+export interface MediaEmbedSource {
+  kind: 'media';
+  media: MediaKind;
   title: string;
   filePath: string;
   mimeType?: string;
 }
 
-export type EmbedSource = NoteEmbedSource | ImageEmbedSource;
+export type EmbedSource = NoteEmbedSource | MediaEmbedSource;
 
 /** 按链接目标查找嵌入内容；目标不存在时返回 null */
 export type EmbedResolver = (target: string) => EmbedSource | null;
@@ -65,9 +67,9 @@ export interface RenderOptions {
 /** 嵌入最大嵌套层数 */
 export const MAX_EMBED_DEPTH = 4;
 
-/** 图片嵌入的文件路径与 MIME 类型属性 */
-export const EMBED_IMAGE_PATH_ATTR = 'data-embed-path';
-export const EMBED_IMAGE_MIME_ATTR = 'data-embed-mime';
+/** 媒体嵌入（图片 / 视频 / 音频）的文件路径与 MIME 类型属性；组件层据此读取文件 */
+export const EMBED_MEDIA_PATH_ATTR = 'data-embed-path';
+export const EMBED_MEDIA_MIME_ATTR = 'data-embed-mime';
 
 /** 带块 ID 的元素属性（顶层文档中同时获得 block-<id> 锚点） */
 const BLOCK_ID_ATTR = 'data-block-id';
@@ -143,6 +145,37 @@ function embedNotice(text: string): HTMLElement {
   return notice;
 }
 
+/** 媒体附件 → 播放 / 显示元素（src 由组件层按文件路径填入） */
+export function createMediaElement(source: MediaEmbedSource, label: string): HTMLElement {
+  const element = document.createElement(source.media === 'image' ? 'img' : source.media);
+  if (element instanceof HTMLImageElement) {
+    element.alt = label;
+  } else {
+    element.setAttribute('controls', '');
+    element.setAttribute('preload', 'metadata');
+    element.setAttribute('aria-label', label);
+  }
+  element.setAttribute(EMBED_MEDIA_PATH_ATTR, source.filePath);
+  if (source.mimeType) element.setAttribute(EMBED_MEDIA_MIME_ATTR, source.mimeType);
+  return element;
+}
+
+/**
+ * 正文中 ![](本地文件) 的媒体：按文件名在知识库中查找附件，找到后记下文件路径供组件层加载，找不到时显示提示
+ */
+function resolveLocalMedia(container: HTMLElement, resolve: EmbedResolver | undefined): void {
+  container.querySelectorAll<HTMLElement>(`[${MEDIA_SRC_ATTR}]:not([src])`).forEach((element) => {
+    const target = localMediaTarget(element.getAttribute(MEDIA_SRC_ATTR) ?? '');
+    const source = target ? resolve?.(target) : null;
+    if (source?.kind === 'media') {
+      element.setAttribute(EMBED_MEDIA_PATH_ATTR, source.filePath);
+      if (source.mimeType) element.setAttribute(EMBED_MEDIA_MIME_ATTR, source.mimeType);
+    } else {
+      element.replaceWith(embedNotice(`未找到附件「${target}」`));
+    }
+  });
+}
+
 /** 渲染一个嵌入：标题链接 + 只读内容 */
 function renderEmbed(parts: WikiLinkParts, ctx: EmbedContext): HTMLElement {
   const wrapper = document.createElement('div');
@@ -150,14 +183,11 @@ function renderEmbed(parts: WikiLinkParts, ctx: EmbedContext): HTMLElement {
   const ref = wikiLinkRef(parts.target, parts.heading);
   const source = parts.target ? (ctx.resolve?.(parts.target) ?? null) : ctx.self;
 
-  if (source?.kind === 'image') {
-    const image = document.createElement('img');
-    image.className = 'wiki-embed-image';
-    image.alt = parts.alias || source.title;
-    image.setAttribute(EMBED_IMAGE_PATH_ATTR, source.filePath);
-    if (source.mimeType) image.setAttribute(EMBED_IMAGE_MIME_ATTR, source.mimeType);
-    image.dataset.wikiTarget = parts.target;
-    wrapper.appendChild(image);
+  if (source?.kind === 'media') {
+    const media = createMediaElement(source, parts.alias || source.title);
+    media.className = `wiki-embed-media wiki-embed-${source.media}`;
+    media.dataset.wikiTarget = parts.target;
+    wrapper.appendChild(media);
     return wrapper;
   }
 
@@ -198,6 +228,7 @@ function renderEmbed(parts: WikiLinkParts, ctx: EmbedContext): HTMLElement {
   }
 
   const body = renderNodes(parseContent(content, source.format));
+  resolveLocalMedia(body, ctx.resolve);
   expandEmbeds(body, {
     resolve: ctx.resolve,
     self: source,
@@ -270,6 +301,7 @@ function renderDocToElement(
     el.id = blockAnchorId(el.getAttribute(BLOCK_ID_ATTR)!);
   });
 
+  resolveLocalMedia(container, host.resolveEmbed);
   expandEmbeds(container, rootContext(host));
   return { element: container, headings };
 }

@@ -314,6 +314,16 @@ function createMarkInputRules(schema: Schema, config: InputRulesConfig): InputRu
 // ================================
 
 /**
+ * ![替代文字](地址 "标题")：输入闭合的 ) 时转换为图片节点（视频、音频地址呈现为播放器）
+ */
+function createImageInputRule(imageType: NodeType): InputRule {
+  return new InputRule(/(?<!\\)!\[([^[\]]*)\]\(([^()\s]+)(?:\s+"([^"]*)")?\)$/, (state, match, start, end) => {
+    const [, alt, src, title] = match;
+    return state.tr.replaceWith(start, end, imageType.create({ src, alt: alt || null, title: title ?? null }));
+  });
+}
+
+/**
  * 行内公式 $x$ 与段落内的 $$x$$
  * 整个段落只有 $$x$$ 时转换为块级公式
  */
@@ -522,6 +532,11 @@ export function createInputRulesPlugin(schema: Schema, config: InputRulesConfig 
   // 公式（块级规则在前，避免 $$ 被行内规则截获）
   if (mergedConfig.math) {
     rules.push(...createMathInputRules(schema));
+  }
+
+  // 图片 / 媒体
+  if (mergedConfig.link && schema.nodes.image) {
+    rules.push(createImageInputRule(schema.nodes.image));
   }
 
   // 行内标记

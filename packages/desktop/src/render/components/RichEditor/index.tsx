@@ -77,6 +77,7 @@ import { createCodeBlockView } from './CodeBlockView';
 import { createMathInlineView, createMathBlockView } from './MathNodeView';
 import { createListItemView } from './ListItemView';
 import { createWikiEmbedView } from './WikiEmbedView';
+import { createMediaImageView } from './MediaImageView';
 import { DocumentPreview } from './DocumentPreview';
 import { LatexEditor } from './LatexEditor';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
@@ -653,7 +654,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   linkResolverRef.current = linkResolver;
   const documentTitleRef = useRef(userOptions?.title ?? '');
   documentTitleRef.current = userOptions?.title ?? '';
-  const embedViewsRef = useRef<ReturnType<typeof createWikiEmbedView> | null>(null);
+  const embedViewsRef = useRef<{ refresh: () => void } | null>(null);
 
   // 存储格式：.md 等为 Markdown，.txt 为纯文本
   const format: ContentFormat = formatForFileType(fileType);
@@ -889,7 +890,14 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
         format,
       },
     }));
-    embedViewsRef.current = embedViews;
+    // ![](地址)：视频 / 音频播放，本地文件经知识库解析
+    const mediaViews = createMediaImageView(() => linkResolverRef.current?.resolveEmbed);
+    embedViewsRef.current = {
+      refresh: () => {
+        embedViews.refresh();
+        mediaViews.refresh();
+      },
+    };
 
     // 插件顺序：输入规则与块级回车 → 表格/列表/格式快捷键 → 基础快捷键 → 历史与光标
     const plugins: Plugin[] = [
@@ -945,6 +953,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
         math_block: createMathBlockView(),
         list_item: createListItemView(),
         wiki_embed: embedViews.nodeView,
+        image: mediaViews.nodeView,
       },
       dispatchTransaction(transaction: Transaction) {
         const newState = view.state.apply(transaction);

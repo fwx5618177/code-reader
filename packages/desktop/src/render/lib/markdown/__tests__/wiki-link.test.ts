@@ -239,11 +239,50 @@ describe('嵌入渲染', () => {
   it('图片嵌入输出待加载的图片元素', () => {
     const container = document.createElement('div');
     container.innerHTML = renderContentToHtml('![[photo.png]]', 'markdown', {
-      resolveEmbed: () => ({ kind: 'image', title: 'photo.png', filePath: '/tmp/photo.png' }),
+      resolveEmbed: () => ({ kind: 'media', media: 'image', title: 'photo.png', filePath: '/tmp/photo.png' }),
     }).html;
-    const image = container.querySelector<HTMLImageElement>('img.wiki-embed-image')!;
+    const image = container.querySelector<HTMLImageElement>('img.wiki-embed-media')!;
     expect(image.getAttribute('data-embed-path')).toBe('/tmp/photo.png');
     expect(image.getAttribute('src')).toBeNull();
+  });
+
+  it('视频、音频嵌入输出带控件的播放器', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderContentToHtml('![[clip.mp4|演示]]\n\n![[talk.mp3]]', 'markdown', {
+      resolveEmbed: (target) =>
+        target === 'clip.mp4'
+          ? { kind: 'media', media: 'video', title: 'clip.mp4', filePath: '/tmp/clip.mp4', mimeType: 'video/mp4' }
+          : { kind: 'media', media: 'audio', title: 'talk.mp3', filePath: '/tmp/talk.mp3' },
+    }).html;
+    const video = container.querySelector('video.wiki-embed-media')!;
+    expect(video.hasAttribute('controls')).toBe(true);
+    expect(video.getAttribute('aria-label')).toBe('演示');
+    expect(video.getAttribute('data-embed-mime')).toBe('video/mp4');
+    expect(container.querySelector('audio.wiki-embed-media')!.getAttribute('data-embed-path')).toBe('/tmp/talk.mp3');
+  });
+
+  it('![](视频) 渲染为播放器：远程地址直接播放，本地文件经知识库解析，找不到时提示', () => {
+    const container = document.createElement('div');
+    container.innerHTML = renderContentToHtml(
+      '![远程](https://example.com/a.webm) ![](media/clip.mp4) ![](lost.mov) ![图](https://example.com/p.png)',
+      'markdown',
+      {
+        resolveEmbed: (target) =>
+          target === 'clip.mp4' ? { kind: 'media', media: 'video', title: 'clip.mp4', filePath: '/tmp/clip.mp4' } : null,
+      }
+    ).html;
+    const [remote, local] = container.querySelectorAll('video');
+    expect(remote.getAttribute('src')).toBe('https://example.com/a.webm');
+    expect(remote.getAttribute('aria-label')).toBe('远程');
+    expect(local.getAttribute('src')).toBeNull();
+    expect(local.getAttribute('data-embed-path')).toBe('/tmp/clip.mp4');
+    expect(container.querySelector('.wiki-embed-missing')!.textContent).toBe('未找到附件「lost.mov」');
+    expect(container.querySelector('img')!.getAttribute('src')).toBe('https://example.com/p.png');
+  });
+
+  it('![](视频) 往返无损', () => {
+    const source = '![演示](media/clip.mp4 "标题")\n';
+    expect(serializeMarkdown(parseMarkdown(source))).toBe(source);
   });
 
   it('嵌入内容中的 [[#标题]] 指向被嵌入的文档', () => {
@@ -253,6 +292,14 @@ describe('嵌入渲染', () => {
 });
 
 describe('编辑器输入', () => {
+  it('输入 ![替代文字](地址) 转换为图片节点，视频地址保持原样序列化', () => {
+    const editor = createEditor('');
+    type(editor, '看 ![演示](media/clip.mp4 "片段")');
+    const node = editor.state.doc.firstChild!.lastChild!;
+    expect(node.type.name).toBe('image');
+    expect(node.attrs).toEqual({ src: 'media/clip.mp4', alt: '演示', title: '片段' });
+    expect(serializeMarkdown(editor.state.doc)).toBe('看 ![演示](media/clip.mp4 "片段")\n');
+  });
   it('输入 [[文档#标题|别名]] 转换为标题链接', () => {
     const editor = createEditor('');
     type(editor, '见 [[笔记#第一节|一]] 与 [[#本文]]');
