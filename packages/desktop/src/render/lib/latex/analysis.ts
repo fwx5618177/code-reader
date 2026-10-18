@@ -233,9 +233,10 @@ function computeFolds(
   return folds.sort((a, b) => a.from - b.from || b.to - a.to);
 }
 
-/** 标题原文 → 纯文本：去掉命令名与花括号，保留公式 */
+/** 标题原文 → 纯文本：去掉 \thanks 脚注、命令名与花括号，保留公式 */
 function plainTitle(raw: string): string {
   return raw
+    .replace(/\\thanks\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '')
     .replace(/\\(?:and|\\)/g, ' ')
     .replace(/\\[a-zA-Z]+\*?/g, '')
     .replace(/[{}~]/g, ' ')

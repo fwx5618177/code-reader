@@ -89,6 +89,40 @@ function hashString(str: string): string {
   return hash.toString(36);
 }
 
+/**
+ * 从 `{` 之后的位置开始找配对的 `}`（跳过 `\{`、`\}` 等转义），未闭合返回 -1
+ */
+export function findClosingBrace(text: string, from: number): number {
+  let depth = 1;
+  for (let i = from; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\') {
+      i++;
+    } else if (ch === '{') {
+      depth++;
+    } else if (ch === '}' && --depth === 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * 读取前言中 `\name[可选]{参数}` 的必选参数（花括号配对，忽略被注释掉的行）；
+ * 未出现时返回 undefined
+ */
+function readCommandArgument(content: string, name: string): string | undefined {
+  const pattern = new RegExp(`\\\\${name}(?![a-zA-Z])\\s*(?:\\[[^\\]]*\\])?\\s*\\{`, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content)) !== null) {
+    const lineStart = content.lastIndexOf('\n', match.index) + 1;
+    if (/(^|[^\\])%/.test(content.slice(lineStart, match.index))) continue;
+    const open = match.index + match[0].length;
+    const close = findClosingBrace(content, open);
+    return content.slice(open, close === -1 ? content.length : close);
+  }
+  return undefined;
+}
 
 // ================================
 // LaTeX 解析器类
@@ -228,24 +262,12 @@ export class LatexParser {
       });
     }
 
-    // 解析 \title
-    const titleMatch = content.match(/\\title\{([^}]*)\}/);
-    if (titleMatch) {
-      title = titleMatch[1];
-    }
-
-    // 解析 \author
-    const authorMatch = content.match(/\\author\{([^}]*)\}/);
-    if (authorMatch) {
-      author = authorMatch[1];
-    }
-
-    // 解析 \date
-    const dateMatch = content.match(/\\date\{([^}]*)\}/);
-    if (dateMatch) {
-      date = dateMatch[1] === '\\today'
-        ? new Date().toLocaleDateString('zh-CN')
-        : dateMatch[1];
+    // \title / \author / \date 的参数常含嵌套命令（\textbf{..}、\thanks{..}），按花括号配对读取
+    title = readCommandArgument(content, 'title');
+    author = readCommandArgument(content, 'author');
+    const rawDate = readCommandArgument(content, 'date');
+    if (rawDate !== undefined) {
+      date = rawDate.trim() === '\\today' ? new Date().toLocaleDateString('zh-CN') : rawDate;
     }
 
     return {

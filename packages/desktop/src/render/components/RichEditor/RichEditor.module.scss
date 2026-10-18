@@ -928,6 +928,29 @@ $page-rule-rows: repeating-linear-gradient(
     // 空的，不显示任何内容
     display: none;
   }
+
+  // 标题块：\title / \author（\and 分隔的多位作者并列）/ \date
+  .latex-title-block {
+    margin-bottom: var(--spacing-6);
+    text-align: center;
+  }
+
+  .latex-title {
+    margin: 0 0 var(--spacing-3);
+  }
+
+  .latex-authors {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--spacing-2) var(--spacing-8);
+    color: var(--text-secondary);
+  }
+
+  .latex-date {
+    margin: var(--spacing-2) 0 0;
+    color: var(--text-muted);
+  }
 }
 
 // ================================

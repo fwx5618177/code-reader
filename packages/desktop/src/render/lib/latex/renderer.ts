@@ -32,6 +32,7 @@ import {
   formatHtmlAttributes,
   isMathEnv,
 } from './math-env-handler';
+import { findClosingBrace } from './parser';
 
 // ================================
 // 默认配置
@@ -150,19 +151,46 @@ export class LatexRenderer {
     let html = `<div class="${this.prefix}-title-block">`;
 
     if (preamble.title) {
-      html += `<h1 class="${this.prefix}-title">${this.escapeHtml(preamble.title)}</h1>`;
+      html += `<h1 class="${this.prefix}-title">${this.renderTitleText(preamble.title)}</h1>`;
     }
 
-    if (preamble.author) {
-      html += `<p class="${this.prefix}-author">${this.escapeHtml(preamble.author)}</p>`;
+    // \and 分隔多位作者，各自渲染为并列的作者单元（单元内 \\ 换行写单位等信息）
+    const authors = (preamble.author ?? '')
+      .split(/\\and(?![a-zA-Z])/)
+      .map((part) => this.renderTitleText(part))
+      .filter((part) => part.length > 0);
+    if (authors.length > 0) {
+      html += `<div class="${this.prefix}-authors">`;
+      for (const author of authors) {
+        html += `<span class="${this.prefix}-author">${author}</span>`;
+      }
+      html += '</div>';
     }
 
     if (preamble.date) {
-      html += `<p class="${this.prefix}-date">${this.escapeHtml(preamble.date)}</p>`;
+      html += `<p class="${this.prefix}-date">${this.renderTitleText(preamble.date)}</p>`;
     }
 
     html += '</div>';
     return html;
+  }
+
+  /**
+   * 标题块文字：去掉 \thanks{..} 脚注后按行内内容渲染（支持 \textbf、\\、行内公式等）
+   */
+  private renderTitleText(text: string): string {
+    let plain = '';
+    let pos = 0;
+    const thanks = /\\thanks\s*\{/g;
+    let match: RegExpExecArray | null;
+    while ((match = thanks.exec(text)) !== null) {
+      plain += text.slice(pos, match.index);
+      const close = findClosingBrace(text, match.index + match[0].length);
+      pos = close === -1 ? text.length : close + 1;
+      thanks.lastIndex = pos;
+    }
+    plain += text.slice(pos);
+    return this.processInlineContent(plain.trim()).replace(/^(\s|<br \/>)+|(\s|<br \/>)+$/g, '');
   }
 
 

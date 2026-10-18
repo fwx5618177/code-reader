@@ -75,6 +75,8 @@ describe('analyzeLatex', () => {
 
   it('文档信息：标题与作者为纯文本', () => {
     expect(analysis.info).toEqual({ title: 'Paper on Things', authors: ['Alice', 'Bob'] });
+    const withThanks = analyzeLatex('\\author{甲\\thanks{资助 \\emph{X}} \\and 乙}\\begin{document}\\end{document}');
+    expect(withThanks.info.authors).toEqual(['甲', '乙']);
   });
 
   it('折叠：多行环境折叠到 \\end 之前，章节折叠到下一个同级章节之前', () => {
