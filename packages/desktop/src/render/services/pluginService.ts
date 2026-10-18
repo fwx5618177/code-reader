@@ -6,7 +6,7 @@
 // 生命周期编排（@code-reader/plugin-system/lifecycle）：
 // 1. 可参与激活的插件 = manifest 有效、未被签名策略阻止、已启用且权限已授予
 // 2. 依赖解析：依赖先激活；必需依赖缺失、未启用、版本不满足或循环依赖时拒绝激活并显示原因
-// 3. 激活事件：onStartup（默认）/ onLanguage / onView 发生后激活；其余时间保持“等待激活”，
+// 3. 激活事件：onStartup（默认，首屏后的空闲时刻）/ onLanguage / onView 发生后激活；其余时间保持“等待激活”，
 //    执行它的命令（命令面板、快捷键、斜杠菜单、工具栏、视图）时先激活再执行
 // 由 PluginHost 在应用启动时调用 init()，只初始化一次。
 // ================================
@@ -130,6 +130,16 @@ function byOrder<T>(items: Array<T & { order?: number }>): T[] {
   return items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
+/** onStartup 最多等待的空闲时间：主线程持续繁忙时也在此之后激活启动插件 */
+const STARTUP_IDLE_TIMEOUT_MS = 2000;
+
+function waitForIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(() => resolve(), { timeout: STARTUP_IDLE_TIMEOUT_MS });
+    else setTimeout(resolve, 0);
+  });
+}
+
 class PluginService {
   /** 扩展点注册表：界面（状态栏、插件视图）从这里订阅插件运行时贡献 */
   readonly registry = new ExtensionRegistry();
@@ -193,7 +203,11 @@ class PluginService {
 
   // ======= 初始化 =======
 
-  /** 读取偏好、扫描插件目录，按激活事件启动已启用的插件（只执行一次） */
+  /**
+   * 读取偏好、扫描插件目录，按激活事件启动已启用的插件（只执行一次）。
+   * onStartup 推迟到首屏之后的空闲时刻触发：启动插件的入口读取与 Worker 创建不与首屏争抢主线程；
+   * 等待期间操作队列保持空闲（启用、执行命令等不被阻塞）。返回的 Promise 在启动插件激活后完成
+   */
   init(): Promise<void> {
     this.initialized ??= this.serialize(async () => {
       this.preferences = { ...(await settingsService.get()).plugins };
@@ -207,11 +221,17 @@ class PluginService {
       }
       const bridge = getEditorBridge();
       bridge.onDidChange(() => this.fireLanguageEvent());
-      this.firedEvents.add('onStartup');
       this.fireLanguageEvent();
       await this.reconcile();
       this.setSnapshot({ initialized: true });
-    });
+    })
+      .then(waitForIdle)
+      .then(() =>
+        this.serialize(async () => {
+          this.firedEvents.add('onStartup');
+          await this.reconcile();
+        })
+      );
     return this.initialized;
   }
 

@@ -230,6 +230,34 @@ describe('pluginService 生命周期编排', () => {
     expect(status(service, 'app')?.status).toBe('active');
   });
 
+  it('onStartup 推迟到空闲时激活：等待期间已初始化、状态为等待激活，操作队列不被阻塞', async () => {
+    let onIdle: (() => void) | undefined;
+    vi.stubGlobal('requestIdleCallback', (callback: () => void) => {
+      onIdle = callback;
+      return 1;
+    });
+    try {
+      state.packages = [pluginPackage([], 'demo'), pluginPackage([], 'tex-tools', { activationEvents: ['onCommand:hello'] })];
+      state.settings.plugins = enabled('demo', 'tex-tools');
+      const service = await loadService();
+      const initializing = service.init();
+
+      await vi.waitFor(() => expect(onIdle).toBeDefined());
+      expect(service.getSnapshot().initialized).toBe(true);
+      expect(status(service, 'demo')?.status).toBe('idle');
+      expect(state.activated).toEqual([]);
+      // 空闲前按需激活仍然可用
+      await expect(service.executeCommand('tex-tools', 'hello')).resolves.toBe('tex-tools:hello');
+
+      onIdle!();
+      await initializing;
+      expect(state.activated).toEqual(['tex-tools', 'demo']);
+      expect(status(service, 'demo')?.status).toBe('active');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('依赖未启用或版本不满足时拒绝激活并说明原因；启用依赖后自动激活', async () => {
     state.packages = [
       pluginPackage([], 'app', { dependencies: [{ id: 'lib', version: '^1.0.0' }] }),

@@ -1,6 +1,6 @@
 // ================================
 // 激活事件：插件在什么时机被激活
-// - onStartup：应用启动（manifest 未声明 activationEvents 时的默认值）
+// - onStartup：应用启动完成（manifest 未声明 activationEvents 时的默认值；宿主可推迟到首屏后的空闲时刻触发）
 // - onCommand:<命令 ID>：首次执行该命令时（执行插件声明的命令时总会先激活插件，此事件可省略）
 // - onLanguage:<语言 ID>：首次打开该语言的文档时（如 onLanguage:markdown、onLanguage:latex）
 // - onView:<视图 ID>：首次显示该视图时
@@ -16,7 +16,7 @@ export interface ParsedActivationEvent {
   argument?: string;
 }
 
-/** 未声明 activationEvents 时的默认值：启动即激活 */
+/** 未声明 activationEvents 时的默认值：启动完成后激活 */
 export const DEFAULT_ACTIVATION_EVENTS: readonly string[] = ['onStartup'];
 
 const ARGUMENT = /^[A-Za-z][\w.-]{0,63}$/;
