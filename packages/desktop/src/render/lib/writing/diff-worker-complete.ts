@@ -1220,7 +1220,9 @@ function handleMessage(request: WorkerRequest): WorkerResponse {
 // Worker 初始化
 // ================================
 
-const isWorkerContext = typeof self !== 'undefined' && typeof (self as { postMessage?: unknown }).postMessage === 'function';
+// 只在专用 Worker 中注册消息处理（原因见 @code-reader/diff-algorithm 的 worker/diff-worker.ts）
+const WorkerScope = (globalThis as { WorkerGlobalScope?: abstract new () => unknown }).WorkerGlobalScope;
+const isWorkerContext = WorkerScope !== undefined && self instanceof WorkerScope;
 
 if (isWorkerContext) {
   self.onmessage = (event: MessageEvent<WorkerRequest>) => {
