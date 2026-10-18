@@ -413,8 +413,8 @@ export class RadixTree<T = CompletionMeta> {
       const prefixLen = commonPrefixLength(child.label, remaining);
 
       if (prefixLen === remaining.length) {
-        // 前缀完全匹配到了子节点标签的某个位置
-        matchedPrefix += remaining;
+        // 前缀在子节点标签中间结束：结果路径包含该子节点的完整标签
+        matchedPrefix += child.label;
         node = child;
         break;
       } else if (prefixLen === child.label.length) {
@@ -529,9 +529,11 @@ export class RadixTree<T = CompletionMeta> {
     if (node.isTerminal && node.values.length > 0) {
       const distance = levenshteinDistance(query, currentPath, maxDist);
       if (distance <= maxDist) {
-        const score = fuzzyScore(query, currentPath);
+        // 按编辑距离评分（拼写错误如 sectoin 不是 section 的子序列，不能用子序列评分过滤），
+        // 与子序列评分取较高者；模糊结果的分数低于精确匹配
+        const similarity = 1 - distance / Math.max(query.length, currentPath.length, 1);
+        const score = Math.max(similarity, fuzzyScore(query, currentPath)) * 0.9;
         if (score > 0.3) {
-          // 只保留足够相似的结果
           results.push({
             key: currentPath,
             values: node.values,
