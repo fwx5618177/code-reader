@@ -176,3 +176,21 @@ describe('LaTeX 交叉引用索引', () => {
     expect(result.crossReferences.includedFiles).toEqual(['chapter1']);
   });
 });
+
+describe('未闭合的公式', () => {
+  it('行内 $ 与 $$ 未闭合时在空行处结束，不吞掉后面段落的标签与文献', () => {
+    const source = String.raw`\begin{document}
+\section{A s$b}
+
+\label{after}
+Display $$ x
+
+\begin{thebibliography}{9}
+\bibitem{knuth} Knuth.
+\end{thebibliography}
+\end{document}`;
+    const { crossReferences } = parseLaTeX(source);
+    expect(crossReferences.labels.map((entry) => textOf(source, entry))).toEqual(['after']);
+    expect(crossReferences.bibItems.map((entry) => entry.key)).toEqual(['knuth']);
+  });
+});

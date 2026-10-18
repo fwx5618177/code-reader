@@ -938,16 +938,23 @@ export class LatexLezerParser {
     let content = '';
     const closeType = delimiter === '$' ? TokenType.MathInlineClose : TokenType.MathParenClose;
 
+    let depth = 0;
     while (!this.isAtEnd()) {
       const token = this.currentToken()!;
 
       if (token.type === closeType || token.type === TokenType.ParagraphBreak || this.atOpenEnvironmentEnd()) {
         break;
       }
+      // 关闭公式之外分组的 }：公式未闭合，在此结束（} 留给外层分组）
+      if (token.type === TokenType.BraceClose && depth === 0) {
+        break;
+      }
       if (token.type === TokenType.Error) {
         this.parseError();
         continue;
       }
+      if (token.type === TokenType.BraceOpen) depth++;
+      else if (token.type === TokenType.BraceClose) depth--;
 
       content += token.value;
       this.advance();
@@ -989,16 +996,23 @@ export class LatexLezerParser {
     let content = '';
     const closeType = delimiter === '$$' ? TokenType.MathDisplayClose : TokenType.MathBracketClose;
 
+    let depth = 0;
     while (!this.isAtEnd()) {
       const token = this.currentToken()!;
 
       if (token.type === closeType || token.type === TokenType.ParagraphBreak || this.atOpenEnvironmentEnd()) {
         break;
       }
+      // 关闭公式之外分组的 }：公式未闭合，在此结束（} 留给外层分组）
+      if (token.type === TokenType.BraceClose && depth === 0) {
+        break;
+      }
       if (token.type === TokenType.Error) {
         this.parseError();
         continue;
       }
+      if (token.type === TokenType.BraceOpen) depth++;
+      else if (token.type === TokenType.BraceClose) depth--;
 
       content += token.value;
       this.advance();

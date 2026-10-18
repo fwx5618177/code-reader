@@ -394,6 +394,30 @@ class LaTeXLexer {
     };
   }
 
+  /** 公式内遇到未配对的 }：属于公式外层的分组（如 \section{a $b}），公式应在此结束 */
+  private closesEnclosingGroup(depth: number): boolean {
+    return depth === 0 && this.input.charAt(this.pos) === '}';
+  }
+
+  /** 更新公式内的花括号深度（转义的 \{ \} 由调用方整体跳过，不计入） */
+  private mathBraceDepth(depth: number): number {
+    const char = this.input.charAt(this.pos);
+    if (char === '{') return depth + 1;
+    if (char === '}') return depth - 1;
+    return depth;
+  }
+
+  /** 当前位置是否为段落分隔：换行之后的下一行只含空白 */
+  private atParagraphBreak(): boolean {
+    if (this.input.charAt(this.pos) !== '\n') return false;
+    for (let i = this.pos + 1; i < this.input.length; i++) {
+      const char = this.input.charAt(i);
+      if (char === '\n') return true;
+      if (char !== ' ' && char !== '\t' && char !== '\r') return false;
+    }
+    return false;
+  }
+
   private readMath(): Token {
     const startLine = this.line;
     const startColumn = this.column;
@@ -404,6 +428,7 @@ class LaTeXLexer {
       this.pos += 2;
       this.column += 2;
       let value = '';
+      let depth = 0;
 
       while (this.pos < this.input.length) {
         if (
@@ -414,6 +439,14 @@ class LaTeXLexer {
           this.pos += 2;
           this.column += 2;
           break;
+        }
+        // 未闭合的公式在空行或所在分组的 } 处结束（TeX 在段落 / 分组结束时报 Missing $），不吞掉后面的正文
+        if (this.atParagraphBreak() || this.closesEnclosingGroup(depth)) break;
+        depth = this.mathBraceDepth(depth);
+        if (this.input.charAt(this.pos) === '\\' && this.pos + 1 < this.input.length) {
+          value += this.input.charAt(this.pos);
+          this.pos++;
+          this.column++;
         }
         if (this.input.charAt(this.pos) === '\n') {
           this.line++;
@@ -438,8 +471,11 @@ class LaTeXLexer {
     this.pos++;
     this.column++;
     let value = '';
+    let depth = 0;
 
     while (this.pos < this.input.length && this.input.charAt(this.pos) !== '$') {
+      if (this.atParagraphBreak() || this.closesEnclosingGroup(depth)) break;
+      depth = this.mathBraceDepth(depth);
       // 处理转义的 $
       if (this.input.charAt(this.pos) === '\\' && this.pos + 1 < this.input.length) {
         value += this.input.charAt(this.pos);
@@ -463,8 +499,8 @@ class LaTeXLexer {
       this.pos++;
     }
 
-    // 跳过结束的 $
-    if (this.pos < this.input.length) {
+    // 跳过结束的 $（在空行处中止时没有）
+    if (this.pos < this.input.length && this.input.charAt(this.pos) === '$') {
       this.pos++;
       this.column++;
     }

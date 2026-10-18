@@ -47,6 +47,19 @@ describe('LaTeX 语法诊断', () => {
     expect(errors).toEqual([{ message: '公式缺少结束分隔符 $', text: '$', line: 1, column: 2 }]);
   });
 
+  it('分组内未闭合的公式在分组的 } 处结束，后文的公式不错位', () => {
+    const { errors } = problems('{a $b} text $x$ and\n$$ y $$');
+    expect(errors).toEqual([{ message: '公式缺少结束分隔符 $', text: '$', line: 1, column: 3 }]);
+  });
+
+  it('标签键里的 $ 不影响下一行的行间公式', () => {
+    expect(problems('\\label{e$xtra} text\n$$ x^2 $$\n').errors).toEqual([]);
+  });
+
+  it('公式内部的花括号分组照常配对', () => {
+    expect(problems('\\textbf{see $\\frac{a}{b}$ here}').errors).toEqual([]);
+  });
+
   it('未闭合的公式不吞掉外层环境的 \\end', () => {
     const { errors } = problems('\\begin{document}\n内容 $x+1\n\\end{document}');
     expect(errors.map((e) => e.message)).toEqual(['公式缺少结束分隔符 $']);

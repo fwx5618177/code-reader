@@ -115,6 +115,8 @@ export interface TokenizerState {
   verbatimEnvName: string | null;
   /** 括号栈 */
   braceStack: number;
+  /** 进入行内/行间公式时的括号深度：公式内出现关闭外层分组的 } 时公式在此结束（TeX 报 Missing $） */
+  mathBraceBase: number;
   /** 环境栈 */
   envStack: string[];
   /** \begin{name} 读完后待进入的模式（原样输出或数学环境），at 为环境名参数之后的位置 */
@@ -175,6 +177,7 @@ export class LatexTokenizer {
       inVerbatim: false,
       verbatimEnvName: null,
       braceStack: 0,
+      mathBraceBase: 0,
       envStack: [],
       pendingMode: null,
       rawArgument: null,
@@ -255,6 +258,13 @@ export class LatexTokenizer {
     const match = ENV_NAME_PATTERN.exec(this.input);
     if (!match) return null;
     return { name: (match[1] ?? '').trim(), end: this.state.pos + match[0].length };
+  }
+
+  private enterMathMode(type: 'inline' | 'display', delimiter: string): void {
+    this.state.inMathMode = true;
+    this.state.mathModeType = type;
+    this.state.mathDelimiter = delimiter;
+    this.state.mathBraceBase = this.state.braceStack;
   }
 
   private exitMathMode(): void {
@@ -380,17 +390,13 @@ export class LatexTokenizer {
     if (!this.state.inMathMode) {
       if (nextChar === '(') {
         this.advance();
-        this.state.inMathMode = true;
-        this.state.mathModeType = 'inline';
-        this.state.mathDelimiter = '\\(';
+        this.enterMathMode('inline', '\\(');
         return this.createToken(TokenType.MathParenOpen, '\\(', start, this.state.pos);
       }
 
       if (nextChar === '[') {
         this.advance();
-        this.state.inMathMode = true;
-        this.state.mathModeType = 'display';
-        this.state.mathDelimiter = '\\[';
+        this.enterMathMode('display', '\\[');
         return this.createToken(TokenType.MathBracketOpen, '\\[', start, this.state.pos);
       }
 
@@ -541,17 +547,13 @@ export class LatexTokenizer {
       this.advance();
       this.advance();
 
-        this.state.inMathMode = true;
-      this.state.mathModeType = 'display';
-      this.state.mathDelimiter = '$$';
+      this.enterMathMode('display', '$$');
       return this.createToken(TokenType.MathDisplayOpen, '$$', start, this.state.pos);
     }
 
     // 单个 $（inline math）
     this.advance();
-    this.state.inMathMode = true;
-    this.state.mathModeType = 'inline';
-    this.state.mathDelimiter = '$';
+    this.enterMathMode('inline', '$');
     return this.createToken(TokenType.MathInlineOpen, '$', start, this.state.pos);
   }
 
@@ -717,6 +719,12 @@ export class LatexTokenizer {
       this.advance();
       this.exitMathMode();
       return this.createToken(TokenType.MathDisplayClose, '$$', start, this.state.pos);
+    }
+
+    // 关闭公式之外分组的 }（\label{a $b}、\section{x $y}）：未闭合的公式在此结束，} 按正文处理
+    if (char === '}' && this.state.mathModeType !== 'environment' && this.state.braceStack <= this.state.mathBraceBase) {
+      this.exitMathMode();
+      return this.tokenizeNormalMode();
     }
 
     // 其余数学模式（\( \[ $$ 与公式环境）中出现的 $ 不合法
