@@ -19,7 +19,7 @@ import {
 } from '@code-reader/plugin-system/lifecycle';
 import type { PluginPackage, PluginSignatureCheck } from '../types/electron';
 import { getEditorBridge } from '../lib/plugins/editor-bridge';
-import { ExtensionRegistry } from '../lib/plugins/extension-registry';
+import { createHostExtensionRegistry } from '../lib/plugins/extension-registry';
 import { currentPlatform, resolveKeybindings, type ResolvedKeybinding } from '../lib/plugins/keybindings';
 import { validateManifest } from '../lib/plugins/manifest';
 import { PluginLoader } from '../lib/plugins/plugin-loader';
@@ -142,7 +142,7 @@ function waitForIdle(): Promise<void> {
 
 class PluginService {
   /** 扩展点注册表：界面（状态栏、插件视图）从这里订阅插件运行时贡献 */
-  readonly registry = new ExtensionRegistry();
+  readonly registry = createHostExtensionRegistry();
   private readonly loader = new PluginLoader({
     registry: this.registry,
     configurationFor: (manifest) => this.configurationFor(manifest),

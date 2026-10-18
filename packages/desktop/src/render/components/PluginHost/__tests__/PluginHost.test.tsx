@@ -16,10 +16,10 @@ const fake = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../services/pluginService', async () => {
-  const { ExtensionRegistry } = await import('../../../lib/plugins/extension-registry');
+  const { createHostExtensionRegistry } = await import('../../../lib/plugins/extension-registry');
   return {
     pluginService: {
-      registry: new ExtensionRegistry(),
+      registry: createHostExtensionRegistry(),
       init: vi.fn(async () => undefined),
       subscribe: (listener: () => void) => {
         fake.listeners.add(listener);
@@ -62,7 +62,7 @@ describe('插件界面入口', () => {
   beforeEach(() => {
     vi.mocked(pluginService.runCommand).mockClear();
     vi.mocked(pluginService.notifyViewsShown).mockClear();
-    pluginService.registry.removeAllByPlugin('demo');
+    pluginService.registry.unregisterAllByPlugin('demo');
     setContributions({});
   });
 
@@ -114,7 +114,7 @@ describe('插件界面入口', () => {
     expect(pluginService.notifyViewsShown).toHaveBeenCalledWith(['list']);
 
     act(() =>
-      pluginService.registry.set(VIEW_ITEMS, 'demo', {
+      pluginService.registry.registerExtension(VIEW_ITEMS, 'demo', {
         list: [{ label: '120 字', description: '汉字 100', command: 'run', args: [1] }, { label: '只读项' }],
       })
     );

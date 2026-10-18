@@ -1,6 +1,8 @@
 // ================================
 // 插件注册表
-// 管理扩展点注册和扩展获取
+// 管理扩展点注册和扩展获取。
+// 每个扩展点的注册列表写时复制：变更时整体替换为新数组，未变更时 getExtensions 返回同一引用，
+// 界面可直接把它作为快照（如 React useSyncExternalStore）。排序：优先级高在前，同优先级按插件 ID
 // ================================
 
 import type {
@@ -11,6 +13,8 @@ import type {
   Disposable,
 } from '../types';
 import { PluginPriority } from '../types';
+
+const EMPTY: readonly ExtensionRegistration[] = [];
 
 // ================================
 // 扩展点注册表
@@ -24,8 +28,8 @@ export class ExtensionRegistry {
   /** 扩展点定义 */
   private extensionPoints: Map<string, ExtensionPoint> = new Map();
 
-  /** 扩展注册 */
-  private extensions: Map<string, ExtensionRegistration[]> = new Map();
+  /** 扩展注册（不可变数组） */
+  private extensions: Map<string, readonly ExtensionRegistration[]> = new Map();
 
   /** 变更监听器 */
   private listeners: Set<ExtensionChangeListener> = new Set();
@@ -134,10 +138,12 @@ export class ExtensionRegistry {
       throw new Error(`扩展点 "${extensionPointId}" 的注册列表不存在`);
     }
 
-    registrations.push(registration as ExtensionRegistration);
-
-    // 按优先级排序（高优先级在前）
-    registrations.sort((a, b) => b.priority - a.priority);
+    this.extensions.set(
+      extensionPointId,
+      [...registrations, registration as ExtensionRegistration].sort(
+        (a, b) => b.priority - a.priority || (a.pluginId < b.pluginId ? -1 : a.pluginId > b.pluginId ? 1 : 0)
+      )
+    );
 
     this.emitChange({
       type: 'extension-added',
@@ -167,7 +173,10 @@ export class ExtensionRegistry {
     );
 
     if (index !== -1) {
-      registrations.splice(index, 1);
+      this.extensions.set(
+        extensionPointId,
+        registrations.filter((_, i) => i !== index)
+      );
 
       this.emitChange({
         type: 'extension-removed',
@@ -203,8 +212,8 @@ export class ExtensionRegistry {
    * 获取扩展点的所有扩展
    * @param extensionPointId 扩展点 ID
    */
-  getExtensions<T>(extensionPointId: string): ExtensionRegistration<T>[] {
-    return (this.extensions.get(extensionPointId) || []) as ExtensionRegistration<T>[];
+  getExtensions<T>(extensionPointId: string): readonly ExtensionRegistration<T>[] {
+    return (this.extensions.get(extensionPointId) ?? EMPTY) as readonly ExtensionRegistration<T>[];
   }
 
   /**

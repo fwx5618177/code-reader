@@ -3,8 +3,9 @@
 // 负责插件生命周期：以沙箱化上下文激活插件、管理其命令与扩展贡献、停用时统一清理
 // ================================
 
+import type { ExtensionRegistry } from '@code-reader/plugin-system/registry';
 import { getEditorBridge } from './editor-bridge';
-import { STATUS_BAR_ITEMS, VIEW_ITEMS, type ExtensionRegistry } from './extension-registry';
+import { STATUS_BAR_ITEMS, VIEW_ITEMS, type ViewItemsByView } from './extension-registry';
 import { configurationValues } from './preferences';
 import { createSandboxedContext, type Permission } from './sandbox';
 import { createPluginStorage } from './storage';
@@ -24,6 +25,8 @@ interface ActivePlugin {
   plugin: Plugin;
   context: PluginContext;
   commands: Map<string, (...args: unknown[]) => unknown>;
+  /** 扩展点 ID → 本插件当前的贡献（重新设置时先撤下旧贡献） */
+  contributions: Map<string, Disposable>;
 }
 
 const DEFAULT_ACTIVATION_TIMEOUT = 5000;
@@ -75,18 +78,28 @@ export class PluginLoader {
 
     const bridge = getEditorBridge();
     const commands = new Map<string, (...args: unknown[]) => unknown>();
+    const contributions = new Map<string, Disposable>();
+    const contribute = (pointId: string, value: unknown) => {
+      const registration = this.registry.registerExtension(pointId, pluginId, value);
+      contributions.get(pointId)?.dispose();
+      contributions.set(pointId, registration);
+    };
+    let views: ViewItemsByView = {};
     const context = createSandboxedContext(manifest, granted, {
       editor: bridge.createEditorAPI(),
       ui: bridge.createUIAPI(),
       storage: this.storageFor(pluginId),
       statusBar: {
-        set: (item) => this.registry.set(STATUS_BAR_ITEMS, pluginId, item),
-        clear: () => this.registry.remove(STATUS_BAR_ITEMS, pluginId),
+        set: (item) => contribute(STATUS_BAR_ITEMS, item),
+        clear: () => {
+          contributions.get(STATUS_BAR_ITEMS)?.dispose();
+          contributions.delete(STATUS_BAR_ITEMS);
+        },
       },
       views: {
         set: (viewId, items) => {
-          const current = this.registry.get(VIEW_ITEMS).find((entry) => entry.pluginId === pluginId)?.value;
-          this.registry.set(VIEW_ITEMS, pluginId, { ...current, [viewId]: items });
+          views = { ...views, [viewId]: items };
+          contribute(VIEW_ITEMS, views);
         },
       },
       configuration: this.configurationFor(manifest),
@@ -101,7 +114,7 @@ export class PluginLoader {
       },
     });
 
-    this.active.set(pluginId, { plugin, context, commands });
+    this.active.set(pluginId, { plugin, context, commands, contributions });
     try {
       await withTimeout(
         (async () => plugin.activate(context))(),
@@ -131,7 +144,8 @@ export class PluginLoader {
       }
     }
     entry.commands.clear();
-    this.registry.removeAllByPlugin(pluginId);
+    this.registry.unregisterAllByPlugin(pluginId);
+    entry.contributions.clear();
   }
 
   async executeCommand(pluginId: PluginId, commandId: string, ...args: unknown[]): Promise<unknown> {

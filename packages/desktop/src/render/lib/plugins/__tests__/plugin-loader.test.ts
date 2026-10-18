@@ -6,7 +6,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getEditorBridge, type EditorInstance } from '../editor-bridge';
-import { ExtensionRegistry, STATUS_BAR_ITEMS, VIEW_ITEMS } from '../extension-registry';
+import type { ExtensionRegistry } from '@code-reader/plugin-system/registry';
+import { createHostExtensionRegistry, STATUS_BAR_ITEMS, VIEW_ITEMS } from '../extension-registry';
 import { PluginLoader } from '../plugin-loader';
 import type { HostMessage, HostMethod, WorkerMessage } from '../plugin-protocol';
 import type { Permission } from '../sandbox';
@@ -135,7 +136,7 @@ describe('PluginLoader + Worker 插件', () => {
 
   beforeEach(() => {
     localStorage.clear();
-    registry = new ExtensionRegistry();
+    registry = createHostExtensionRegistry();
     loader = new PluginLoader({ registry, storageFor: (id) => createPluginStorage(id) });
     editor = createMockEditor();
     editorRegistration = getEditorBridge().registerEditor(editor);
@@ -188,12 +189,14 @@ describe('PluginLoader + Worker 插件', () => {
       await w.call('statusBar.set', { text: '12 字', command: 'insert' });
     });
     await promise;
-    expect(registry.get(STATUS_BAR_ITEMS)).toEqual([{ pluginId: 'demo', value: { text: '12 字', tooltip: undefined, command: 'insert' } }]);
+    expect(registry.getExtensions(STATUS_BAR_ITEMS)).toEqual([
+      expect.objectContaining({ pluginId: 'demo', extension: { text: '12 字', tooltip: undefined, command: 'insert' } }),
+    ]);
 
     await loader.deactivate('demo');
     expect(loader.isActive('demo')).toBe(false);
     expect(loader.hasCommand('demo', 'insert')).toBe(false);
-    expect(registry.get(STATUS_BAR_ITEMS)).toEqual([]);
+    expect(registry.getExtensions(STATUS_BAR_ITEMS)).toEqual([]);
     expect(worker.terminated).toBe(true);
     await expect(loader.executeCommand('demo', 'insert')).rejects.toThrow('不可用');
   });
@@ -247,10 +250,12 @@ describe('PluginLoader + Worker 插件', () => {
       await w.call('views.set', 'list', [{ label: '二', command: 'insert' }]);
     });
     await promise;
-    expect(registry.get(VIEW_ITEMS)).toEqual([{ pluginId: 'demo', value: { list: [{ label: '二', command: 'insert' }] } }]);
+    expect(registry.getExtensions(VIEW_ITEMS)).toEqual([
+      expect.objectContaining({ pluginId: 'demo', extension: { list: [{ label: '二', command: 'insert' }] } }),
+    ]);
 
     await loader.deactivate('demo');
-    expect(registry.get(VIEW_ITEMS)).toEqual([]);
+    expect(registry.getExtensions(VIEW_ITEMS)).toEqual([]);
   });
 
   it('读取配置与文档语言，配置变更通知 Worker', async () => {

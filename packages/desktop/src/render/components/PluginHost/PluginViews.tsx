@@ -6,17 +6,18 @@
 // ================================
 
 import React, { useEffect, useSyncExternalStore } from 'react';
-import { VIEW_ITEMS } from '../../lib/plugins/extension-registry';
+import { getViewItems, subscribeExtensions } from '../../lib/plugins/extension-registry';
 import { pluginService } from '../../services/pluginService';
 import { PanelEmpty } from '../SidebarPanels/PanelEmpty';
 import styles from './PluginViews.module.scss';
 
 const getViews = () => pluginService.getSnapshot().contributions.views;
-const getViewItems = () => pluginService.registry.get(VIEW_ITEMS);
+const subscribeContents = (listener: () => void) => subscribeExtensions(pluginService.registry, listener);
+const getContents = () => getViewItems(pluginService.registry);
 
 const PluginViewsPanel: React.FC = () => {
   const views = useSyncExternalStore(pluginService.subscribe, getViews);
-  const contents = useSyncExternalStore(pluginService.registry.subscribe, getViewItems);
+  const contents = useSyncExternalStore(subscribeContents, getContents);
 
   useEffect(() => {
     pluginService.notifyViewsShown(views.map((view) => view.id));
@@ -29,7 +30,7 @@ const PluginViewsPanel: React.FC = () => {
   return (
     <div className={styles.views}>
       {views.map((view) => {
-        const items = contents.find((entry) => entry.pluginId === view.pluginId)?.value[view.id];
+        const items = contents.find((entry) => entry.pluginId === view.pluginId)?.extension[view.id];
         return (
           <section key={`${view.pluginId}.${view.id}`} className={styles.view} aria-label={view.name}>
             <h3 className={styles.title} title={view.pluginName}>

@@ -1,78 +1,53 @@
 // ================================
-// 扩展点注册表
-// 插件向扩展点贡献数据，界面订阅扩展点渲染；每个插件在每个扩展点上最多一条贡献（再次设置即替换）。
+// 宿主扩展点
+// 基于 @code-reader/plugin-system 的扩展点注册表：插件向扩展点贡献数据，界面订阅扩展点渲染；
+// 每个插件在每个扩展点上最多一条贡献（由 PluginLoader 负责替换）。
 // 这里只有插件运行时动态产生的数据（状态栏项、侧栏视图内容）；命令、快捷键、菜单、工具栏等静态贡献
 // 来自 manifest，由 pluginService 按插件状态提供。新增扩展点时须同时提供界面入口。
 // ================================
 
-import type { PluginId, StatusBarItem, ViewItem } from './types';
-
-export interface ExtensionPoint<T> {
-  readonly id: string;
-  readonly description: string;
-  /** 仅用于携带贡献数据的类型 */
-  readonly __type?: T;
-}
-
-export interface Contribution<T> {
-  pluginId: PluginId;
-  value: T;
-}
+import { ExtensionRegistry } from '@code-reader/plugin-system/registry';
+import { ExtensionPointType, type ExtensionRegistration } from '@code-reader/plugin-system/types';
+import type { StatusBarItem, ViewItem } from './types';
 
 /** 状态栏右侧的插件项，由 PluginStatusBar 渲染 */
-export const STATUS_BAR_ITEMS: ExtensionPoint<StatusBarItem> = {
-  id: 'statusBar.item',
-  description: '状态栏项（每个插件一项，可点击执行本插件命令）',
-};
+export const STATUS_BAR_ITEMS = 'statusBar.item';
 
 /** 侧栏「插件视图」的内容：视图 ID → 列表项，由 PluginViewsPanel 渲染 */
-export const VIEW_ITEMS: ExtensionPoint<Readonly<Record<string, readonly ViewItem[]>>> = {
-  id: 'sidebar.viewItems',
-  description: '插件侧栏视图的列表内容（视图在 manifest.contributes.views 中声明）',
-};
+export const VIEW_ITEMS = 'sidebar.viewItems';
 
-const EMPTY: readonly Contribution<never>[] = [];
+export type ViewItemsByView = Readonly<Record<string, readonly ViewItem[]>>;
 
-export class ExtensionRegistry {
-  /** 扩展点 ID → 贡献列表（不可变数组，便于 useSyncExternalStore 比较快照） */
-  private readonly contributions = new Map<string, readonly Contribution<unknown>[]>();
-  private readonly listeners = new Set<() => void>();
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-  set<T>(point: ExtensionPoint<T>, pluginId: PluginId, value: T): void {
-    const others = this.get(point).filter((entry) => entry.pluginId !== pluginId);
-    this.update(point.id, [...others, { pluginId, value }].sort((a, b) => a.pluginId.localeCompare(b.pluginId)));
-  }
+/** 创建注册表并定义宿主提供的扩展点 */
+export function createHostExtensionRegistry(): ExtensionRegistry {
+  const registry = new ExtensionRegistry();
+  registry.defineExtensionPoint<StatusBarItem>({
+    id: STATUS_BAR_ITEMS,
+    type: ExtensionPointType.UI,
+    description: '状态栏项（每个插件一项，可点击执行本插件命令）',
+    validator: (item) => isRecord(item) && typeof item.text === 'string',
+  });
+  registry.defineExtensionPoint<ViewItemsByView>({
+    id: VIEW_ITEMS,
+    type: ExtensionPointType.Sidebar,
+    description: '插件侧栏视图的列表内容（视图在 manifest.contributes.views 中声明）',
+    validator: (views) => isRecord(views) && Object.values(views).every(Array.isArray),
+  });
+  return registry;
+}
 
-  remove<T>(point: ExtensionPoint<T>, pluginId: PluginId): void {
-    const current = this.get(point);
-    if (current.some((entry) => entry.pluginId === pluginId)) {
-      this.update(point.id, current.filter((entry) => entry.pluginId !== pluginId));
-    }
-  }
+/** 供 useSyncExternalStore 订阅注册表变更 */
+export function subscribeExtensions(registry: ExtensionRegistry, listener: () => void): () => void {
+  const subscription = registry.onExtensionChange(listener);
+  return () => subscription.dispose();
+}
 
-  /** 插件停用时移除其全部贡献 */
-  removeAllByPlugin(pluginId: PluginId): void {
-    for (const [pointId, entries] of this.contributions) {
-      if (entries.some((entry) => entry.pluginId === pluginId)) {
-        this.update(pointId, entries.filter((entry) => entry.pluginId !== pluginId));
-      }
-    }
-  }
+export function getStatusBarItems(registry: ExtensionRegistry): readonly ExtensionRegistration<StatusBarItem>[] {
+  return registry.getExtensions<StatusBarItem>(STATUS_BAR_ITEMS);
+}
 
-  get<T>(point: ExtensionPoint<T>): readonly Contribution<T>[] {
-    return (this.contributions.get(point.id) as readonly Contribution<T>[] | undefined) ?? EMPTY;
-  }
-
-  subscribe = (listener: () => void): (() => void) => {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
-  };
-
-  private update(pointId: string, entries: readonly Contribution<unknown>[]): void {
-    if (entries.length === 0) this.contributions.delete(pointId);
-    else this.contributions.set(pointId, entries);
-    for (const listener of this.listeners) listener();
-  }
+export function getViewItems(registry: ExtensionRegistry): readonly ExtensionRegistration<ViewItemsByView>[] {
+  return registry.getExtensions<ViewItemsByView>(VIEW_ITEMS);
 }

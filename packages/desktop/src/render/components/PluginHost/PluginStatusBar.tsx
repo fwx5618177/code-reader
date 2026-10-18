@@ -5,34 +5,35 @@
 
 import React, { useSyncExternalStore } from 'react';
 import { Command } from 'lucide-react';
-import { STATUS_BAR_ITEMS } from '../../lib/plugins/extension-registry';
+import { getStatusBarItems, subscribeExtensions } from '../../lib/plugins/extension-registry';
 import { pluginService } from '../../services/pluginService';
 import { usePluginHost } from './index';
 import styles from './PluginStatusBar.module.scss';
 
-const getItems = () => pluginService.registry.get(STATUS_BAR_ITEMS);
+const subscribe = (listener: () => void) => subscribeExtensions(pluginService.registry, listener);
+const getItems = () => getStatusBarItems(pluginService.registry);
 
 const PluginStatusBar: React.FC = () => {
-  const items = useSyncExternalStore(pluginService.registry.subscribe, getItems);
+  const items = useSyncExternalStore(subscribe, getItems);
   const { openCommandPalette, runCommand } = usePluginHost();
 
   return (
     <>
-      {items.map(({ pluginId, value }) => {
-        const { command } = value;
+      {items.map(({ pluginId, extension: item }) => {
+        const { command } = item;
         return command ? (
           <button
             key={pluginId}
             type="button"
             className={`${styles.item} ${styles.clickable}`}
-            title={value.tooltip}
+            title={item.tooltip}
             onClick={() => runCommand(pluginId, command)}
           >
-            {value.text}
+            {item.text}
           </button>
         ) : (
-          <span key={pluginId} className={styles.item} title={value.tooltip}>
-            {value.text}
+          <span key={pluginId} className={styles.item} title={item.tooltip}>
+            {item.text}
           </span>
         );
       })}

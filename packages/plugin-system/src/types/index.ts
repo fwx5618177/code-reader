@@ -14,7 +14,7 @@ export type PluginId = string;
 export type PluginVersion = string;
 
 /** 插件状态 */
-export const enum PluginState {
+export enum PluginState {
   /** 未加载 */
   Unloaded = 'unloaded',
   /** 加载中 */
@@ -34,7 +34,7 @@ export const enum PluginState {
 }
 
 /** 插件优先级 */
-export const enum PluginPriority {
+export enum PluginPriority {
   /** 最低优先级 */
   Lowest = 0,
   /** 低优先级 */
@@ -50,7 +50,7 @@ export const enum PluginPriority {
 }
 
 /** 扩展点类型 */
-export const enum ExtensionPointType {
+export enum ExtensionPointType {
   /** 编辑器扩展 */
   Editor = 'editor',
   /** 解析器扩展 */
@@ -342,7 +342,7 @@ export interface PluginContributes {
 // ================================
 
 /** 日志级别 */
-export const enum LogLevel {
+export enum LogLevel {
   Debug = 0,
   Info = 1,
   Warn = 2,
@@ -508,7 +508,7 @@ export type PluginFactory = () => Plugin;
 // ================================
 
 /** 插件事件类型 */
-export const enum PluginEventType {
+export enum PluginEventType {
   /** 插件已加载 */
   Loaded = 'plugin:loaded',
   /** 插件已激活 */
@@ -609,7 +609,7 @@ export interface ExtensionRegistration<T = unknown> {
 // ================================
 
 /** 插件加载源 */
-export const enum PluginSource {
+export enum PluginSource {
   /** 内置插件 */
   Builtin = 'builtin',
   /** 用户安装 */
@@ -659,7 +659,7 @@ export type DisposableFactory = (cleanup: () => void) => Disposable;
 export type AsyncInitializer = () => Promise<void>;
 
 /** 版本比较结果 */
-export const enum VersionCompareResult {
+export enum VersionCompareResult {
   Less = -1,
   Equal = 0,
   Greater = 1,
