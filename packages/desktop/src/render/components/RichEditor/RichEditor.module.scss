@@ -951,6 +951,48 @@ $page-rule-rows: repeating-linear-gradient(
     margin: var(--spacing-2) 0 0;
     color: var(--text-muted);
   }
+
+  // 未识别的命令：原样保留（含参数），等宽字体 + 波浪下划线标出，悬停显示原因
+  .latex-unknown-command {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--color-warning);
+    background-color: var(--color-warning-bg);
+    border-radius: var(--radius-sm);
+    padding: 0 var(--spacing-1);
+    text-decoration: underline wavy var(--color-warning);
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+
+  .latex-smallcaps {
+    font-variant: small-caps;
+  }
+
+  .latex-sans {
+    font-family: var(--font-sans);
+  }
+
+  .latex-fbox {
+    border: 1px solid var(--border-primary);
+    padding: 0 var(--spacing-1);
+  }
+
+  .latex-caption {
+    margin-top: var(--spacing-2);
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.95em;
+  }
+
+  // \includegraphics：预览不读取图片文件，显示文件名占位
+  .latex-graphics {
+    display: inline-block;
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px dashed var(--border-primary);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+  }
 }
 
 // ================================

@@ -25,6 +25,7 @@ import type {
   LatexParserOptions,
   LatexParseResult,
 } from './types';
+import { findClosingBrace, isAccentSymbol, isAccentWord } from './text-symbols';
 
 // ================================
 // 常量定义
@@ -90,19 +91,17 @@ function hashString(str: string): string {
 }
 
 /**
- * 从 `{` 之后的位置开始找配对的 `}`（跳过 `\{`、`\}` 等转义），未闭合返回 -1
+ * 从 from 开始查找与当前环境配对的 \end{name}：同名的 \begin{name} 使深度加一，未找到返回 -1
  */
-export function findClosingBrace(text: string, from: number): number {
+function findEnvironmentEnd(input: string, from: number, name: string): number {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`\\\\(begin|end)\\{${escaped}\\}`, 'g');
+  pattern.lastIndex = from;
   let depth = 1;
-  for (let i = from; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '\\') {
-      i++;
-    } else if (ch === '{') {
-      depth++;
-    } else if (ch === '}' && --depth === 0) {
-      return i;
-    }
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(input)) !== null) {
+    depth += match[1] === 'begin' ? 1 : -1;
+    if (depth === 0) return match.index;
   }
   return -1;
 }
@@ -147,6 +146,17 @@ export class LatexParser {
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.errors = [];
     this.depth = 0;
+  }
+
+  /**
+   * 从 pos（反斜杠处）解析一个命令，返回节点与结束位置。
+   * 渲染器处理原文片段（列表项、标题、环境内容）时用它，保证与正文 AST 走同一套命令解析与渲染
+   */
+  static parseCommandAt(input: string, pos: number): { node: LatexNode | null; end: number } {
+    const parser = new LatexParser(input);
+    parser.pos = pos;
+    const node = parser.parseCommand(0);
+    return { node, end: Math.max(parser.pos, pos + 1) };
   }
 
   /**
@@ -265,10 +275,7 @@ export class LatexParser {
     // \title / \author / \date 的参数常含嵌套命令（\textbf{..}、\thanks{..}），按花括号配对读取
     title = readCommandArgument(content, 'title');
     author = readCommandArgument(content, 'author');
-    const rawDate = readCommandArgument(content, 'date');
-    if (rawDate !== undefined) {
-      date = rawDate.trim() === '\\today' ? new Date().toLocaleDateString('zh-CN') : rawDate;
-    }
+    date = readCommandArgument(content, 'date');
 
     return {
       type: 'preamble',
@@ -301,10 +308,7 @@ export class LatexParser {
     let currentParagraph: LatexNode[] = [];
 
     while (this.pos < this.length) {
-      this.skipWhitespace();
-      if (this.pos >= this.length) break;
-
-      // 检查段落分隔（双换行）
+      // 段落分隔（空行）先于空白跳过判断，否则空行会被当作普通空白吞掉
       if (this.checkParagraphBreak()) {
         if (currentParagraph.length > 0) {
           children.push(this.createParagraphNode(currentParagraph, offset));
@@ -312,6 +316,12 @@ export class LatexParser {
         }
         this.consumeParagraphBreak();
         continue;
+      }
+
+      // 只跳过段首空白；段内节点之间的空格是正文的一部分（\% \& 之间、\textbf{x} 之后）
+      if (currentParagraph.length === 0) {
+        this.skipWhitespace();
+        if (this.pos >= this.length) break;
       }
 
       // 解析下一个节点
@@ -436,7 +446,9 @@ export class LatexParser {
         return this.parseMathInline(offset, start, '\\(');
       }
 
-      const raw = '\\' + charCmd;
+      // 单字符重音（\'e、\"{o}、\^\i）：被修饰的字符作为参数读入，渲染时合成为带重音的字符
+      const args = isAccentSymbol(charCmd) ? [this.parseAccentArgument(offset)] : [];
+      const raw = this.input.slice(start, this.pos);
       return {
         type: 'command',
         id: generateNodeId(),
@@ -446,7 +458,7 @@ export class LatexParser {
         hash: hashString(raw),
         name: charCmd,
         options: [],
-        args: [],
+        args,
         star: false,
       } as CommandNode;
     }
@@ -478,16 +490,21 @@ export class LatexParser {
 
     // 解析可选参数
     const options: string[] = [];
-    this.skipWhitespace();
+    this.skipArgumentWhitespace();
     if (this.peek() === '[') {
       options.push(this.parseOptionalArg());
     }
 
     // 解析必选参数
     const args: LatexNode[][] = [];
-    this.skipWhitespace();
+    this.skipArgumentWhitespace();
     while (this.peek() === '{') {
       args.push(this.parseRequiredArg(offset));
+    }
+
+    // 字母重音的参数也可以不加花括号：\c c、\v s
+    if (isAccentWord(name) && args.length === 0) {
+      args.push(this.parseAccentArgument(offset));
     }
 
     const raw = this.input.slice(start, this.pos);
@@ -503,6 +520,32 @@ export class LatexParser {
       args,
       star,
     } as CommandNode;
+  }
+
+  /**
+   * 读取重音命令的参数（{x}、\i 等控制词或下一个字符）；参数为单个文本/命令节点，读不到时为空
+   */
+  private parseAccentArgument(offset: number): LatexNode[] {
+    while (this.peek() === ' ') this.pos++;
+    const char = this.peek();
+    if (!char || char === '}' || char === '\n') return [];
+    if (char === '{') return this.parseRequiredArg(offset);
+    if (char === '\\') {
+      const node = this.parseCommand(offset);
+      return node ? [node] : [];
+    }
+    const start = this.pos;
+    const text = String.fromCodePoint(this.input.codePointAt(start)!);
+    this.pos += text.length;
+    return [{
+      type: 'text',
+      id: generateNodeId(),
+      start: offset + start,
+      end: offset + this.pos,
+      raw: text,
+      hash: hashString(text),
+      content: text,
+    } as TextNode];
   }
 
   /**
@@ -540,9 +583,9 @@ export class LatexParser {
       args.push(this.parseRequiredArg(offset));
     }
 
-    // 查找 \end{envName}
+    // 查找配对的 \end{envName}（同名环境可以嵌套：枚举中的枚举）
     const endPattern = `\\end{${envName}}`;
-    const endIndex = this.input.indexOf(endPattern, this.pos);
+    const endIndex = findEnvironmentEnd(this.input, this.pos, envName);
 
     if (endIndex === -1) {
       this.errors.push(`找不到 \\end{${envName}}`);
@@ -658,28 +701,26 @@ export class LatexParser {
     listType: 'itemize' | 'enumerate' | 'description'
   ): ListNode {
     const items: ListItemNode[] = [];
-    const itemRegex = /\\item(?:\[([^\]]*)\])?/g;
+    // 只在本层切分 \item：嵌套环境（子列表）内的 \item 属于子列表；\itemsep 等不是条目
+    const tokenRegex = /\\(begin|end)\s*\{[^}]*\}|\\item(?![a-zA-Z])(?:\s*\[([^\]]*)\])?/g;
     let match: RegExpExecArray | null;
-    const positions: { start: number; label?: string }[] = [];
+    const positions: { itemStart: number; start: number; label?: string }[] = [];
+    let depth = 0;
 
-    while ((match = itemRegex.exec(content)) !== null) {
-      positions.push({
-        start: match.index + match[0].length,
-        label: match[1],
-      });
+    while ((match = tokenRegex.exec(content)) !== null) {
+      if (match[1] === 'begin') depth++;
+      else if (match[1] === 'end') depth = Math.max(0, depth - 1);
+      else if (depth === 0) {
+        positions.push({ itemStart: match.index, start: match.index + match[0].length, label: match[2] });
+      }
     }
 
     for (let i = 0; i < positions.length; i++) {
       const start = positions[i].start;
-      const end = i + 1 < positions.length
-        ? content.lastIndexOf('\\item', positions[i + 1].start)
-        : content.length;
+      const end = i + 1 < positions.length ? positions[i + 1].itemStart : content.length;
 
       const itemContent = content.slice(start, end).trim();
-      const itemRaw = content.slice(
-        content.lastIndexOf('\\item', start),
-        end
-      );
+      const itemRaw = content.slice(positions[i].itemStart, end);
 
       items.push({
         type: 'list_item',
@@ -1064,6 +1105,21 @@ export class LatexParser {
         break;
       }
     }
+  }
+
+  /**
+   * 命令与参数之间的空白：与 TeX 一致，只跳过空格和至多一个换行，不跨过空行（空行是段落分隔）
+   */
+  private skipArgumentWhitespace(): void {
+    const isBlank = (char: string | undefined) => char === ' ' || char === '\t' || char === '\r';
+    let pos = this.pos;
+    while (isBlank(this.input[pos])) pos++;
+    if (this.input[pos] === '\n') {
+      let next = pos + 1;
+      while (isBlank(this.input[next])) next++;
+      if (this.input[next] !== '\n') pos = next;
+    }
+    this.pos = pos;
   }
 
   /**

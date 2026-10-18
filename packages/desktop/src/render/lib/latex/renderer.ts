@@ -32,11 +32,279 @@ import {
   formatHtmlAttributes,
   isMathEnv,
 } from './math-env-handler';
-import { findClosingBrace } from './parser';
+import { LatexParser } from './parser';
+import {
+  ACCENTS,
+  CONTROL_SYMBOLS,
+  PASSTHROUGH_COMMANDS,
+  SILENT_COMMANDS,
+  TEXT_SYMBOLS,
+  applyAccent,
+  applyTextLigatures,
+  findClosingBrace,
+  latexToPlainText,
+  todayText,
+} from './text-symbols';
 
 // ================================
 // 默认配置
 // ================================
+
+/**
+ * 正文中直接出现时按行内公式渲染的数学命令（文本模式下 \alpha、\frac{a}{b}、\sum_{i} 等）
+ * \underline、\ldots 等同时是文本命令的不在此列，由文本符号表与 renderCommand 处理
+ */
+const TEXT_MATH_COMMANDS: ReadonlySet<string> = new Set([
+  // 极限类运算符
+  'lim',
+  'limsup',
+  'liminf',
+  'sup',
+  'inf',
+  'max',
+  'min',
+  // 大型运算符
+  'sum',
+  'prod',
+  'coprod',
+  'int',
+  'iint',
+  'iiint',
+  'oint',
+  'bigcap',
+  'bigcup',
+  'bigvee',
+  'bigwedge',
+  'bigoplus',
+  'bigotimes',
+  // 分数和根号
+  'frac',
+  'dfrac',
+  'tfrac',
+  'sqrt',
+  'binom',
+  // 三角函数
+  'sin',
+  'cos',
+  'tan',
+  'cot',
+  'sec',
+  'csc',
+  'arcsin',
+  'arccos',
+  'arctan',
+  'sinh',
+  'cosh',
+  'tanh',
+  // 其他函数
+  'log',
+  'ln',
+  'lg',
+  'exp',
+  'det',
+  'dim',
+  'gcd',
+  'hom',
+  'ker',
+  'deg',
+  'Pr',
+  'arg',
+  // 希腊字母
+  'alpha',
+  'beta',
+  'gamma',
+  'delta',
+  'epsilon',
+  'varepsilon',
+  'zeta',
+  'eta',
+  'theta',
+  'vartheta',
+  'iota',
+  'kappa',
+  'lambda',
+  'mu',
+  'nu',
+  'xi',
+  'pi',
+  'varpi',
+  'rho',
+  'varrho',
+  'sigma',
+  'varsigma',
+  'tau',
+  'upsilon',
+  'phi',
+  'varphi',
+  'chi',
+  'psi',
+  'omega',
+  'Gamma',
+  'Delta',
+  'Theta',
+  'Lambda',
+  'Xi',
+  'Pi',
+  'Sigma',
+  'Upsilon',
+  'Phi',
+  'Psi',
+  'Omega',
+  // 数学符号
+  'infty',
+  'nabla',
+  'partial',
+  'forall',
+  'exists',
+  'nexists',
+  'emptyset',
+  'neg',
+  'lnot',
+  'angle',
+  'triangle',
+  'square',
+  'diamond',
+  'pm',
+  'mp',
+  'times',
+  'div',
+  'cdot',
+  'ast',
+  'star',
+  'circ',
+  'bullet',
+  'oplus',
+  'ominus',
+  'otimes',
+  'odot',
+  'cap',
+  'cup',
+  'vee',
+  'wedge',
+  'ne',
+  'neq',
+  'le',
+  'leq',
+  'ge',
+  'geq',
+  'lt',
+  'gt',
+  'approx',
+  'equiv',
+  'sim',
+  'simeq',
+  'cong',
+  'propto',
+  'll',
+  'gg',
+  'subset',
+  'supset',
+  'subseteq',
+  'supseteq',
+  'in',
+  'notin',
+  'ni',
+  'to',
+  'rightarrow',
+  'Rightarrow',
+  'leftarrow',
+  'Leftarrow',
+  'leftrightarrow',
+  'Leftrightarrow',
+  'uparrow',
+  'downarrow',
+  'mapsto',
+  'implies',
+  'iff',
+  'vdots',
+  'cdots',
+  'ddots',
+  'prime',
+  'hbar',
+  'ell',
+  'Re',
+  'Im',
+  'aleph',
+  // 矩阵环境（这些需要特殊处理）
+  'left',
+  'right',
+  // 重音符号
+  'hat',
+  'check',
+  'tilde',
+  'acute',
+  'grave',
+  'dot',
+  'ddot',
+  'breve',
+  'bar',
+  'vec',
+  'overline',
+  'widehat',
+  'widetilde',
+  // 字体命令
+  'mathbb',
+  'mathbf',
+  'mathrm',
+  'mathit',
+  'mathcal',
+  'mathfrak',
+]);
+
+/** 原文片段中需要单独处理的字符（其余为纯文本） */
+const INLINE_SPECIAL: ReadonlySet<string> = new Set(['\\', '$', '\n']);
+
+/** 宏展开的最大嵌套层数（防止自引用的 \newcommand 无限展开） */
+const MAX_MACRO_DEPTH = 32;
+
+/** 正文中识别为普通单词（结束公式）的例外：这些字母串是函数名 */
+const MATH_FUNCTION_WORD = /^(sin|cos|tan|log|lim|max|min|sup|inf|exp|det|dim|gcd|arg|deg)/;
+
+/**
+ * 从数学命令之后继续扫描，把跟随的参数、上下标、其他数学命令与符号并入同一个行内公式；
+ * 遇到空白、普通单词或非数学命令时结束。返回公式的结束位置
+ */
+function scanTextMathExpression(text: string, from: number): number {
+  let pos = from;
+  let depth = 0;
+  while (pos < text.length) {
+    const char = text[pos];
+    if (char === '{') {
+      depth++;
+      pos++;
+    } else if (char === '}') {
+      if (depth === 0) break;
+      depth--;
+      pos++;
+    } else if (depth > 0) {
+      // 花括号内整体并入（转义字符连同反斜杠一起跳过）
+      pos += char === '\\' ? 2 : 1;
+    } else if (char === '_' || char === '^') {
+      pos++;
+      if (text[pos] === '{') {
+        const close = findClosingBrace(text, pos + 1);
+        pos = close === -1 ? text.length : close + 1;
+      } else if (text[pos] === '\\') {
+        pos += /^\\[a-zA-Z]*/.exec(text.slice(pos))![0].length;
+      } else if (/[a-zA-Z0-9]/.test(text[pos] ?? '')) {
+        pos++;
+      }
+    } else if (char === '\\') {
+      const next = /^\\([a-zA-Z]+|[,;:! ])/.exec(text.slice(pos));
+      if (!next || !(TEXT_MATH_COMMANDS.has(next[1]) || /^[,;:! ]$/.test(next[1]))) break;
+      pos += next[0].length;
+    } else if (/\s/.test(char)) {
+      break;
+    } else if (/[a-zA-Z0-9+\-=<>()[\]|.,']/.test(char)) {
+      const lookAhead = text.slice(pos, pos + 10);
+      if (/^[a-zA-Z]{3,}/.test(lookAhead) && !MATH_FUNCTION_WORD.test(lookAhead)) break;
+      pos++;
+    } else {
+      break;
+    }
+  }
+  return pos;
+}
 
 /** 默认渲染选项 */
 const DEFAULT_RENDER_OPTIONS: Required<LatexRenderOptions> = {
@@ -59,6 +327,8 @@ export class LatexRenderer {
   private prefix: string;
   /** 全文 section 索引（\tableofcontents 渲染依据） */
   private sectionIndex: TocEntry[] = [];
+  /** 当前宏展开嵌套层数 */
+  private macroDepth = 0;
 
   constructor(options?: LatexRenderOptions) {
     this.options = { ...DEFAULT_RENDER_OPTIONS, ...options };
@@ -296,537 +566,100 @@ export class LatexRenderer {
   }
 
   /**
-   * 处理行内内容，包括行内公式、命令和换行
+   * 处理原文片段（列表项、标题、环境内容等）：行内/块级公式、\\ 换行、文本连字，
+   * 其余命令交给 LatexParser 解析成节点后走 renderCommand，与正文 AST 渲染保持一致
    */
   private processInlineContent(text: string): string {
     let result = '';
     let pos = 0;
 
     while (pos < text.length) {
-      const remaining = text.slice(pos);
+      const char = text[pos];
 
-      // 检查块级数学 $$...$$ (优先于行内公式)
-      if (remaining.startsWith('$$')) {
-        const endMatch = remaining.slice(2).indexOf('$$');
-        if (endMatch !== -1) {
-          const mathContent = remaining.slice(2, endMatch + 2);
-          const mathResult = renderMath(mathContent, { displayMode: true });
-          result += `<div class="${this.prefix}-math-block">${mathResult.html}</div>`;
-          pos += endMatch + 4;
-          continue;
-        }
-      }
-
-      // 检查行内公式 $...$
-      if (text[pos] === '$' && (pos === 0 || text[pos - 1] !== '\\')) {
-        // 确保不是 $$
-        if (text[pos + 1] !== '$') {
-          // 查找结束的 $（不能包含换行）
-          let end = pos + 1;
-          while (end < text.length && text[end] !== '\n') {
-            if (text[end] === '$' && text[end - 1] !== '\\') {
-              break;
-            }
-            end++;
-          }
-          if (end < text.length && text[end] === '$') {
-            const mathContent = text.slice(pos + 1, end);
-            if (mathContent.trim().length > 0) {
-              const mathResult = renderMath(mathContent, { displayMode: false });
-              result += `<span class="${this.prefix}-math-inline">${mathResult.html}</span>`;
-              pos = end + 1;
-              continue;
-            }
-          }
-        }
-      }
-
-      // 检查行内公式 \(...\)
-      if (remaining.startsWith('\\(')) {
-        const end = text.indexOf('\\)', pos + 2);
+      // 块级数学 $$...$$（优先于行内公式）
+      if (text.startsWith('$$', pos)) {
+        const end = text.indexOf('$$', pos + 2);
         if (end !== -1) {
-          const mathContent = text.slice(pos + 2, end);
-          const mathResult = renderMath(mathContent, { displayMode: false });
-          result += `<span class="${this.prefix}-math-inline">${mathResult.html}</span>`;
+          result += `<div class="${this.prefix}-math-block">${renderMath(text.slice(pos + 2, end), { displayMode: true }).html}</div>`;
           pos = end + 2;
           continue;
         }
       }
 
-      // 检查块级数学 \[...\]
-      if (remaining.startsWith('\\[')) {
-        const end = text.indexOf('\\]', pos + 2);
-        if (end !== -1) {
-          const mathContent = text.slice(pos + 2, end);
-          const mathResult = renderMath(mathContent, { displayMode: true });
-          result += `<div class="${this.prefix}-math-block">${mathResult.html}</div>`;
-          pos = end + 2;
+      // 行内公式 $...$（不跨行）
+      if (char === '$' && text[pos + 1] !== '$') {
+        let end = pos + 1;
+        while (end < text.length && text[end] !== '\n' && !(text[end] === '$' && text[end - 1] !== '\\')) end++;
+        if (text[end] === '$' && text.slice(pos + 1, end).trim()) {
+          result += `<span class="${this.prefix}-math-inline">${renderMath(text.slice(pos + 1, end), { displayMode: false }).html}</span>`;
+          pos = end + 1;
           continue;
         }
       }
 
-      // 检查 \tableofcontents
-      if (remaining.startsWith('\\tableofcontents')) {
-        result += this.generateToc();
-        pos += 16;
-        continue;
-      }
-
-      // 检查 \newpage
-      if (remaining.startsWith('\\newpage')) {
-        result += `<hr class="${this.prefix}-page-break" />`;
-        pos += 8;
-        continue;
-      }
-
-      // 检查 \clearpage
-      if (remaining.startsWith('\\clearpage')) {
-        result += `<hr class="${this.prefix}-page-break" />`;
-        pos += 10;
-        continue;
-      }
-
-      // 检查 \maketitle
-      if (remaining.startsWith('\\maketitle')) {
-        result += `<div class="${this.prefix}-maketitle-placeholder"></div>`;
-        pos += 10;
-        continue;
-      }
-
-      // 检查换行命令 \\
-      if (remaining.startsWith('\\\\')) {
-        result += '<br />';
-        pos += 2;
-        // 跳过可选的换行参数 [...]
-        if (pos < text.length && text[pos] === '[') {
-          const bracketEnd = text.indexOf(']', pos);
-          if (bracketEnd !== -1) {
-            pos = bracketEnd + 1;
+      if (char === '\\') {
+        // 行内公式 \(...\) 与块级公式 \[...\]
+        const delimiter = text[pos + 1];
+        if (delimiter === '(' || delimiter === '[') {
+          const end = text.indexOf(delimiter === '(' ? '\\)' : '\\]', pos + 2);
+          if (end !== -1) {
+            const display = delimiter === '[';
+            const html = renderMath(text.slice(pos + 2, end), { displayMode: display }).html;
+            result += display
+              ? `<div class="${this.prefix}-math-block">${html}</div>`
+              : `<span class="${this.prefix}-math-inline">${html}</span>`;
+            pos = end + 2;
+            continue;
           }
         }
+
+        // 换行 \\（跳过可选的间距参数 [..]）
+        if (delimiter === '\\') {
+          result += '<br />';
+          pos += 2;
+          if (text[pos] === '[') {
+            const bracketEnd = text.indexOf(']', pos);
+            if (bracketEnd !== -1) pos = bracketEnd + 1;
+          }
+          continue;
+        }
+
+        // 文本中直接出现的数学命令（\alpha、\frac{a}{b}、\sum_{i}^{n}）：连同上下标按行内公式渲染
+        const name = /^[a-zA-Z]+/.exec(text.slice(pos + 1))?.[0];
+        if (name && TEXT_MATH_COMMANDS.has(name) && !this.macros.has(name)) {
+          const end = scanTextMathExpression(text, pos + 1 + name.length);
+          result += `<span class="${this.prefix}-math-inline">${renderMath(text.slice(pos, end), { displayMode: false }).html}</span>`;
+          pos = end;
+          continue;
+        }
+
+        // 其余命令：解析为节点，与正文同一套渲染（符号、重音、格式、宏、未识别标记）
+        const { node, end } = LatexParser.parseCommandAt(text, pos);
+        result += node ? this.renderNodeInternal(node) : this.escapeHtml(text.slice(pos, end));
+        pos = end;
         continue;
       }
 
-      // 检查 \newline
-      if (remaining.startsWith('\\newline')) {
-        result += '<br />';
-        pos += 8;
-        continue;
-      }
-
-      // 检查 \linebreak
-      if (remaining.startsWith('\\linebreak')) {
-        result += '<br />';
-        pos += 10;
-        continue;
-      }
-
-      // 检查 \noindent
-      if (remaining.startsWith('\\noindent')) {
-        pos += 9;
-        continue;
-      }
-
-      // 检查 \par (段落分隔)
-      if (remaining.startsWith('\\par')) {
-        result += '</p><p class="' + this.prefix + '-paragraph">';
-        pos += 4;
-        continue;
-      }
-
-      // 检查文本格式命令 \textbf{...}
-      const textbfMatch = remaining.match(/^\\textbf\{([^}]*)\}/);
-      if (textbfMatch) {
-        result += `<strong>${this.processInlineContent(textbfMatch[1])}</strong>`;
-        pos += textbfMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \textit{...}
-      const textitMatch = remaining.match(/^\\textit\{([^}]*)\}/);
-      if (textitMatch) {
-        result += `<em>${this.processInlineContent(textitMatch[1])}</em>`;
-        pos += textitMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \emph{...}
-      const emphMatch = remaining.match(/^\\emph\{([^}]*)\}/);
-      if (emphMatch) {
-        result += `<em>${this.processInlineContent(emphMatch[1])}</em>`;
-        pos += emphMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \underline{...}
-      const underlineMatch = remaining.match(/^\\underline\{([^}]*)\}/);
-      if (underlineMatch) {
-        result += `<u>${this.processInlineContent(underlineMatch[1])}</u>`;
-        pos += underlineMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \texttt{...}
-      const textttMatch = remaining.match(/^\\texttt\{([^}]*)\}/);
-      if (textttMatch) {
-        result += `<code>${this.processInlineContent(textttMatch[1])}</code>`;
-        pos += textttMatch[0].length;
-        continue;
-      }
-
-      // 检查普通换行符
-      if (text[pos] === '\n') {
-        // 单个换行符转为空格（LaTeX 行为）
+      // 单个换行转为空格（LaTeX 行为）
+      if (char === '\n') {
         result += ' ';
         pos++;
         continue;
       }
 
-      // 检查反斜杠后跟命令
-      if (text[pos] === '\\') {
-        // 匹配命令名
-        const cmdMatch = remaining.match(/^\\([a-zA-Z]+)/);
-        if (cmdMatch) {
-          const cmdName = cmdMatch[1];
-
-          // 常见的数学命令列表 - 这些命令应该作为数学公式渲染
-          const mathCommands = new Set([
-            // 极限类运算符
-            'lim',
-            'limsup',
-            'liminf',
-            'sup',
-            'inf',
-            'max',
-            'min',
-            // 大型运算符
-            'sum',
-            'prod',
-            'coprod',
-            'int',
-            'iint',
-            'iiint',
-            'oint',
-            'bigcap',
-            'bigcup',
-            'bigvee',
-            'bigwedge',
-            'bigoplus',
-            'bigotimes',
-            // 分数和根号
-            'frac',
-            'dfrac',
-            'tfrac',
-            'sqrt',
-            'binom',
-            // 三角函数
-            'sin',
-            'cos',
-            'tan',
-            'cot',
-            'sec',
-            'csc',
-            'arcsin',
-            'arccos',
-            'arctan',
-            'sinh',
-            'cosh',
-            'tanh',
-            // 其他函数
-            'log',
-            'ln',
-            'lg',
-            'exp',
-            'det',
-            'dim',
-            'gcd',
-            'hom',
-            'ker',
-            'deg',
-            'Pr',
-            'arg',
-            // 希腊字母
-            'alpha',
-            'beta',
-            'gamma',
-            'delta',
-            'epsilon',
-            'varepsilon',
-            'zeta',
-            'eta',
-            'theta',
-            'vartheta',
-            'iota',
-            'kappa',
-            'lambda',
-            'mu',
-            'nu',
-            'xi',
-            'pi',
-            'varpi',
-            'rho',
-            'varrho',
-            'sigma',
-            'varsigma',
-            'tau',
-            'upsilon',
-            'phi',
-            'varphi',
-            'chi',
-            'psi',
-            'omega',
-            'Gamma',
-            'Delta',
-            'Theta',
-            'Lambda',
-            'Xi',
-            'Pi',
-            'Sigma',
-            'Upsilon',
-            'Phi',
-            'Psi',
-            'Omega',
-            // 数学符号
-            'infty',
-            'nabla',
-            'partial',
-            'forall',
-            'exists',
-            'nexists',
-            'emptyset',
-            'neg',
-            'lnot',
-            'angle',
-            'triangle',
-            'square',
-            'diamond',
-            'pm',
-            'mp',
-            'times',
-            'div',
-            'cdot',
-            'ast',
-            'star',
-            'circ',
-            'bullet',
-            'oplus',
-            'ominus',
-            'otimes',
-            'odot',
-            'cap',
-            'cup',
-            'vee',
-            'wedge',
-            'ne',
-            'neq',
-            'le',
-            'leq',
-            'ge',
-            'geq',
-            'lt',
-            'gt',
-            'approx',
-            'equiv',
-            'sim',
-            'simeq',
-            'cong',
-            'propto',
-            'll',
-            'gg',
-            'subset',
-            'supset',
-            'subseteq',
-            'supseteq',
-            'in',
-            'notin',
-            'ni',
-            'to',
-            'rightarrow',
-            'Rightarrow',
-            'leftarrow',
-            'Leftarrow',
-            'leftrightarrow',
-            'Leftrightarrow',
-            'uparrow',
-            'downarrow',
-            'mapsto',
-            'implies',
-            'iff',
-            'vdots',
-            'cdots',
-            'ddots',
-            'ldots',
-            'dots',
-            'prime',
-            'hbar',
-            'ell',
-            'Re',
-            'Im',
-            'aleph',
-            // 矩阵环境（这些需要特殊处理）
-            'left',
-            'right',
-            // 重音符号
-            'hat',
-            'check',
-            'tilde',
-            'acute',
-            'grave',
-            'dot',
-            'ddot',
-            'breve',
-            'bar',
-            'vec',
-            'overline',
-            'underline',
-            'widehat',
-            'widetilde',
-            // 字体命令
-            'mathbb',
-            'mathbf',
-            'mathrm',
-            'mathit',
-            'mathcal',
-            'mathfrak',
-          ]);
-
-          // 检查是否是数学命令
-          if (mathCommands.has(cmdName)) {
-            // 提取完整的数学表达式（包括下标、上标和参数）
-            let mathExpr = cmdMatch[0];
-            let scanPos = pos + mathExpr.length;
-
-            // 持续扫描以捕获完整的数学表达式
-            let depth = 0;
-            let inMathExpr = true;
-
-            while (scanPos < text.length && inMathExpr) {
-              const char = text[scanPos];
-
-              // 跟踪花括号深度
-              if (char === '{') {
-                depth++;
-                mathExpr += char;
-                scanPos++;
-              } else if (char === '}') {
-                if (depth > 0) {
-                  depth--;
-                  mathExpr += char;
-                  scanPos++;
-                } else {
-                  inMathExpr = false;
-                }
-              } else if (char === '_' || char === '^') {
-                // 下标或上标
-                mathExpr += char;
-                scanPos++;
-                // 检查是否有花括号组
-                if (scanPos < text.length && text[scanPos] === '{') {
-                  // 扫描到匹配的 }
-                  let braceDepth = 1;
-                  mathExpr += text[scanPos];
-                  scanPos++;
-                  while (scanPos < text.length && braceDepth > 0) {
-                    if (text[scanPos] === '{') braceDepth++;
-                    if (text[scanPos] === '}') braceDepth--;
-                    mathExpr += text[scanPos];
-                    scanPos++;
-                  }
-                } else if (scanPos < text.length && text[scanPos] === '\\') {
-                  // 下标/上标是另一个命令
-                  const subCmdMatch = text.slice(scanPos).match(/^\\[a-zA-Z]+/);
-                  if (subCmdMatch) {
-                    mathExpr += subCmdMatch[0];
-                    scanPos += subCmdMatch[0].length;
-                  }
-                } else if (scanPos < text.length && /[a-zA-Z0-9]/.test(text[scanPos])) {
-                  // 单个字符的下标/上标
-                  mathExpr += text[scanPos];
-                  scanPos++;
-                }
-              } else if (char === '\\') {
-                // 可能是另一个数学命令或空格
-                const nextCmdMatch = text.slice(scanPos).match(/^\\([a-zA-Z]+|[,;:!]|\s)/);
-                if (nextCmdMatch) {
-                  const nextCmd = nextCmdMatch[1];
-                  // 只有数学相关的命令才继续
-                  if (
-                    mathCommands.has(nextCmd) ||
-                    /^[,;:!]$/.test(nextCmd) ||
-                    nextCmd === ' ' ||
-                    nextCmd === 'to'
-                  ) {
-                    mathExpr += nextCmdMatch[0];
-                    scanPos += nextCmdMatch[0].length;
-                  } else {
-                    inMathExpr = false;
-                  }
-                } else {
-                  inMathExpr = false;
-                }
-              } else if (/[\s]/.test(char) && depth === 0) {
-                // 遇到空格且不在花括号内，结束数学表达式
-                inMathExpr = false;
-              } else if (/[a-zA-Z0-9+\-=<>()[\]|.,']/.test(char) && depth === 0) {
-                // 可能是数学表达式的一部分，但要小心
-                // 检查是否看起来像普通文本
-                const lookAhead = text.slice(scanPos, scanPos + 10);
-                if (
-                  /^[a-zA-Z]{3,}/.test(lookAhead) &&
-                  !/^(sin|cos|tan|log|lim|max|min|sup|inf|exp|det|dim|gcd|arg|deg)/.test(lookAhead)
-                ) {
-                  // 看起来像普通单词，结束数学表达式
-                  inMathExpr = false;
-                } else {
-                  mathExpr += char;
-                  scanPos++;
-                }
-              } else if (depth > 0) {
-                // 在花括号内，继续添加
-                mathExpr += char;
-                scanPos++;
-              } else {
-                // 其他字符，结束
-                inMathExpr = false;
-              }
-            }
-
-            // 渲染数学表达式
-            if (mathExpr.trim()) {
-              const mathResult = renderMath(mathExpr, { displayMode: false });
-              result += `<span class="${this.prefix}-math-inline">${mathResult.html}</span>`;
-              pos = scanPos;
-              continue;
-            }
-          }
-
-          // 非数学命令，尝试跳过参数
-          let cmdEnd = cmdMatch[0].length;
-          // 跳过可选参数 [...]
-          if (pos + cmdEnd < text.length && text[pos + cmdEnd] === '[') {
-            const bracketEnd = text.indexOf(']', pos + cmdEnd);
-            if (bracketEnd !== -1) {
-              cmdEnd = bracketEnd - pos + 1;
-            }
-          }
-          // 跳过必选参数 {...}
-          if (pos + cmdEnd < text.length && text[pos + cmdEnd] === '{') {
-            const braceEnd = text.indexOf('}', pos + cmdEnd);
-            if (braceEnd !== -1) {
-              cmdEnd = braceEnd - pos + 1;
-            }
-          }
-          pos += cmdEnd;
-          continue;
-        }
-      }
-
-      // 普通字符
-      result += this.escapeHtml(text[pos]);
-      pos++;
+      // 纯文本：到下一个特殊字符为止；分组花括号不可见，连字与引号转换
+      let end = pos + 1;
+      while (end < text.length && !INLINE_SPECIAL.has(text[end])) end++;
+      result += this.renderPlainText(text.slice(pos, end).replace(/[{}]/g, ''));
+      pos = end;
     }
 
     return result;
+  }
+
+  /** 纯文本片段：TeX 连字、引号、~ 转为对应字符后转义 */
+  private renderPlainText(text: string): string {
+    return this.escapeHtml(applyTextLigatures(text));
   }
 
   /**
@@ -872,94 +705,123 @@ export class LatexRenderer {
   }
 
   /**
-   * 渲染文本
+   * 渲染文本：含命令、公式或分组花括号时按原文片段处理，否则做连字与引号转换
    */
   private renderText(node: TextNode): string {
-    // 防护：确保 content 存在
     if (!node || node.content === undefined || node.content === null) {
       return '';
     }
     const content = String(node.content);
-    // 如果文本中包含公式标记、换行命令或反斜杠命令，使用行内内容处理
-    // 添加对 \lim, \sum, \int, \frac 等数学命令的检测
-    if (/\$[^$]+\$|\\\(|\\\)|\\\\|\\newline|\\linebreak|\\[a-zA-Z]+/.test(content)) {
-      return this.processInlineContent(content);
-    }
-    return this.escapeHtml(content);
+    return /[\\${}]/.test(content) ? this.processInlineContent(content) : this.renderPlainText(content);
   }
 
   /**
-   * 渲染命令
+   * 渲染命令。查找顺序：用户宏 → 文本中的数学命令 → 重音 → 转义字符 → 符号表 → 静默命令 → 格式/结构命令 → 未识别
    */
   private renderCommand(node: CommandNode): string {
     const name = node.name;
 
-    // 检查是否为自定义宏
     const macro = this.macros.get(name);
     if (macro) {
-      return this.expandMacro(macro, node.args);
+      return this.expandMacro(macro, node);
     }
 
-    // 处理常见命令
+    if (TEXT_MATH_COMMANDS.has(name)) {
+      const html = renderMath(node.raw.trim(), { displayMode: false }).html;
+      return `<span class="${this.prefix}-math-inline">${html}</span>`;
+    }
+
+    if (ACCENTS.has(name)) {
+      const accented = applyAccent(name, latexToPlainText(this.argSource(node.args[0])));
+      return accented === null ? this.renderUnknownCommand(node) : this.escapeHtml(accented);
+    }
+
+    const control = CONTROL_SYMBOLS.get(name);
+    if (control !== undefined) {
+      return this.escapeHtml(control);
+    }
+
+    // 符号命令之后的 {}（\LaTeX{}）或分组照常渲染
+    const symbol = TEXT_SYMBOLS.get(name);
+    if (symbol !== undefined) {
+      return this.escapeHtml(symbol) + this.renderArgs(node.args);
+    }
+
+    if (SILENT_COMMANDS.has(name)) {
+      return '';
+    }
+
+    if (PASSTHROUGH_COMMANDS.has(name)) {
+      return this.renderArgs(node.args);
+    }
+
     switch (name) {
       case 'textbf':
         return `<strong>${this.renderArgs(node.args)}</strong>`;
       case 'textit':
+      case 'textsl':
       case 'emph':
         return `<em>${this.renderArgs(node.args)}</em>`;
       case 'underline':
         return `<u>${this.renderArgs(node.args)}</u>`;
       case 'texttt':
         return `<code>${this.renderArgs(node.args)}</code>`;
+      case 'textsc':
+        return `<span class="${this.prefix}-smallcaps">${this.renderArgs(node.args)}</span>`;
+      case 'textsf':
+        return `<span class="${this.prefix}-sans">${this.renderArgs(node.args)}</span>`;
+      case 'fbox':
+      case 'framebox':
+        return `<span class="${this.prefix}-fbox">${this.renderArgs(node.args)}</span>`;
       case 'textsuperscript':
         return `<sup>${this.renderArgs(node.args)}</sup>`;
       case 'textsubscript':
         return `<sub>${this.renderArgs(node.args)}</sub>`;
+      case 'today':
+        return this.escapeHtml(todayText());
       case 'href':
         if (node.args.length >= 2) {
           const url = this.getTextContent(node.args[0]);
           const text = this.renderNodes(node.args[1]);
           return `<a href="${this.escapeHtml(url)}" target="_blank" rel="noopener">${text}</a>`;
         }
-        return '';
+        return this.renderUnknownCommand(node);
       case 'url':
         if (node.args.length >= 1) {
           const url = this.getTextContent(node.args[0]);
           return `<a href="${this.escapeHtml(url)}" target="_blank" rel="noopener">${this.escapeHtml(url)}</a>`;
         }
-        return '';
+        return this.renderUnknownCommand(node);
       case 'footnote':
         return `<span class="${this.prefix}-footnote">${this.renderArgs(node.args)}</span>`;
+      case 'caption':
+        return `<div class="${this.prefix}-caption">${this.renderArgs(node.args)}</div>`;
+      case 'includegraphics': {
+        // 预览不读取图片文件：显示文件名占位
+        const file = this.getTextContent(node.args[0] ?? []);
+        return `<span class="${this.prefix}-graphics" title="${this.escapeHtml(file)}">[图片：${this.escapeHtml(file)}]</span>`;
+      }
       case 'cite':
         if (node.args.length >= 1) {
           const key = this.getTextContent(node.args[0]);
           return `<cite class="${this.prefix}-cite">[${this.escapeHtml(key)}]</cite>`;
         }
-        return '';
+        return this.renderUnknownCommand(node);
       case 'ref':
       case 'eqref':
         if (node.args.length >= 1) {
           const label = this.getTextContent(node.args[0]);
           return `<a href="#${this.escapeHtml(label)}" class="${this.prefix}-ref">${this.escapeHtml(label)}</a>`;
         }
-        return '';
-      case 'label':
-        return ''; // 标签不可见
+        return this.renderUnknownCommand(node);
       case 'par':
         return '</p><p class="' + this.prefix + '-paragraph">';
       case 'hspace':
-      case 'hspace*':
         return '<span style="display: inline-block; width: 1em;"></span>';
       case 'vspace':
-      case 'vspace*':
         return '<div style="height: 1em;"></div>';
-      case 'noindent':
-        return ''; // 忽略
-      case 'centering':
-        return ''; // 通过环境处理
       case 'maketitle':
-        // maketitle 通常由 preamble 中的 title/author/date 信息渲染
-        // 如果标题块已经渲染，这里返回空；否则返回占位提示
+        // 标题块由前言中的 \title / \author / \date 渲染，这里只留占位
         return `<div class="${this.prefix}-maketitle-placeholder"></div>`;
       case 'tableofcontents':
         return this.generateToc();
@@ -970,8 +832,6 @@ export class LatexRenderer {
       case 'newpage':
       case 'clearpage':
       case 'cleardoublepage':
-        // 分页命令，返回分隔线
-        return `<hr class="${this.prefix}-page-break" />`;
       case 'pagebreak':
         return `<hr class="${this.prefix}-page-break" />`;
       case 'linebreak':
@@ -984,10 +844,6 @@ export class LatexRenderer {
         return `<div class="${this.prefix}-vspace" style="height: 1em;"></div>`;
       case 'smallskip':
         return `<div class="${this.prefix}-vspace" style="height: 0.5em;"></div>`;
-      case 'quad':
-        return '<span style="display: inline-block; width: 1em;"></span>';
-      case 'qquad':
-        return '<span style="display: inline-block; width: 2em;"></span>';
       case 'hfill':
         return '<span style="flex: 1;"></span>';
       case 'vfill':
@@ -995,16 +851,33 @@ export class LatexRenderer {
       case 'appendix':
         return `<div class="${this.prefix}-appendix-marker"><strong>Appendix</strong></div>`;
       case 'bibliography':
-        return `<div class="${this.prefix}-bibliography-placeholder"><em>[Bibliography]</em></div>`;
       case 'printbibliography':
         return `<div class="${this.prefix}-bibliography-placeholder"><em>[Bibliography]</em></div>`;
       default:
-        // 未知命令，显示原始内容
-        if (this.options.showErrors) {
-          return `<span class="${this.prefix}-unknown-cmd">\\${this.escapeHtml(name)}</span>`;
-        }
-        return '';
+        return this.renderUnknownCommand(node);
     }
+  }
+
+  /**
+   * 未识别的命令：原样保留（含参数），以特殊样式标出，不吞掉内容。
+   * 控制词之后被吞掉的空白补回一个空格，让原文与后续文字不粘连
+   */
+  private renderUnknownCommand(node: CommandNode): string {
+    const raw = node.raw.trimEnd();
+    const trailing = raw.length < node.raw.length ? ' ' : '';
+    if (!this.options.showErrors) {
+      return this.escapeHtml(raw) + trailing;
+    }
+    const command = node.name.length === 1 && !/[a-zA-Z]/.test(node.name) ? `\\${node.name}` : `\\${node.name}${node.star ? '*' : ''}`;
+    return (
+      `<span class="${this.prefix}-unknown-command" title="未识别的命令 ${this.escapeHtml(command)}">${this.escapeHtml(raw)}</span>` +
+      trailing
+    );
+  }
+
+  /** 参数的原始 LaTeX 源码 */
+  private argSource(arg: readonly LatexNode[] | undefined): string {
+    return (arg ?? []).map((node) => node.raw).join('');
   }
 
   /**
@@ -1390,24 +1263,32 @@ export class LatexRenderer {
   }
 
   /**
-   * 展开宏
+   * 展开 \newcommand 宏：#n 替换为参数的 LaTeX 源码（带可选参数的宏，#1 取 [..] 或默认值），
+   * 展开结果再按 LaTeX 渲染；多余的花括号参数按分组接在后面（与 TeX 一致）。
+   * 自引用导致嵌套过深时停止展开，按未识别命令标出
    */
-  private expandMacro(macro: MacroDefinition, args: LatexNode[][]): string {
-    let expansion = macro.expansion;
-
-    // 替换参数
-    for (let i = 0; i < args.length && i < macro.numArgs; i++) {
-      const argContent = this.renderNodes(args[i]);
-      expansion = expansion.replace(new RegExp(`#${i + 1}`, 'g'), argContent);
+  private expandMacro(macro: MacroDefinition, node: CommandNode): string {
+    if (this.macroDepth >= MAX_MACRO_DEPTH) {
+      return this.renderUnknownCommand(node);
     }
+    const optional = macro.defaultArgs.length > 0;
+    const required = optional ? macro.numArgs - 1 : macro.numArgs;
+    const params = [
+      ...(optional ? [node.options[0] ?? macro.defaultArgs[0]] : []),
+      ...node.args.slice(0, required).map((arg) => this.argSource(arg)),
+    ];
+    const expansion = macro.expansion.replace(/#([1-9])/g, (match, digit: string) => {
+      const index = Number(digit) - 1;
+      return index < macro.numArgs ? (params[index] ?? '') : match;
+    });
 
-    // 处理默认参数
-    for (let i = args.length; i < macro.numArgs; i++) {
-      const defaultArg = macro.defaultArgs[i - args.length] || '';
-      expansion = expansion.replace(new RegExp(`#${i + 1}`, 'g'), defaultArg);
+    this.macroDepth++;
+    try {
+      const rest = node.args.slice(required).map((arg) => this.renderNodes(arg)).join('');
+      return this.processInlineContent(expansion) + rest;
+    } finally {
+      this.macroDepth--;
     }
-
-    return expansion;
   }
 
   /**

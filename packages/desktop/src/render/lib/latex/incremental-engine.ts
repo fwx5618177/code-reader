@@ -18,7 +18,6 @@ import type {
   LatexNode,
   PreambleNode,
   SectionNode,
-  TextNode,
   ErrorNode,
   AnyLatexNode,
   LatexParserOptions,
@@ -33,6 +32,7 @@ import type {
 import { LatexParser } from './parser';
 import { LatexRenderer } from './renderer';
 import { findBodyRange, scanBlock, countNewlines, type BodyRange } from './block-segmenter';
+import { latexToPlainText } from './text-symbols';
 
 // ================================
 // 类型定义
@@ -233,16 +233,9 @@ export function markDirtyBlocks(
   return dirty;
 }
 
+/** 章节标题的纯文本（重音、符号命令转为字符，格式命令只留参数） */
 function extractText(nodes: readonly LatexNode[]): string {
-  let text = '';
-  for (const node of nodes) {
-    if (node.type === 'text') {
-      text += (node as TextNode).content;
-    } else if (node.children) {
-      text += extractText(node.children);
-    }
-  }
-  return text.trim();
+  return latexToPlainText(nodes.map((node) => node.raw).join(''));
 }
 
 /**

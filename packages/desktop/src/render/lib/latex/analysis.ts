@@ -15,6 +15,7 @@ import {
   type SectionASTNode,
 } from '@code-reader/syntax-parser';
 import { parseLaTeX, type CrossReferenceEntry, type CrossReferenceIndex } from '@code-reader/format-parser';
+import { latexToPlainText } from './text-symbols';
 
 export type LatexDiagnosticSeverity = 'error' | 'warning' | 'info';
 
@@ -235,11 +236,5 @@ function computeFolds(
 
 /** 标题原文 → 纯文本：去掉 \thanks 脚注、命令名与花括号，保留公式 */
 function plainTitle(raw: string): string {
-  return raw
-    .replace(/\\thanks\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '')
-    .replace(/\\(?:and|\\)/g, ' ')
-    .replace(/\\[a-zA-Z]+\*?/g, '')
-    .replace(/[{}~]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return latexToPlainText(raw.replace(/\\and(?![a-zA-Z])/g, ' '));
 }
