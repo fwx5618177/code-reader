@@ -37,9 +37,13 @@ import {
   flushBeforeClose,
   flushBeforeQuit,
 } from './flush/window-flush';
+import { currentPlatform } from './platform';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/** 平台差异（窗口外观、应用图标、退出行为） */
+const platform = currentPlatform();
 
 // 自定义协议须在 app ready 之前注册权限
 registerOcrScheme();
@@ -128,10 +132,7 @@ function loadAppIcon(): Electron.NativeImage {
         const icon = nativeImage.createFromPath(iconPath);
         if (!icon.isEmpty()) {
           console.log(`[Main] Successfully loaded app icon from: ${iconPath}`);
-          // On macOS, also set the dock icon
-          if (process.platform === 'darwin') {
-            app.dock?.setIcon(icon);
-          }
+          platform.applyAppIcon(icon);
           return icon;
         } else {
           console.log(`[Main] Icon file exists but created empty image: ${iconPath}`);
@@ -144,11 +145,7 @@ function loadAppIcon(): Electron.NativeImage {
 
   console.log('[Main] Using fallback programmatic icon');
   const fallbackIcon = createFallbackIcon();
-
-  // On macOS, also set the dock icon for fallback
-  if (process.platform === 'darwin') {
-    app.dock?.setIcon(fallbackIcon);
-  }
+  platform.applyAppIcon(fallbackIcon);
 
   return fallbackIcon;
 }
@@ -164,21 +161,8 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     icon: appIcon,
-    // 无边框窗口，使用自定义标题栏
-    frame: false,
-    titleBarStyle: 'hidden',
-    // macOS 特定设置
-    trafficLightPosition: { x: 12, y: 12 },
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    // Windows 特定设置
-    ...(process.platform === 'win32' && {
-      titleBarOverlay: {
-        color: '#1e1e1e',
-        symbolColor: '#e0e0e0',
-        height: 38,
-      },
-    }),
+    // 无边框窗口，使用自定义标题栏（交通灯 / 窗口按钮由平台适配提供）
+    ...platform.windowChrome(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -263,18 +247,7 @@ function createChildWindow(mode: string): BrowserWindow {
     minWidth: 600,
     minHeight: 400,
     icon: appIcon,
-    frame: false,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 12, y: 12 },
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'win32' && {
-      titleBarOverlay: {
-        color: '#1e1e1e',
-        symbolColor: '#e0e0e0',
-        height: 38,
-      },
-    }),
+    ...platform.windowChrome(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -584,7 +557,7 @@ app.whenReady().then(async () => {
 
 // 所有窗口关闭时退出应用
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (platform.quitWhenAllWindowsClosed) {
     app.quit();
   }
 });
