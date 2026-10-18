@@ -1,11 +1,11 @@
 // ================================
 // LaTeX 文档分析客户端：编辑器与侧栏大纲共用
 //
-// - 在 Worker 中分析（80 万字符约 150ms，不阻塞输入）；Worker 不可用时回退为主线程同步分析
+// - 在 Worker 中分析（按块缓存：80 万字符文档改动一段约 10ms，整篇重新分析约 120ms）；Worker 不可用时回退为主线程同步分析
 // - 缓存最近一次结果，并合并同一内容的并发请求：编辑器诊断与侧栏大纲对同一份内容只解析一次
 // ================================
 
-import { analyzeLatex, type LatexAnalysis } from './analysis';
+import { LatexAnalyzer, type LatexAnalysis } from './analysis';
 
 export interface AnalysisWorkerRequest {
   id: number;
@@ -25,6 +25,8 @@ const pending = new Map<number, { resolve: (result: LatexAnalysis) => void; reje
 
 let latest: { source: string; result: LatexAnalysis } | null = null;
 let inflight: { source: string; promise: Promise<LatexAnalysis> } | null = null;
+/** 主线程回退路径的分析器（同样按块缓存） */
+let fallbackAnalyzer: LatexAnalyzer | null = null;
 
 /**
  * 分析 LaTeX 源码；同一内容的重复请求复用缓存或在途请求
@@ -34,7 +36,7 @@ export function requestLatexAnalysis(source: string): Promise<LatexAnalysis> {
   if (inflight?.source === source) return inflight.promise;
 
   const promise = analyzeInWorker(source)
-    .catch(() => analyzeLatex(source))
+    .catch(() => (fallbackAnalyzer ??= new LatexAnalyzer()).analyze(source))
     .then((result) => {
       latest = { source, result };
       return result;
