@@ -12,7 +12,7 @@
 // - WritingIntegration: 搜索索引、差分缓存、性能监控
 // ================================
 
-import { useReducer, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useReducer, useCallback, useMemo, useRef, useEffect, useState } from 'react';
 import { documentReducer } from './reducer';
 import { documentService } from './service';
 import { initialDocumentState } from './state';
@@ -107,20 +107,58 @@ export interface UseDocumentsReturn {
 // 辅助函数
 // ================================
 
-function calculateWordCount(content: string): number {
-  if (!content) return 0;
-  const text = stripMarkup(content);
-  const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-  const englishWords = text
-    .replace(/[\u4e00-\u9fa5]/g, ' ')
-    .split(/\s+/)
-    .filter((word) => word.length > 0).length;
-  return chineseChars + englishWords;
+export interface DocumentStats {
+  wordCount: number;
+  charCount: number;
 }
 
-function calculateCharCount(content: string): number {
-  if (!content) return 0;
-  return stripMarkup(content).replace(/\s/g, '').length;
+/** 字数（中文按字、其他按空白分隔的词）与字符数（不含空白），去掉 Markdown 标记后统计 */
+export function calculateStats(content: string): DocumentStats {
+  if (!content) return { wordCount: 0, charCount: 0 };
+  const text = stripMarkup(content);
+  let chinese = 0;
+  let words = 0;
+  let chars = 0;
+  let inWord = false;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    const space = code === 32 || (code >= 9 && code <= 13) || code === 0xa0 || code === 0x3000 || code === 0xfeff ||
+      (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x1680;
+    if (space) {
+      inWord = false;
+      continue;
+    }
+    chars++;
+    if (code >= 0x4e00 && code <= 0x9fa5) {
+      chinese++;
+      inWord = false;
+    } else if (!inWord) {
+      words++;
+      inWord = true;
+    }
+  }
+  return { wordCount: chinese + words, charCount: chars };
+}
+
+/** 超过这个长度的文档，字数统计在停止输入后再计算，不占用按键响应时间 */
+const DEFERRED_STATS_LENGTH = 50_000;
+const STATS_DELAY_MS = 400;
+
+/**
+ * 文档统计：小文档随内容同步计算；大文档在内容停止变化 STATS_DELAY_MS 后计算
+ */
+function useDocumentStats(content: string): DocumentStats {
+  const deferred = content.length > DEFERRED_STATS_LENGTH;
+  const immediate = useMemo(() => (deferred ? null : calculateStats(content)), [deferred, content]);
+  const [delayed, setDelayed] = useState<DocumentStats | null>(null);
+
+  useEffect(() => {
+    if (!deferred) return;
+    const timer = setTimeout(() => setDelayed(calculateStats(content)), STATS_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [deferred, content]);
+
+  return immediate ?? delayed ?? { wordCount: 0, charCount: 0 };
 }
 
 // ================================
@@ -639,8 +677,7 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
 
   const title = editor.isReady ? editor.title : (state.editor.document?.title ?? '');
   const content = editor.isReady ? editor.content : (state.editor.document?.content ?? '');
-  const wordCount = useMemo(() => calculateWordCount(content), [content]);
-  const charCount = useMemo(() => calculateCharCount(content), [content]);
+  const { wordCount, charCount } = useDocumentStats(content);
   const loadedDocument = state.editor.document;
   const currentDocument = useMemo(
     () =>

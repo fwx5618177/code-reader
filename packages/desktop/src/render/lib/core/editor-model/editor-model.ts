@@ -61,16 +61,70 @@ import { hashContent } from '../delta';
  * model.markAsSaved(snapshot.versionId, snapshot.contentHash);
  * ```
  */
+/**
+ * 某一版本内容的哈希：首次读取时计算并缓存。
+ * 大文档每次按键都整篇哈希代价高（80 万字符约 9ms），而哈希只在保存快照与比较时才需要
+ */
+class LazyContentHash {
+  private value: string | null;
+
+  constructor(
+    readonly title: string,
+    readonly content: string,
+    known?: string
+  ) {
+    this.value = known ?? null;
+  }
+
+  get(): string {
+    return (this.value ??= hashContent(`${this.title}\n---\n${this.content}`));
+  }
+
+  /** 已知该版本的哈希（如保存结果带回的哈希）时直接记下，免去计算 */
+  prime(hash: string): void {
+    this.value ??= hash;
+  }
+}
+
+/** 保存进行中时最多记住多少个快照版本（用于保存完成后免哈希判断有无未保存的修改） */
+const MAX_PENDING_SNAPSHOTS = 8;
+
+/** 内容变更事件：哈希字段按需计算 */
+function changeEvent(
+  previousVersionId: number,
+  newVersionId: number,
+  previous: LazyContentHash,
+  next: LazyContentHash,
+  changeType: ContentChangeEvent['changeType']
+): ContentChangeEvent {
+  return {
+    previousVersionId,
+    newVersionId,
+    get previousContentHash() {
+      return previous.get();
+    },
+    get newContentHash() {
+      return next.get();
+    },
+    changeType,
+    timestamp: Date.now(),
+  };
+}
+
 export class EditorModel implements IEditorModel {
   private documentId: string | null;
   private title: string;
   private content: string;
-  private contentHash: string;
+  private hash: LazyContentHash;
   private readonly versionTracker: VersionTracker;
   private lastSavedVersionId: number | null;
   private lastSavedContentHash: string | null;
+  /** 最近一次保存的版本内容（已知时），用于不计算哈希就判断有无未保存的修改 */
+  private lastSaved: LazyContentHash | null;
+  /** 已取快照、尚未确认保存的版本 */
+  private readonly pendingSnapshots = new Map<number, LazyContentHash>();
   private parentVersionId: number | null;
-  private parentContentHash: string | null;
+  private parentHash: LazyContentHash | null;
   private readonly listeners: Set<ContentChangeListener>;
   private destroyed: boolean;
 
@@ -79,9 +133,7 @@ export class EditorModel implements IEditorModel {
     this.title = config.initialTitle ?? '';
     this.content = config.initialContent ?? '';
 
-    // 计算初始内容哈希
-    const combinedContent = `${this.title}\n---\n${this.content}`;
-    this.contentHash = config.initialContentHash ?? hashContent(combinedContent);
+    this.hash = new LazyContentHash(this.title, this.content, config.initialContentHash);
 
     this.versionTracker = new VersionTracker({
       initialVersionId: config.initialVersionId ?? 1,
@@ -89,8 +141,9 @@ export class EditorModel implements IEditorModel {
 
     this.lastSavedVersionId = null;
     this.lastSavedContentHash = null;
+    this.lastSaved = null;
     this.parentVersionId = null;
-    this.parentContentHash = null;
+    this.parentHash = null;
     this.listeners = new Set();
     this.destroyed = false;
   }
@@ -116,7 +169,7 @@ export class EditorModel implements IEditorModel {
       this.title,
       this.content,
       this.versionTracker.getVersionId(),
-      this.contentHash
+      this.hash.get()
     );
   }
 
@@ -125,14 +178,20 @@ export class EditorModel implements IEditorModel {
       return null;
     }
 
+    const versionId = this.versionTracker.getVersionId();
+    this.pendingSnapshots.set(versionId, this.hash);
+    if (this.pendingSnapshots.size > MAX_PENDING_SNAPSHOTS) {
+      this.pendingSnapshots.delete(this.pendingSnapshots.keys().next().value!);
+    }
+
     return createContentSnapshot(
       this.documentId,
       this.title,
       this.content,
-      this.versionTracker.getVersionId(),
-      this.contentHash,
+      versionId,
+      this.hash.get(),
       this.parentVersionId ?? undefined,
-      this.parentContentHash ?? undefined
+      this.parentHash?.get()
     );
   }
 
@@ -141,7 +200,7 @@ export class EditorModel implements IEditorModel {
   }
 
   getContentHash(): string {
-    return this.contentHash;
+    return this.hash.get();
   }
 
   getTitle(): string {
@@ -168,29 +227,11 @@ export class EditorModel implements IEditorModel {
     }
 
     const previousVersionId = this.versionTracker.getVersionId();
-    const previousContentHash = this.contentHash;
-
     // 更新内容
     this.content = content;
 
-    // 计算新的内容哈希
-    const combinedContent = `${this.title}\n---\n${this.content}`;
-    const newContentHash = hashContent(combinedContent);
-
-    // 更新版本信息
-    this.parentVersionId = previousVersionId;
-    this.parentContentHash = previousContentHash;
-    this.contentHash = newContentHash;
-    const newVersionId = this.versionTracker.increment();
-
-    this.notifyListeners({
-      previousVersionId,
-      newVersionId,
-      previousContentHash,
-      newContentHash,
-      changeType: 'content',
-      timestamp: Date.now(),
-    });
+    const newVersionId = this.advanceVersion(previousVersionId);
+    this.notifyListeners(changeEvent(previousVersionId, newVersionId, this.parentHash!, this.hash, 'content'));
 
     return newVersionId;
   }
@@ -207,29 +248,11 @@ export class EditorModel implements IEditorModel {
     }
 
     const previousVersionId = this.versionTracker.getVersionId();
-    const previousContentHash = this.contentHash;
-
     // 更新标题
     this.title = title;
 
-    // 计算新的内容哈希
-    const combinedContent = `${this.title}\n---\n${this.content}`;
-    const newContentHash = hashContent(combinedContent);
-
-    // 更新版本信息
-    this.parentVersionId = previousVersionId;
-    this.parentContentHash = previousContentHash;
-    this.contentHash = newContentHash;
-    const newVersionId = this.versionTracker.increment();
-
-    this.notifyListeners({
-      previousVersionId,
-      newVersionId,
-      previousContentHash,
-      newContentHash,
-      changeType: 'title',
-      timestamp: Date.now(),
-    });
+    const newVersionId = this.advanceVersion(previousVersionId);
+    this.notifyListeners(changeEvent(previousVersionId, newVersionId, this.parentHash!, this.hash, 'title'));
 
     return newVersionId;
   }
@@ -249,35 +272,25 @@ export class EditorModel implements IEditorModel {
     }
 
     const previousVersionId = this.versionTracker.getVersionId();
-    const previousContentHash = this.contentHash;
 
     // 更新内容
     this.title = title;
     this.content = content;
 
-    // 计算新的内容哈希
-    const combinedContent = `${this.title}\n---\n${this.content}`;
-    const newContentHash = hashContent(combinedContent);
-
-    // 更新版本信息
-    this.parentVersionId = previousVersionId;
-    this.parentContentHash = previousContentHash;
-    this.contentHash = newContentHash;
-    const newVersionId = this.versionTracker.increment();
-
+    const newVersionId = this.advanceVersion(previousVersionId);
     const changeType: 'title' | 'content' | 'both' =
       titleChanged && contentChanged ? 'both' : titleChanged ? 'title' : 'content';
-
-    this.notifyListeners({
-      previousVersionId,
-      newVersionId,
-      previousContentHash,
-      newContentHash,
-      changeType,
-      timestamp: Date.now(),
-    });
+    this.notifyListeners(changeEvent(previousVersionId, newVersionId, this.parentHash!, this.hash, changeType));
 
     return newVersionId;
+  }
+
+  /** 内容已更新：当前哈希变为父版本，新版本的哈希留待需要时计算 */
+  private advanceVersion(previousVersionId: number): number {
+    this.parentVersionId = previousVersionId;
+    this.parentHash = this.hash;
+    this.hash = new LazyContentHash(this.title, this.content);
+    return this.versionTracker.increment();
   }
 
   // ================================
@@ -291,38 +304,34 @@ export class EditorModel implements IEditorModel {
     }
 
     const previousVersionId = this.versionTracker.getVersionId();
-    const previousContentHash = this.contentHash;
+    const previous = this.hash;
 
     this.documentId = config.documentId ?? null;
     this.title = config.initialTitle ?? '';
     this.content = config.initialContent ?? '';
-
-    // 计算新的内容哈希
-    const combinedContent = `${this.title}\n---\n${this.content}`;
-    this.contentHash = config.initialContentHash ?? hashContent(combinedContent);
+    this.hash = new LazyContentHash(this.title, this.content, config.initialContentHash);
 
     this.versionTracker.reset(config.initialVersionId ?? 1);
     this.lastSavedVersionId = null;
     this.lastSavedContentHash = null;
+    this.lastSaved = null;
+    this.pendingSnapshots.clear();
     this.parentVersionId = null;
-    this.parentContentHash = null;
+    this.parentHash = null;
 
-    const newVersionId = this.versionTracker.getVersionId();
-
-    this.notifyListeners({
-      previousVersionId,
-      newVersionId,
-      previousContentHash,
-      newContentHash: this.contentHash,
-      changeType: 'both',
-      timestamp: Date.now(),
-    });
+    this.notifyListeners(changeEvent(previousVersionId, this.versionTracker.getVersionId(), previous, this.hash, 'both'));
   }
 
+  /**
+   * 标题与正文都没有可见内容（正文中的旧版 HTML 标签不算）。
+   * 每次内容变化都会调用：找到第一个非空白字符且不是标签开头就返回，不扫描整篇
+   */
   isEmpty(): boolean {
-    const trimmedTitle = this.title.trim();
-    const trimmedContent = this.content.replace(/<[^>]*>/g, '').trim();
-    return trimmedTitle.length === 0 && trimmedContent.length === 0;
+    if (this.title.trim().length > 0) return false;
+    const first = this.content.search(/\S/);
+    if (first === -1) return true;
+    if (this.content[first] !== '<') return false;
+    return this.content.replace(/<[^>]*>/g, '').trim().length === 0;
   }
 
   // ================================
@@ -354,18 +363,30 @@ export class EditorModel implements IEditorModel {
     if (this.lastSavedVersionId === null || versionId > this.lastSavedVersionId) {
       this.lastSavedVersionId = versionId;
       this.lastSavedContentHash = contentHash;
+      const saved =
+        versionId === this.versionTracker.getVersionId()
+          ? this.hash
+          : (this.pendingSnapshots.get(versionId) ?? (versionId === this.parentVersionId ? this.parentHash : null));
+      saved?.prime(contentHash);
+      this.lastSaved = saved;
+    }
+    for (const pending of this.pendingSnapshots.keys()) {
+      if (pending <= versionId) this.pendingSnapshots.delete(pending);
     }
   }
 
+  /**
+   * 是否有未保存的修改（按内容判断，比版本号准确：改了又改回来算没有修改）。
+   * 已知保存时的内容就直接比较字符串，不计算哈希
+   */
   hasUnsavedChanges(): boolean {
-    // 使用内容哈希进行精确检测
     if (this.lastSavedContentHash === null) {
       // 从未保存过 - 如果非空则有更改
       return !this.isEmpty();
     }
-
-    // 比较内容哈希（比版本号更准确）
-    return this.contentHash !== this.lastSavedContentHash;
+    const saved = this.lastSaved;
+    if (saved) return saved !== this.hash && (saved.title !== this.title || saved.content !== this.content);
+    return this.hash.get() !== this.lastSavedContentHash;
   }
 
   /**
@@ -373,20 +394,20 @@ export class EditorModel implements IEditorModel {
    * 如果有父版本信息，则可以计算增量
    */
   canUseIncrementalSave(): boolean {
-    return this.parentVersionId !== null && this.parentContentHash !== null;
+    return this.parentVersionId !== null && this.parentHash !== null;
   }
 
   /**
    * 获取父版本信息（用于增量保存）
    */
   getParentVersion(): { versionId: number; contentHash: string } | null {
-    if (this.parentVersionId === null || this.parentContentHash === null) {
+    if (this.parentVersionId === null || this.parentHash === null) {
       return null;
     }
 
     return {
       versionId: this.parentVersionId,
-      contentHash: this.parentContentHash,
+      contentHash: this.parentHash.get(),
     };
   }
 

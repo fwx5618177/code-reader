@@ -218,6 +218,8 @@ const SourceEditor = memo<SourceEditorProps>(
     const extensions = useMemo((): Extension[] => {
       const exts: Extension[] = [
         latex(),
+        // 自动换行：LaTeX 段落通常是一整行，不换行时在行尾输入会撑宽内容、触发横向滚动与整篇重新测量
+        EditorView.lineWrapping,
         history(),
         closeBrackets(),
         keymap.of([...defaultKeymap, ...historyKeymap, ...closeBracketsKeymap, indentWithTab]),
@@ -715,8 +717,14 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
       const view = sourceViewRef.current;
       if (view) {
         const anchor = Math.min(from, view.state.doc.length);
-        view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: 'start', yMargin: 24 }) });
+        const scrollToAnchor = () => EditorView.scrollIntoView(anchor, { y: 'start', yMargin: 24 });
+        view.dispatch({ selection: { anchor }, effects: scrollToAnchor() });
         view.focus();
+        // 自动换行时视口外各行的高度是估计值，滚动后测得实际高度会使目标偏移：测量完成后按实测位置再滚动一次
+        view.requestMeasure({
+          read: () => null,
+          write: () => requestAnimationFrame(() => view.dispatch({ effects: scrollToAnchor() })),
+        });
         return;
       }
       const scroller = previewRef.current?.getScrollContainer();

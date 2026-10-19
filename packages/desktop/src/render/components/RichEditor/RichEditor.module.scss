@@ -2172,6 +2172,9 @@ $page-rule-rows: repeating-linear-gradient(
   background-color: var(--bg-primary);
 }
 
+// 面板尺寸由容器决定：contain: strict 让一侧的布局与绘制不波及另一侧
+// （大文档分栏时，源码每次按键都会触发整个预览重新布局与绘制）
+
 // 单个面板（源码或预览）
 .latexEditorPane {
   flex: 1;
@@ -2179,6 +2182,7 @@ $page-rule-rows: repeating-linear-gradient(
   height: 100%;
   min-height: 0;
   overflow: auto;
+  contain: strict;
   @include scrollbar;
 }
 
@@ -2189,6 +2193,7 @@ $page-rule-rows: repeating-linear-gradient(
   height: 100%;
   overflow: auto;
   border-right: none;
+  contain: strict;
   @include scrollbar;
 }
 
@@ -2198,6 +2203,7 @@ $page-rule-rows: repeating-linear-gradient(
   min-width: 0;
   height: 100%;
   overflow: auto;
+  contain: strict;
   @include scrollbar;
 }
 
