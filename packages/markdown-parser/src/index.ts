@@ -13,6 +13,8 @@ export {
   BlockType,
 } from './commonmark';
 
+export { renderHtml, escapeHtml, normalizeUrl } from './commonmark/html-renderer';
+
 export type {
   ParseResult,
   ParseWarning,

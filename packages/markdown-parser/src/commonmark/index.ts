@@ -37,3 +37,5 @@ export type {
   // 配置类型
   CommonMarkOptions,
 } from './commonmark-parser';
+
+export { renderHtml, escapeHtml, normalizeUrl } from './html-renderer';

@@ -4,7 +4,7 @@
 // ================================
 
 import { describe, expect, it } from 'vitest';
-import { parseCommonMark, BlockType } from '../src';
+import { parseCommonMark, renderHtml, BlockType } from '../src';
 
 /** CommonMark 0.31.2 规范用例 81、82、93、138、145、215、278、347 */
 const FORMERLY_HANGING = [
@@ -34,5 +34,19 @@ describe('Markdown 解析健壮性', () => {
   it('信息串含反引号的“围栏”按段落文本处理', () => {
     const [paragraph] = parseCommonMark('``` aa ```\nfoo\n').document.children!;
     expect(paragraph?.type).toBe(BlockType.Paragraph);
+  });
+
+  it('随机输入 2 万次：不抛错，单次不超过 50ms', () => {
+    let seed = 1;
+    const random = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const pieces = ['*', '_', '[', ']', '(', ')', '`', '<', '>', '\n', ' ', '-', '#', '|', '!', '\\', '&amp;', 'a', '1.', '    ', '~', '"', "'", '\t', ':', '[^1]'];
+    let slowest = 0;
+    for (let i = 0; i < 20000; i++) {
+      const text = Array.from({ length: 1 + Math.floor(random() * 60) }, () => pieces[Math.floor(random() * pieces.length)]).join('');
+      const started = performance.now();
+      renderHtml(parseCommonMark(text, { smartPunctuation: true }).document);
+      slowest = Math.max(slowest, performance.now() - started);
+    }
+    expect(slowest).toBeLessThan(50);
   });
 });
