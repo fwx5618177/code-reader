@@ -6,7 +6,7 @@
 // - TreeFragment 缓存和重用
 // - AST 转换和缓存
 // - 与 CodeMirror 6 深度集成
-// - 手写 LaTeX 增量解析器
+// 手写 LaTeX 解析器在 @code-reader/syntax-parser
 // ================================
 
 // ================================
@@ -43,8 +43,8 @@ export { LezerIncrementalParser, createLezerParser, type LezerParserConfig } fro
 
 export type { NodeMapping, ParseState } from './lezer-parser';
 
-import { LezerIncrementalParser, createLezerParser } from './lezer-parser';
-import { ASTCache, createASTCache } from './ast-cache';
+import { LezerIncrementalParser } from './lezer-parser';
+import { ASTCache } from './ast-cache';
 
 // ================================
 // AST 缓存
@@ -58,59 +58,6 @@ export {
   estimateSize,
   hashString,
 } from './ast-cache';
-
-// ================================
-// LaTeX 解析器（手写实现）
-// ================================
-
-export {
-  // 节点类型
-  NodeType as LatexNodeType,
-  NodeNames as LatexNodeNames,
-  type NodeTypeValue as LatexNodeTypeValue,
-  type LatexASTNode,
-  type CommandASTNode,
-  type EnvironmentASTNode,
-  type MathASTNode,
-  type SectionASTNode,
-  type ItemASTNode,
-  type TableCellASTNode,
-  type CommentASTNode as LatexCommentASTNode,
-  type ErrorASTNode as LatexErrorASTNode,
-  // 配置类型
-  type LatexLezerConfig,
-  DEFAULT_LATEX_LEZER_CONFIG,
-  // 解析结果类型
-  type LatexParseError,
-  type LatexLezerParseResult,
-  type LatexLezerIncrementalResult,
-  // 常量
-  SECTION_COMMANDS,
-  LIST_ENVIRONMENTS,
-  MATH_ENVIRONMENTS,
-  TABLE_ENVIRONMENTS,
-  FLOAT_ENVIRONMENTS,
-  VERBATIM_ENVIRONMENTS,
-  SPECIAL_CHARS,
-  COMMAND_ARG_COUNTS,
-  // Tokenizer
-  TokenType as LatexTokenType,
-  type TokenTypeValue as LatexTokenTypeValue,
-  type Token as LatexToken,
-  type TokenizerState as LatexTokenizerState,
-  LatexTokenizer,
-  createLatexTokenizer,
-  tokenizeLatex,
-  // Parser
-  LatexLezerParser,
-  createLatexLezerParser,
-  parseLatexDocument,
-  // 便捷函数
-  getLatexLezerParser,
-  destroyLatexLezerParser,
-  parseLatex,
-  parseLatexIncremental,
-} from './latex';
 
 // ================================
 // 便捷工厂函数
@@ -134,23 +81,3 @@ export function createCachedLezerParser<T extends ASTNode = ASTNode>(
 
   return { parser, cache };
 }
-
-// ================================
-// 重新导入用于默认导出
-// ================================
-
-import { LatexLezerParser, getLatexLezerParser } from './latex';
-
-// ================================
-// 默认导出
-// ================================
-
-export default {
-  LezerIncrementalParser,
-  ASTCache,
-  createLezerParser,
-  createASTCache,
-  createCachedLezerParser,
-  LatexLezerParser,
-  getLatexLezerParser,
-};

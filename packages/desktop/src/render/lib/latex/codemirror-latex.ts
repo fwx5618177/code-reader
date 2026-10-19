@@ -9,22 +9,36 @@
 // 4. 与主题系统集成
 // ================================
 
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { tags as t } from '@lezer/highlight';
 import {
+  HighlightStyle,
   StreamLanguage,
+  indentOnInput,
+  indentService,
+  syntaxHighlighting,
+  type IndentContext,
   type StringStream,
   type StreamParser,
 } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
 import { LATEX_LANGUAGE_CONFIGURATION } from '@code-reader/syntax-parser';
+
+const { indentationRules } = LATEX_LANGUAGE_CONFIGURATION;
+/** 使下一行缩进一级的标记（\begin{…}，document 除外） */
+const INDENT_INCREASE = new RegExp(indentationRules?.increaseIndentPattern ?? '(?!)', 'g');
+/** 使本行回退一级的标记（\end{…}，document 除外） */
+const INDENT_DECREASE = new RegExp(indentationRules?.decreaseIndentPattern ?? '(?!)', 'g');
+/** 行首是回退标记 */
+const DECREASE_AT_LINE_START = new RegExp(`^\\s*(?:${INDENT_DECREASE.source})`);
 
 /**
  * 编辑行为来自 syntax-parser 的 LaTeX 语言配置：
  * - 行注释 % （⌘/ / Ctrl+/ 切换注释）
  * - 自动配对 { [ ( $；LaTeX 的引号是 ``…'' ，不配对 ' 与 "。
  *   \( \[ 等多字符配对 CodeMirror 不支持，由补全片段提供
+ * - 缩进规则：输入完 \end{…} 时按 indentOnInput 重新缩进本行
  */
 const LATEX_LANGUAGE_DATA = {
+  indentOnInput: new RegExp(`${DECREASE_AT_LINE_START.source}\\s*$`),
   commentTokens: { line: LATEX_LANGUAGE_CONFIGURATION.lineComment },
   closeBrackets: {
     brackets: (LATEX_LANGUAGE_CONFIGURATION.autoClosingPairs ?? [])
@@ -423,7 +437,43 @@ const latexHighlightStyle = HighlightStyle.define([
   { tag: t.escape, color: 'var(--code-regex, #d16969)' },
 ]);
 
-/** 获取 LaTeX 语法高亮扩展 */
+/** 去掉行内 % 注释（\% 是转义的百分号，不是注释） */
+function stripLineComment(text: string): string {
+  const match = /(^|[^\\])%/.exec(text);
+  return match ? text.slice(0, match.index + match[1].length) : text;
+}
+
+/** 一行中缩进标记的净增量：\begin 数减 \end 数 */
+function indentBalance(text: string): number {
+  const code = stripLineComment(text);
+  return (code.match(INDENT_INCREASE)?.length ?? 0) - (code.match(INDENT_DECREASE)?.length ?? 0);
+}
+
+/**
+ * 环境缩进（规则取自语言配置的 indentationRules）：
+ * 以上一个非空行的缩进为基准，该行打开了环境则加一级；本行以 \end{…} 开头则减一级。
+ * 用 IndentContext.lineAt 读取行，回车时模拟断行的位置也能正确计算
+ */
+export function latexIndentation(context: IndentContext, pos: number): number {
+  const current = context.lineAt(pos, 1);
+  let previous = current.from > 0 ? context.lineAt(current.from - 1, -1) : null;
+  while (previous && !previous.text.trim() && previous.from > 0) {
+    previous = context.lineAt(previous.from - 1, -1);
+  }
+  if (!previous || !previous.text.trim()) return 0;
+
+  let indent = context.lineIndent(previous.from, -1);
+  if (indentBalance(previous.text) > 0) indent += context.unit;
+  if (DECREASE_AT_LINE_START.test(current.text)) indent -= context.unit;
+  return Math.max(0, indent);
+}
+
+/** 获取 LaTeX 语言扩展：语法高亮、环境缩进 */
 export function latex() {
-  return [latexLanguage, syntaxHighlighting(latexHighlightStyle)];
+  return [
+    latexLanguage,
+    syntaxHighlighting(latexHighlightStyle),
+    indentService.of(latexIndentation),
+    indentOnInput(),
+  ];
 }

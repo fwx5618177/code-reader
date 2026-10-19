@@ -4,7 +4,7 @@
 
 import { createLatexBlockScanner } from '../src/block-scanner';
 
-import { createLatexLezerParser } from '../src/lezer';
+import { createLatexLezerParser } from '@code-reader/syntax-parser';
 
 // ================================
 // 测试数据生成

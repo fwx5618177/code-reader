@@ -67,7 +67,7 @@ export {
 // LaTeX 语言定义
 // ================================
 
-export { LATEX_CONTRIBUTION, LATEX_HIGHLIGHT_RULES, LATEX_LANGUAGE_CONFIGURATION } from './latex';
+export { LATEX_CONTRIBUTION, LATEX_HIGHLIGHT_RULES } from './latex';
 
 // ================================
 // 便捷函数：初始化内置语言
@@ -82,7 +82,7 @@ import { LATEX_CONTRIBUTION } from './latex';
  * 调用此函数会将内置语言（如 LaTeX）注册到全局 LanguageRegistry
  *
  * ```typescript
- * import { initBuiltinLanguages, getLanguageRegistry } from '@code-reader/syntax-parser';
+ * import { initBuiltinLanguages, getLanguageRegistry } from '@code-reader/syntax-parser-extras';
  *
  * initBuiltinLanguages();
  *

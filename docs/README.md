@@ -35,7 +35,8 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `desktop` | Electron + React + Vite 桌面应用，主进程（多知识库、SQLite、AI、Agent、OCR 资源、插件目录、托盘）与渲染进程（UI、编辑器、LaTeX 渲染、插件运行时） |
 | `diff-algorithm` | 文本/二进制差分、编辑距离、模糊匹配、Histogram 行差分，含差分缓存与 Worker 支持 |
 | `diff-algorithm-extras` | desktop 未使用的差分算法：rsync / 滚动哈希、Patience、LCS、VCDIFF / BSDiff、CRDT 接口、流式哈希与差分、独立的 diff-match-patch Worker（与核心库解耦，按需引入） |
-| `syntax-parser` | 增量语法解析：手写 Lezer 风格 LaTeX 解析器、LaTeX 块扫描器、语言注册表与高亮引擎、AST 缓存（desktop 用其 LaTeX 解析器做语法诊断、折叠与大纲） |
+| `syntax-parser` | 零依赖的手写 LaTeX 解析器与 LaTeX 语言配置（desktop 用于语法诊断、折叠、大纲，以及源码编辑器的注释、自动配对与环境缩进） |
+| `syntax-parser-extras` | desktop 未使用的语言注册表与高亮引擎、Lezer 增量解析封装、AST 缓存、正则 LaTeX 块扫描器（按需引入） |
 | `format-parser` | LaTeX 解析（交叉引用索引、文档元数据）与按内容识别格式（desktop 用其做交叉引用检查与无扩展名文档的格式判断） |
 | `markdown-parser` | 零依赖的 CommonMark / GFM 解析器与增量解析（由 format-parser 拆出，desktop 暂不接入，目标是替代 markdown-it） |
 | `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）、编辑器适配器（CodeMirror / ProseMirror） |

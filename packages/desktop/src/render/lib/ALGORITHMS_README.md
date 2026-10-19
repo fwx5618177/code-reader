@@ -29,4 +29,4 @@
 | 版本分层保留 | `main/database/version-retention.ts` | 版本清理 | 按时间段分层：近期全留，之后每个自然日 / 周 / 月各留一个，最新版本始终保留 |
 | 行级差分重建 | `lib/writing/components/diff-lines.ts` | 版本对比视图 | 把字符级差分重建为“旧行 + 新行”，行内只高亮变化部分 |
 
-Markdown 解析与序列化由 `lib/markdown`（markdown-it + ProseMirror）负责；LaTeX 解析器在 `lib/latex/parser.ts`。子包 `packages/format-parser`、`packages/syntax-parser`、`packages/plugin-system` 目前不被 desktop 引用。数学公式使用自研解析与渲染（`lib/math`），不依赖 KaTeX / MathJax。
+Markdown 解析与序列化由 `lib/markdown`（markdown-it + ProseMirror）负责；LaTeX 解析器在 `lib/latex/parser.ts`。子包的接入位置：`syntax-parser`（LaTeX 语法诊断、折叠、大纲；源码编辑器的注释、自动配对、环境缩进）、`format-parser`（LaTeX 交叉引用、按内容识别文档格式）、`plugin-system`（插件贡献点类型、生命周期、扩展点注册表），完整对照见 `docs/ARCHITECTURE.md` 第 1 节。数学公式使用自研解析与渲染（`lib/math`），不依赖 KaTeX / MathJax。

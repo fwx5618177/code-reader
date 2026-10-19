@@ -1,11 +1,12 @@
 // ================================
 // LaTeX 语言定义
 //
-// 职责：定义 LaTeX 的高亮规则、语言配置、语言贡献
+// 职责：定义 LaTeX 的高亮规则与语言贡献；语言配置（注释、括号、自动配对）在 @code-reader/syntax-parser
 // 使用 BlockScannerAdapter 适配器进行块级结构扫描
 // ================================
 
-import type { LanguageContribution, HighlightRule, LanguageConfiguration } from './types';
+import { LATEX_LANGUAGE_CONFIGURATION } from '@code-reader/syntax-parser';
+import type { LanguageContribution, HighlightRule } from './types';
 import type { ParserConfig } from '../types';
 import { BlockScannerAdapter } from './block-scanner-adapter';
 
@@ -66,36 +67,6 @@ export const LATEX_HIGHLIGHT_RULES: HighlightRule[] = [
 ];
 
 // ================================
-// LaTeX 语言配置
-// ================================
-
-export const LATEX_LANGUAGE_CONFIGURATION: LanguageConfiguration = {
-  lineComment: '%',
-  brackets: [
-    ['{', '}'],
-    ['[', ']'],
-    ['(', ')'],
-  ],
-  autoClosingPairs: [
-    { open: '{', close: '}' },
-    { open: '[', close: ']' },
-    { open: '(', close: ')' },
-    { open: '$', close: '$', notIn: ['string', 'comment'] },
-    { open: '\\(', close: '\\)' },
-    { open: '\\[', close: '\\]' },
-  ],
-  indentationRules: {
-    increaseIndentPattern: '\\\\begin\\{[^}]*\\}',
-    decreaseIndentPattern: '\\\\end\\{[^}]*\\}',
-  },
-  foldingMarkers: {
-    start: '\\\\begin\\{',
-    end: '\\\\end\\{',
-  },
-  wordPattern: '\\\\?[a-zA-Z@]+',
-};
-
-// ================================
 // LaTeX 语言贡献
 // ================================
 
@@ -105,7 +76,7 @@ export const LATEX_LANGUAGE_CONFIGURATION: LanguageConfiguration = {
  * 使用 BlockScannerAdapter 进行块级结构扫描，无需外部依赖
  *
  * ```typescript
- * import { getLanguageRegistry, LATEX_CONTRIBUTION } from '@code-reader/syntax-parser';
+ * import { getLanguageRegistry, LATEX_CONTRIBUTION } from '@code-reader/syntax-parser-extras';
  *
  * const registry = getLanguageRegistry();
  * registry.register(LATEX_CONTRIBUTION);

@@ -94,7 +94,7 @@ export interface LezerLanguageContributionOptions {
  * 这是通过 Lezer 解析器接入新语言的最简方式：
  *
  * ```typescript
- * import { createLezerLanguageContribution, registerLanguage } from '@code-reader/syntax-parser';
+ * import { createLezerLanguageContribution, registerLanguage } from '@code-reader/syntax-parser-extras';
  * import { parser as jsParser } from 'some-lezer-grammar';
  *
  * const jsContribution = createLezerLanguageContribution({

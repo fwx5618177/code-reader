@@ -13,6 +13,9 @@ import type {
   TextChangeSet,
   ASTRoot,
 } from '../types';
+import type { LanguageConfiguration } from '@code-reader/syntax-parser';
+
+export type { LanguageConfiguration, AutoClosingPair, IndentationRules, FoldingMarkers } from '@code-reader/syntax-parser';
 
 // ================================
 // 语言元信息
@@ -255,55 +258,6 @@ export interface LanguageContribution {
  * 解析器工厂
  */
 export type LanguageParserFactory = (config?: ParserConfig) => ILanguageParser;
-
-/**
- * 语言配置（括号匹配、注释格式等）
- *
- * 类似 VSCode 的 language-configuration.json
- */
-export interface LanguageConfiguration {
-  /** 行注释标记 */
-  readonly lineComment?: string;
-  /** 块注释标记 */
-  readonly blockComment?: readonly [string, string];
-  /** 括号对 */
-  readonly brackets?: readonly (readonly [string, string])[];
-  /** 自动闭合对 */
-  readonly autoClosingPairs?: readonly AutoClosingPair[];
-  /** 缩进规则 */
-  readonly indentationRules?: IndentationRules;
-  /** 折叠区域标记 */
-  readonly foldingMarkers?: FoldingMarkers;
-  /** 单词定义正则 */
-  readonly wordPattern?: string;
-}
-
-/**
- * 自动闭合对
- */
-export interface AutoClosingPair {
-  readonly open: string;
-  readonly close: string;
-  readonly notIn?: readonly string[];
-}
-
-/**
- * 缩进规则
- */
-export interface IndentationRules {
-  readonly increaseIndentPattern?: string;
-  readonly decreaseIndentPattern?: string;
-  readonly indentNextLinePattern?: string;
-  readonly unIndentedLinePattern?: string;
-}
-
-/**
- * 折叠区域标记
- */
-export interface FoldingMarkers {
-  readonly start: string;
-  readonly end: string;
-}
 
 // ================================
 // 注册表事件

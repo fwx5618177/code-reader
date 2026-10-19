@@ -9,7 +9,7 @@ import {
   LatexTokenizer,
   createLatexTokenizer,
   tokenizeLatex,
-} from '../src/lezer';
+} from '../src';
 
 describe('LatexTokenizer', () => {
   describe('基础 Tokenization', () => {

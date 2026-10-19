@@ -1,7 +1,7 @@
 {
   "name": "@code-reader/syntax-parser",
   "version": "0.1.0",
-  "description": "高性能增量解析库 - 提供 Lezer 增量解析、纯 TS Tree-sitter 风格解析器、AST 缓存等功能",
+  "description": "零依赖的手写 LaTeX 解析器（词法、语法、错误恢复与诊断）与 LaTeX 语言配置；语言注册表、高亮引擎、Lezer 增量封装、AST 缓存、块扫描器在 @code-reader/syntax-parser-extras",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -11,13 +11,9 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./lezer": {
-      "import": "./dist/lezer/index.js",
-      "types": "./dist/lezer/index.d.ts"
-    },
-    "./block-scanner": {
-      "import": "./dist/block-scanner/index.js",
-      "types": "./dist/block-scanner/index.d.ts"
+    "./latex": {
+      "import": "./dist/latex/index.js",
+      "types": "./dist/latex/index.d.ts"
     }
   },
   "files": [
@@ -28,34 +24,20 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "clean": "rimraf dist",
-    "test": "vitest run --passWithNoTests",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "benchmark": "tsx benchmark/parser-benchmark.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
-    "incremental-parser",
-    "lezer",
-    "tree-sitter",
-    "ast-cache",
     "latex",
-    "markdown",
-    "syntax-highlighting",
-    "codemirror"
+    "parser",
+    "tokenizer",
+    "diagnostics",
+    "language-configuration"
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "@code-reader/text-buffer": "workspace:*",
-    "@lezer/common": "^1.2.1",
-    "@lezer/lr": "^1.4.0",
-    "@lezer/highlight": "^1.2.0"
-  },
   "devDependencies": {
-    "@vitest/coverage-v8": "^1.3.0",
     "rimraf": "^6.0.1",
-    "tsx": "^4.7.0",
     "typescript": "^5.3.0",
     "vitest": "^1.3.0"
   },

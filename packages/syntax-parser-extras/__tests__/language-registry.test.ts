@@ -13,8 +13,8 @@ import {
   createHighlightEngine,
   LATEX_CONTRIBUTION,
   LATEX_HIGHLIGHT_RULES,
-  LATEX_LANGUAGE_CONFIGURATION,
 } from '../src/language-registry';
+import { LATEX_LANGUAGE_CONFIGURATION } from '@code-reader/syntax-parser';
 import type {
   LanguageContribution,
   ILanguageParser,
@@ -643,18 +643,8 @@ describe('内置语言贡献', () => {
   });
 
   describe('LATEX_LANGUAGE_CONFIGURATION', () => {
-    it('应定义行注释', () => {
-      expect(LATEX_LANGUAGE_CONFIGURATION.lineComment).toBe('%');
-    });
-
-    it('应定义括号配对', () => {
-      expect(LATEX_LANGUAGE_CONFIGURATION.brackets).toBeDefined();
-      expect(LATEX_LANGUAGE_CONFIGURATION.brackets!.length).toBeGreaterThan(0);
-    });
-
-    it('应定义自动闭合对', () => {
-      expect(LATEX_LANGUAGE_CONFIGURATION.autoClosingPairs).toBeDefined();
-      expect(LATEX_LANGUAGE_CONFIGURATION.autoClosingPairs!.length).toBeGreaterThan(0);
+    it('LaTeX 语言贡献直接使用 syntax-parser 的语言配置', () => {
+      expect(LATEX_CONTRIBUTION.configuration).toBe(LATEX_LANGUAGE_CONFIGURATION);
     });
   });
 });
