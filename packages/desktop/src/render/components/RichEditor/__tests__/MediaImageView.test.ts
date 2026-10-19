@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { markdownSchema, type EmbedResolver } from '../../../lib/markdown';
 import { createMediaImageView } from '../MediaImageView';
 
-vi.mock('../../ReadingWorkspace/system', () => ({
+vi.mock('../../ReadingWorkspace/system', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../ReadingWorkspace/system')>()),
   readBinaryFile: vi.fn(async () => new Uint8Array([1, 2, 3])),
 }));
 
@@ -20,14 +21,27 @@ describe('MediaImageView', () => {
     vi.unstubAllGlobals();
   });
 
-  it('本地视频经知识库解析后读取文件，以 Blob URL 播放', async () => {
+  it('本地视频经知识库解析后以流式地址播放，不读入整个文件；加载失败时显示提示', async () => {
     const resolver: EmbedResolver = (target) =>
-      target === 'clip.mp4' ? { kind: 'media', media: 'video', title: 'clip.mp4', filePath: '/kb/clip.mp4', mimeType: 'video/mp4' } : null;
+      target === 'clip.mp4' ? { kind: 'media', media: 'video', title: 'clip.mp4', filePath: '/kb/会议 clip.mp4', mimeType: 'video/mp4' } : null;
     const view = createMediaImageView(() => resolver).nodeView(image('media/clip.mp4', '演示'));
     const video = view.dom.querySelector('video')!;
     expect(video.hasAttribute('controls')).toBe(true);
-    expect(video.getAttribute('data-embed-path')).toBe('/kb/clip.mp4');
-    await vi.waitFor(() => expect(video.getAttribute('src')).toBe('blob:media'));
+    expect(video.getAttribute('data-embed-path')).toBe('/kb/会议 clip.mp4');
+    expect(video.getAttribute('src')).toBe(`kb-media://file/${encodeURIComponent('/kb/会议 clip.mp4')}`);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    video.dispatchEvent(new Event('error'));
+    expect(view.dom.textContent).toContain('无法读取视频');
+    view.destroy();
+  });
+
+  it('本地图片经主进程读取后以 Blob URL 显示，销毁时释放', async () => {
+    const resolver: EmbedResolver = () => ({ kind: 'media', media: 'image', title: 'a.png', filePath: '/kb/a.png', mimeType: 'image/png' });
+    const view = createMediaImageView(() => resolver).nodeView(image('a.png'));
+    const img = view.dom.querySelector('img')!;
+    await vi.waitFor(() => expect(img.getAttribute('src')).toBe('blob:media'));
     view.destroy();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:media');
   });

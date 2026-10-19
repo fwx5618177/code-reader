@@ -24,6 +24,7 @@
 │  web/       网页与图片抓取（剪藏）                           │
 │  spellcheck/ 拼写检查词典与个人词典                         │
 │  ocr/       文字识别资源协议、语言数据与识别结果              │
+│  media/     音视频附件流式播放协议（kb-media，支持 Range）    │
 │  plugins/   插件目录管理（列出 / 读取入口 / 卸载）            │
 │  tray/      托盘（含最近打开）                               │
 ├──────────────────────────────────────────────────────────────┤
@@ -74,6 +75,7 @@
 | 事务写入 | `main/database/statements.ts`、`ipc-handlers.ts` | `db:transaction` 在一个 better-sqlite3 事务中执行一组语句（校验条数与类型，禁止 BEGIN / COMMIT / ATTACH / VACUUM 等）；标签合并、条目标签更新、文件夹删除与排序使用 |
 | 实体图谱 | `main/database/entity-ipc-handlers.ts` | `entities:getGraph` 读取 `entities` / `item_entities` / `entity_relations` 供图谱实体层使用；`entities:getItemRelations` 返回与条目提及的实体相关的关系 |
 | 文字识别 | `main/ocr/ipc-handlers.ts` | 自定义协议 `ocr-resource://`（app ready 前注册）向识别 Worker 提供 tesseract 引擎脚本与语言数据（先查 `userData/ocr/languages`，再查内置 `assets/ocr`；`.gz` 由 Worker 解压）；识别结果与扫描页检测结果按“条目 + 页码”原子写入当前知识库的 `ocr-results/<条目ID>/`。引擎与内置语言数据在构建时由 `scripts/ocr-assets.ts`（Vite 插件）从 node_modules 复制，经 `extraResources` 打包；CSP 为此放行 `ocr-resource:` 与 `'wasm-unsafe-eval'` |
+| 音视频流式播放 | `main/media/media-protocol.ts` | `kb-media://file/<编码后的绝对路径>`：只服务当前知识库附件目录内的文件（`realpath` 后检查，防符号链接逃逸），支持单段 Range（206 / 416），以文件流返回。自定义协议的权限在 `main/index.ts` 中与 `ocr-resource` 合并为一次 `registerSchemesAsPrivileged` 调用 |
 | 插件目录、签名与市场 | `main/plugins/ipc-handlers.ts`、`package-files.ts`、`trust.ts`、`market.ts` | 内置插件 `assets/plugins`、用户插件 `userData/plugins`（同 ID 用户优先）；只保证路径安全与大小上限（manifest 64KB、入口 1MB），manifest 由渲染进程校验。签名：`src/shared/plugin-signing.ts`（Ed25519，`signature.json` 覆盖 manifest.json 与入口文件的 SHA-256，载荷含 ID 与版本，与 `scripts/plugin-tools.ts` 共用）；列目录时附带验签结果，加载用户插件入口前按 `userData/config/plugin-trust.json` 的策略（warn / require）与受信任公钥拒绝，签名无效总是拒绝。市场：registry 地址存 `config/plugin-market.json`，`net.fetch` 读取索引（https / file / 本机 http），安装时重新读取条目、校验大小与 SHA-256、解压出 manifest / 入口 / 签名并核对 ID 与版本、按策略验签，写入临时目录后替换 `userData/plugins/<id>` |
 | 问答流式生成 | `main/ai/ipc-handlers.ts` | `ai:chatStream` 按 streamId 推送 `ai:chatChunk`；每个 streamId 持有 AbortController，`ai:chatStreamCancel` 中止 OpenAI / Anthropic 请求 |
 | 网页剪藏 | `main/web/ipc-handlers.ts` | `net.fetch` 抓取网页 HTML（仅 http/https、超时、只接受 HTML、识别编码，超过上限拒绝而不截断），以及剪藏图片下载（只接受 `image/*`、单张上限、并发 4）；渲染进程 CSP 不允许外部连接，因此由主进程请求 |
@@ -118,7 +120,7 @@
 | 知识库列表 | `userData/config/workspaces.json`（仅主进程读写） |
 | 写作文档正文 | `.md` 存标准 Markdown，`.txt` 存原文，`.tex` 存 LaTeX 源码；旧版 HTML 内容读入时兼容、保存时转为 Markdown |
 | 双向链接 | 笔记正文中的 `[[ ]]` 是唯一事实来源；渲染进程内存索引计算反链（含未创建的目标），文档保存时把已解析的引用同步到 `links` 表（type=reference）；Agent 的语义关联写入 type=ai-suggested |
-| 附件（录音、图片、文件、剪藏图片） | `<知识库根>/attachments/`，数据库只存路径与元数据（录音在 metadata 中记录 `durationMs`）；渲染进程经 `read-binary-file` 转 Blob URL 预览（CSP 不放开 file:） |
+| 附件（录音、图片、文件、剪藏图片） | `<知识库根>/attachments/`，数据库只存路径与元数据（录音在 metadata 中记录 `durationMs`）；图片经 `read-binary-file` 转 Blob URL 预览（CSP 不放开 file:）；音视频经主进程 `kb-media://file/<路径>` 协议流式播放（`main/media/media-protocol.ts`：支持 Range / 206，只服务当前知识库附件目录内的文件，解析符号链接后检查；CSP `media-src` 放行 `kb-media:`），拖动进度只读取所需片段；保存附件时二进制经结构化克隆直接传给主进程 |
 | 扫描版 PDF 识别结果 | `<知识库根>/ocr-results/<条目ID>/`：逐页识别结果、写回正文的全文、扫描页检测结果（按 PDF 内容哈希判断是否过期）；删除条目时清理。识别文本同时追加到条目正文，由已有的 FTS 触发器索引 |
 | 文字识别语言数据 | 内置 eng / chi_sim 在 `assets/ocr/`（构建时生成，不入库）；用户导入的在 `userData/ocr/languages/`；参与识别的语言选择存在 localStorage（`ocrLanguageService`） |
 | 插件 | 内置 `assets/plugins/`，用户插件 `userData/plugins/<id>/`；启用状态、已授予权限与用户修改过的配置在 `settings.json` 的 `plugins`；插件私有存储为 localStorage `plugin-storage:<id>`（有配额） |

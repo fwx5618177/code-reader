@@ -1,14 +1,14 @@
 // ================================
-// 附件呈现：图片 / 音频 / 视频经 Blob URL 内嵌播放，PDF 在应用内分页阅读，
+// 附件呈现：图片经 Blob URL 显示，音频 / 视频经 kb-media 协议流式播放，PDF 在应用内分页阅读，
 // EPUB 在阅读模式中按章节阅读，其他文件提供“在文件夹中显示”
 // ================================
 
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useEffect, useState } from 'react';
 import { FileText, FolderOpen } from 'lucide-react';
 import type { AttachmentKind } from '../../lib/reading';
 import { useBlobUrl, usePdfDocument, type PdfDocumentState } from './hooks';
 import { PdfReader, type PdfReaderHandle, type PdfReaderProps } from './PdfReader';
-import { showInFolder } from './system';
+import { mediaStreamUrl, showInFolder } from './system';
 import styles from './ReadingView.module.scss';
 
 export interface ReadingAttachmentProps {
@@ -38,21 +38,35 @@ const FileCard: React.FC<{ filePath: string; message: string }> = ({ filePath, m
   </div>
 );
 
-const MediaAttachment: React.FC<ReadingAttachmentProps> = ({ filePath, mimeType, kind, title }) => {
+const MISSING_MESSAGE = '无法读取附件，文件可能已被移动或删除';
+
+/** 图片：经主进程读取后以 Blob URL 显示 */
+const ImageAttachment: React.FC<{ filePath: string; mimeType?: string; title: string }> = ({ filePath, mimeType, title }) => {
   const { url, error } = useBlobUrl(filePath, mimeType);
-
-  if (error) return <FileCard filePath={filePath} message="无法读取附件，文件可能已被移动或删除" />;
+  if (error) return <FileCard filePath={filePath} message={MISSING_MESSAGE} />;
   if (!url) return <div className={styles.mediaLoading}>正在加载附件…</div>;
-
-  switch (kind) {
-    case 'image':
-      return <img className={styles.mediaImage} src={url} alt={title} />;
-    case 'audio':
-      return <audio className={styles.mediaAudio} src={url} controls />;
-    default:
-      return <video className={styles.mediaVideo} src={url} controls />;
-  }
+  return <img className={styles.mediaImage} src={url} alt={title} />;
 };
+
+/** 音视频：流式播放，按需读取片段，不把整个文件读进内存 */
+const StreamingMedia: React.FC<{ filePath: string; kind: 'audio' | 'video' }> = ({ filePath, kind }) => {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [filePath]);
+  if (failed) return <FileCard filePath={filePath} message={MISSING_MESSAGE} />;
+  const src = mediaStreamUrl(filePath);
+  return kind === 'audio' ? (
+    <audio className={styles.mediaAudio} src={src} controls onError={() => setFailed(true)} />
+  ) : (
+    <video className={styles.mediaVideo} src={src} controls onError={() => setFailed(true)} />
+  );
+};
+
+const MediaAttachment: React.FC<ReadingAttachmentProps> = ({ filePath, mimeType, kind, title }) =>
+  kind === 'image' ? (
+    <ImageAttachment filePath={filePath} mimeType={mimeType} title={title} />
+  ) : (
+    <StreamingMedia filePath={filePath} kind={kind === 'audio' ? 'audio' : 'video'} />
+  );
 
 export interface PdfAttachmentProps extends Omit<PdfReaderProps, 'document'> {
   filePath: string;

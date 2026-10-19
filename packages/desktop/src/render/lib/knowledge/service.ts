@@ -134,8 +134,8 @@ async function saveAttachment(file: File): Promise<string> {
   await window.electron.ipcRenderer.invoke('create-directory', attachmentsPath);
   const safeName = file.name.replace(/[\\/:*?"<>|]/g, '_');
   const path = `${attachmentsPath}/${Date.now().toString(36)}-${safeName}`;
-  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-  await window.electron.ipcRenderer.invoke('write-binary-file', path, bytes);
+  // 直接传二进制（结构化克隆），不转成数字数组：大文件转数组会占用数倍内存
+  await window.electron.ipcRenderer.invoke('write-binary-file', path, new Uint8Array(await file.arrayBuffer()));
   return path;
 }
 

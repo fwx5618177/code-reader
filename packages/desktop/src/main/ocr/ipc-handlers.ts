@@ -120,18 +120,11 @@ async function languageFiles(dir: string): Promise<Map<string, string>> {
   return files;
 }
 
-/**
- * 在应用 ready 之前注册协议权限（Electron 只允许调用一次 registerSchemesAsPrivileged，
- * 新增其他自定义协议时应合并到同一次调用中）
- */
-export function registerOcrScheme(): void {
-  protocol.registerSchemesAsPrivileged([
-    {
-      scheme: OCR_SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
-    },
-  ]);
-}
+/** 协议权限：Worker 以 Blob URL 运行，fetch 资源属于跨源请求，需要 corsEnabled */
+export const OCR_SCHEME_PRIVILEGES: Electron.CustomScheme = {
+  scheme: OCR_SCHEME,
+  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
+};
 
 /**
  * 注册 OCR 资源协议与 IPC

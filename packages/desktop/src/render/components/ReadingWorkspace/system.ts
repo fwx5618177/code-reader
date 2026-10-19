@@ -24,3 +24,11 @@ export function showInFolder(filePath: string): void {
 export async function readBinaryFile(filePath: string): Promise<Uint8Array<ArrayBuffer>> {
   return (await invoke('read-binary-file', filePath)) as Uint8Array<ArrayBuffer>;
 }
+
+/**
+ * 本地音视频附件的流式播放地址（主进程 kb-media 协议，支持 Range，只能访问当前知识库的附件目录）。
+ * 音视频不经 IPC 整个读入内存，拖动进度条时只读取需要的片段
+ */
+export function mediaStreamUrl(filePath: string): string {
+  return `kb-media://file/${encodeURIComponent(filePath)}`;
+}

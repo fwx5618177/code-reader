@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeImage, protocol } from 'electron';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { existsSync } from 'fs';
@@ -18,7 +18,8 @@ import { registerVersionHistoryHandlers } from './database/version-ipc-handlers'
 import { registerWebHandlers } from './web/ipc-handlers';
 import { registerSpellcheckHandlers } from './spellcheck/ipc-handlers';
 import { registerPluginHandlers } from './plugins/ipc-handlers';
-import { registerOcrHandlers, registerOcrScheme } from './ocr/ipc-handlers';
+import { OCR_SCHEME_PRIVILEGES, registerOcrHandlers } from './ocr/ipc-handlers';
+import { MEDIA_SCHEME_PRIVILEGES, registerMediaProtocol } from './media/media-protocol';
 import { registerAIHandlers, cleanupAIHandlers } from './ai/ipc-handlers';
 import {
   registerAgentHandlers,
@@ -45,8 +46,8 @@ const __dirname = dirname(__filename);
 /** 平台差异（窗口外观、应用图标、退出行为） */
 const platform = currentPlatform();
 
-// 自定义协议须在 app ready 之前注册权限
-registerOcrScheme();
+// 自定义协议须在 app ready 之前注册权限；Electron 只允许调用一次，全部协议合并在这里
+protocol.registerSchemesAsPrivileged([OCR_SCHEME_PRIVILEGES, MEDIA_SCHEME_PRIVILEGES]);
 
 let mainWindow: BrowserWindow | null = null;
 const childWindows: Map<string, BrowserWindow> = new Map();
@@ -176,7 +177,7 @@ function createWindow() {
 
   // 设置 Content-Security-Policy
   // - worker-src blob:：允许从 Blob URL 创建 Worker（用于差分计算等后台任务）
-  // - img-src https:：Markdown 与网页剪藏中的远程图片；media-src blob:：本地音视频附件以 Blob URL 播放，https:：Markdown 中远程音视频地址
+  // - img-src https:：Markdown 与网页剪藏中的远程图片；media-src kb-media:：本地音视频附件经流式协议播放（支持拖动进度），blob:：EPUB 内嵌的音视频，https:：Markdown 中远程音视频地址
   // - connect-src 不放行任何外部服务：AI 请求只由主进程发起，渲染进程不直连网络
   // - ocr-resource:：文字识别 Worker 从本地协议加载脚本（script-src）与语言数据（connect-src）；
   //   'wasm-unsafe-eval' 仅允许编译 WebAssembly（识别引擎），不放行 eval
@@ -186,8 +187,8 @@ function createWindow() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           process.env.NODE_ENV === 'development'
-            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob: ocr-resource:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* ocr-resource:"
-            : "default-src 'self'; script-src 'self' blob: ocr-resource: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' ocr-resource:",
+            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob: ocr-resource:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https: kb-media:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* ocr-resource:"
+            : "default-src 'self'; script-src 'self' blob: ocr-resource: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https: kb-media:; font-src 'self' data:; connect-src 'self' ocr-resource:",
         ],
       },
     });
@@ -374,11 +375,10 @@ function setupIPC() {
   });
 
   // 写入二进制文件
-  ipcMain.handle('write-binary-file', async (_event, filePath: string, data: number[]) => {
+  ipcMain.handle('write-binary-file', async (_event, filePath: string, data: Uint8Array) => {
     try {
-      // 从渲染进程接收的数据是序列化后的数组，转换回 Buffer
-      const buffer = Buffer.from(data);
-      await writeFile(filePath, buffer);
+      // 二进制数据经结构化克隆直接传来，不转成数字数组
+      await writeFile(filePath, data);
       return true;
     } catch (error) {
       console.error('Error writing binary file:', error);
@@ -476,6 +476,9 @@ function setupIPC() {
 
   // 扫描版 PDF 文字识别：资源协议、语言数据与识别结果
   registerOcrHandlers(getPackageRoot());
+
+  // 本地音视频附件的流式播放（支持 Range）
+  registerMediaProtocol();
 
   // 知识库管理与切换
   registerWorkspaceHandlers();
