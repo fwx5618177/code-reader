@@ -103,7 +103,7 @@ function isBoundaryChar(text: string, index: number): boolean {
 
 /**
  * 计算模糊匹配分数
- * 使用贪心算法匹配模式字符
+ * 在所有子序列对齐中取得分最高的一个（动态规划，见 findBestMatch）
  *
  * @param pattern 搜索模式
  * @param text 目标文本
@@ -133,23 +133,17 @@ export function fuzzyScore(pattern: string, text: string, options?: FuzzyScoreOp
   const patternNorm = opts.caseSensitive ? pattern : pattern.toLowerCase();
   const textNorm = opts.caseSensitive ? text : text.toLowerCase();
 
-  // 快速检查：模式中所有字符是否都在文本中
-  for (const char of patternNorm) {
-    if (!textNorm.includes(char)) {
-      return { matched: false, score: 0, positions: [] };
-    }
-  }
-
-  // 使用递归搜索找到最佳匹配
-  const result = findBestMatch(patternNorm, textNorm, text, 0, 0, [], opts);
-
-  if (!result.matched) {
+  // 快速检查：不是子序列就不可能匹配
+  if (!fuzzyMatch(patternNorm, textNorm, true)) {
     return { matched: false, score: 0, positions: [] };
   }
 
+  const result = findBestMatch(patternNorm, textNorm, text, opts);
+  const score = calculateMatchScore(result.positions, text, opts);
+
   // 归一化分数到 0-100
   const maxPossibleScore = calculateMaxScore(pattern.length, opts);
-  const normalizedScore = Math.min(100, Math.round((result.score / maxPossibleScore) * 100));
+  const normalizedScore = Math.min(100, Math.round((score / maxPossibleScore) * 100));
 
   return {
     matched: true,
@@ -159,62 +153,112 @@ export function fuzzyScore(pattern: string, text: string, options?: FuzzyScoreOp
 }
 
 /**
- * 递归查找最佳匹配
+ * 动态规划求得分最高的对齐（与 calculateMatchScore 的计分完全一致，结果是全局最优；
+ * 得分相同时取位置靠前的对齐）。复杂度 O(m² · n)，m 为模式长度、n 为文本长度。
+ *
+ * 计分可以按“连续段”拆开：一段长为 L 的连续匹配，段内第 k 个连续字符奖励 consecutiveBonus × k；
+ * 段与段之间按间隔扣分（不超过 baseMatchScore）。因此记录两张表：
+ * - start[i][j]：模式第 i 个字符匹配文本第 j 个字符、且它是一段的开头（与前一个匹配不相邻）时的最高分
+ * - best[i][j]：模式第 i 个字符匹配文本第 j 个字符时的最高分（= 某个段开头的分数 + 段内收益）
  */
 function findBestMatch(
   pattern: string,
   textNorm: string,
   textOriginal: string,
-  patternIndex: number,
-  textIndex: number,
-  currentPositions: number[],
   opts: Required<FuzzyScoreOptions>
-): { matched: boolean; score: number; positions: number[] } {
-  // 模式已完全匹配
-  if (patternIndex === pattern.length) {
-    const score = calculateMatchScore(currentPositions, textOriginal, opts);
-    return { matched: true, score, positions: [...currentPositions] };
+): { positions: number[] } {
+  const m = pattern.length;
+  const n = textNorm.length;
+  const NONE = Number.NEGATIVE_INFINITY;
+
+  /** 单个字符的得分：基础分 + 首字符奖励 + 边界奖励 */
+  const charScore = new Float64Array(n);
+  for (let j = 0; j < n; j++) {
+    charScore[j] =
+      opts.baseMatchScore + (j === 0 ? opts.startBonus : 0) + (isBoundaryChar(textOriginal, j) ? opts.boundaryBonus : 0);
   }
+  const gapPenalty = (gap: number) => Math.min(gap * opts.gapPenalty, opts.baseMatchScore);
+  // 间隔达到 capGap 后扣分封顶，可用前缀最大值统一处理
+  const capGap = opts.gapPenalty > 0 ? Math.max(1, Math.ceil(opts.baseMatchScore / opts.gapPenalty)) : 1;
 
-  // 文本已遍历完但模式未完成
-  if (textIndex >= textNorm.length) {
-    return { matched: false, score: 0, positions: [] };
-  }
+  const start = Array.from({ length: m }, () => new Float64Array(n).fill(NONE));
+  const best = Array.from({ length: m }, () => new Float64Array(n).fill(NONE));
+  /** start 的前驱：上一个模式字符匹配的文本位置 */
+  const startFrom = Array.from({ length: m }, () => new Int32Array(n).fill(-1));
+  /** best 对应的段内位置：这个匹配是所在段的第几个连续字符（0 为段首） */
+  const runIndex = Array.from({ length: m }, () => new Int32Array(n));
 
-  const patternChar = pattern[patternIndex];
-  let bestResult: { matched: boolean; score: number; positions: number[] } = {
-    matched: false,
-    score: 0,
-    positions: [],
-  };
+  for (let i = 0; i < m; i++) {
+    const char = pattern.charCodeAt(i);
+    // 上一行 best 在 [0, j - 1 - capGap] 上的前缀最大值（扣分已封顶）
+    let prefixMax = NONE;
+    let prefixArg = -1;
 
-  // 在文本中查找下一个匹配字符
-  for (let i = textIndex; i < textNorm.length; i++) {
-    if (textNorm[i] === patternChar) {
-      // 找到匹配，递归查找剩余部分
-      const newPositions = [...currentPositions, i];
-      const result = findBestMatch(
-        pattern,
-        textNorm,
-        textOriginal,
-        patternIndex + 1,
-        i + 1,
-        newPositions,
-        opts
-      );
+    for (let j = i; j < n; j++) {
+      if (i > 0) {
+        const capped = j - 1 - capGap;
+        if (capped >= 0 && best[i - 1]![capped]! > prefixMax) {
+          prefixMax = best[i - 1]![capped]!;
+          prefixArg = capped;
+        }
+      }
+      if (textNorm.charCodeAt(j) !== char) continue;
 
-      if (result.matched && result.score > bestResult.score) {
-        bestResult = result;
+      // 段首：前一个匹配不相邻
+      if (i === 0) {
+        start[i]![j] = charScore[j]!;
+      } else {
+        let value = prefixMax === NONE ? NONE : prefixMax - opts.baseMatchScore * (opts.gapPenalty > 0 ? 1 : 0);
+        let from = prefixArg;
+        if (opts.gapPenalty === 0 && prefixMax !== NONE) value = prefixMax;
+        for (let prev = Math.max(0, j - capGap); prev <= j - 2; prev++) {
+          const candidate = best[i - 1]![prev]! - gapPenalty(j - prev - 1);
+          if (candidate > value || (candidate === value && prev < from)) {
+            value = candidate;
+            from = prev;
+          }
+        }
+        if (value !== NONE) {
+          start[i]![j] = value + charScore[j]!;
+          startFrom[i]![j] = from;
+        }
       }
 
-      // 优化：如果找到边界匹配，可以提前停止搜索
-      if (isBoundaryChar(textOriginal, i) && result.matched) {
-        break;
+      // 以 j 结尾的连续段：段首在 (i - r, j - r)
+      let gain = 0;
+      for (let r = 0; r <= i && j - r >= 0; r++) {
+        if (r > 0) {
+          if (textNorm.charCodeAt(j - r) !== pattern.charCodeAt(i - r)) break;
+          gain += charScore[j - r + 1]! + opts.consecutiveBonus * r;
+        }
+        const head = start[i - r]![j - r]!;
+        if (head === NONE) continue;
+        // 得分相同时取段首更靠前（r 更大）的对齐
+        if (head + gain >= best[i]![j]!) {
+          best[i]![j] = head + gain;
+          runIndex[i]![j] = r;
+        }
       }
     }
   }
 
-  return bestResult;
+  // 末字符得分最高（相同时取最靠前）的位置，沿表回溯
+  let end = -1;
+  for (let j = m - 1; j < n; j++) {
+    if (best[m - 1]![j]! !== NONE && (end === -1 || best[m - 1]![j]! > best[m - 1]![end]!)) end = j;
+  }
+  const positions = new Array<number>(m);
+  let i = m - 1;
+  let j = end;
+  while (i >= 0) {
+    const r = runIndex[i]![j]!;
+    for (let k = 0; k <= r; k++) positions[i - k] = j - k;
+    const headI = i - r;
+    const headJ = j - r;
+    j = startFrom[headI]![headJ]!;
+    i = headI - 1;
+  }
+  return { positions };
 }
 
 /**

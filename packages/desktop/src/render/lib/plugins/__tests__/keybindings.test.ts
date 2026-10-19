@@ -83,4 +83,43 @@ describe('resolveKeybindings', () => {
     expect(second!.conflict).toBe('与插件「插件a」的命令「命令run」冲突，未生效');
     expect(third!.conflict).toBeNull();
   });
+
+  it('Windows / Linux：Mod 解析为 Ctrl，按平台显示，按事件匹配 Ctrl 而不是 Meta', () => {
+    for (const platform of ['win', 'linux'] as const) {
+      const [reserved, own] = resolveKeybindings([entry('a', 'Mod+P'), entry('b', 'Mod+Alt+9')], platform);
+      expect(reserved!.conflict).toBe('与应用快捷键「全局搜索」冲突，未生效');
+      expect(reserved!.label).toBe('Ctrl+P');
+      expect(own!.conflict).toBeNull();
+      expect(own!.label).toBe('Ctrl+Alt+9');
+      const press = (init: Partial<KeyboardEvent>) =>
+        matchesKeyboardEvent(own!.parsed, { code: 'Digit9', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init });
+      expect(press({ ctrlKey: true, altKey: true })).toBe(true);
+      expect(press({ metaKey: true, altKey: true })).toBe(false);
+    }
+  });
+
+  it('内置插件 writing-tools 的快捷键在三个平台上都生效且不与应用快捷键冲突', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const manifest = JSON.parse(
+      readFileSync(resolve(__dirname, '../../../../../assets/plugins/writing-tools/manifest.json'), 'utf-8')
+    ) as { contributes: { keybindings: Array<{ command: string; key: string; mac?: string }> } };
+    const entries = manifest.contributes.keybindings.map((binding) => ({
+      pluginId: 'writing-tools',
+      pluginName: '写作助手',
+      binding,
+      commandTitle: binding.command,
+    }));
+    const labels = (platform: 'mac' | 'win' | 'linux') =>
+      resolveKeybindings(entries, platform).map((resolved) => [resolved.label, resolved.conflict]);
+    expect(labels('mac')).toEqual([
+      ['⇧⌘D', null],
+      ['⌥⌘K', null],
+    ]);
+    expect(labels('win')).toEqual([
+      ['Ctrl+Alt+D', null],
+      ['Ctrl+Alt+K', null],
+    ]);
+    expect(labels('linux')).toEqual(labels('win'));
+  });
 });
