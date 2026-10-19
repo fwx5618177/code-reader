@@ -13,8 +13,8 @@ import type {
   UIAPI,
   Disposable,
   PluginVersion,
-} from '../types';
-import { createDisposable, PluginState } from '../types';
+} from '@code-reader/plugin-system/types';
+import { createDisposable, PluginState } from '@code-reader/plugin-system/types';
 
 // ================================
 // 沙箱配置
@@ -26,17 +26,17 @@ export interface SandboxConfig {
   pluginId: PluginId;
   /** 插件版本 */
   version: PluginVersion;
-  /** 是否允许网络访问 */
+  /** 是否允许网络访问。上下文本身不提供网络 API，由宿主通过 getConfig() 读取后决定是否注入 */
   allowNetwork?: boolean;
-  /** 是否允许文件系统访问 */
+  /** 是否允许文件系统访问。含义同 allowNetwork */
   allowFileSystem?: boolean;
-  /** 是否允许执行命令 */
+  /** 是否允许注册与执行命令；为 false 时命令 API 的调用会抛错 */
   allowCommands?: boolean;
-  /** 允许访问的 API 列表 */
+  /** 允许访问的上下文 API（storage、commands、editor、ui、logger）；不在列表中的 API 调用会抛错 */
   allowedAPIs?: string[];
-  /** 执行超时时间（毫秒） */
+  /** executeWithTimeout 的超时时间（毫秒） */
   timeout?: number;
-  /** 内存限制（字节） */
+  /** 内存限制（字节）。同线程无法强制限制，由在 Worker 或独立进程里运行插件的宿主读取后执行 */
   memoryLimit?: number;
   /** 日志级别 */
   logLevel?: 'debug' | 'info' | 'warn' | 'error';
@@ -103,9 +103,12 @@ function createSandboxLogger(pluginId: PluginId, logLevel: string): Logger {
 function createSandboxStorage(pluginId: PluginId, isGlobal = false): StorageAPI {
   const storageKey = isGlobal ? 'plugin-global-storage' : `plugin-storage-${pluginId}`;
   let cache: Record<string, unknown> = {};
+  // 没有 localStorage 的环境（Node、Worker）只存在内存里
+  const persistent = typeof localStorage !== 'undefined';
 
   // 从 localStorage 加载
   const load = (): void => {
+    if (!persistent) return;
     try {
       const data = localStorage.getItem(storageKey);
       if (data) {
@@ -118,6 +121,7 @@ function createSandboxStorage(pluginId: PluginId, isGlobal = false): StorageAPI 
 
   // 保存到 localStorage
   const save = (): void => {
+    if (!persistent) return;
     try {
       localStorage.setItem(storageKey, JSON.stringify(cache));
     } catch (error) {
@@ -297,7 +301,8 @@ export interface UIProxy {
  */
 function createSandboxUIAPI(uiProxy?: UIProxy): UIAPI {
   const sidebarViews = new Map<string, unknown>();
-  const toolbarButtons = new Map<string, () => void>();
+  const toolbarButtons = new Map<number, () => void>();
+  let nextButtonId = 0;
 
   // 如果没有代理，返回基础实现
   if (!uiProxy) {
@@ -315,7 +320,7 @@ function createSandboxUIAPI(uiProxy?: UIProxy): UIAPI {
         });
       },
       registerToolbarButton: (_button, handler: () => void) => {
-        const id = `toolbar-${Date.now()}`;
+        const id = nextButtonId++;
         toolbarButtons.set(id, handler);
         return createDisposable(() => {
           toolbarButtons.delete(id);
@@ -337,13 +342,30 @@ function createSandboxUIAPI(uiProxy?: UIProxy): UIAPI {
       });
     },
     registerToolbarButton: (_button, handler: () => void) => {
-      const id = `toolbar-${Date.now()}`;
+      const id = nextButtonId++;
       toolbarButtons.set(id, handler);
       return createDisposable(() => {
         toolbarButtons.delete(id);
       });
     },
   };
+}
+
+// ================================
+// API 权限
+// ================================
+
+/**
+ * 未授权的 API：访问任一方法都抛错，错误信息指明插件与 API
+ */
+function deniedAPI<T extends object>(pluginId: PluginId, api: string): T {
+  return new Proxy({} as T, {
+    get(_target, member) {
+      return () => {
+        throw new Error(`插件 "${pluginId}" 无权使用 ${api}.${String(member)}`);
+      };
+    },
+  });
 }
 
 // ================================
@@ -390,6 +412,13 @@ export class PluginSandbox {
   }
 
   /**
+   * 获取生效的配置（含默认值），供宿主执行网络、文件系统、内存等上下文之外的限制
+   */
+  getConfig(): Readonly<Required<SandboxConfig>> {
+    return this.config;
+  }
+
+  /**
    * 获取插件状态
    */
   getState(): PluginState {
@@ -407,18 +436,25 @@ export class PluginSandbox {
    * 创建插件上下文
    */
   createContext(): PluginContext {
-    const { pluginId, version, logLevel } = this.config;
+    const { pluginId, version, logLevel, allowedAPIs, allowCommands } = this.config;
+    const allowed = (api: string): boolean => allowedAPIs.includes(api);
 
-    // 创建 API
-    const logger = createSandboxLogger(pluginId, logLevel);
-    const storage = createSandboxStorage(pluginId, false);
-    const globalStorage = createSandboxStorage(pluginId, true);
-    const commands = createSandboxCommandAPI(
-      pluginId,
-      this.deps.globalCommands || new Map()
-    );
-    const editor = createSandboxEditorAPI(this.deps.editorProxy);
-    const ui = createSandboxUIAPI(this.deps.uiProxy);
+    // 创建 API；未授权的 API 换成调用即抛错的代理
+    const logger = allowed('logger') ? createSandboxLogger(pluginId, logLevel) : deniedAPI<Logger>(pluginId, 'logger');
+    const storage = allowed('storage')
+      ? createSandboxStorage(pluginId, false)
+      : deniedAPI<StorageAPI>(pluginId, 'storage');
+    const globalStorage = allowed('storage')
+      ? createSandboxStorage(pluginId, true)
+      : deniedAPI<StorageAPI>(pluginId, 'globalStorage');
+    const commands =
+      allowed('commands') && allowCommands
+        ? createSandboxCommandAPI(pluginId, this.deps.globalCommands || new Map())
+        : deniedAPI<CommandAPI>(pluginId, 'commands');
+    const editor = allowed('editor')
+      ? createSandboxEditorAPI(this.deps.editorProxy)
+      : deniedAPI<EditorAPI>(pluginId, 'editor');
+    const ui = allowed('ui') ? createSandboxUIAPI(this.deps.uiProxy) : deniedAPI<UIAPI>(pluginId, 'ui');
 
     this.context = {
       pluginId,
@@ -460,7 +496,9 @@ export class PluginSandbox {
         reject(new Error(`插件执行超时 (${timeout}ms)`));
       }, timeout);
 
-      Promise.resolve(fn())
+      // fn 同步抛错也要走 catch，清掉计时器
+      Promise.resolve()
+        .then(fn)
         .then((result) => {
           clearTimeout(timer);
           resolve(result);
@@ -503,9 +541,3 @@ export function createPluginSandbox(
 ): PluginSandbox {
   return new PluginSandbox(config, deps);
 }
-
-// ================================
-// 导出
-// ================================
-
-export { PluginSandbox as default };

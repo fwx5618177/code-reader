@@ -39,7 +39,8 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `format-parser` | 内容格式解析：自研 CommonMark/GFM Markdown 解析器、LaTeX 解析器（交叉引用索引、文档元数据）、增量编辑解析（desktop 用其 LaTeX 解析器做交叉引用检查） |
 | `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）、编辑器适配器（CodeMirror / ProseMirror） |
 | `fuzzy-match-algorithm` | 补全与拼写建议的核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
-| `plugin-system` | 插件核心库：贡献点类型、生命周期编排（版本范围、依赖解析、激活事件）、扩展点注册表、PluginManager 与沙箱（desktop 使用贡献点类型、生命周期编排与注册表，运行时为 `desktop/src/render/lib/plugins` 的 Worker 沙箱） |
+| `plugin-system` | 插件基础库：贡献点类型、生命周期编排（版本范围、依赖解析、激活事件）、扩展点注册表（desktop 全部使用，运行时为 `desktop/src/render/lib/plugins` 的 Worker 沙箱） |
+| `plugin-system-extras` | desktop 未使用的同进程插件管理器与插件沙箱（按需引入） |
 | `search-service` | 全文搜索倒排索引、文件内容搜索、模糊匹配 |
 | `text-buffer` | 文本存储数据结构：Piece Table、Rope、Gap Buffer |
 

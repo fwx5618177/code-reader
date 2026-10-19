@@ -1,7 +1,7 @@
 {
   "name": "@code-reader/plugin-system",
   "version": "1.0.0",
-  "description": "插件系统核心模块 - 支持插件注册、生命周期管理、沙箱隔离",
+  "description": "插件系统基础：插件清单与贡献点类型、扩展点注册表、版本范围与依赖解析、激活事件。同进程插件管理器与沙箱在 @code-reader/plugin-system-extras",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -14,14 +14,6 @@
     "./types": {
       "import": "./dist/types/index.js",
       "types": "./dist/types/index.d.ts"
-    },
-    "./core": {
-      "import": "./dist/core/index.js",
-      "types": "./dist/core/index.d.ts"
-    },
-    "./sandbox": {
-      "import": "./dist/sandbox/index.js",
-      "types": "./dist/sandbox/index.d.ts"
     },
     "./registry": {
       "import": "./dist/registry/index.js",

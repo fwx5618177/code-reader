@@ -433,6 +433,22 @@ importers:
         specifier: ^1.3.0
         version: 1.6.1(@types/node@20.19.30)(@vitest/ui@1.6.1)(jsdom@24.1.3)(sass@1.97.3)
 
+  packages/plugin-system-extras:
+    dependencies:
+      '@code-reader/plugin-system':
+        specifier: workspace:*
+        version: link:../plugin-system
+    devDependencies:
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.2
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.3.0
+        version: 1.6.1(@types/node@20.19.30)(@vitest/ui@1.6.1)(jsdom@24.1.3)(sass@1.97.3)
+
   packages/search-service:
     devDependencies:
       '@vitest/coverage-v8':

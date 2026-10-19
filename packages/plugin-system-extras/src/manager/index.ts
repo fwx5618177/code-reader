@@ -17,16 +17,16 @@ import type {
   CommandAPI,
   EditorAPI,
   UIAPI,
-} from '../types';
+} from '@code-reader/plugin-system/types';
 import {
   createDisposable,
   PluginEventType,
   PluginPriority,
   PluginSource,
   PluginState,
-} from '../types';
-import { ExtensionRegistry } from '../registry';
-import { resolveDependencies, satisfiesVersionRange } from '../lifecycle';
+} from '@code-reader/plugin-system/types';
+import { ExtensionRegistry } from '@code-reader/plugin-system/registry';
+import { resolveDependencies, satisfiesVersionRange } from '@code-reader/plugin-system/lifecycle';
 
 // ================================
 // 插件管理器配置
@@ -222,6 +222,10 @@ export class PluginManager {
     if (instance.state === PluginState.Active) {
       return; // 已激活
     }
+    if (instance.state === PluginState.Activating) {
+      // 依赖链又回到了正在激活的插件
+      throw new Error(`插件 "${pluginId}" 存在循环依赖`);
+    }
 
     // 更新状态
     this.updatePluginState(pluginId, PluginState.Activating);
@@ -235,14 +239,19 @@ export class PluginManager {
         instance.plugin.activate(instance.context)
       );
 
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
+        timer = setTimeout(() => {
           reject(new Error(`插件 "${pluginId}" 激活超时`));
         }, this.config.activationTimeout);
       });
 
-      // 执行激活
-      instance.api = await Promise.race([activationPromise, timeoutPromise]);
+      // 执行激活；无论成败都清掉超时计时器
+      try {
+        instance.api = await Promise.race([activationPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timer);
+      }
       instance.activatedAt = Date.now();
 
       // 更新状态
@@ -634,154 +643,86 @@ export class PluginManager {
     };
   }
 
+  // 下面四个 API 的提供者都在调用时读取：插件加载之后再设置的提供者同样生效
+
   /**
-   * 创建存储 API
+   * 创建存储 API；插件私有存储的键带 `plugin:<id>:` 前缀，全局存储不带
    */
   private createStorageAPI(pluginId: PluginId, global: boolean): StorageAPI {
-    const provider = this.storageProvider;
     const keyPrefix = global ? '' : `plugin:${pluginId}:`;
+    const provider = () => this.storageProvider;
 
     return {
-      get<T>(key: string, defaultValue?: T): T | undefined {
-        if (provider) {
-          return provider.get(`${keyPrefix}${key}`, defaultValue);
-        }
-        return defaultValue;
+      get: <T>(key: string, defaultValue?: T): T | undefined => {
+        const current = provider();
+        return current ? current.get(`${keyPrefix}${key}`, defaultValue) : defaultValue;
       },
-      async set<T>(key: string, value: T): Promise<void> {
-        if (provider) {
-          await provider.set(`${keyPrefix}${key}`, value);
-        }
+      set: async <T>(key: string, value: T): Promise<void> => {
+        await provider()?.set(`${keyPrefix}${key}`, value);
       },
-      async delete(key: string): Promise<void> {
-        if (provider) {
-          await provider.delete(`${keyPrefix}${key}`);
-        }
+      delete: async (key: string): Promise<void> => {
+        await provider()?.delete(`${keyPrefix}${key}`);
       },
-      async clear(): Promise<void> {
-        if (provider) {
-          await provider.clear(keyPrefix);
-        }
+      clear: async (): Promise<void> => {
+        await provider()?.clear(keyPrefix);
       },
-      keys(): string[] {
-        if (provider) {
-          return provider.keys(keyPrefix);
-        }
-        return [];
-      },
+      keys: (): string[] => provider()?.keys(keyPrefix) ?? [],
     };
   }
 
   /**
-   * 创建命令 API
+   * 创建命令 API；插件注册的命令 ID 自动加上 `<插件 ID>.` 前缀
    */
   private createCommandAPI(pluginId: PluginId): CommandAPI {
-    const provider = this.commandProvider;
+    const provider = () => this.commandProvider;
 
     return {
-      registerCommand(id: string, handler: (...args: unknown[]) => unknown): Disposable {
-        const fullId = `${pluginId}.${id}`;
-        if (provider) {
-          return provider.registerCommand(fullId, handler);
-        }
-        return createDisposable(() => {});
+      registerCommand: (id: string, handler: (...args: unknown[]) => unknown): Disposable =>
+        provider()?.registerCommand(`${pluginId}.${id}`, handler) ?? createDisposable(() => {}),
+      executeCommand: async <T>(id: string, ...args: unknown[]): Promise<T> => {
+        const current = provider();
+        if (!current) throw new Error(`命令 "${id}" 未注册`);
+        return current.executeCommand<T>(id, ...args);
       },
-      async executeCommand<T>(id: string, ...args: unknown[]): Promise<T> {
-        if (provider) {
-          return provider.executeCommand<T>(id, ...args);
-        }
-        throw new Error(`命令 "${id}" 未注册`);
-      },
-      getCommands(): string[] {
-        if (provider) {
-          return provider.getCommands();
-        }
-        return [];
-      },
+      getCommands: (): string[] => provider()?.getCommands() ?? [],
     };
   }
 
   /**
-   * 创建编辑器 API
+   * 创建编辑器 API；没有提供者时读操作返回空值，写操作忽略
    */
   private createEditorAPI(): EditorAPI {
-    const provider = this.editorProvider;
+    const provider = () => this.editorProvider;
 
     return {
-      getContent(): string {
-        return provider?.getContent() ?? '';
-      },
-      setContent(content: string): void {
-        provider?.setContent(content);
-      },
-      getSelection(): string {
-        return provider?.getSelection() ?? '';
-      },
-      replaceSelection(text: string): void {
-        provider?.replaceSelection(text);
-      },
-      insertText(text: string, position?: number): void {
-        provider?.insertText(text, position);
-      },
-      getCursorPosition(): { line: number; column: number } {
-        return provider?.getCursorPosition() ?? { line: 1, column: 1 };
-      },
-      setCursorPosition(line: number, column: number): void {
-        provider?.setCursorPosition(line, column);
-      },
-      registerExtension(extension: unknown): Disposable {
-        if (provider) {
-          return provider.registerExtension(extension);
-        }
-        return createDisposable(() => {});
-      },
-      getFileType(): string {
-        return provider?.getFileType() ?? 'markdown';
-      },
-      supportsMath(): boolean {
-        return provider?.supportsMath() ?? true;
-      },
+      getContent: () => provider()?.getContent() ?? '',
+      setContent: (content) => provider()?.setContent(content),
+      getSelection: () => provider()?.getSelection() ?? '',
+      replaceSelection: (text) => provider()?.replaceSelection(text),
+      insertText: (text, position) => provider()?.insertText(text, position),
+      getCursorPosition: () => provider()?.getCursorPosition() ?? { line: 1, column: 1 },
+      setCursorPosition: (line, column) => provider()?.setCursorPosition(line, column),
+      registerExtension: (extension) => provider()?.registerExtension(extension) ?? createDisposable(() => {}),
+      getFileType: () => provider()?.getFileType() ?? 'markdown',
+      supportsMath: () => provider()?.supportsMath() ?? true,
     };
   }
 
   /**
-   * 创建 UI API
+   * 创建 UI API；没有提供者时对话类方法返回空结果
    */
   private createUIAPI(): UIAPI {
-    const provider = this.uiProvider;
+    const provider = () => this.uiProvider;
 
     return {
-      showMessage(message: string, type?: 'info' | 'warning' | 'error'): void {
-        provider?.showMessage(message, type);
-      },
-      async showInput(options: {
-        prompt?: string;
-        placeholder?: string;
-        value?: string;
-      }): Promise<string | undefined> {
-        return provider?.showInput(options);
-      },
-      async showQuickPick(
-        items: string[],
-        options?: { placeholder?: string }
-      ): Promise<string | undefined> {
-        return provider?.showQuickPick(items, options);
-      },
-      async showConfirm(message: string): Promise<boolean> {
-        return provider?.showConfirm(message) ?? false;
-      },
-      registerSidebarView(id: string, component: unknown): Disposable {
-        if (provider) {
-          return provider.registerSidebarView(id, component);
-        }
-        return createDisposable(() => {});
-      },
-      registerToolbarButton(button: unknown, handler: () => void): Disposable {
-        if (provider) {
-          return provider.registerToolbarButton(button, handler);
-        }
-        return createDisposable(() => {});
-      },
+      showMessage: (message, type) => provider()?.showMessage(message, type),
+      showInput: async (options) => provider()?.showInput(options),
+      showQuickPick: async (items, options) => provider()?.showQuickPick(items, options),
+      showConfirm: async (message) => (await provider()?.showConfirm(message)) ?? false,
+      registerSidebarView: (id, component) =>
+        provider()?.registerSidebarView(id, component) ?? createDisposable(() => {}),
+      registerToolbarButton: (button, handler) =>
+        provider()?.registerToolbarButton(button, handler) ?? createDisposable(() => {}),
     };
   }
 
@@ -873,9 +814,3 @@ export type PluginEventListener = (event: PluginEvent) => void;
 export function createPluginManager(config?: PluginManagerConfig): PluginManager {
   return new PluginManager(config);
 }
-
-// ================================
-// 导出
-// ================================
-
-export { PluginManager as default };
