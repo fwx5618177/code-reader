@@ -4,7 +4,7 @@
 // ================================
 
 import { describe, expect, it } from 'vitest';
-import { parseCommonMark, BlockType } from '../src/markdown';
+import { parseCommonMark, BlockType } from '../src';
 
 /** CommonMark 0.31.2 规范用例 81、82、93、138、145、215、278、347 */
 const FORMERLY_HANGING = [

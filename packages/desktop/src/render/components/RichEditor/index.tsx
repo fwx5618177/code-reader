@@ -80,6 +80,7 @@ import { createWikiEmbedView } from './WikiEmbedView';
 import { createMediaImageView } from './MediaImageView';
 import { DocumentPreview } from './DocumentPreview';
 import { LatexEditor } from './LatexEditor';
+import { resolveDocumentType } from '../../lib/documents/file-types';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
 import { pluginService } from '../../services/pluginService';
 import { createBlockKeymap } from '../../lib/editor/block-commands';
@@ -745,38 +746,11 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   /** 大文档启用分块渲染（视口外的块跳过布局） */
   const [chunked, setChunked] = useState(false);
 
-  // 判断是否为 LaTeX 文件（根据文件类型、文件名和内容特征）
-  const isTexFile = useMemo(() => {
-    // 根据文件类型判断
-    if (fileType === 'latex') return true;
-
-    // 根据文件名扩展名判断
-    if (fileName) {
-      const ext = fileName.toLowerCase();
-      if (ext.endsWith('.tex') || ext.endsWith('.latex') || ext.endsWith('.ltx')) {
-        return true;
-      }
-    }
-
-    // 根据内容特征判断（检测 LaTeX 特有的命令）
-    if (initialContent) {
-      const latexPatterns = [
-        /\\documentclass\s*[{[]/,
-        /\\begin\s*\{document\}/,
-        /\\usepackage\s*[{[]/,
-        /\\section\s*\{/,
-        /\\maketitle/,
-      ];
-
-      for (const pattern of latexPatterns) {
-        if (pattern.test(initialContent)) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }, [fileType, fileName, initialContent]);
+  // 是否按 LaTeX 渲染：文件类型为 LaTeX，或文件名 / 内容判定为 LaTeX
+  const isTexFile = useMemo(
+    () => fileType === 'latex' || resolveDocumentType(fileName, initialContent) === 'latex',
+    [fileType, fileName, initialContent]
+  );
 
   // Initialize ProseMirror
   // 注意：LaTeX 文件的渲染在 JSX 返回部分处理，不在这里提前返回

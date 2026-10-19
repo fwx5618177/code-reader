@@ -1,5 +1,5 @@
 // ================================
-// @code-reader/parser - Markdown 模块
+// @code-reader/markdown-parser - CommonMark 解析
 // 入口文件
 // ================================
 

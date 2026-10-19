@@ -27,6 +27,7 @@ export {
   getDefaultTemplate,
   getCreatableTypes,
   inferTypeFromContent,
+  resolveDocumentType,
   getFileTypeDisplayInfo,
   getAllSupportedExtensions,
   isSupportedFile,

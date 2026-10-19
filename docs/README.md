@@ -36,7 +36,8 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `diff-algorithm` | 文本/二进制差分、编辑距离、模糊匹配、Histogram 行差分，含差分缓存与 Worker 支持 |
 | `diff-algorithm-extras` | desktop 未使用的差分算法：rsync / 滚动哈希、Patience、LCS、VCDIFF / BSDiff、CRDT 接口、流式哈希与差分、独立的 diff-match-patch Worker（与核心库解耦，按需引入） |
 | `syntax-parser` | 增量语法解析：手写 Lezer 风格 LaTeX 解析器、LaTeX 块扫描器、语言注册表与高亮引擎、AST 缓存（desktop 用其 LaTeX 解析器做语法诊断、折叠与大纲） |
-| `format-parser` | 内容格式解析：自研 CommonMark/GFM Markdown 解析器、LaTeX 解析器（交叉引用索引、文档元数据）、增量编辑解析（desktop 用其 LaTeX 解析器做交叉引用检查） |
+| `format-parser` | LaTeX 解析（交叉引用索引、文档元数据）与按内容识别格式（desktop 用其做交叉引用检查与无扩展名文档的格式判断） |
+| `markdown-parser` | 零依赖的 CommonMark / GFM 解析器与增量解析（由 format-parser 拆出，desktop 暂不接入，目标是替代 markdown-it） |
 | `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）、编辑器适配器（CodeMirror / ProseMirror） |
 | `fuzzy-match-algorithm` | 补全与拼写建议的核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
 | `plugin-system` | 插件基础库：贡献点类型、生命周期编排（版本范围、依赖解析、激活事件）、扩展点注册表（desktop 全部使用，运行时为 `desktop/src/render/lib/plugins` 的 Worker 沙箱） |

@@ -1,0 +1,52 @@
+// ================================
+// @code-reader/markdown-parser
+// 零依赖的 Markdown 解析：CommonMark / GFM 解析器（块级与行内节点都带行列与偏移），
+// 以及面向大文件的逐行 token 增量解析
+// ================================
+
+export {
+  CommonMarkParser,
+  createCommonMarkParser,
+  parseCommonMark,
+  parseInline,
+  InlineType,
+  BlockType,
+} from './commonmark';
+
+export type {
+  ParseResult,
+  ParseWarning,
+  Position,
+  InlineNode,
+  BlockNode,
+  TableAlignment,
+  TableCellNode,
+  TableRowNode,
+  TableNode,
+  CommonMarkOptions,
+} from './commonmark';
+
+export {
+  IncrementalParser,
+  createIncrementalParser,
+  parseMarkdown,
+  parseMarkdownStream,
+  ParserState,
+  TokenType,
+  IncrementalEditParser,
+  createIncrementalEditParser,
+  parseWithEdit,
+  createEditOperation,
+  EditOperationType,
+} from './incremental';
+
+export type {
+  Token,
+  IncrementalParseResult,
+  ParseError,
+  ParserConfig,
+  EditOperation,
+  AffectedRange,
+  IncrementalEditParseResult,
+  IncrementalEditParserConfig,
+} from './incremental';

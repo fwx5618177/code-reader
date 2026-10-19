@@ -27,6 +27,8 @@
     "build:format-parser": "pnpm --filter @code-reader/format-parser build",
     "watch:format-parser": "pnpm --filter @code-reader/format-parser dev",
     "test:format-parser": "pnpm --filter @code-reader/format-parser test",
+    "build:markdown-parser": "pnpm --filter @code-reader/markdown-parser build",
+    "test:markdown-parser": "pnpm --filter @code-reader/markdown-parser test",
     "build:syntax-parser": "pnpm --filter @code-reader/syntax-parser build",
     "watch:syntax-parser": "pnpm --filter @code-reader/syntax-parser dev",
     "test:syntax-parser": "pnpm --filter @code-reader/syntax-parser test",

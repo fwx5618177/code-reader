@@ -30,20 +30,21 @@
 │ 可复用子包 packages/*（与 UI 无关的算法与服务）              │
 │  text-buffer  diff-algorithm  search-service                  │
 │  autocomplete-service  fuzzy-match-algorithm                  │
-│  syntax-parser  format-parser  plugin-system                  │
+│  syntax-parser  format-parser  markdown-parser  plugin-system │
 │  diff-algorithm-extras  plugin-system-extras                  │
 │  （*-extras：桌面端暂未使用、保持可用的部分，按需引入）       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；LaTeX 渲染链路（`lib/latex/parser.ts` 起）只依赖 `@code-reader/text-buffer`，LaTeX 诊断 / 折叠 / 大纲（`lib/latex/analysis.ts`）使用 `syntax-parser` 与 `format-parser`，LaTeX 源码编辑器的注释与自动配对取自 `syntax-parser` 的语言配置；桌面端插件系统 `lib/plugins` 使用 `plugin-system` 的贡献点类型、`lifecycle` 模块与扩展点注册表；命令面板用 `fuzzy-match-algorithm` 排序与高亮。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
+依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；LaTeX 渲染链路（`lib/latex/parser.ts` 起）只依赖 `@code-reader/text-buffer`，LaTeX 诊断 / 折叠 / 大纲（`lib/latex/analysis.ts`）使用 `syntax-parser` 与 `format-parser`，按内容识别文档格式用 `format-parser` 的 `isLaTeXDocument`，LaTeX 源码编辑器的注释与自动配对取自 `syntax-parser` 的语言配置；桌面端插件系统 `lib/plugins` 使用 `plugin-system` 的贡献点类型、`lifecycle` 模块与扩展点注册表；命令面板用 `fuzzy-match-algorithm` 排序与高亮。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
 
 **子包接入对照**（桌面端的实际导入可用 `packages/desktop/.e2e` 外的脚本统计：遍历 `src` 中来自 `@code-reader/*` 的 import）：
 
 | 子包 | 桌面端用到的能力 → 接入位置 | 未接入部分与处理 |
 |------|------|------|
 | `syntax-parser` | `LatexLezerParser` 语法诊断与 AST（折叠 / 大纲）→ `lib/latex/analysis.ts`（`LatexAnalyzer` 按块增量调用）；`LATEX_LANGUAGE_CONFIGURATION`（`%` 行注释、自动配对）→ `lib/latex/codemirror-latex.ts` | 语言注册表 / 高亮引擎（编辑器高亮由 CodeMirror StreamLanguage 承担）、`LezerIncrementalParser`（包内 `parseIncremental` 实际整篇重解析）、`ASTCache`（缓存整棵 `ASTRoot` 与节点表；按块增量分析缓存的是每块的分析摘要，改用自己的代际缓存）、正则块扫描器（与 `block-segmenter` 重叠）。保留在包内，与正在用的解析器同属一个模型，尚未拆分 |
-| `format-parser` | LaTeX 交叉引用索引与文档元数据 → `analysis.ts` | Markdown 解析（CommonMark / 增量 / 流式）：规范一致性 58.9%，不接入编辑器，调研与路线见 [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md)；`isLaTeXDocument` 对含代码块的 Markdown 会误判，不接入 |
+| `format-parser` | LaTeX 交叉引用索引与文档元数据 → `analysis.ts`；`isLaTeXDocument`（先去掉代码块、行内代码、公式与注释再判断）→ `lib/documents/file-types.ts` 的 `resolveDocumentType`：文件名有已知扩展名时以扩展名为准，否则按内容决定 RichEditor 用 LaTeX 还是 Markdown 渲染（此前两处各写一套正则，`.md` 笔记里贴了 `\section{` 代码块会被当成 LaTeX） | 统一入口 `parse` / `autoParse` 的 Markdown 模式由 `markdown-parser` 提供 |
+| `markdown-parser` | 桌面端不引用（编辑器用 markdown-it + prosemirror-markdown） | 由 `format-parser` 拆出的 CommonMark / GFM 解析器与逐行 token 增量解析，零依赖，目标是成长为 markdown-it 的替代品；规范一致性与路线见 [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) |
 | `plugin-system` | 贡献点类型（含主题、语言）、`lifecycle`（版本范围 / 依赖 / 激活事件，含 `onStartupFinished` 与 `matchedActivationEvent`）→ `lib/plugins/*`、`services/pluginService.ts`；`ExtensionRegistry` → `lib/plugins/extension-registry.ts` | 文件类型贡献点未开放。同进程的 `PluginManager` / `PluginSandbox` 已迁到 `plugin-system-extras`（桌面端保留每插件独占 Worker 的隔离） |
 | `plugin-system-extras` | 桌面端不引用 | 同进程插件管理器（依赖先激活、循环依赖报错、激活超时）与插件沙箱（按 `allowedAPIs` / `allowCommands` 拒绝未授权 API、带超时执行）。供插件与宿主同线程的场景（命令行工具、测试、服务端）单独引入，有行为测试 |
 | `fuzzy-match-algorithm` | `damerauLevenshteinDistance` → 拼写建议；`fuzzyScore` → 命令面板排序与高亮 | `RadixTree` 与 Levenshtein 变体由 `autocomplete-service` 内部使用；全包已有行为测试（前缀搜索丢字符、模糊搜索滤掉拼写错误两处缺陷已修复） |

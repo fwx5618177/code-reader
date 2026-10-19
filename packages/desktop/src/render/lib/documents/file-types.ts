@@ -3,6 +3,8 @@
 // 支持多种文档类型（Markdown、LaTeX 等）
 // ================================
 
+import { isLaTeXDocument } from '@code-reader/format-parser';
+
 // ================================
 // 类型定义
 // ================================
@@ -373,33 +375,19 @@ export function getCreatableTypes(): FileTypeConfig[] {
 }
 
 /**
- * 根据内容推断文件类型
+ * 根据内容推断文件类型：围栏代码块、行内代码、公式里的 LaTeX 源码不算（见 format-parser 的 isLaTeXDocument）
  */
 export function inferTypeFromContent(content: string): DocumentTypeId {
-  const trimmed = content.trim();
+  return isLaTeXDocument(content) ? 'latex' : 'markdown';
+}
 
-  // 检测 LaTeX
-  if (
-    trimmed.startsWith('\\documentclass') ||
-    trimmed.startsWith('\\begin{document}') ||
-    /\\(section|chapter|subsection)\{/.test(trimmed)
-  ) {
-    return 'latex';
-  }
-
-  // 检测 Markdown
-  if (
-    /^#{1,6}\s/.test(trimmed) ||
-    /^\*{1,2}[^*]+\*{1,2}/.test(trimmed) ||
-    /^\[.+\]\(.+\)/.test(trimmed) ||
-    /^```/.test(trimmed) ||
-    /^[-*+]\s/.test(trimmed)
-  ) {
-    return 'markdown';
-  }
-
-  // 默认返回 Markdown
-  return 'markdown';
+/**
+ * 判断文档类型：文件名带已知扩展名时以扩展名为准（.md 笔记里贴的 LaTeX 代码不改变渲染方式），
+ * 否则按内容推断
+ */
+export function resolveDocumentType(fileName: string | undefined, content: string): DocumentTypeId {
+  const byName = fileName ? fileTypeRegistry.getByFilename(fileName) : undefined;
+  return byName ? byName.id : inferTypeFromContent(content);
 }
 
 /**
