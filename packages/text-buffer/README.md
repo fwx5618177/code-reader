@@ -10,6 +10,8 @@
 - **Rope** - Xi Editor / Lapce 使用，适合超大文件
 - **Gap Buffer** - Emacs 使用，适合局部密集编辑
 
+桌面端的 LaTeX 文档模型（`desktop/src/render/lib/latex/latex-document.ts`）用 `createAutoBuffer` 存放源码，编辑以批量变更（变更前坐标）应用。三种实现都有与普通字符串逐步对照的随机编辑测试（`__tests__/text-buffer.test.ts`）。
+
 ## 安装
 
 ```bash
@@ -58,7 +60,7 @@ console.log(`行 ${position.line}, 列 ${position.column}`);
 | 数据结构 | 插入/删除 | 随机访问 | 内存效率 | 适用场景 |
 |---------|----------|---------|---------|---------|
 | Piece Table | O(log n) | O(n) 平均 | 高 | 频繁编辑、撤销/重做 |
-| Rope | O(log n) | O(log n) | 中 | 超大文件（> 10MB）、并行处理 |
+| Rope | O(log n) | O(log n) | 中 | 超大文件（超过 1000 万字符）、并行处理 |
 | Gap Buffer | O(1) 局部 | O(1) | 低 | 局部密集编辑、简单场景 |
 
 ### 自动选择策略
@@ -68,8 +70,8 @@ import { selectBufferType, createAutoBuffer } from '@code-reader/text-buffer';
 
 // 根据文件大小自动选择
 const bufferType = selectBufferType(fileContent.length);
-// > 10MB: 'rope'
-// <= 10MB: 'piece-table'
+// 超过 1000 万字符（string.length）: 'rope'
+// 其余: 'piece-table'
 
 // 或直接使用自动缓冲区
 const buffer = createAutoBuffer(fileContent);
@@ -178,7 +180,7 @@ console.log(newTable.toString()); // "Hello, beautiful World!"
 ```typescript
 import { Rope, createRope } from '@code-reader/text-buffer';
 
-const rope = createRope(hugeFileContent); // > 10MB
+const rope = createRope(hugeFileContent); // 超过 1000 万字符
 const newRope = rope.insert(1000000, 'inserted text');
 ```
 

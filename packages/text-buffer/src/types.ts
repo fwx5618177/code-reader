@@ -157,7 +157,7 @@ export interface BufferPerformanceProfile {
   deleteComplexity: 'O(1)' | 'O(log n)' | 'O(n)';
   /** 随机访问复杂度 */
   accessComplexity: 'O(1)' | 'O(log n)' | 'O(n)';
-  /** 适合的文件大小阈值（字节） */
+  /** 适合的内容长度范围（UTF-16 码元） */
   suitableForSize: {
     min: number;
     max: number;

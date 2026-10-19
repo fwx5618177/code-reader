@@ -55,7 +55,7 @@
 | `search-service` | `SearchIndex` → 写作全文搜索 | `FileSearcher`（逐行正则 / 全词 / 大小写，带行号与上下文，经 `IFileProvider` 读内容）：可用于全局搜索的“精确查找”，需要笔记正文的内容来源与搜索面板的模式切换，待做；中文 / 代码预设索引 |
 | `autocomplete-service` | `AutocompleteService` + `createCodeProviders` + `CodeMirrorAdapter` → 代码块补全（只注册代码片段，按代码块语言过滤，片段按 CodeMirror snippet 插入、Tab 跳字段）；`EmojiProvider` → Markdown 编辑器的 `:emoji` 补全（`lib/editor/prosemirror-autocomplete.ts`，替换了桌面端原来 20 个表情的硬编码表，可按别名与中文描述匹配） | 修复：服务初始化时用空上下文预载提供者结果，导致 Python 代码块出现 JavaScript 片段、代码里出现 Markdown 标题；缓存键只有查询词；`isIncomplete` 永远为假；片段 `$1` 原样插入。有行为测试 |
 | `autocomplete-service-extras` | 桌面端不引用 | ProseMirror 补全适配器（桌面端 Markdown 编辑器用自己的补全插件：斜杠菜单、`[[` 双链、结构化插入）与预设工厂（全部内置提供者的服务、Markdown / 代码编辑器的 CodeMirror 扩展）。有行为测试 |
-| `text-buffer` | `createTextBuffer` / `selectBufferType` → LaTeX 文档模型 | `createAutoBuffer`、性能档案与内部配置类型 |
+| `text-buffer` | `createAutoBuffer` → LaTeX 文档模型（`lib/latex/latex-document.ts`，此前为测 UTF-8 字节数把整篇源码复制进 `Blob` 再选类型，现在按 `string.length` 选择） | `GapBuffer`、`recommendBufferType`、性能档案：按使用模式选型的接口，保持导出。三种实现有与字符串逐步对照的随机编辑测试 |
 
 ## 2. 主进程
 

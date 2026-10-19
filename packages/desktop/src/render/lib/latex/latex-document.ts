@@ -6,8 +6,7 @@
 // ================================
 
 import {
-  createTextBuffer,
-  selectBufferType,
+  createAutoBuffer,
   type ITextBuffer,
   type TextChange,
   type TextChangeSet,
@@ -27,10 +26,8 @@ export class LatexDocument {
   private buffer: ITextBuffer;
 
   constructor(content: string) {
-    this.buffer = createTextBuffer({
-      type: selectBufferType(new Blob([content]).size),
-      initialContent: content,
-    });
+    // 按长度选择 Piece Table 或 Rope（超过 1000 万字符）
+    this.buffer = createAutoBuffer(content);
   }
 
   /**

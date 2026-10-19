@@ -63,6 +63,9 @@ import { GapBuffer, createGapBuffer } from './gap-buffer';
 // 性能特征配置
 // ================================
 
+/** 超过这个长度（UTF-16 码元，即 string.length）使用 Rope */
+const ROPE_THRESHOLD = 10 * 1024 * 1024;
+
 /** 各缓冲区类型的性能特征 */
 export const BUFFER_PROFILES: Record<TextBufferType, BufferPerformanceProfile> = {
   'piece-table': {
@@ -72,7 +75,7 @@ export const BUFFER_PROFILES: Record<TextBufferType, BufferPerformanceProfile> =
     accessComplexity: 'O(n)',
     suitableForSize: {
       min: 0,
-      max: 10 * 1024 * 1024, // 10MB
+      max: ROPE_THRESHOLD,
     },
     suitableForPattern: ['frequent-edit', 'multi-cursor'],
     description: 'VS Code 使用，适合频繁编辑场景，支持高效撤销/重做',
@@ -83,7 +86,7 @@ export const BUFFER_PROFILES: Record<TextBufferType, BufferPerformanceProfile> =
     deleteComplexity: 'O(log n)',
     accessComplexity: 'O(log n)',
     suitableForSize: {
-      min: 10 * 1024 * 1024, // 10MB
+      min: ROPE_THRESHOLD,
       max: Infinity,
     },
     suitableForPattern: ['large-file'],
@@ -96,7 +99,7 @@ export const BUFFER_PROFILES: Record<TextBufferType, BufferPerformanceProfile> =
     accessComplexity: 'O(1)',
     suitableForSize: {
       min: 0,
-      max: 1 * 1024 * 1024, // 1MB
+      max: 1024 * 1024,
     },
     suitableForPattern: ['local-edit'],
     description: 'Emacs 使用，适合局部密集编辑，简单高效',
@@ -108,13 +111,13 @@ export const BUFFER_PROFILES: Record<TextBufferType, BufferPerformanceProfile> =
 // ================================
 
 /**
- * 根据文件大小自动选择最佳缓冲区类型
- * @param size 文件大小（字节）
+ * 根据内容长度自动选择缓冲区类型
+ * @param length 内容长度（UTF-16 码元，即 string.length；不需要先编码成字节）
  * @returns 推荐的缓冲区类型
  */
-export function selectBufferType(size: number): TextBufferType {
+export function selectBufferType(length: number): TextBufferType {
   // 超大文件使用 Rope
-  if (size > 10 * 1024 * 1024) {
+  if (length > ROPE_THRESHOLD) {
     return 'rope';
   }
   // 默认使用 Piece Table
@@ -171,15 +174,15 @@ export function getBufferProfile(type: TextBufferType): BufferPerformanceProfile
 /**
  * 根据使用模式推荐缓冲区类型
  * @param pattern 使用模式
- * @param size 文件大小（字节）
+ * @param length 内容长度（UTF-16 码元）
  * @returns 推荐的缓冲区类型
  */
 export function recommendBufferType(
   pattern: 'frequent-edit' | 'large-file' | 'local-edit' | 'multi-cursor',
-  size: number
+  length: number
 ): TextBufferType {
   // 超大文件强制使用 Rope
-  if (size > 10 * 1024 * 1024) {
+  if (length > ROPE_THRESHOLD) {
     return 'rope';
   }
 
