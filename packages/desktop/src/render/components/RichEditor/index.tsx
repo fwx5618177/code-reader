@@ -43,6 +43,7 @@ import {
   type BlockIdSlot,
   type ContentFormat,
   type WikiLinkParts,
+  type RevealRequest,
 } from '../../lib/markdown';
 import { normalizeLinkTarget, useLinkResolver } from '../../lib/links';
 import {
@@ -144,11 +145,8 @@ export interface RichEditorProps {
   linkTargets?: string[];
   /** 点击双向链接（参数为 目标#标题 形式的引用） */
   onWikiLinkClick?: (target: string) => void;
-  /**
-   * 滚动到指定标题或块（heading 为 ^id 时是块；occurrence 为同名标题中的第几个，从 0 计，默认第一个）
-   * 每个请求对象只执行一次
-   */
-  revealHeading?: { heading: string; occurrence?: number } | null;
+  /** 滚动到指定标题、块或源码位置（见 RevealRequest），每个请求对象只执行一次 */
+  revealHeading?: RevealRequest | null;
   /** [[文档#^ 补全选中其他文档中没有 ID 的块：在写入位置写入块 ID */
   onAssignBlockId?: (target: string, slot: BlockIdSlot, id: string) => void;
   /**
@@ -583,7 +581,20 @@ const StatusBar: React.FC<StatusBarProps> = ({ wordCount, charCount }) => (
  */
 function revealLinkTargetInView(view: EditorView, subpath: string, occurrence = 0): void {
   const pos = findLinkTargetInDoc(view.state.doc, subpath, occurrence);
-  if (pos === null) return;
+  if (pos !== null) revealNodeAt(view, pos);
+}
+
+/** 定位到第 index 个顶层块（超出时取最后一个） */
+function revealTopLevelBlock(view: EditorView, index: number): void {
+  const { doc } = view.state;
+  if (doc.childCount === 0) return;
+  let pos = 0;
+  for (let i = 0; i < Math.min(index, doc.childCount - 1); i++) pos += doc.child(i).nodeSize;
+  revealNodeAt(view, pos);
+}
+
+/** 光标移到 pos 处的节点内，滚动到顶部并闪烁提示 */
+function revealNodeAt(view: EditorView, pos: number): void {
   view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos + 1))));
   view.focus();
   (view.nodeDOM(pos) as HTMLElement | null)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -1042,7 +1053,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     if (!view || !revealHeading || revealedHeadingRequests.has(revealHeading)) return;
     const frame = requestAnimationFrame(() => {
       revealedHeadingRequests.add(revealHeading);
-      revealLinkTargetInView(view, revealHeading.heading, revealHeading.occurrence);
+      if (revealHeading.location) revealTopLevelBlock(view, revealHeading.location.block);
+      else revealLinkTargetInView(view, revealHeading.heading, revealHeading.occurrence);
     });
     return () => cancelAnimationFrame(frame);
   }, [revealHeading]);

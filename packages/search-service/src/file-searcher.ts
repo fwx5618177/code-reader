@@ -139,12 +139,13 @@ export interface IFileProvider {
   getFileName(path: string): string;
 }
 
+/** 填入默认值后的搜索选项（回调与取消信号除外） */
+type ResolvedOptions = Required<Omit<FileSearchOptions, 'onProgress' | 'onFileMatch' | 'abortSignal'>>;
+
 /**
  * 默认搜索选项
  */
-const DEFAULT_OPTIONS: Required<
-  Omit<FileSearchOptions, 'onProgress' | 'onFileMatch' | 'abortSignal'>
-> = {
+const DEFAULT_OPTIONS: ResolvedOptions = {
   caseSensitive: false,
   wholeWord: false,
   useRegex: false,
@@ -234,17 +235,14 @@ export class FileSearcher {
       opts.excludePatterns
     );
 
-    // 限制文件数量
-    const filesToSearch = files.slice(0, opts.maxFiles);
-    const totalFiles = filesToSearch.length;
+    const totalFiles = files.length;
 
-    // 并行搜索文件
-    const concurrency = Math.min(opts.concurrency, filesToSearch.length);
-    const chunks = this.chunkArray(filesToSearch, concurrency);
+    // 每批并行搜索 concurrency 个文件；匹配文件数达到 maxFiles 后停止
+    const concurrency = Math.max(1, Math.min(opts.concurrency, files.length));
+    const chunks = this.chunkArray(files, concurrency);
 
     for (const chunk of chunks) {
-      // 检查取消
-      if (opts.abortSignal?.aborted) {
+      if (opts.abortSignal?.aborted || results.length >= opts.maxFiles) {
         break;
       }
 
@@ -283,7 +281,7 @@ export class FileSearcher {
 
       // 收集结果
       for (const result of chunkResults) {
-        if (result) {
+        if (result && results.length < opts.maxFiles) {
           results.push(result);
         }
       }
@@ -302,56 +300,23 @@ export class FileSearcher {
     filePath: string,
     fileSize: number,
     matcher: IMatcher,
-    opts: Required<Omit<FileSearchOptions, 'onProgress' | 'onFileMatch' | 'abortSignal'>>
+    opts: ResolvedOptions
   ): Promise<FileMatch | null> {
     const startTime = performance.now();
-
-    try {
-      const content = await this.fileProvider.readFile(filePath);
-      const lines = content.split('\n');
-      const matches: LineMatch[] = [];
-
-      for (let i = 0; i < lines.length && matches.length < opts.maxMatchesPerFile; i++) {
-        const line = lines[i];
-        const positions = matcher.match(line);
-
-        if (positions.length > 0) {
-          const lineMatch: LineMatch = {
-            lineNumber: i + 1,
-            lineContent: line,
-            positions,
-          };
-
-          // 添加上下文
-          if (opts.contextLines > 0) {
-            const beforeStart = Math.max(0, i - opts.contextLines);
-            const afterEnd = Math.min(lines.length, i + opts.contextLines + 1);
-
-            lineMatch.contextBefore = lines.slice(beforeStart, i);
-            lineMatch.contextAfter = lines.slice(i + 1, afterEnd);
-          }
-
-          matches.push(lineMatch);
-        }
-      }
-
-      if (matches.length === 0) {
-        return null;
-      }
-
-      const endTime = performance.now();
-
-      return {
-        path: filePath,
-        filename: this.fileProvider.getFileName(filePath),
-        matches,
-        matchCount: matches.reduce((sum, m) => sum + m.positions.length, 0),
-        fileSize,
-        searchTimeMs: endTime - startTime,
-      };
-    } catch {
+    const content = await this.fileProvider.readFile(filePath);
+    const matches = matchLines(content, matcher, opts);
+    if (matches.length === 0) {
       return null;
     }
+
+    return {
+      path: filePath,
+      filename: this.fileProvider.getFileName(filePath),
+      matches,
+      matchCount: matches.reduce((sum, m) => sum + m.positions.length, 0),
+      fileSize,
+      searchTimeMs: performance.now() - startTime,
+    };
   }
 
   /**
@@ -359,34 +324,7 @@ export class FileSearcher {
    */
   searchContent(content: string, query: string, options: FileSearchOptions = {}): LineMatch[] {
     const opts = { ...DEFAULT_OPTIONS, ...options };
-    const matcher = this.createMatcher(query, opts);
-    const lines = content.split('\n');
-    const matches: LineMatch[] = [];
-
-    for (let i = 0; i < lines.length && matches.length < opts.maxMatchesPerFile; i++) {
-      const line = lines[i];
-      const positions = matcher.match(line);
-
-      if (positions.length > 0) {
-        const lineMatch: LineMatch = {
-          lineNumber: i + 1,
-          lineContent: line,
-          positions,
-        };
-
-        if (opts.contextLines > 0) {
-          const beforeStart = Math.max(0, i - opts.contextLines);
-          const afterEnd = Math.min(lines.length, i + opts.contextLines + 1);
-
-          lineMatch.contextBefore = lines.slice(beforeStart, i);
-          lineMatch.contextAfter = lines.slice(i + 1, afterEnd);
-        }
-
-        matches.push(lineMatch);
-      }
-    }
-
-    return matches;
+    return matchLines(content, this.createMatcher(query, opts), opts);
   }
 
   /**
@@ -429,7 +367,7 @@ export class FileSearcher {
     content: string,
     matcher: IMatcher,
     replacement: string,
-    _opts: Required<Omit<FileSearchOptions, 'onProgress' | 'onFileMatch' | 'abortSignal'>>
+    _opts: ResolvedOptions
   ): { newContent: string; count: number } {
     const lines = content.split('\n');
     let count = 0;
@@ -466,10 +404,7 @@ export class FileSearcher {
   /**
    * 创建匹配器
    */
-  private createMatcher(
-    query: string,
-    opts: Required<Omit<FileSearchOptions, 'onProgress' | 'onFileMatch' | 'abortSignal'>>
-  ): IMatcher {
+  private createMatcher(query: string, opts: ResolvedOptions): IMatcher {
     if (opts.useRegex) {
       return new RegexMatcher(query, opts.caseSensitive);
     }
@@ -505,6 +440,32 @@ interface IMatcher {
 }
 
 /**
+ * 逐行匹配，带上下文行；每个文件最多 maxMatchesPerFile 行
+ */
+function matchLines(content: string, matcher: IMatcher, opts: ResolvedOptions): LineMatch[] {
+  const lines = content.split('\n');
+  const matches: LineMatch[] = [];
+
+  for (let i = 0; i < lines.length && matches.length < opts.maxMatchesPerFile; i++) {
+    const line = lines[i];
+    const positions = matcher.match(line);
+    if (positions.length === 0) continue;
+
+    const lineMatch: LineMatch = { lineNumber: i + 1, lineContent: line, positions };
+    if (opts.contextLines > 0) {
+      lineMatch.contextBefore = lines.slice(Math.max(0, i - opts.contextLines), i);
+      lineMatch.contextAfter = lines.slice(i + 1, Math.min(lines.length, i + opts.contextLines + 1));
+    }
+    matches.push(lineMatch);
+  }
+
+  return matches;
+}
+
+/** 全词匹配的“词字符”：Unicode 字母、数字与下划线 */
+const WORD_CHAR = /[\p{L}\p{N}_]/u;
+
+/**
  * 字面量匹配器
  */
 class LiteralMatcher implements IMatcher {
@@ -518,38 +479,38 @@ class LiteralMatcher implements IMatcher {
     this.wholeWord = wholeWord;
   }
 
+  /** 不重叠的匹配（与替换一致：在 aaa 中找 aa 只有一处） */
   match(text: string): MatchPosition[] {
     const positions: MatchPosition[] = [];
+    if (this.query.length === 0) return positions;
     const searchText = this.caseSensitive ? text : text.toLowerCase();
 
     let pos = 0;
     while ((pos = searchText.indexOf(this.query, pos)) !== -1) {
-      // 检查全词匹配
-      if (this.wholeWord) {
-        const before = pos > 0 ? searchText[pos - 1] : ' ';
-        const after =
-          pos + this.query.length < searchText.length ? searchText[pos + this.query.length] : ' ';
-
-        if (this.isWordChar(before) || this.isWordChar(after)) {
-          pos++;
-          continue;
-        }
+      const end = pos + this.query.length;
+      if (this.wholeWord && (WORD_CHAR.test(searchText[pos - 1] ?? ' ') || WORD_CHAR.test(searchText[end] ?? ' '))) {
+        pos++;
+        continue;
       }
 
-      positions.push({
-        start: pos,
-        end: pos + this.query.length,
-        matchedText: text.substring(pos, pos + this.query.length),
-      });
-
-      pos++;
+      positions.push({ start: pos, end, matchedText: text.substring(pos, end) });
+      pos = end;
     }
 
     return positions;
   }
+}
 
-  private isWordChar(char: string): boolean {
-    return /\w/.test(char);
+/**
+ * 正则表达式无效（search / searchContent 会抛出，调用方据此提示用户）
+ */
+export class InvalidSearchPatternError extends Error {
+  constructor(
+    readonly pattern: string,
+    reason: string
+  ) {
+    super(`无效的正则表达式：${reason}`);
+    this.name = 'InvalidSearchPatternError';
   }
 }
 
@@ -560,7 +521,11 @@ class RegexMatcher implements IMatcher {
   private readonly regex: RegExp;
 
   constructor(pattern: string, caseSensitive: boolean) {
-    this.regex = new RegExp(pattern, caseSensitive ? 'g' : 'gi');
+    try {
+      this.regex = new RegExp(pattern, caseSensitive ? 'g' : 'gi');
+    } catch (error) {
+      throw new InvalidSearchPatternError(pattern, error instanceof Error ? error.message : String(error));
+    }
   }
 
   match(text: string): MatchPosition[] {
@@ -728,10 +693,15 @@ export class MemoryFileProvider implements IFileProvider {
   }
 
   private matchPattern(path: string, pattern: string): boolean {
-    // 简化的 glob 匹配
-    const regexPattern = pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*').replace(/\?/g, '.');
+    // 简化的 glob：** 跨目录，* 不跨目录，? 单个字符；其余字符按字面匹配。
+    // 与 .gitignore 相同，不含 / 的模式（如 *.min.js）匹配任意目录下的文件名
+    const target = pattern.includes('/') ? path : (path.split('/').pop() ?? path);
+    const regexPattern = pattern
+      .split(/(\*\*|\*|\?)/)
+      .map((part) => (part === '**' ? '.*' : part === '*' ? '[^/]*' : part === '?' ? '[^/]' : part.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
+      .join('');
 
-    return new RegExp(`^${regexPattern}$`).test(path);
+    return new RegExp(`^${regexPattern}$`).test(target);
   }
 }
 

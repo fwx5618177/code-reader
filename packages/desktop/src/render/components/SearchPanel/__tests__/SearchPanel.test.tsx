@@ -1,5 +1,5 @@
 // ================================
-// 全局搜索测试：结果合并分组、摘要高亮拆分、过期响应丢弃
+// 全局搜索测试：结果合并分组、摘要高亮拆分、过期响应丢弃、精确查找
 // ================================
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,10 +8,14 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { HybridSearchResult } from '../../../types/electron';
 import type { DocumentSearchResult } from '../../../lib/writing';
 import { mergeSearchResults, splitHighlights } from '../search-results';
+import { lineSegments } from '../exact-search';
 import SearchPanel from '..';
 
 const searchDocuments = vi.fn();
 vi.mock('../../../lib/writing', () => ({ useWritingService: () => ({ search: searchDocuments }) }));
+
+const databaseAll = vi.fn();
+vi.mock('../../../services/database', () => ({ databaseService: { all: (...args: unknown[]) => databaseAll(...args) } }));
 
 const doc = (id: string, title: string, snippet = ''): DocumentSearchResult => ({
   id,
@@ -110,12 +114,12 @@ describe('SearchPanel', () => {
     expect(screen.getByRole('group', { name: '知识条目' }).textContent).toContain('网页B');
 
     fireEvent.click(screen.getByText('网页B'));
-    expect(props.onOpenItem).toHaveBeenCalledWith('w1');
+    expect(props.onOpenItem).toHaveBeenCalledWith('w1', undefined);
     expect(props.onClose).toHaveBeenCalled();
 
     // 键盘：第一项为写作文档
     fireEvent.keyDown(screen.getByLabelText('搜索'), { key: 'Enter' });
-    expect(props.onOpenItem).toHaveBeenLastCalledWith('d1');
+    expect(props.onOpenItem).toHaveBeenLastCalledWith('d1', undefined);
   });
 
   it('知识库搜索失败时仍展示写作文档结果', async () => {
@@ -147,5 +151,60 @@ describe('SearchPanel', () => {
     await act(async () => resolveSlow([hit('old', 'webpage', '旧结果')]));
     expect(screen.queryByText('旧结果')).toBeNull();
     expect(screen.getByText('新结果')).toBeTruthy();
+  });
+
+  describe('精确查找', () => {
+    const ROWS = [
+      { id: 'n1', title: '笔记.md', type: 'note', content: '# 标题\n\nTODO: 第一处\n\n```js\nconst todo = 1;\n```' },
+      { id: 'w1', title: '剪藏', type: 'webpage', content: '网页正文 TODO' },
+      { id: 't1', title: '记录.txt', type: 'note', content: '一\n二 TODO' },
+    ];
+
+    async function exactSearchFor(query: string) {
+      fireEvent.click(screen.getByRole('tab', { name: '精确' }));
+      fireEvent.change(screen.getByLabelText('搜索'), { target: { value: query } });
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+    }
+
+    it('逐行列出命中，打开时带上源码行与顶层块；全文检索不运行', async () => {
+      databaseAll.mockResolvedValue(ROWS);
+      const props = renderPanel();
+      await exactSearchFor('todo');
+
+      expect(hybrid).not.toHaveBeenCalled();
+      const note = screen.getByRole('group', { name: '笔记' });
+      expect(note.querySelectorAll('[role="option"]')).toHaveLength(2);
+      expect(note.querySelector('mark')?.textContent).toBe('TODO');
+
+      fireEvent.click(screen.getByText('const', { exact: false }));
+      expect(props.onOpenItem).toHaveBeenCalledWith('n1', { line: 6, block: 2 });
+
+      // 纯文本笔记一行一段；键盘回车打开第一行命中
+      fireEvent.keyDown(screen.getByLabelText('搜索'), { key: 'Enter' });
+      expect(props.onOpenItem).toHaveBeenLastCalledWith('n1', { line: 3, block: 1 });
+      expect(screen.getByRole('group', { name: '记录' }).textContent).toContain('二 TODO');
+    });
+
+    it('区分大小写开关生效；无效正则显示错误提示', async () => {
+      databaseAll.mockResolvedValue(ROWS);
+      renderPanel();
+      await exactSearchFor('todo');
+      fireEvent.click(screen.getByRole('button', { name: '区分大小写' }));
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+      expect(screen.getAllByRole('option')).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole('button', { name: '正则表达式' }));
+      fireEvent.change(screen.getByLabelText('搜索'), { target: { value: '(todo' } });
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+      expect(screen.getByRole('alert').textContent).toContain('无效的正则表达式');
+    });
+
+    it('lineSegments：长行截取命中附近，命中部分高亮', () => {
+      const text = 'x'.repeat(300) + 'HIT' + 'y'.repeat(300);
+      const segments = lineSegments(text, [{ start: 300, end: 303, matchedText: 'HIT' }], 100);
+      expect(segments[0]).toEqual({ text: '…', highlight: false });
+      expect(segments.find((segment) => segment.highlight)?.text).toBe('HIT');
+      expect(segments.at(-1)).toEqual({ text: '…', highlight: false });
+    });
   });
 });

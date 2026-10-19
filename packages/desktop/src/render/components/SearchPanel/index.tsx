@@ -1,6 +1,8 @@
 // ================================
 // 全局搜索（⌘P）
-// 同时搜索写作文档与知识库条目，按组展示；检索见 useGlobalSearch
+// - 全文：同时搜索写作文档与知识库条目，按组展示
+// - 精确：在全部条目正文中逐行查找（区分大小写 / 全词 / 正则），列出命中行，打开后定位到该行
+// 检索见 useGlobalSearch
 // ================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,15 +10,32 @@ import { ArrowDown, ArrowUp, Clock, Filter, Search, X } from 'lucide-react';
 import type { KnowledgeItemType } from '../../types/knowledge';
 import { ITEM_TYPE_ICONS, ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
 import { SEARCH_GROUPS, type SearchHit } from './search-results';
-import { useGlobalSearch } from './useGlobalSearch';
+import { useExactSearch, useGlobalSearch } from './useGlobalSearch';
+import type { SourceLocation } from '../../lib/markdown';
+import { lineSegments, type ExactItemHit, type ExactLineHit, type ExactSearchOptions } from './exact-search';
 import { Snippet } from './Snippet';
 import styles from './SearchPanel.module.scss';
 
 interface SearchPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  /** 打开命中的条目：由调用方按条目类型决定进入写作、阅读还是知识库 */
-  onOpenItem: (id: string) => void;
+  /** 打开命中的条目：由调用方按条目类型决定进入写作、阅读还是知识库；精确查找带上命中行的位置 */
+  onOpenItem: (id: string, location?: SourceLocation) => void;
+}
+
+type SearchMode = 'fulltext' | 'exact';
+
+/** 精确查找的选项开关 */
+const EXACT_OPTIONS: ReadonlyArray<{ key: keyof ExactSearchOptions; label: string; title: string }> = [
+  { key: 'caseSensitive', label: 'Aa', title: '区分大小写' },
+  { key: 'wholeWord', label: 'ab', title: '全词匹配' },
+  { key: 'useRegex', label: '.*', title: '正则表达式' },
+];
+
+/** 精确查找的可选中项：一行命中及其所属条目 */
+interface ExactEntry {
+  item: ExactItemHit;
+  line: ExactLineHit;
 }
 
 /** 保留的最近搜索词数 */
@@ -30,11 +49,20 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
   const [typeFilter, setTypeFilter] = useState<KnowledgeItemType[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [mode, setMode] = useState<SearchMode>('fulltext');
+  const [exactOptions, setExactOptions] = useState<ExactSearchOptions>({
+    caseSensitive: false,
+    wholeWord: false,
+    useRegex: false,
+  });
 
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
-  const { groups, isLoading } = useGlobalSearch(query);
+  const exactMode = mode === 'exact';
+  const { groups, isLoading: fulltextLoading } = useGlobalSearch(exactMode ? '' : query);
+  const exact = useExactSearch(query, exactOptions, exactMode);
+  const isLoading = exactMode ? exact.isLoading : fulltextLoading;
 
   // 打开时聚焦并选中输入框
   useEffect(() => {
@@ -53,32 +81,44 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
   }, [groups, typeFilter]);
   const flatHits = useMemo(() => visibleGroups.flatMap((group) => group.hits), [visibleGroups]);
 
+  const exactItems = useMemo(
+    () => exact.result.items.filter((item) => typeFilter.length === 0 || typeFilter.includes(item.type)),
+    [exact.result.items, typeFilter]
+  );
+  const exactEntries = useMemo<ExactEntry[]>(
+    () => exactItems.flatMap((item) => item.lines.map((line) => ({ item, line }))),
+    [exactItems]
+  );
+  const optionCount = exactMode ? exactEntries.length : flatHits.length;
+
   useEffect(() => {
     setSelectedIndex(0);
-  }, [flatHits]);
+  }, [flatHits, exactEntries]);
 
   // 选中项滚动到可见区域
   useEffect(() => {
     resultsRef.current
       ?.querySelector('[aria-selected="true"]')
       ?.scrollIntoView({ block: 'nearest' });
-  }, [selectedIndex, flatHits]);
+  }, [selectedIndex, flatHits, exactEntries]);
 
-  const openHit = useCallback(
-    (hit: SearchHit) => {
+  const open = useCallback(
+    (id: string, location?: SourceLocation) => {
       const term = query.trim();
       setSearchHistory((prev) => [term, ...prev.filter((t) => t !== term)].slice(0, HISTORY_LIMIT));
-      onOpenItem(hit.id);
+      onOpenItem(id, location);
       onClose();
     },
     [query, onOpenItem, onClose]
   );
+  const openHit = useCallback((hit: SearchHit) => open(hit.id), [open]);
+  const openEntry = useCallback((entry: ExactEntry) => open(entry.item.id, entry.line.location), [open]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setSelectedIndex((prev) => Math.min(prev + 1, flatHits.length - 1));
+        setSelectedIndex((prev) => Math.min(prev + 1, optionCount - 1));
         break;
       case 'ArrowUp':
         e.preventDefault();
@@ -86,13 +126,21 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
         break;
       case 'Enter':
         e.preventDefault();
-        if (flatHits[selectedIndex]) openHit(flatHits[selectedIndex]);
+        if (exactMode) {
+          if (exactEntries[selectedIndex]) openEntry(exactEntries[selectedIndex]);
+        } else if (flatHits[selectedIndex]) {
+          openHit(flatHits[selectedIndex]);
+        }
         break;
       case 'Escape':
         e.preventDefault();
         onClose();
         break;
     }
+  };
+
+  const toggleExactOption = (key: keyof ExactSearchOptions) => {
+    setExactOptions((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const toggleTypeFilter = (type: KnowledgeItemType) => {
@@ -102,7 +150,15 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
   if (!isOpen) return null;
 
   const renderResults = () => {
-    if (isLoading && flatHits.length === 0) {
+    if (exactMode && exact.error) {
+      return (
+        <div className={styles.searchError} role="alert">
+          {exact.error}
+        </div>
+      );
+    }
+
+    if (isLoading && optionCount === 0) {
       return (
         <div className={styles.searchLoading}>
           <div className={styles.loadingSpinner} />
@@ -133,14 +189,16 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
             <div className={styles.emptyState}>
               <Search size={32} />
               <p>输入关键词开始搜索</p>
-              <span className={styles.hintText}>同时搜索写作文档与知识库条目</span>
+              <span className={styles.hintText}>
+                {exactMode ? '在全部条目正文中逐行查找，可区分大小写、全词或使用正则' : '同时搜索写作文档与知识库条目'}
+              </span>
             </div>
           )}
         </div>
       );
     }
 
-    if (flatHits.length === 0) {
+    if (optionCount === 0) {
       return (
         <div className={styles.searchEmpty}>
           <div className={styles.emptyState}>
@@ -153,6 +211,8 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
         </div>
       );
     }
+
+    if (exactMode) return renderExactResults();
 
     let offset = 0;
     return (
@@ -201,6 +261,48 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
     );
   };
 
+  const renderExactResults = () => {
+    let index = 0;
+    return (
+      <div className={styles.resultsList} role="listbox" aria-label="精确查找结果">
+        {exactItems.map((item) => {
+          const Icon = ITEM_TYPE_ICONS[item.type];
+          return (
+            <div key={item.id} role="group" aria-label={item.title}>
+              <div className={styles.exactItemHeader}>
+                <Icon size={14} />
+                <span>{item.title}</span>
+                <span className={styles.groupCount}>{item.matchCount}</span>
+              </div>
+              {item.lines.map((line) => {
+                const entryIndex = index++;
+                const selected = entryIndex === selectedIndex;
+                return (
+                  <div
+                    key={line.lineNumber}
+                    role="option"
+                    aria-selected={selected}
+                    className={`${styles.lineHit} ${selected ? styles.resultItemSelected : ''}`}
+                    onClick={() => openEntry({ item, line })}
+                    onMouseEnter={() => setSelectedIndex(entryIndex)}
+                  >
+                    <span className={styles.lineNumber}>{line.lineNumber}</span>
+                    <span className={styles.lineText}>
+                      {lineSegments(line.text, line.positions).map((segment, i) =>
+                        segment.highlight ? <mark key={i}>{segment.text}</mark> : <span key={i}>{segment.text}</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+        {exact.result.truncated && <div className={styles.truncatedHint}>结果较多，只列出前 100 个条目</div>}
+      </div>
+    );
+  };
+
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.searchPanel} onClick={(e) => e.stopPropagation()}>
@@ -211,7 +313,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
               ref={inputRef}
               type="text"
               className={styles.searchInput}
-              placeholder="搜索写作文档与知识库..."
+              placeholder={exactMode ? '在条目正文中精确查找...' : '搜索写作文档与知识库...'}
               aria-label="搜索"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -230,6 +332,43 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, onOpenItem }
             >
               <Filter size={16} />
             </button>
+          </div>
+
+          <div className={styles.modeBar}>
+            <div className={styles.modeTabs} role="tablist" aria-label="搜索模式">
+              {(['fulltext', 'exact'] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === value}
+                  className={`${styles.modeTab} ${mode === value ? styles.modeTabActive : ''}`}
+                  onClick={() => {
+                    setMode(value);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  {value === 'fulltext' ? '全文' : '精确'}
+                </button>
+              ))}
+            </div>
+            {exactMode &&
+              EXACT_OPTIONS.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  title={option.title}
+                  aria-label={option.title}
+                  aria-pressed={exactOptions[option.key]}
+                  className={`${styles.optionToggle} ${exactOptions[option.key] ? styles.optionToggleActive : ''}`}
+                  onClick={() => {
+                    toggleExactOption(option.key);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
           </div>
 
           <div className={styles.keyboardHints}>

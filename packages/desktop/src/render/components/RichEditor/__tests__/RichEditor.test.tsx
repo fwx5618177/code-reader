@@ -86,4 +86,21 @@ describe('RichEditor', () => {
     expect(container.querySelector('.ProseMirror h1')).toBeNull();
     expect(container.querySelector('.ProseMirror')!.textContent).toContain('# 不是标题');
   });
+
+  it('按源码位置定位：光标移到对应的顶层块并滚动到它', async () => {
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this);
+    };
+    const reveal = { heading: '', location: { line: 11, block: 3 } };
+    const { container } = render(
+      <RichEditor initialContent={SAMPLE} fileType="markdown" options={{ showToolbar: false }} revealHeading={reveal} />
+    );
+    await waitFor(() => expect(scrolled.length).toBeGreaterThan(0));
+    // 第 4 个顶层块（从 0 计为 3）是代码块
+    const codeBlock = container.querySelectorAll('.ProseMirror > *')[3];
+    expect(codeBlock?.classList.contains('code-block-wrapper') || codeBlock?.querySelector('.code-block-wrapper')).toBeTruthy();
+    expect(scrolled).toContain(codeBlock);
+  });
 });
+

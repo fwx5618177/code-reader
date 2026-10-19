@@ -126,6 +126,38 @@ export function findLinkTargetInDoc(doc: PMNode, subpath: string, occurrence = 0
   return findHeadingInDoc(doc, subpath, occurrence);
 }
 
+/** 源码中的位置：行号（从 1 计）与解析后文档的顶层块序号（从 0 计） */
+export interface SourceLocation {
+  line: number;
+  block: number;
+}
+
+/**
+ * 编辑器定位请求：有 location 时定位源码位置（全局精确查找），否则定位标题或块
+ * （heading 为 ^id 时是块；occurrence 为同名标题中的第几个，从 0 计）。每个请求对象只执行一次
+ */
+export interface RevealRequest {
+  heading: string;
+  occurrence?: number;
+  location?: SourceLocation;
+}
+
+/**
+ * 源码第 line 行（从 0 计）所在的顶层块序号（从 0 计），即解析后文档的第几个顶层节点。
+ * 依据 markdown-it 顶层块 token 的行范围（map）；落在块之间的空行时取下一个块，超出末尾时取最后一个块。
+ * 没有任何块时返回 null
+ */
+export function topLevelBlockAtLine(markdown: string, line: number): number | null {
+  let index = -1;
+  for (const token of markdownTokenizer.parse(markdown, {})) {
+    // 顶层的开标签或自闭合块（围栏代码、分隔线、公式块等）各对应一个顶层节点
+    if (token.level !== 0 || token.nesting === -1 || !token.map) continue;
+    index++;
+    if (line < token.map[1]) return index;
+  }
+  return index >= 0 ? index : null;
+}
+
 /**
  * 提取可读纯文本（完整解析 Markdown，结果准确；用于搜索索引等非逐键场景）
  */

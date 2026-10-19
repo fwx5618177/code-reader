@@ -40,6 +40,7 @@ export type {
 export {
   // 核心类
   FileSearcher,
+  InvalidSearchPatternError,
   MemoryFileProvider,
   // 工厂函数
   createFileSearcher,

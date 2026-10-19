@@ -76,7 +76,13 @@ import {
   useLinkIndex,
   useRelatedLinks,
 } from './lib/links';
-import { extractWikiLinks, parseWikiLinkInner, type BlockIdSlot } from './lib/markdown';
+import {
+  extractWikiLinks,
+  parseWikiLinkInner,
+  type BlockIdSlot,
+  type RevealRequest,
+  type SourceLocation,
+} from './lib/markdown';
 import {
   ChevronDown,
   ChevronRight,
@@ -765,15 +771,12 @@ const App: React.FC = () => {
   );
 
   /**
-   * 通过 [[文档#标题]] / [[文档#^块]] 或大纲打开文档后要定位的标题或块（occurrence 为同名标题序号）
+   * 通过 [[文档#标题]] / [[文档#^块]]、大纲或全局精确查找打开文档后要定位的标题、块或源码行（见 RevealRequest）
    * view 为负责定位的视图：写作编辑器或阅读视图
    */
-  const [headingRequest, setHeadingRequest] = useState<{
-    view: 'writing' | 'reading';
-    docId: string;
-    heading: string;
-    occurrence?: number;
-  } | null>(null);
+  const [headingRequest, setHeadingRequest] = useState<
+    (RevealRequest & { view: 'writing' | 'reading'; docId: string }) | null
+  >(null);
 
   /**
    * 点击 [[双向链接]]（目标#标题）：目标存在则打开并定位标题或块，否则创建
@@ -933,6 +936,18 @@ const App: React.FC = () => {
       }
     },
     [createDocument, kb.setItemTags]
+  );
+
+  /** 全局搜索打开条目；精确查找的命中行在写作编辑器中定位 */
+  const openSearchHit = useCallback(
+    (id: string, location?: SourceLocation) => {
+      openItem(id);
+      const item = kb.items.find((candidate) => candidate.id === id);
+      if (location && item && isWritingDocument(item)) {
+        setHeadingRequest({ view: 'writing', docId: id, heading: '', location });
+      }
+    },
+    [openItem, kb.items]
   );
 
   /** 写作大纲：在编辑器中定位到当前文档的第 occurrence 个同名标题 */
@@ -1511,7 +1526,7 @@ const App: React.FC = () => {
       <SearchPanel
         isOpen={appState.searchOpen}
         onClose={() => dispatch({ type: 'TOGGLE_SEARCH', payload: false })}
-        onOpenItem={openItem}
+        onOpenItem={openSearchHit}
       />
 
       {/* Settings Panel */}

@@ -42,7 +42,7 @@ import { latex } from '../../lib/latex/codemirror-latex';
 import { latexAnalysis } from '../../lib/latex/codemirror-analysis';
 import type { LatexAnalysis } from '../../lib/latex/analysis';
 import { requestLatexAnalysis } from '../../lib/latex/analysis-client';
-import { findHeadingIndex } from '../../lib/markdown';
+import { findHeadingIndex, type RevealRequest } from '../../lib/markdown';
 import { getEditorBridge, type EditorInstance } from '../../lib/plugins/editor-bridge';
 import {
   LatexDocument,
@@ -85,8 +85,8 @@ export interface LatexEditorProps {
   showLineNumbers?: boolean;
   /** 预览刷新防抖延迟（毫秒） */
   debounceMs?: number;
-  /** 定位到章节（侧栏大纲点击）：occurrence 为同名章节中的序号 */
-  revealHeading?: { heading: string; occurrence?: number } | null;
+  /** 定位到章节（侧栏大纲点击，occurrence 为同名章节中的序号）或源码行（全局精确查找） */
+  revealHeading?: RevealRequest | null;
   /** 是否为聚焦的一栏（插件编辑器 API 作用于聚焦的一栏） */
   active?: boolean;
 }
@@ -704,28 +704,41 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
     }
   }, []);
 
-  // 侧栏大纲点击章节：源码可见时定位光标并滚动（分栏模式下预览跟随同步），仅预览时滚动预览
+  // 侧栏大纲点击章节、精确查找打开命中行：源码可见时定位光标并滚动（分栏模式下预览跟随同步），仅预览时滚动预览
   useEffect(() => {
     if (!revealHeading || revealedHeadingRequests.has(revealHeading)) return;
     let cancelled = false;
     const text = latexDocument.getText();
-    void requestLatexAnalysis(text).then(({ outline }) => {
-      if (cancelled) return;
-      revealedHeadingRequests.add(revealHeading);
-      const entry = outline[findHeadingIndex(outline, revealHeading.heading, revealHeading.occurrence)];
-      if (!entry) return;
 
+    /** 定位到源码偏移 from（所在行为 line，从 1 计） */
+    const reveal = (from: number, line: number) => {
       const view = sourceViewRef.current;
       if (view) {
-        const anchor = Math.min(entry.from, view.state.doc.length);
+        const anchor = Math.min(from, view.state.doc.length);
         view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: 'start', yMargin: 24 }) });
         view.focus();
         return;
       }
       const scroller = previewRef.current?.getScrollContainer();
-      const line = text.slice(0, entry.from).split('\n').length;
       const target = pipelineRef.current?.heightMap.getPositionForLine(line);
       if (scroller && target != null) scroller.scrollTop = target;
+    };
+
+    const { location } = revealHeading;
+    if (location) {
+      revealedHeadingRequests.add(revealHeading);
+      const lines = text.split('\n');
+      const line = Math.min(Math.max(1, location.line), lines.length);
+      const from = lines.slice(0, line - 1).reduce((offset, current) => offset + current.length + 1, 0);
+      reveal(from, line);
+      return;
+    }
+
+    void requestLatexAnalysis(text).then(({ outline }) => {
+      if (cancelled) return;
+      revealedHeadingRequests.add(revealHeading);
+      const entry = outline[findHeadingIndex(outline, revealHeading.heading, revealHeading.occurrence)];
+      if (entry) reveal(entry.from, text.slice(0, entry.from).split('\n').length);
     });
     return () => {
       cancelled = true;
