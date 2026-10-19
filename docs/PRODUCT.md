@@ -64,7 +64,7 @@
 | 问答增强 | 已有混合检索 + 引用溯源 + 多轮追问 + 流式输出 + 中途停止 + 分段语义索引（条目按最相关的一段召回） |
 | 录音体验 | 已有实时波形、录音管理面板（新录音在 metadata 中记录时长；旧录音与导入音频首次在列表中读取文件后回填时长） |
 
-已完成：双向链接增强（块级引用 `[[笔记#^块ID]]`，表格 / 代码块可补全并自动写入 ID）、阅读增强（PDF 跨页高亮、扫描版 OCR、书签）、版本历史分层保留（按日 / 周 / 月抽样）、编辑器块操作、布局（标签页、两栏同时编辑、Ribbon 侧栏面板与标签云）、页面设置与打字机模式、拼写检查 COMPOUNDRULE、子包能力接入（`syntax-parser` + `format-parser`：LaTeX 语法诊断、交叉引用检查、环境 / 章节折叠、LaTeX 大纲，按块增量分析；`plugin-system`：插件快捷键、斜杠菜单、标签栏按钮、侧栏视图、配置项、依赖与按事件激活；`diff-algorithm`：版本对比按行对齐；未使用的差分算法分到 `diff-algorithm-extras`；`format-parser` 的 Markdown 解析不接入编辑器，调研见 FORMAT_PARSER_RESEARCH.md）、LaTeX 正文符号表与未识别命令标记、Markdown 视频 / 音频嵌入。
+已完成：双向链接增强（块级引用 `[[笔记#^块ID]]`，表格 / 代码块可补全并自动写入 ID）、阅读增强（PDF 跨页高亮、扫描版 OCR、书签）、版本历史分层保留（按日 / 周 / 月抽样）、编辑器块操作、布局（标签页、两栏同时编辑、Ribbon 侧栏面板与标签云）、页面设置与打字机模式、拼写检查 COMPOUNDRULE、子包能力接入（`syntax-parser` + `format-parser`：LaTeX 语法诊断、交叉引用检查、环境 / 章节折叠、LaTeX 大纲，按块增量分析；`plugin-system`：插件快捷键、斜杠菜单、标签栏按钮、侧栏视图、配置项、依赖与按事件激活；`diff-algorithm`：版本对比按行对齐；未使用的差分算法分到 `diff-algorithm-extras`；Markdown 解析拆为独立子包 `markdown-parser`，CommonMark 规范 652/652 通过，暂不接入编辑器，调研见 FORMAT_PARSER_RESEARCH.md；各子包未使用的部分分到 `*-extras` 子包并保持可用）、全局搜索的精确查找（逐行、正则、定位到命中段落）、Markdown 的 Emoji 补全与代码块片段补全、LaTeX 环境自动缩进、附件音视频流式播放、80 万字符 LaTeX 文档输入延迟优化、LaTeX 正文符号表与未识别命令标记、Markdown 视频 / 音频嵌入。
 
 ### P2 长期规划
 
