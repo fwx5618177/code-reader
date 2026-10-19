@@ -61,6 +61,16 @@ export function toCodeMirrorSnippet(body: string): string {
   return result;
 }
 
+/**
+ * CodeMirror 用 label 与输入的词匹配并高亮。补全项的匹配文本（filterText，如片段的触发词 def）
+ * 与显示名称（如“函数定义”）不同时，label 取匹配文本，displayLabel 显示名称；否则显示名称会让所有选项被过滤掉
+ */
+function completionLabels(item: CompletionItem): Pick<Completion, 'label' | 'displayLabel'> {
+  return item.filterText && item.filterText !== item.label
+    ? { label: item.filterText, displayLabel: item.label }
+    : { label: item.label };
+}
+
 /** 补全项的插入方式：含占位符的代码片段按 snippet 插入（Tab 在字段间跳转），其余直接插入文本 */
 function completionApply(item: CompletionItem): Completion['apply'] {
   const text = item.insertText || item.label;
@@ -255,7 +265,7 @@ export class CodeMirrorAdapter {
    */
   private convertToCompletion(item: CompletionItem): Completion {
     const completion: Completion = {
-      label: item.label,
+      ...completionLabels(item),
       apply: completionApply(item),
       type: item.type,
       boost: this.calculateBoost(item),
@@ -423,7 +433,7 @@ export function createMarkdownCompletionSource(service: AutocompleteService): Co
     return {
       from: context.pos - query.length,
       options: result.items.map((item) => ({
-        label: item.label,
+        ...completionLabels(item),
         apply: completionApply(item),
         type: item.type,
         detail: item.detail,
@@ -477,7 +487,7 @@ export function createEmojiCompletionSource(service: AutocompleteService): Compl
     return {
       from,
       options: emojiItems.map((item) => ({
-        label: item.label,
+        ...completionLabels(item),
         apply: completionApply(item),
         type: 'emoji',
         detail: item.detail,
@@ -530,7 +540,7 @@ export function createSnippetCompletionSource(
     return {
       from: context.pos - query.length,
       options: snippetItems.map((item) => ({
-        label: item.label,
+        ...completionLabels(item),
         apply: completionApply(item),
         type: 'snippet',
         detail: item.detail,

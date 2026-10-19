@@ -884,8 +884,10 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       },
     };
 
-    // 插件顺序：输入规则与块级回车 → 表格/列表/格式快捷键 → 基础快捷键 → 历史与光标
+    // 插件顺序（靠前的先处理按键）：补全面板（打开时接管 ↑↓ / Enter / Tab / Esc）→ 输入规则与块级回车
+    // → 表格/列表/格式快捷键 → 基础快捷键 → 历史与光标
     const plugins: Plugin[] = [
+      autocompletePlugin,
       ...(isMarkdown ? createEditorPlugins(schema) : []),
       ...(isMarkdown ? [createTableKeymap(schema), createBlockKeymap()] : []),
       createKeymap(schema),
@@ -894,7 +896,6 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       dropCursor(),
       gapCursor(),
       searchHighlightPlugin,
-      autocompletePlugin,
       wikiLinkClickPlugin,
       createTypewriterPlugin({ enabled: Boolean(options.typewriterMode), className: styles.typewriter }),
     ];

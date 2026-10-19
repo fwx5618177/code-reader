@@ -3,10 +3,16 @@
 // 补全服务、内置提供者与 CodeMirror 适配器的行为测试
 // ================================
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { CompletionContext as CMCompletionContext, type Completion } from '@codemirror/autocomplete';
+import {
+  CompletionContext as CMCompletionContext,
+  completionStatus,
+  currentCompletions,
+  startCompletion,
+  type Completion,
+} from '@codemirror/autocomplete';
 import {
   AutocompleteService,
   CodeMirrorAdapter,
@@ -151,7 +157,8 @@ describe('CodeMirrorAdapter', () => {
     const view = new EditorView({ state: EditorState.create({ doc: 'fn', selection: { anchor: 2 } }) });
 
     const result = await source(new CMCompletionContext(view.state, 2, true));
-    const option = result!.options.find((item: Completion) => item.label === '函数声明')!;
+    const option = result!.options.find((item: Completion) => item.displayLabel === '函数声明')!;
+    expect(option.label).toBe('fn');
     expect(typeof option.apply).toBe('function');
     (option.apply as (view: EditorView, completion: Completion, from: number, to: number) => void)(
       view,
@@ -169,8 +176,21 @@ describe('CodeMirrorAdapter', () => {
     adapter.setLanguage('python');
     const state = EditorState.create({ doc: 'def', selection: { anchor: 3 } });
     const result = await adapter.createCompletionSource()(new CMCompletionContext(state, 3, true));
-    expect(result!.options.map((item) => item.label)).toContain(
-      new SnippetProvider().getCompletions(context('def', { language: 'python' }))[0]!.label
-    );
+    expect(result!.options.map((item) => item.displayLabel)).toContain('函数定义');
+  });
+
+  it('经扩展触发后补全列表真正打开：选项按触发词匹配，显示名称为中文（回归：曾因 label 为中文被全部过滤）', async () => {
+    const adapter = new CodeMirrorAdapter({ service: codeService(), language: 'python' });
+    const view = new EditorView({
+      state: EditorState.create({ doc: 'x = 1\ndef', selection: { anchor: 9 }, extensions: adapter.createFullExtension() }),
+      parent: document.body,
+    });
+    view.focus();
+    startCompletion(view);
+    await vi.waitFor(() => expect(completionStatus(view.state)).toBe('active'));
+    const options = currentCompletions(view.state);
+    expect(options.map((option) => option.label)).toContain('def');
+    expect(options.every((option) => !/javascript/i.test(option.detail ?? ''))).toBe(true);
+    view.destroy();
   });
 });
