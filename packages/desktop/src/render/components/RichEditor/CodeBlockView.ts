@@ -16,9 +16,10 @@ import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language'
 import { lineNumbers, highlightActiveLineGutter } from '@codemirror/view';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import {
-  AutocompleteService,
   CodeMirrorAdapter,
-  createDefaultProviders,
+  createAutocompleteService,
+  createCodeProviders,
+  type AutocompleteService,
 } from '@code-reader/autocomplete-service';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-javascript';
@@ -69,43 +70,17 @@ export interface CodeBlockViewOptions {
 // ================================
 
 let sharedAutocompleteService: AutocompleteService | null = null;
-let autocompleteServiceInitPromise: Promise<AutocompleteService> | null = null;
 
 /**
- * 获取或创建共享的 AutocompleteService 实例
- * 使用单例模式避免重复创建
+ * 所有代码块共享一个补全服务，只注册代码片段提供者；语言随每次查询传入（适配器的 language），
+ * 片段按当前代码块的语言过滤
  */
-async function getSharedAutocompleteService(): Promise<AutocompleteService> {
-  if (sharedAutocompleteService) {
-    return sharedAutocompleteService;
+function getSharedAutocompleteService(): AutocompleteService {
+  if (!sharedAutocompleteService) {
+    sharedAutocompleteService = createAutocompleteService({ maxResults: 50, fuzzy: true, cacheEnabled: true });
+    for (const provider of createCodeProviders()) sharedAutocompleteService.registerProvider(provider);
   }
-
-  if (autocompleteServiceInitPromise) {
-    return autocompleteServiceInitPromise;
-  }
-
-  autocompleteServiceInitPromise = (async () => {
-    const service = new AutocompleteService({
-      maxResults: 50,
-      fuzzy: true,
-      debounceMs: 100,
-      cacheEnabled: true,
-    });
-
-    // 注册默认提供者
-    const providers = createDefaultProviders();
-    for (const provider of providers) {
-      service.registerProvider(provider);
-    }
-
-    // 初始化服务
-    await service.initialize();
-
-    sharedAutocompleteService = service;
-    return service;
-  })();
-
-  return autocompleteServiceInitPromise;
+  return sharedAutocompleteService;
 }
 
 /**
@@ -412,43 +387,30 @@ export class CodeBlockView {
       parent: this.editContainer,
     });
 
-    // 异步初始化补全服务
     if (this.options.enableAutocomplete) {
       this.initAutocomplete(language);
     }
   }
 
   /**
-   * 异步初始化补全服务
+   * 接入代码片段补全
    */
-  private async initAutocomplete(language: string): Promise<void> {
-    try {
-      const service = this.options.autocompleteService || (await getSharedAutocompleteService());
+  private initAutocomplete(language: string): void {
+    this.autocompleteAdapter = new CodeMirrorAdapter({
+      service: this.options.autocompleteService ?? getSharedAutocompleteService(),
+      language,
+      fuzzy: true,
+      maxResults: 30,
+      minTriggerLength: 1,
+      activateOnTyping: true,
+      triggerCharacters: ['.', '/', '<', ':', '@', '#'],
+      showDetail: true,
+      showDocumentation: true,
+    });
 
-      // 创建补全适配器
-      this.autocompleteAdapter = new CodeMirrorAdapter({
-        service,
-        language,
-        fuzzy: true,
-        maxResults: 30,
-        minTriggerLength: 1,
-        activateOnTyping: true,
-        triggerCharacters: ['.', '/', '<', ':', '@', '#'],
-        showDetail: true,
-        showDocumentation: true,
-      });
-
-      // 更新 CodeMirror 配置，添加补全扩展
-      if (this.cm) {
-        this.cm.dispatch({
-          effects: this.autocompleteCompartment.reconfigure(
-            this.autocompleteAdapter.createFullExtension()
-          ),
-        });
-      }
-    } catch (error) {
-      console.error('初始化代码补全失败:', error);
-    }
+    this.cm?.dispatch({
+      effects: this.autocompleteCompartment.reconfigure(this.autocompleteAdapter.createFullExtension()),
+    });
   }
 
   /**

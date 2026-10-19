@@ -1,7 +1,8 @@
 // ================================
 // AutocompleteService 智能补全服务
-// 整合 Radix Tree 实现高性能的智能补全功能
-// 支持多种补全源、优先级排序、实时更新
+// - 补全提供者按每次查询的上下文（语言、触发字符、光标前文本）实时查询，结果才符合当前语境
+// - Radix Tree 只存放宿主用 addItem 加入的静态补全项（如文档中的词、标签），支持前缀与模糊检索
+// - 结果按查询上下文缓存
 // ================================
 
 import {
@@ -29,10 +30,14 @@ const DEFAULT_OPTIONS: Required<AutocompleteServiceOptions> = {
   maxEditDistance: 2,
   caseSensitive: false,
   minTriggerLength: 1,
-  debounceMs: 100,
   cacheEnabled: true,
   cacheTTL: 30000, // 30 秒
 };
+
+/** 查询上下文的缓存键 */
+function cacheKeyOf(context: CompletionContext): string {
+  return [context.language ?? '', context.triggerCharacter ?? '', context.textBefore, context.query].join('\u0000');
+}
 
 // ================================
 // AutocompleteService 类
@@ -51,8 +56,6 @@ export class AutocompleteService {
   private options: Required<AutocompleteServiceOptions>;
   /** 结果缓存 */
   private cache: Map<string, CacheEntry> = new Map();
-  /** 待处理的更新定时器 */
-  private pendingUpdate: ReturnType<typeof setTimeout> | null = null;
   /** 是否已初始化 */
   private isInitialized: boolean = false;
 
@@ -72,14 +75,10 @@ export class AutocompleteService {
   // ================================
 
   /**
-   * 初始化服务
+   * 初始化服务。提供者不做预加载：用空上下文预取的结果会丢掉语言与触发条件
+   * （例如 Python 代码块里出现 JavaScript 片段、代码里出现 Markdown 标题）
    */
   async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-
-    // 从所有提供者加载初始数据
-    await this.refreshAllProviders();
-
     this.isInitialized = true;
   }
 
@@ -90,10 +89,6 @@ export class AutocompleteService {
     this.clear();
     this.providers.clear();
     this.cache.clear();
-    if (this.pendingUpdate) {
-      clearTimeout(this.pendingUpdate);
-      this.pendingUpdate = null;
-    }
     this.isInitialized = false;
   }
 
@@ -113,6 +108,7 @@ export class AutocompleteService {
    */
   registerProvider(provider: CompletionProvider): void {
     this.providers.set(provider.name, provider);
+    this.clearCache();
   }
 
   /**
@@ -124,6 +120,7 @@ export class AutocompleteService {
       provider.dispose();
     }
     this.providers.delete(name);
+    this.clearCache();
   }
 
   /**
@@ -141,56 +138,20 @@ export class AutocompleteService {
   }
 
   /**
-   * 刷新指定提供者的数据
+   * 提供者的数据变化后调用（如片段库更新）：丢弃含该提供者结果的缓存，下次查询重新向它取
    */
   async refreshProvider(name: string): Promise<void> {
-    const provider = this.providers.get(name);
-    if (!provider) return;
-
-    // 创建一个空的上下文来获取所有补全项
-    const context: CompletionContext = {
-      query: '',
-      position: { line: 0, column: 0 },
-      lineText: '',
-      textBefore: '',
-      textAfter: '',
-    };
-
-    const items = await provider.getCompletions(context);
-
-    // 将补全项添加到树中
-    for (const item of items) {
-      const filterText = item.filterText ?? item.label;
-      const meta: CompletionMeta = {
-        id: item.id,
-        label: item.label,
-        type: item.type,
-        detail: item.detail,
-        documentation: item.documentation,
-        priority: item.priority,
-        data: {
-          insertText: item.insertText,
-          icon: item.icon,
-          source: provider.name,
-          sortText: item.sortText,
-          ...((item.data as object) ?? {}),
-        },
-      };
-      this.tree.insert(filterText, meta);
+    if (!this.providers.has(name)) return;
+    for (const [key, entry] of this.cache) {
+      if (entry.result.items.some((item) => item.source === name)) this.cache.delete(key);
     }
   }
 
   /**
-   * 刷新所有提供者的数据
+   * 所有提供者的数据变化后调用：清空结果缓存（addItem 加入的静态补全项保留）
    */
   async refreshAllProviders(): Promise<void> {
-    // 清空树
-    this.tree.clear();
     this.clearCache();
-
-    // 并行刷新所有提供者
-    const refreshTasks = [...this.providers.keys()].map((name) => this.refreshProvider(name));
-    await Promise.all(refreshTasks);
   }
 
   // ================================
@@ -218,7 +179,7 @@ export class AutocompleteService {
       },
     };
     this.tree.insert(filterText, meta);
-    this.invalidateCache();
+    this.clearCache();
   }
 
   /**
@@ -228,7 +189,7 @@ export class AutocompleteService {
     for (const item of items) {
       this.addItem(item);
     }
-    this.invalidateCache();
+    this.clearCache();
   }
 
   /**
@@ -237,7 +198,7 @@ export class AutocompleteService {
   removeItem(filterText: string): boolean {
     const result = this.tree.delete(filterText);
     if (result) {
-      this.invalidateCache();
+      this.clearCache();
     }
     return result;
   }
@@ -270,9 +231,10 @@ export class AutocompleteService {
       };
     }
 
-    // 检查缓存
+    // 检查缓存：提供者的结果取决于语言、触发字符与光标前文本，缓存键要包含它们
+    const cacheKey = cacheKeyOf(context);
     if (this.options.cacheEnabled) {
-      const cached = this.getFromCache(query);
+      const cached = this.getFromCache(cacheKey);
       if (cached) {
         return {
           ...cached,
@@ -306,7 +268,7 @@ export class AutocompleteService {
 
     // 缓存结果
     if (this.options.cacheEnabled) {
-      this.addToCache(query, result);
+      this.addToCache(cacheKey, result);
     }
 
     return result;
@@ -316,8 +278,9 @@ export class AutocompleteService {
    * 前缀搜索
    */
   private searchPrefix(query: string): CompletionItem[] {
+    // 多取一条，才能判断结果是否被截断（isIncomplete）
     const results = this.tree.prefixSearch(query, {
-      maxResults: this.options.maxResults,
+      maxResults: this.options.maxResults + 1,
       fuzzy: false,
     });
     return this.convertSearchResults(results);
@@ -328,15 +291,16 @@ export class AutocompleteService {
    */
   private searchWithFuzzy(query: string): CompletionItem[] {
     // 先尝试前缀匹配
+    const limit = this.options.maxResults + 1;
     let results = this.tree.prefixSearch(query, {
-      maxResults: this.options.maxResults,
+      maxResults: limit,
       fuzzy: true,
     });
 
     // 如果结果不足，添加模糊匹配
-    if (results.length < this.options.maxResults) {
+    if (results.length < limit) {
       const fuzzyResults = this.tree.fuzzySearch(query, {
-        maxResults: this.options.maxResults - results.length,
+        maxResults: limit - results.length,
         maxEditDistance: this.options.maxEditDistance,
       });
 
@@ -483,13 +447,13 @@ export class AutocompleteService {
   /**
    * 从缓存获取结果
    */
-  private getFromCache(query: string): CompletionResult | null {
-    const entry = this.cache.get(query);
+  private getFromCache(key: string): CompletionResult | null {
+    const entry = this.cache.get(key);
     if (!entry) return null;
 
     // 检查是否过期
     if (Date.now() - entry.timestamp > this.options.cacheTTL) {
-      this.cache.delete(query);
+      this.cache.delete(key);
       return null;
     }
 
@@ -499,16 +463,16 @@ export class AutocompleteService {
   /**
    * 添加结果到缓存
    */
-  private addToCache(query: string, result: CompletionResult): void {
+  private addToCache(key: string, result: CompletionResult): void {
     // 定期清理过期缓存
     if (this.cache.size > 100) {
       this.pruneCache();
     }
 
-    this.cache.set(query, {
+    this.cache.set(key, {
       result,
       timestamp: Date.now(),
-      query,
+      query: key,
     });
   }
 
@@ -540,21 +504,6 @@ export class AutocompleteService {
         }
       }
     }
-  }
-
-  /**
-   * 失效缓存
-   */
-  private invalidateCache(): void {
-    // 使用防抖清除缓存
-    if (this.pendingUpdate) {
-      clearTimeout(this.pendingUpdate);
-    }
-
-    this.pendingUpdate = setTimeout(() => {
-      this.clearCache();
-      this.pendingUpdate = null;
-    }, this.options.debounceMs);
   }
 
   /**
@@ -592,7 +541,7 @@ export class AutocompleteService {
    */
   updateOptions(options: Partial<AutocompleteServiceOptions>): void {
     this.options = { ...this.options, ...options };
-    this.invalidateCache();
+    this.clearCache();
   }
 }
 

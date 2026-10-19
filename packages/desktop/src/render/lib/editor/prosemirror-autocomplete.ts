@@ -6,6 +6,7 @@
 
 import { Plugin, PluginKey, EditorState, Transaction } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
+import { EmojiProvider } from '@code-reader/autocomplete-service';
 
 // ================================
 // 类型定义
@@ -78,6 +79,8 @@ export interface CompletionProvider {
   readonly triggerCharacters?: string[];
   /** 显示条数上限（不设置时使用插件配置的 maxResults）；多个提供者同时激活时取最大值 */
   readonly maxResults?: number;
+  /** 自己完成匹配（别名、描述、模糊匹配等）：插件不再按 filterText 过滤其结果 */
+  readonly filtersOwnResults?: boolean;
   /** 是否应该激活 */
   shouldActivate(context: CompletionContext): boolean;
   /** 获取补全项 */
@@ -205,16 +208,18 @@ function extractQuery(textBefore: string, triggerPos: number, trigger: string): 
   return textBefore.slice(triggerPos + trigger.length);
 }
 
-/** 过滤和排序补全项 */
+/** 过滤和排序补全项；preFiltered 中的项已由提供者匹配过，不再按文本过滤 */
 function filterAndSortItems(
   items: CompletionItem[],
   query: string,
-  maxResults: number
+  maxResults: number,
+  preFiltered: ReadonlySet<CompletionItem> = new Set()
 ): CompletionItem[] {
   const queryLower = query.toLowerCase();
 
   // 过滤匹配项
   const filtered = items.filter((item) => {
+    if (preFiltered.has(item)) return true;
     const filterText = (item.filterText || item.label).toLowerCase();
     return filterText.includes(queryLower);
   });
@@ -402,6 +407,7 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
   /** 收集所有激活提供者的补全项 */
   const updateCompletions = async (context: CompletionContext): Promise<CompletionItem[]> => {
     const allItems: CompletionItem[] = [];
+    const preFiltered = new Set<CompletionItem>();
     let limit = opts.maxResults;
 
     for (const provider of opts.providers) {
@@ -409,6 +415,7 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
         try {
           const items = await provider.getCompletions(context);
           allItems.push(...items);
+          if (provider.filtersOwnResults) items.forEach((item) => preFiltered.add(item));
           if (provider.maxResults !== undefined) limit = Math.max(limit, provider.maxResults);
         } catch (error) {
           console.error(`[Autocomplete] 提供者 ${provider.name} 出错:`, error);
@@ -416,7 +423,7 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
       }
     }
 
-    return filterAndSortItems(allItems, context.query, limit);
+    return filterAndSortItems(allItems, context.query, limit, preFiltered);
   };
 
   /** 接受补全 */
@@ -678,78 +685,42 @@ export function createAutocompletePlugin(options: AutocompletePluginOptions): Pl
 // 内置补全提供者
 // ================================
 
-/** Emoji 补全提供者 */
+/**
+ * Emoji 补全：`:` 后输入短代码、别名或中文描述（如 :smile、:+1、:微笑）。
+ * 表情数据与匹配规则（精确 > 前缀 > 包含 > 别名 > 描述 > 模糊）来自 autocomplete-service 的 EmojiProvider
+ */
 export class EmojiCompletionProvider implements CompletionProvider {
   readonly name = 'emoji';
   readonly type: CompletionType = 'emoji';
   readonly triggerCharacters = [':'];
-
-  private items: CompletionItem[] = [
-    { id: 'smile', label: ':smile:', insertText: '😊', type: 'emoji', icon: '😊', priority: 100 },
-    { id: 'laugh', label: ':laugh:', insertText: '😂', type: 'emoji', icon: '😂', priority: 99 },
-    { id: 'heart', label: ':heart:', insertText: '❤️', type: 'emoji', icon: '❤️', priority: 98 },
-    {
-      id: 'thumbsup',
-      label: ':thumbsup:',
-      insertText: '👍',
-      type: 'emoji',
-      icon: '👍',
-      priority: 97,
-    },
-    {
-      id: 'thumbsdown',
-      label: ':thumbsdown:',
-      insertText: '👎',
-      type: 'emoji',
-      icon: '👎',
-      priority: 96,
-    },
-    { id: 'fire', label: ':fire:', insertText: '🔥', type: 'emoji', icon: '🔥', priority: 95 },
-    { id: 'star', label: ':star:', insertText: '⭐', type: 'emoji', icon: '⭐', priority: 94 },
-    { id: 'check', label: ':check:', insertText: '✅', type: 'emoji', icon: '✅', priority: 93 },
-    { id: 'cross', label: ':cross:', insertText: '❌', type: 'emoji', icon: '❌', priority: 92 },
-    {
-      id: 'warning',
-      label: ':warning:',
-      insertText: '⚠️',
-      type: 'emoji',
-      icon: '⚠️',
-      priority: 91,
-    },
-    { id: 'info', label: ':info:', insertText: 'ℹ️', type: 'emoji', icon: 'ℹ️', priority: 90 },
-    {
-      id: 'question',
-      label: ':question:',
-      insertText: '❓',
-      type: 'emoji',
-      icon: '❓',
-      priority: 89,
-    },
-    { id: 'idea', label: ':idea:', insertText: '💡', type: 'emoji', icon: '💡', priority: 88 },
-    { id: 'rocket', label: ':rocket:', insertText: '🚀', type: 'emoji', icon: '🚀', priority: 87 },
-    { id: 'tada', label: ':tada:', insertText: '🎉', type: 'emoji', icon: '🎉', priority: 86 },
-    {
-      id: 'thinking',
-      label: ':thinking:',
-      insertText: '🤔',
-      type: 'emoji',
-      icon: '🤔',
-      priority: 85,
-    },
-    { id: 'eyes', label: ':eyes:', insertText: '👀', type: 'emoji', icon: '👀', priority: 84 },
-    { id: 'clap', label: ':clap:', insertText: '👏', type: 'emoji', icon: '👏', priority: 83 },
-    { id: 'wave', label: ':wave:', insertText: '👋', type: 'emoji', icon: '👋', priority: 82 },
-    { id: 'pray', label: ':pray:', insertText: '🙏', type: 'emoji', icon: '🙏', priority: 81 },
-  ];
+  readonly filtersOwnResults = true;
+  private readonly source = new EmojiProvider();
 
   shouldActivate(context: CompletionContext): boolean {
-    // 需要 : 后面有字符才激活
-    return context.trigger === ':' && context.query.length >= 1;
+    // 需要 : 后面有字符才激活，且不含空白（"时间: 10" 之类的普通冒号不触发）
+    return context.trigger === ':' && context.query.length >= 1 && !/\s/.test(context.query);
   }
 
   getCompletions(context: CompletionContext): CompletionItem[] {
-    const query = context.query.toLowerCase();
-    return this.items.filter((item) => item.label.toLowerCase().includes(`:${query}`));
+    const items = this.source.getCompletions({
+      query: context.query,
+      triggerCharacter: ':',
+      position: { line: 1, column: context.textBefore.length + 1, offset: context.pos },
+      lineText: context.lineText,
+      textBefore: context.textBefore,
+      textAfter: context.lineText.slice(context.textBefore.length),
+      editorType: 'prosemirror',
+    });
+    return items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      insertText: item.insertText ?? item.label,
+      type: 'emoji',
+      detail: item.detail,
+      priority: item.priority,
+      icon: item.icon,
+      filterText: item.filterText,
+    }));
   }
 }
 

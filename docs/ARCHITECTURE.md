@@ -32,12 +32,12 @@
 │  autocomplete-service  fuzzy-match-algorithm                  │
 │  syntax-parser  format-parser  markdown-parser  plugin-system │
 │  diff-algorithm-extras  plugin-system-extras                  │
-│  syntax-parser-extras                                         │
+│  syntax-parser-extras  autocomplete-service-extras            │
 │  （*-extras：桌面端暂未使用、保持可用的部分，按需引入）       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；LaTeX 渲染链路（`lib/latex/parser.ts` 起）只依赖 `@code-reader/text-buffer`，LaTeX 诊断 / 折叠 / 大纲（`lib/latex/analysis.ts`）使用 `syntax-parser` 与 `format-parser`，按内容识别文档格式用 `format-parser` 的 `isLaTeXDocument`，LaTeX 源码编辑器的注释与自动配对取自 `syntax-parser` 的语言配置；桌面端插件系统 `lib/plugins` 使用 `plugin-system` 的贡献点类型、`lifecycle` 模块与扩展点注册表；命令面板用 `fuzzy-match-algorithm` 排序与高亮。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
+依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`，Markdown 编辑器的 Emoji 补全使用其 `EmojiProvider`；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；LaTeX 渲染链路（`lib/latex/parser.ts` 起）只依赖 `@code-reader/text-buffer`，LaTeX 诊断 / 折叠 / 大纲（`lib/latex/analysis.ts`）使用 `syntax-parser` 与 `format-parser`，按内容识别文档格式用 `format-parser` 的 `isLaTeXDocument`，LaTeX 源码编辑器的注释与自动配对取自 `syntax-parser` 的语言配置；桌面端插件系统 `lib/plugins` 使用 `plugin-system` 的贡献点类型、`lifecycle` 模块与扩展点注册表；命令面板用 `fuzzy-match-algorithm` 排序与高亮。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
 
 **子包接入对照**（桌面端的实际导入可用 `packages/desktop/.e2e` 外的脚本统计：遍历 `src` 中来自 `@code-reader/*` 的 import）：
 
@@ -53,7 +53,8 @@
 | `diff-algorithm` | `DiffEngine` / `TextDiff` / `AsyncDiffEngine` / `DiffCache` → 保存引擎、历史管理、写作服务；`quickHistogramDiff`（`./algorithms`）→ 版本对比按行对齐（`lib/writing/components/diff-lines.ts`） | 未使用的算法已迁到 `diff-algorithm-extras`，核心包只留正在使用的能力与其内部依赖（二进制差分、编辑距离、模糊匹配供统一差分引擎使用） |
 | `diff-algorithm-extras` | 桌面端不引用 | rsync / 滚动哈希、Patience、LCS、VCDIFF / BSDiff 适配器、CRDT 接口、流式哈希与流式差分、独立的 diff-match-patch Worker（`dmp-standalone`，原桌面端 `lib/writing` 中与核心库重复的实现）。导出保持可用并有行为测试，需要时单独引入 |
 | `search-service` | `SearchIndex` → 写作全文搜索 | `FileSearcher`（逐行正则 / 全词 / 大小写，带行号与上下文，经 `IFileProvider` 读内容）：可用于全局搜索的“精确查找”，需要笔记正文的内容来源与搜索面板的模式切换，待做；中文 / 代码预设索引 |
-| `autocomplete-service` | `AutocompleteService` + `CodeMirrorAdapter` → 代码块补全 | `ProseMirrorAdapter`（Markdown 编辑器的斜杠菜单与 `[[` 补全是桌面端自己的实现，功能重叠）、Markdown / Emoji / 片段补全源；包内没有测试 |
+| `autocomplete-service` | `AutocompleteService` + `createCodeProviders` + `CodeMirrorAdapter` → 代码块补全（只注册代码片段，按代码块语言过滤，片段按 CodeMirror snippet 插入、Tab 跳字段）；`EmojiProvider` → Markdown 编辑器的 `:emoji` 补全（`lib/editor/prosemirror-autocomplete.ts`，替换了桌面端原来 20 个表情的硬编码表，可按别名与中文描述匹配） | 修复：服务初始化时用空上下文预载提供者结果，导致 Python 代码块出现 JavaScript 片段、代码里出现 Markdown 标题；缓存键只有查询词；`isIncomplete` 永远为假；片段 `$1` 原样插入。有行为测试 |
+| `autocomplete-service-extras` | 桌面端不引用 | ProseMirror 补全适配器（桌面端 Markdown 编辑器用自己的补全插件：斜杠菜单、`[[` 双链、结构化插入）与预设工厂（全部内置提供者的服务、Markdown / 代码编辑器的 CodeMirror 扩展）。有行为测试 |
 | `text-buffer` | `createTextBuffer` / `selectBufferType` → LaTeX 文档模型 | `createAutoBuffer`、性能档案与内部配置类型 |
 
 ## 2. 主进程

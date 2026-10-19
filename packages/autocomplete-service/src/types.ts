@@ -151,8 +151,6 @@ export interface AutocompleteServiceOptions {
   caseSensitive?: boolean;
   /** 最小触发长度 */
   minTriggerLength?: number;
-  /** 防抖延迟（毫秒） */
-  debounceMs?: number;
   /** 是否缓存结果 */
   cacheEnabled?: boolean;
   /** 缓存过期时间（毫秒） */

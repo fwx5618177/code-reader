@@ -15,18 +15,7 @@ export {
   createEmojiCompletionSource,
   createSnippetCompletionSource,
   createMixedCompletionExtension,
+  toCodeMirrorSnippet,
 } from './codemirror-adapter';
 
 export type { CodeMirrorAdapterOptions } from './codemirror-adapter';
-
-// ================================
-// ProseMirror 适配器
-// ================================
-
-export {
-  ProseMirrorAdapter,
-  createProseMirrorAdapter,
-  createProseMirrorPlugin,
-} from './prosemirror-adapter';
-
-export type { ProseMirrorAdapterOptions } from './prosemirror-adapter';

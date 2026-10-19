@@ -1,22 +1,36 @@
 // ================================
-// @code-reader/autocomplete-service
+// @code-reader/autocomplete-service-extras
 // ProseMirror 编辑器适配器
 // 将 AutocompleteService 集成到 ProseMirror 编辑器
 // ================================
 
 import { Plugin, PluginKey, TextSelection, EditorState, Transaction } from 'prosemirror-state';
 import { EditorView, Decoration, DecorationSet } from 'prosemirror-view';
-import { AutocompleteService } from '../service/autocomplete-service';
-import type {
-  CompletionItem,
-  CompletionContext,
-  BaseAdapterOptions,
-  IconMap,
-  DEFAULT_ICON_MAP,
-  CompletionEventType,
-  CompletionEvent,
-  CompletionEventListener,
-} from '../types';
+import {
+  AutocompleteService,
+  type CompletionItem,
+  type CompletionContext,
+  type BaseAdapterOptions,
+  type IconMap,
+  type CompletionEventType,
+  type CompletionEvent,
+  type CompletionEventListener,
+} from '@code-reader/autocomplete-service';
+
+// ================================
+// 代码片段
+// ================================
+
+/**
+ * 富文本里没有字段跳转：片段模板（$1、${1:默认值}、${1|a,b|}、$0）去掉占位符，保留默认值
+ */
+export function snippetPlainText(body: string): string {
+  return body
+    .replace(/\$\{\d+:([^}]*)\}/g, '$1')
+    .replace(/\$\{\d+\|([^|,}]*)[^}]*\}/g, '$1')
+    .replace(/\$\{\d+\}|\$\d+/g, '')
+    .replace(/\\\$/g, '$');
+}
 
 // ================================
 // 配置类型
@@ -133,7 +147,6 @@ export class ProseMirrorAdapter {
         maxResults: this.options.maxResults,
         fuzzy: this.options.fuzzy,
         minTriggerLength: this.options.minTriggerLength,
-        debounceMs: this.options.debounceMs,
       });
       this.ownsService = true;
     }
@@ -526,11 +539,10 @@ export class ProseMirrorAdapter {
     if (!state?.active || state.items.length === 0) return;
 
     const item = state.items[state.selectedIndex];
-    const insertText = item.insertText ?? item.label;
+    const insertText = item.type === 'snippet' ? snippetPlainText(item.insertText ?? item.label) : (item.insertText ?? item.label);
 
-    // 替换文本
-    const tr = view.state.tr
-      .replaceWith(state.from, state.to, view.state.schema.text(insertText))
+    // 替换文本（插入空文本即删除查询词：ProseMirror 不允许空文本节点）
+    const tr = (insertText ? view.state.tr.insertText(insertText, state.from, state.to) : view.state.tr.delete(state.from, state.to))
       .setMeta('autocomplete-close', true);
 
     view.dispatch(tr);

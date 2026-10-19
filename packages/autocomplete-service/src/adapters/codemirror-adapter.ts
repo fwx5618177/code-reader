@@ -14,6 +14,7 @@ import {
   closeCompletion,
   acceptCompletion,
   moveCompletionSelection,
+  snippet,
 } from '@codemirror/autocomplete';
 import { type Extension } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
@@ -25,6 +26,46 @@ import type {
   IconMap,
   DEFAULT_ICON_MAP,
 } from '../types';
+
+// ================================
+// 代码片段
+// ================================
+
+/**
+ * 把 VS Code 风格的片段模板（$1、${1:默认值}、${1|a,b|}、$0）转成 CodeMirror snippet 模板：
+ * 字面的 { } 加反斜杠转义；$0（最终光标位置）排在所有字段之后
+ */
+export function toCodeMirrorSnippet(body: string): string {
+  let result = '';
+  let index = 0;
+  while (index < body.length) {
+    const rest = body.slice(index);
+    const placeholder = /^\$(?:(\d+)|\{(\d+)(?::([^}]*)|\|([^|}]*)\|)?\})/.exec(rest);
+    if (placeholder) {
+      const order = placeholder[1] ?? placeholder[2]!;
+      const text = placeholder[3] ?? placeholder[4]?.split(',')[0] ?? '';
+      const field = order === '0' ? '9999' : order;
+      result += text ? `\${${field}:${text.replace(/[{}]/g, '\\$&')}}` : `\${${field}}`;
+      index += placeholder[0].length;
+      continue;
+    }
+    const char = body[index]!;
+    if (char === '\\' && body[index + 1] === '$') {
+      result += '$';
+      index += 2;
+      continue;
+    }
+    result += char === '{' || char === '}' ? `\\${char}` : char;
+    index += 1;
+  }
+  return result;
+}
+
+/** 补全项的插入方式：含占位符的代码片段按 snippet 插入（Tab 在字段间跳转），其余直接插入文本 */
+function completionApply(item: CompletionItem): Completion['apply'] {
+  const text = item.insertText || item.label;
+  return item.type === 'snippet' && /\$(?:\d|\{\d)/.test(text) ? snippet(toCodeMirrorSnippet(text)) : text;
+}
 
 // ================================
 // 配置类型
@@ -93,7 +134,6 @@ export class CodeMirrorAdapter {
         maxResults: this.options.maxResults,
         fuzzy: this.options.fuzzy,
         minTriggerLength: this.options.minTriggerLength,
-        debounceMs: this.options.debounceMs,
       });
       this.ownsService = true;
     }
@@ -216,7 +256,7 @@ export class CodeMirrorAdapter {
   private convertToCompletion(item: CompletionItem): Completion {
     const completion: Completion = {
       label: item.label,
-      apply: item.insertText || item.label,
+      apply: completionApply(item),
       type: item.type,
       boost: this.calculateBoost(item),
     };
@@ -384,7 +424,7 @@ export function createMarkdownCompletionSource(service: AutocompleteService): Co
       from: context.pos - query.length,
       options: result.items.map((item) => ({
         label: item.label,
-        apply: item.insertText || item.label,
+        apply: completionApply(item),
         type: item.type,
         detail: item.detail,
         info: item.documentation,
@@ -438,7 +478,7 @@ export function createEmojiCompletionSource(service: AutocompleteService): Compl
       from,
       options: emojiItems.map((item) => ({
         label: item.label,
-        apply: item.insertText || item.label,
+        apply: completionApply(item),
         type: 'emoji',
         detail: item.detail,
       })),
@@ -491,7 +531,7 @@ export function createSnippetCompletionSource(
       from: context.pos - query.length,
       options: snippetItems.map((item) => ({
         label: item.label,
-        apply: item.insertText || item.label,
+        apply: completionApply(item),
         type: 'snippet',
         detail: item.detail,
         info: item.documentation,
