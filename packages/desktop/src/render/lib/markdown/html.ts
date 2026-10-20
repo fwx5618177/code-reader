@@ -7,6 +7,7 @@
 import { DOMSerializer, type Node as PMNode } from 'prosemirror-model';
 import { renderMath } from '../math';
 import { collectAbbreviations, wrapAbbreviations } from './abbreviations';
+import { numberFootnotes } from './footnotes';
 import { blockRefId, collectDocBlocks, extractBlock, findBlockInDoc, stripBlockMarker } from './block-ref';
 import { extractHeadings, extractSection } from './extract';
 import { parseContent, type ContentFormat } from './parser';
@@ -114,8 +115,26 @@ function renderNodes(doc: PMNode): HTMLElement {
 
   applyBlockMarkers(doc, anchors);
   wrapAbbreviations(container, collectAbbreviations(doc));
+  numberFootnoteElements(container, doc);
   describeFootnoteRefs(container);
   return container;
+}
+
+/** 脚注按第一次引用的顺序编号：引用显示编号，行内脚注与被引用的定义带上编号属性（样式显示在前面） */
+function numberFootnoteElements(container: HTMLElement, doc: PMNode): void {
+  const { at, byLabel } = numberFootnotes(doc);
+  if (at.size === 0) return;
+  const numbers = [...at.values()];
+  container.querySelectorAll<HTMLElement>('[data-footnote-ref], [data-footnote-inline]').forEach((element, index) => {
+    const number = numbers[index];
+    if (number === undefined) return;
+    element.dataset.footnoteNumber = String(number);
+    if (element.hasAttribute('data-footnote-ref')) element.textContent = String(number);
+  });
+  container.querySelectorAll<HTMLElement>('[data-footnote-def]').forEach((definition) => {
+    const number = byLabel.get(definition.getAttribute('data-footnote-def') ?? '');
+    if (number !== undefined) definition.dataset.footnoteNumber = String(number);
+  });
 }
 
 /** 脚注引用悬停时显示脚注内容 */

@@ -6,8 +6,9 @@
 // ================================
 
 import type { Node as PMNode } from 'prosemirror-model';
-import { Plugin, PluginKey, type Transaction } from 'prosemirror-state';
+import { Plugin, PluginKey } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
+import { changedRanges } from '../editor/changed-ranges';
 
 const DEFINITION = /^\*\[((?:[^[\]\\]|\\.)+)\]:(.*)$/;
 
@@ -95,16 +96,6 @@ function buildAll(doc: PMNode, abbreviations: Map<string, string>, signature: st
 
 function signatureOf(abbreviations: ReadonlyMap<string, string>): string {
   return JSON.stringify([...abbreviations]);
-}
-
-/** 事务改动过的范围（新文档中的位置） */
-function changedRanges(tr: Transaction): Array<[number, number]> {
-  let ranges: Array<[number, number]> = [];
-  for (const map of tr.mapping.maps) {
-    ranges = ranges.map(([from, to]) => [map.map(from, -1), map.map(to, 1)]);
-    map.forEach((_oldStart, _oldEnd, newStart, newEnd) => ranges.push([newStart, newEnd]));
-  }
-  return ranges;
 }
 
 /** 创建缩写装饰插件 */

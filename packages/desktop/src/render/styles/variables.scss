@@ -657,6 +657,12 @@ $z-toast: 700;
     background-color: var(--bg-secondary);
     border-radius: var(--radius-sm);
     vertical-align: super;
+
+    // 按引用顺序的编号（lib/markdown/footnotes.ts）
+    &[data-footnote-number]::before {
+      content: attr(data-footnote-number) ' ';
+      color: var(--accent-primary);
+    }
   }
 
   :global(.footnote-def) {
@@ -666,6 +672,7 @@ $z-toast: 700;
     font-size: var(--font-size-sm);
     color: var(--text-secondary);
 
+    // 编辑器里显示标签便于对照源码；预览与阅读视图里被引用的定义显示编号
     &::before {
       content: '[^' attr(data-footnote-def) ']';
       position: absolute;
@@ -675,6 +682,10 @@ $z-toast: 700;
       font-size: var(--font-size-xs);
       line-height: 2;
       pointer-events: none;
+    }
+
+    &[data-footnote-number]::before {
+      content: attr(data-footnote-number) '.';
     }
 
     > :first-child {

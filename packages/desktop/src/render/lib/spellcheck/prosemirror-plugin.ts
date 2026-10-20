@@ -10,6 +10,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { Plugin, PluginKey, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { PopupMenu, type PopupMenuClasses, type PopupMenuEntry } from '../editor/popup-menu';
+import { changedRanges } from '../editor/changed-ranges';
 import { tokenizeWords } from './tokenize';
 import type { SpellChecker } from './types';
 
@@ -82,18 +83,6 @@ function subtractRange(ranges: Range[], [from, to]: Range): Range[] {
 
 function intersects(ranges: Range[], from: number, to: number): boolean {
   return ranges.some(([start, end]) => start < to && end > from);
-}
-
-/** 事务在新文档中改动过的区间 */
-function changedRanges(tr: Transaction): Range[] {
-  const ranges: Range[] = [];
-  tr.mapping.maps.forEach((map, index) => {
-    const rest = tr.mapping.slice(index + 1);
-    map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
-      ranges.push([rest.map(newStart, -1), rest.map(newEnd, 1)]);
-    });
-  });
-  return ranges;
 }
 
 /** 去掉与改动区间重叠的标记；删除产生的空区间只影响跨过该点的标记 */

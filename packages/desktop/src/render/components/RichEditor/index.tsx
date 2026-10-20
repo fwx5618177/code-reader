@@ -30,6 +30,8 @@ import {
   formatForFileType,
   createLivePreviewPlugin,
   createAbbreviationPlugin,
+  createFootnoteNumberPlugin,
+  createFootnoteRefView,
   createFrontMatterPlugin,
   createTableKeymap,
   SlashCommandProvider,
@@ -915,6 +917,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
       plugins.push(
         createLivePreviewPlugin(schema),
         createAbbreviationPlugin(),
+        createFootnoteNumberPlugin(),
         createFrontMatterPlugin(),
         createBlockIdPlugin(styles.blockIdMarker),
         createRevealHighlightPlugin(),
@@ -954,6 +957,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
         list_item: createListItemView(),
         wiki_embed: embedViews.nodeView,
         image: mediaViews.nodeView,
+        footnote_ref: (node, _view, _getPos, decorations) => createFootnoteRefView(node, decorations),
       },
       dispatchTransaction(transaction: Transaction) {
         const newState = view.state.apply(transaction);

@@ -176,12 +176,25 @@ describe('输入规则与回车转换', () => {
     expect(typesIn(editor.state.doc)).not.toContain('subscript');
   });
 
-  it('脚注：正文中的 [^1] 是引用，段首 [^1]: 是定义，^[…] 是行内脚注', () => {
+  it('脚注：正文中的 [^1] 是引用，标签还没有定义时在文末补上（光标留在原处）；^[…] 是行内脚注', () => {
     const editor = createEditor('');
     type(editor, '正文[^1] 与^[行内]');
-    press(editor, 'Enter');
+    expect(serializeMarkdown(editor.state.doc)).toBe('正文[^1] 与^[行内]\n\n[^1]: \n');
+    expect(editor.state.selection.$from.parent.textContent).toBe('正文 与');
+    // 空定义保存后重新打开仍是脚注
+    expect(typesIn(parseMarkdown(serializeMarkdown(editor.state.doc)))).toContain('footnote_ref');
+  });
+
+  it('脚注：段首 [^1]: 是定义；已有定义时输入引用不再补定义', () => {
+    const editor = createEditor('');
     type(editor, '[^1]: 定义内容');
-    expect(serializeMarkdown(editor.state.doc)).toBe('正文[^1] 与^[行内]\n\n[^1]: 定义内容\n');
+    press(editor, 'Enter');
+    press(editor, 'Enter');
+    type(editor, '正文[^1]');
+    const markdown = serializeMarkdown(editor.state.doc);
+    expect(markdown.match(/\[\^1\]:/g)).toHaveLength(1);
+    expect(markdown).toContain('[^1]: 定义内容');
+    expect(markdown).toContain('正文[^1]');
   });
 
   it('术语段落之后输入 ": " 变成定义列表；之后再输入一条说明', () => {
@@ -268,7 +281,7 @@ describe('缩写', () => {
     const { html } = renderContentToHtml('*[API]: 应用程序接口\n\n调用 API 与 `API`[^1]\n\n[^1]: 脚注内容\n', 'markdown');
     expect(html).toContain('<abbr class="abbreviation" title="应用程序接口">API</abbr>');
     expect(html).toContain('<code>API</code>');
-    expect(html).toMatch(/<sup class="footnote-ref" data-footnote-ref="1" title="脚注内容">1<\/sup>/);
+    expect(html).toMatch(/<sup class="footnote-ref" data-footnote-ref="1" data-footnote-number="1" title="脚注内容">1<\/sup>/);
   });
 });
 

@@ -429,7 +429,7 @@ function createTaskListInputRule(listItemType: NodeType): InputRule {
 }
 
 /**
- * 脚注：正文中输入 [^标签] → 脚注引用；段首输入 [^标签]: 加空格 → 脚注定义；^[内容] → 行内脚注
+ * 脚注：正文中输入 [^标签] → 脚注引用（标签还没有定义时在文末补上）；段首输入 [^标签]: 加空格 → 脚注定义；^[内容] → 行内脚注
  */
 function createFootnoteInputRules(schema: Schema): InputRule[] {
   const { footnote_ref: ref, footnote_def: def, footnote_inline: inline, paragraph } = schema.nodes;
@@ -448,7 +448,17 @@ function createFootnoteInputRules(schema: Schema): InputRule[] {
     new InputRule(/(?<!\\)\[\^([^\]\s]+)\]$/, (state, match, start, end) => {
       // 段首的 [^标签] 可能是定义的开头，等输入 ": "
       if (state.doc.resolve(start).parentOffset === 0 || !outsideCode(state, start)) return null;
-      return state.tr.replaceWith(start, end, ref.create({ label: match[1] }));
+      const label = match[1]!;
+      const tr = state.tr.replaceWith(start, end, ref.create({ label }));
+      // 没有定义的引用在 Markdown 里只是文字（重新打开后会变回文字）：在文末补上空定义，光标留在原处
+      let defined = false;
+      tr.doc.descendants((node) => {
+        if (defined || node.isTextblock) return false;
+        if (node.type === def && node.attrs.label === label) defined = true;
+        return !defined;
+      });
+      if (!defined) tr.insert(tr.doc.content.size, def.create({ label }, paragraph.create()));
+      return tr;
     }),
     new InputRule(/(?<!\\)\^\[([^\]]+)\]$/, (state, match, start, end) => {
       if (!outsideCode(state, start)) return null;
