@@ -254,7 +254,14 @@ export class App {
 /** 启动应用（使用已构建的 dist），连上主窗口并初始化数据库 */
 export async function launch() {
   const userData = mkdtempSync(join(tmpdir(), 'code-reader-e2e-'));
-  const child = spawn('npx', ['electron', '.', `--user-data-dir=${userData}`, `--remote-debugging-port=${PORT}`], {
+  // 窗口被遮挡或在后台时 Chromium 会停止出帧、节流定时器，ResizeObserver 不触发，
+  // 虚拟列表会停在旧尺寸只渲染几行。测试时窗口不一定在最前（本机、CI），关闭这些节流
+  const switches = [
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-background-timer-throttling',
+  ];
+  const child = spawn('npx', ['electron', '.', `--user-data-dir=${userData}`, `--remote-debugging-port=${PORT}`, ...switches], {
     cwd: DESKTOP_ROOT,
     detached: true,
     stdio: 'ignore',
