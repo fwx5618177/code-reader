@@ -4,6 +4,7 @@
 // ================================
 
 import { mkdirSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ALT, CTRL, META, launch, reloadWithData, sleep, waitFor } from './cdp.mjs';
@@ -26,6 +27,7 @@ const NOTES = [
   { id: 'e2e-detail', title: '详情标签笔记', content: '---\ntags: [原有]\n---\n\n正文\n', tags: ['原有'] },
   { id: 'e2e-multiline', title: '多行标签笔记', content: '---\ntags: [多行甲,\n  多行乙]\ntitle: x\n---\n\n正文\n' },
   { id: 'e2e-html', title: '旧版笔记', content: '<p>旧版独有词 <strong>HTML</strong> 正文</p>' },
+  { id: 'e2e-ai', title: 'AI 标签笔记', content: '---\ntags: [手写]\n---\n\n关于向量数据库的笔记。\n', tags: ['手写'] },
 ];
 
 async function seed(app) {
@@ -94,6 +96,37 @@ function paneViews(app) {
       preview: Boolean(pane.querySelector('[class*=previewContent]')),
     }))
   );
+}
+
+/**
+ * 本机的 OpenAI 兼容服务：/chat/completions 总是返回 reply 的文字（不联网、不需要真实密钥）。
+ * 返回服务地址与关闭函数；requests 记录收到的请求体
+ */
+async function fakeOpenAI(reply) {
+  const requests = [];
+  const server = createServer((request, response) => {
+    let body = '';
+    request.on('data', (chunk) => (body += chunk));
+    request.on('end', () => {
+      if (request.method !== 'POST' || !request.url.endsWith('/chat/completions')) {
+        response.writeHead(404).end();
+        return;
+      }
+      requests.push(JSON.parse(body));
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(
+        JSON.stringify({
+          id: 'e2e',
+          object: 'chat.completion',
+          created: 0,
+          model: 'e2e-model',
+          choices: [{ index: 0, message: { role: 'assistant', content: reply }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        })
+      );
+    });
+  });
+  await new Promise((done) => server.listen(0, '127.0.0.1', done));
+  return { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, requests, close: () => server.close() };
 }
 
 // ================================
@@ -398,6 +431,39 @@ const scenarios = [
       await waitFor(async () => (await contentOf(app, 'e2e-detail'))?.includes('tags: [原有, 新增]'), { message: '添加后 YAML 没有改写' });
       await app.click('aside[aria-label="条目详情"] button[title="移除标签「原有」"]');
       await waitFor(async () => (await contentOf(app, 'e2e-detail'))?.includes('tags: [新增]'), { message: '删除后 YAML 没有改写' });
+    },
+  },
+  {
+    name: 'AI：提取标签任务完成后，标签写回笔记 YAML（本机 OpenAI 兼容服务）',
+    async run(app) {
+      const service = await fakeOpenAI(JSON.stringify({ tags: [{ name: 'AI标签', confidence: 0.9 }] }));
+      try {
+        const provider = await app.invoke('ai:addProvider', {
+          type: 'openai',
+          name: 'E2E',
+          baseUrl: service.baseUrl,
+          apiKey: 'e2e-key',
+          isEnabled: true,
+          defaultModel: 'e2e-model',
+        });
+        await app.invoke('ai:setDefaultProvider', provider.id);
+        // 与界面上“重新处理”相同的入口：渲染进程提交任务，完成事件由 writeBackAgentTags 写回 YAML
+        await app.call((id) => window.electron.agent.processItem(id, { extractTags: true }), 'e2e-ai');
+        await waitFor(async () => (await contentOf(app, 'e2e-ai'))?.includes('AI标签'), {
+          timeout: 20000,
+          message: 'YAML 没有写回 AI 标签',
+        });
+        const content = await contentOf(app, 'e2e-ai');
+        if (!/^---\ntags: \[手写, AI标签\]\n---\n/.test(content)) throw new Error(`YAML 写回结果：${JSON.stringify(content)}`);
+        if (service.requests.length === 0) throw new Error('没有请求本机服务');
+        const names = (await app.rows(
+          `SELECT t.name FROM item_tags it JOIN tags t ON t.id = it.tag_id WHERE it.item_id = ? ORDER BY t.name`,
+          ['e2e-ai']
+        )).map((row) => row.name);
+        if (!names.includes('AI标签') || !names.includes('手写')) throw new Error(`条目标签：${names.join(',')}`);
+      } finally {
+        service.close();
+      }
     },
   },
 ];

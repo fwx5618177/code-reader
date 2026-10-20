@@ -302,4 +302,4 @@ pnpm --filter @code-reader/fuzzy-match-algorithm benchmark
 
 ### 端到端测试
 
-`packages/desktop/e2e`（`pnpm --filter @code-reader/desktop e2e`）在构建好的应用上执行真实操作：临时用户数据目录、写入种子数据，经 Chrome DevTools Protocol 模拟键盘、输入法提交与点击，再读数据库或页面核对。共 13 个场景，覆盖旧版 HTML 迁移、自动保存、视图按栏独立、三处 LaTeX 补全、Option+` 与 Ctrl+空格手动打开补全、补全面板翻到光标上方且只滚动自身、跨多行 tags、标签重命名 / 合并 / 详情面板改标签后的 YAML 改写；本地连续 3 次完整运行全部通过。`.github/workflows/e2e.yml` 在 macOS 运行器上执行它（尚未在 GitHub 上实际运行过）。
+`packages/desktop/e2e`（`pnpm --filter @code-reader/desktop e2e`）在构建好的应用上执行真实操作：临时用户数据目录、写入种子数据，经 Chrome DevTools Protocol 模拟键盘、输入法提交与点击，再读数据库或页面核对。共 14 个场景，覆盖旧版 HTML 迁移、自动保存、视图按栏独立、三处 LaTeX 补全、Option+` 与 Ctrl+空格手动打开补全、补全面板翻到光标上方且只滚动自身、跨多行 tags、标签重命名 / 合并 / 详情面板改标签后的 YAML 改写、AI 提取标签后写回 YAML（E2E 进程内起一个 OpenAI 兼容的本机服务，不联网）。`.github/workflows/e2e.yml` 在 macOS 运行器上用 Node 22 执行它：尚未在 GitHub 上实际运行过，但已在本地按同样的步骤（干净克隆、冻结 lockfile 安装、构建子包、E2E）模拟通过。
