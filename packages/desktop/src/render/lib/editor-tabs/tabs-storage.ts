@@ -5,10 +5,12 @@
 import {
   INITIAL_EDITOR_TABS_STATE,
   MAX_CLOSED_TABS,
+  PANE_VIEWS,
   normalizePanes,
   type ClosedTab,
   type EditorTabsState,
   type PaneIndex,
+  type PaneView,
   type TabGroup,
 } from './tabs-state';
 
@@ -31,7 +33,9 @@ function normalizeGroup(value: unknown): TabGroup | null {
     typeof value.activeId === 'string' && tabs.includes(value.activeId)
       ? value.activeId
       : (tabs[0] ?? null);
-  return { tabs, activeId };
+  // 旧版本没有视图模式：按编辑
+  const view = PANE_VIEWS.includes(value.view as PaneView) ? (value.view as PaneView) : 'edit';
+  return { tabs, activeId, view };
 }
 
 function normalizeClosed(value: unknown): ClosedTab | null {

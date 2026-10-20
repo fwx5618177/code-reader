@@ -8,5 +8,5 @@ export {
   isSplitView,
   referencedDocIds,
 } from './tabs-state';
-export type { PaneIndex, TabGroup, EditorTabsState, EditorTabsAction } from './tabs-state';
+export type { PaneIndex, PaneView, TabGroup, EditorTabsState, EditorTabsAction } from './tabs-state';
 export { loadEditorTabsState, saveEditorTabsState } from './tabs-storage';

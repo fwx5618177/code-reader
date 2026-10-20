@@ -9,13 +9,13 @@
 import React from 'react';
 import EditorTabs from '../EditorTabs';
 import type { EditorTabsController } from '../../hooks/useEditorTabs';
-import type { PaneIndex } from '../../lib/editor-tabs';
+import type { PaneIndex, PaneView } from '../../lib/editor-tabs';
 import styles from './SplitEditor.module.scss';
 
 export interface SplitEditorProps {
   tabs: EditorTabsController;
-  /** 渲染窗格中活动文档的编辑器；文档变化时重新创建 */
-  renderPane: (docId: string, focused: boolean) => React.ReactNode;
+  /** 渲染窗格中活动文档的编辑器（按窗格的视图模式）；文档变化时重新创建 */
+  renderPane: (docId: string, focused: boolean, view: PaneView) => React.ReactNode;
   /** 窗格中没有打开的文档时显示 */
   emptyPane: React.ReactNode;
 }
@@ -49,7 +49,7 @@ export const SplitEditor: React.FC<SplitEditorProps> = ({ tabs, renderPane, empt
             onFocusCapture={focusThisPane}
           >
             {group.activeId ? (
-              <React.Fragment key={group.activeId}>{renderPane(group.activeId, focused)}</React.Fragment>
+              <React.Fragment key={group.activeId}>{renderPane(group.activeId, focused, group.view)}</React.Fragment>
             ) : (
               emptyPane
             )}

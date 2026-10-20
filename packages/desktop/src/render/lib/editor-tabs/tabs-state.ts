@@ -1,16 +1,23 @@
 // ================================
 // 写作模式标签页与分栏状态（纯逻辑）
-// 一个或两个窗格，每个窗格是一组标签（文档 id）及其活动标签。
+// 一个或两个窗格，每个窗格是一组标签（文档 id）及其活动标签与视图模式（与 Obsidian 相同，每栏各自编辑或预览）。
 // 标题、脏状态等展示信息由文档列表与编辑会话派生，不在此存储。
 // ================================
 
 export type PaneIndex = 0 | 1;
+
+/** 窗格的视图模式：编辑、预览、编辑与预览并排 */
+export type PaneView = 'edit' | 'preview' | 'split';
+
+export const PANE_VIEWS: readonly PaneView[] = ['edit', 'preview', 'split'];
 
 export interface TabGroup {
   /** 标签顺序（文档 id，不重复） */
   tabs: string[];
   /** 活动标签；为 null 表示窗格为空 */
   activeId: string | null;
+  /** 视图模式（切换标签时保持） */
+  view: PaneView;
 }
 
 /** 最近关闭的标签：记录所在窗格与位置，重新打开时放回原处 */
@@ -41,9 +48,11 @@ export type EditorTabsAction =
   /** 拖动标签：同窗格内重排或移动到另一窗格；toIndex 表示插入到目标窗格中该位置的标签之前 */
   | { type: 'move'; docId: string; from: PaneIndex; to: PaneIndex; toIndex: number }
   | { type: 'focusPane'; pane: PaneIndex }
-  /** 向右分栏：新窗格打开当前活动文档 */
+  /** 切换窗格的视图模式 */
+  | { type: 'setView'; pane: PaneIndex; view: PaneView }
+  /** 向右分栏：新窗格打开当前活动文档（沿用当前窗格的视图模式） */
   | { type: 'split' }
-  /** 关闭分栏：两个窗格的标签合并 */
+  /** 关闭分栏：两个窗格的标签合并（保留聚焦窗格的视图模式） */
   | { type: 'unsplit' }
   /** 移除已删除文档的标签（含最近关闭记录） */
   | { type: 'prune'; docIds: string[] };
@@ -51,7 +60,7 @@ export type EditorTabsAction =
 export const MAX_CLOSED_TABS = 20;
 
 export const INITIAL_EDITOR_TABS_STATE: EditorTabsState = {
-  panes: [{ tabs: [], activeId: null }],
+  panes: [{ tabs: [], activeId: null, view: 'edit' }],
   focusedPane: 0,
   closed: [],
 };
@@ -96,7 +105,7 @@ function removeTab(group: TabGroup, docId: string): TabGroup {
   const tabs = group.tabs.filter((id) => id !== docId);
   const activeId =
     group.activeId === docId ? (tabs[Math.min(index, tabs.length - 1)] ?? null) : group.activeId;
-  return { tabs, activeId };
+  return { ...group, tabs, activeId };
 }
 
 /**
@@ -138,7 +147,7 @@ export function editorTabsReducer(
           );
       return {
         ...state,
-        panes: replacePane(state.panes, pane, { tabs, activeId: action.docId }),
+        panes: replacePane(state.panes, pane, { ...group, tabs, activeId: action.docId }),
         closed: state.closed.filter((entry) => entry.docId !== action.docId),
       };
     }
@@ -185,7 +194,7 @@ export function editorTabsReducer(
         : insertAt(group.tabs, last.index, last.docId);
       return {
         ...state,
-        panes: replacePane(state.panes, pane, { tabs, activeId: last.docId }),
+        panes: replacePane(state.panes, pane, { ...group, tabs, activeId: last.docId }),
         focusedPane: pane,
         closed: state.closed.slice(0, -1),
       };
@@ -219,6 +228,7 @@ export function editorTabsReducer(
         return {
           ...state,
           panes: replacePane(state.panes, action.to, {
+            ...source,
             tabs: reposition(source.tabs),
             activeId: action.docId,
           }),
@@ -229,7 +239,7 @@ export function editorTabsReducer(
       const panes = replacePane(
         replacePane(state.panes, action.from, removeTab(source, action.docId)),
         action.to,
-        { tabs: reposition(target.tabs), activeId: action.docId }
+        { ...target, tabs: reposition(target.tabs), activeId: action.docId }
       );
       return { ...state, ...normalizePanes(panes, action.to) };
     }
@@ -238,12 +248,18 @@ export function editorTabsReducer(
       if (action.pane >= state.panes.length || action.pane === state.focusedPane) return state;
       return { ...state, focusedPane: action.pane };
 
+    case 'setView': {
+      const group = state.panes[action.pane];
+      if (!group || group.view === action.view) return state;
+      return { ...state, panes: replacePane(state.panes, action.pane, { ...group, view: action.view }) };
+    }
+
     case 'split': {
       const activeId = selectActiveDocId(state);
       if (isSplitView(state) || !activeId) return state;
       return {
         ...state,
-        panes: [state.panes[0], { tabs: [activeId], activeId }],
+        panes: [state.panes[0], { tabs: [activeId], activeId, view: state.panes[0].view }],
         focusedPane: 1,
       };
     }
@@ -256,8 +272,9 @@ export function editorTabsReducer(
         panes: [
           {
             tabs: [...first.tabs, ...second.tabs.filter((id) => !first.tabs.includes(id))],
-            // 保留聚焦窗格的活动文档，编辑会话不因关闭分栏而切换
+            // 保留聚焦窗格的活动文档与视图模式，编辑会话不因关闭分栏而切换
             activeId: selectActiveDocId(state),
+            view: state.panes[state.focusedPane].view,
           },
         ],
         focusedPane: 0,

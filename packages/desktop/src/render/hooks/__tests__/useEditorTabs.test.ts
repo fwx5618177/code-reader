@@ -55,18 +55,18 @@ describe('useEditorTabs', () => {
 
   it('首次使用时把会话文档作为第一个标签', () => {
     const { result } = setup();
-    expect(result.current.panes).toEqual([{ tabs: ['a'], activeId: 'a' }]);
+    expect(result.current.panes).toEqual([{ tabs: ['a'], activeId: 'a', view: 'edit' }]);
     expect(result.current.activeDocId).toBe('a');
   });
 
   it('恢复持久化的标签：剔除已删除文档，会话切换到恢复的活动标签', () => {
     saveEditorTabsState({
-      panes: [{ tabs: ['b', 'gone'], activeId: 'gone' }],
+      panes: [{ tabs: ['b', 'gone'], activeId: 'gone', view: 'edit' }],
       focusedPane: 0,
       closed: [],
     });
     const { result, options } = setup();
-    expect(result.current.panes).toEqual([{ tabs: ['b'], activeId: 'b' }]);
+    expect(result.current.panes).toEqual([{ tabs: ['b'], activeId: 'b', view: 'edit' }]);
     expect(options.selectSessionDocument).toHaveBeenCalledWith('b');
   });
 
@@ -75,14 +75,14 @@ describe('useEditorTabs', () => {
     act(() => {
       void result.current.openDocument('b');
     });
-    expect(result.current.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b' });
+    expect(result.current.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b', view: 'edit' });
     expect(options.selectSessionDocument).toHaveBeenCalledWith('b');
   });
 
   it('会话被其他途径切换（如新建文档）时在聚焦窗格打开对应标签', () => {
     const { result, rerender, options } = setup();
     rerender({ ...options, sessionDocId: 'b', sessionDocument: doc('b') });
-    expect(result.current.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b' });
+    expect(result.current.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b', view: 'edit' });
   });
 
   it('关闭有未保存修改的标签前先保存，保存失败则保留标签', async () => {

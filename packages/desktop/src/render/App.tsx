@@ -108,11 +108,11 @@ import { aiConfigService } from './services/aiConfigService';
 import { registerFlush } from './services/flushRegistry';
 import { getEditorManager } from './lib/core';
 import { pickRecentlyRead, resolveArticle } from './lib/reading';
-import type { EditorMode } from './components/RichEditor';
+import type { PaneView } from './lib/editor-tabs';
 import './App.scss';
 
 /** 写作区的视图模式（底栏切换；⌘/ 在编辑与预览间切换，⌘⇧/ 切换分屏） */
-const WRITING_VIEW_MODES: ReadonlyArray<{ mode: EditorMode; label: string; icon: React.ReactNode }> = [
+const WRITING_VIEW_MODES: ReadonlyArray<{ mode: PaneView; label: string; icon: React.ReactNode }> = [
   { mode: 'edit', label: '编辑', icon: <PenLine size={14} /> },
   { mode: 'preview', label: '预览（⌘/）', icon: <Eye size={14} /> },
   { mode: 'split', label: '分屏：编辑与预览并排（⌘⇧/）', icon: <Columns2 size={14} /> },
@@ -151,8 +151,6 @@ const App: React.FC = () => {
   const pageSettings = usePageSettings();
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
   const pageContentWidth = PAGE_CONTENT_WIDTH_VALUES[pageSettings.settings.contentWidth];
-  // 写作区的视图模式：分栏各栏与专注模式共用
-  const [writingView, setWritingView] = useState<EditorMode>('edit');
 
   // 轻提示（快速收集结果等）
   const [notice, setNotice] = useState<string | null>(null);
@@ -236,6 +234,10 @@ const App: React.FC = () => {
   });
   // 所有“打开文档”入口（侧边栏、搜索、跨模式跳转等）都在聚焦窗格中打开标签
   const selectDocument = editorTabs.openDocument;
+  // 视图模式按栏独立；底栏按钮、⌘/ 与专注模式作用于聚焦的一栏
+  const writingView: PaneView = editorTabs.panes[editorTabs.focusedPane]?.view ?? 'edit';
+  const { focusedPane, setPaneView } = editorTabs;
+  const setWritingView = useCallback((view: PaneView) => setPaneView(focusedPane, view), [focusedPane, setPaneView]);
 
   // 处理文档移动（移动后刷新列表）
   const handleMoveDocument = useCallback(async () => {
@@ -489,11 +491,11 @@ const App: React.FC = () => {
         return;
       }
 
-      // Cmd/Ctrl + / 写作区在编辑与预览间切换，Cmd/Ctrl + Shift + / 切换分屏（编辑器内也生效）
+      // Cmd/Ctrl + / 聚焦的一栏在编辑与预览间切换，Cmd/Ctrl + Shift + / 切换并排（编辑器内也生效）
       if ((e.metaKey || e.ctrlKey) && e.code === 'Slash' && appState.mode === 'writing') {
         e.preventDefault();
-        setWritingView((view) =>
-          e.shiftKey ? (view === 'split' ? 'edit' : 'split') : view === 'preview' ? 'edit' : 'preview'
+        setWritingView(
+          e.shiftKey ? (writingView === 'split' ? 'edit' : 'split') : writingView === 'preview' ? 'edit' : 'preview'
         );
         return;
       }
@@ -537,6 +539,8 @@ const App: React.FC = () => {
     pageSettingsOpen,
     editorDirty,
     isInFocusMode,
+    writingView,
+    setWritingView,
   ]);
 
   // 托盘菜单动作：与对应的全局快捷键行为一致
@@ -1260,16 +1264,17 @@ const App: React.FC = () => {
         ))
       : null;
 
-  /** 写作编辑器的公共属性：分栏各栏与专注模式共用；定位请求只交给聚焦的一栏 */
+  /** 写作编辑器的公共属性：分栏各栏与专注模式共用；定位请求只交给聚焦的一栏，视图模式按栏 */
   const writingEditorProps = (
     focused: boolean,
+    view: PaneView,
     options: NonNullable<PaneEditorProps['editorProps']['options']>
   ): PaneEditorProps['editorProps'] => ({
     linkTargets,
     onWikiLinkClick: openWikiTarget,
     revealHeading: focused ? revealHeading : null,
     onAssignBlockId: assignBlockId,
-    mode: writingView,
+    mode: view,
     options: {
       showWordCount: false,
       showToolbar: false,
@@ -1335,13 +1340,13 @@ const App: React.FC = () => {
             <PageSurface className="writing-body" settings={pageSettings.settings}>
             <SplitEditor
               tabs={editorTabs}
-              renderPane={(docId, focused) => (
+              renderPane={(docId, focused, view) => (
                 <div className="writing-editor-wrapper">
                   <PaneEditor
                     docId={docId}
                     focused={focused}
                     executor={saveExecutor}
-                    editorProps={writingEditorProps(focused, {
+                    editorProps={writingEditorProps(focused, view, {
                       placeholder: PLACEHOLDERS.CONTENT,
                       showTitle: true,
                       titlePlaceholder: PLACEHOLDERS.TITLE,
@@ -1470,7 +1475,7 @@ const App: React.FC = () => {
                 docId={editorTabs.activeDocId}
                 focused
                 executor={saveExecutor}
-                editorProps={writingEditorProps(true, {
+                editorProps={writingEditorProps(true, writingView, {
                   placeholder: PLACEHOLDERS.FOCUS_CONTENT,
                   minHeight: '100%',
                   showTitle: false,

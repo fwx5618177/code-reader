@@ -35,12 +35,12 @@ describe('editorTabsReducer', () => {
   describe('open / activate', () => {
     it('打开新文档时插在活动标签右侧并激活', () => {
       const state = apply(abc, { type: 'activate', pane: 0, docId: 'a' }, { type: 'open', docId: 'x' });
-      expect(state.panes[0]).toEqual({ tabs: ['a', 'x', 'b', 'c'], activeId: 'x' });
+      expect(state.panes[0]).toEqual({ tabs: ['a', 'x', 'b', 'c'], activeId: 'x', view: 'edit' });
     });
 
     it('打开已存在的文档只激活，不重复添加', () => {
       const state = reduce(abc, { type: 'open', docId: 'a' });
-      expect(state.panes[0]).toEqual({ tabs: ['a', 'b', 'c'], activeId: 'a' });
+      expect(state.panes[0]).toEqual({ tabs: ['a', 'b', 'c'], activeId: 'a', view: 'edit' });
     });
 
     it('打开当前活动文档时状态不变', () => {
@@ -49,7 +49,7 @@ describe('editorTabsReducer', () => {
 
     it('分栏时在聚焦窗格中打开', () => {
       const state = reduce(split, { type: 'open', docId: 'e' });
-      expect(state.panes[1]).toEqual({ tabs: ['c', 'd', 'e'], activeId: 'e' });
+      expect(state.panes[1]).toEqual({ tabs: ['c', 'd', 'e'], activeId: 'e', view: 'edit' });
       expect(state.panes[0].tabs).toEqual(['a', 'b', 'c']);
     });
 
@@ -68,15 +68,15 @@ describe('editorTabsReducer', () => {
   describe('close / reopen', () => {
     it('关闭活动标签后激活右侧相邻标签，没有则左侧', () => {
       const middle = apply(abc, { type: 'activate', pane: 0, docId: 'b' }, { type: 'close', pane: 0, docId: 'b' });
-      expect(middle.panes[0]).toEqual({ tabs: ['a', 'c'], activeId: 'c' });
+      expect(middle.panes[0]).toEqual({ tabs: ['a', 'c'], activeId: 'c', view: 'edit' });
 
       const last = reduce(abc, { type: 'close', pane: 0, docId: 'c' });
-      expect(last.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b' });
+      expect(last.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b', view: 'edit' });
     });
 
     it('关闭非活动标签不改变活动标签', () => {
       const state = reduce(abc, { type: 'close', pane: 0, docId: 'a' });
-      expect(state.panes[0]).toEqual({ tabs: ['b', 'c'], activeId: 'c' });
+      expect(state.panes[0]).toEqual({ tabs: ['b', 'c'], activeId: 'c', view: 'edit' });
     });
 
     it('关闭最后一个标签后窗格为空', () => {
@@ -86,7 +86,7 @@ describe('editorTabsReducer', () => {
         { type: 'close', pane: 0, docId: 'b' },
         { type: 'close', pane: 0, docId: 'c' }
       );
-      expect(state.panes).toEqual([{ tabs: [], activeId: null }]);
+      expect(state.panes).toEqual([{ tabs: [], activeId: null, view: 'edit' }]);
       expect(selectActiveDocId(state)).toBeNull();
     });
 
@@ -97,10 +97,10 @@ describe('editorTabsReducer', () => {
         { type: 'close', pane: 0, docId: 'c' },
         { type: 'reopen' }
       );
-      expect(state.panes[0]).toEqual({ tabs: ['b', 'c'], activeId: 'c' });
+      expect(state.panes[0]).toEqual({ tabs: ['b', 'c'], activeId: 'c', view: 'edit' });
 
       const again = reduce(state, { type: 'reopen' });
-      expect(again.panes[0]).toEqual({ tabs: ['a', 'b', 'c'], activeId: 'a' });
+      expect(again.panes[0]).toEqual({ tabs: ['a', 'b', 'c'], activeId: 'a', view: 'edit' });
       expect(again.closed).toEqual([]);
       expect(reduce(again, { type: 'reopen' })).toBe(again);
     });
@@ -113,7 +113,7 @@ describe('editorTabsReducer', () => {
         { type: 'reopen' }
       );
       // 右侧窗格关空后分栏收起，重新打开的 c 已在左侧窗格中，直接激活
-      expect(state.panes).toEqual([{ tabs: ['a', 'b', 'c'], activeId: 'c' }]);
+      expect(state.panes).toEqual([{ tabs: ['a', 'b', 'c'], activeId: 'c', view: 'edit' }]);
       expect(state.focusedPane).toBe(0);
     });
 
@@ -148,7 +148,7 @@ describe('editorTabsReducer', () => {
   describe('move', () => {
     it('同窗格内向右拖动：插到目标标签之前', () => {
       const state = reduce(abc, { type: 'move', docId: 'a', from: 0, to: 0, toIndex: 2 });
-      expect(state.panes[0]).toEqual({ tabs: ['b', 'a', 'c'], activeId: 'a' });
+      expect(state.panes[0]).toEqual({ tabs: ['b', 'a', 'c'], activeId: 'a', view: 'edit' });
     });
 
     it('同窗格内拖到末尾与拖到开头', () => {
@@ -166,15 +166,15 @@ describe('editorTabsReducer', () => {
 
     it('移动到另一窗格：源窗格激活相邻标签，目标窗格激活并获得焦点', () => {
       const state = reduce(split, { type: 'move', docId: 'b', from: 0, to: 1, toIndex: 1 });
-      expect(state.panes[0]).toEqual({ tabs: ['a', 'c'], activeId: 'c' });
-      expect(state.panes[1]).toEqual({ tabs: ['c', 'b', 'd'], activeId: 'b' });
+      expect(state.panes[0]).toEqual({ tabs: ['a', 'c'], activeId: 'c', view: 'edit' });
+      expect(state.panes[1]).toEqual({ tabs: ['c', 'b', 'd'], activeId: 'b', view: 'edit' });
       expect(state.focusedPane).toBe(1);
     });
 
     it('目标窗格已有该文档时只调整位置', () => {
       const state = reduce(split, { type: 'move', docId: 'c', from: 0, to: 1, toIndex: 2 });
-      expect(state.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b' });
-      expect(state.panes[1]).toEqual({ tabs: ['d', 'c'], activeId: 'c' });
+      expect(state.panes[0]).toEqual({ tabs: ['a', 'b'], activeId: 'b', view: 'edit' });
+      expect(state.panes[1]).toEqual({ tabs: ['d', 'c'], activeId: 'c', view: 'edit' });
     });
 
     it('源窗格被移空时收起分栏', () => {
@@ -183,7 +183,7 @@ describe('editorTabsReducer', () => {
         { type: 'close', pane: 1, docId: 'c' },
         { type: 'move', docId: 'd', from: 1, to: 0, toIndex: 0 }
       );
-      expect(state.panes).toEqual([{ tabs: ['d', 'a', 'b', 'c'], activeId: 'd' }]);
+      expect(state.panes).toEqual([{ tabs: ['d', 'a', 'b', 'c'], activeId: 'd', view: 'edit' }]);
       expect(state.focusedPane).toBe(0);
     });
 
@@ -197,8 +197,8 @@ describe('editorTabsReducer', () => {
     it('分栏时新窗格打开当前活动文档并获得焦点', () => {
       const state = reduce(abc, { type: 'split' });
       expect(state.panes).toEqual([
-        { tabs: ['a', 'b', 'c'], activeId: 'c' },
-        { tabs: ['c'], activeId: 'c' },
+        { tabs: ['a', 'b', 'c'], activeId: 'c', view: 'edit' },
+        { tabs: ['c'], activeId: 'c', view: 'edit' },
       ]);
       expect(state.focusedPane).toBe(1);
       expect(reduce(state, { type: 'split' })).toBe(state);
@@ -210,7 +210,7 @@ describe('editorTabsReducer', () => {
 
     it('关闭分栏时合并标签并保留聚焦窗格的活动文档', () => {
       const state = reduce(split, { type: 'unsplit' });
-      expect(state.panes).toEqual([{ tabs: ['a', 'b', 'c', 'd'], activeId: 'd' }]);
+      expect(state.panes).toEqual([{ tabs: ['a', 'b', 'c', 'd'], activeId: 'd', view: 'edit' }]);
       expect(state.focusedPane).toBe(0);
       expect(reduce(state, { type: 'unsplit' })).toBe(state);
     });
@@ -220,6 +220,22 @@ describe('editorTabsReducer', () => {
       expect(reduce(split, { type: 'focusPane', pane: 0 }).focusedPane).toBe(0);
     });
 
+    it('视图模式按栏独立：切换标签、打开与关闭时保持；分栏沿用当前栏的模式，关闭分栏保留聚焦栏的模式', () => {
+      const preview = reduce(split, { type: 'setView', pane: 1, view: 'preview' });
+      expect(preview.panes.map((group) => group.view)).toEqual(['edit', 'preview']);
+      expect(reduce(preview, { type: 'setView', pane: 1, view: 'preview' })).toBe(preview);
+      expect(reduce(abc, { type: 'setView', pane: 1, view: 'preview' })).toBe(abc);
+
+      const moved = apply(preview, { type: 'cycle', offset: 1 }, { type: 'open', docId: 'x' }, { type: 'close', pane: 1, docId: 'x' });
+      expect(moved.panes[1]!.view).toBe('preview');
+
+      expect(reduce(preview, { type: 'unsplit' }).panes[0]!.view).toBe('preview');
+      expect(apply(preview, { type: 'focusPane', pane: 0 }, { type: 'unsplit' }).panes[0]!.view).toBe('edit');
+
+      const resplit = apply(abc, { type: 'setView', pane: 0, view: 'split' }, { type: 'split' });
+      expect(resplit.panes.map((group) => group.view)).toEqual(['split', 'split']);
+    });
+
     it('关闭窗格中最后一个标签时收起分栏', () => {
       const state = apply(
         split,
@@ -227,7 +243,7 @@ describe('editorTabsReducer', () => {
         { type: 'close', pane: 1, docId: 'c' },
         { type: 'close', pane: 1, docId: 'd' }
       );
-      expect(state.panes).toEqual([{ tabs: ['a', 'b', 'c'], activeId: 'b' }]);
+      expect(state.panes).toEqual([{ tabs: ['a', 'b', 'c'], activeId: 'b', view: 'edit' }]);
       expect(state.focusedPane).toBe(0);
     });
   });
@@ -235,13 +251,13 @@ describe('editorTabsReducer', () => {
   describe('prune', () => {
     it('移除已删除文档的标签与关闭记录，并修正活动标签', () => {
       const state = apply(abc, { type: 'close', pane: 0, docId: 'a' }, { type: 'prune', docIds: ['a', 'c'] });
-      expect(state.panes[0]).toEqual({ tabs: ['b'], activeId: 'b' });
+      expect(state.panes[0]).toEqual({ tabs: ['b'], activeId: 'b', view: 'edit' });
       expect(state.closed).toEqual([]);
     });
 
     it('删除导致窗格为空时收起分栏', () => {
       const state = reduce(split, { type: 'prune', docIds: ['c', 'd'] });
-      expect(state.panes).toEqual([{ tabs: ['a', 'b'], activeId: 'b' }]);
+      expect(state.panes).toEqual([{ tabs: ['a', 'b'], activeId: 'b', view: 'edit' }]);
       expect(state.focusedPane).toBe(0);
     });
 

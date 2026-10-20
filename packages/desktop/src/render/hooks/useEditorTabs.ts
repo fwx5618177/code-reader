@@ -20,6 +20,7 @@ import {
   selectActiveDocId,
   type EditorTabsAction,
   type PaneIndex,
+  type PaneView,
   type TabGroup,
 } from '../lib/editor-tabs';
 import { PLACEHOLDERS, type Document, type DocumentListItem } from '../lib/documents';
@@ -61,6 +62,8 @@ export interface EditorTabsController {
   closeTab: (pane: PaneIndex, docId: string) => Promise<void>;
   moveTab: (docId: string, from: PaneIndex, to: PaneIndex, toIndex: number) => void;
   focusPane: (pane: PaneIndex) => void;
+  /** 切换窗格的视图模式（编辑 / 预览 / 并排） */
+  setPaneView: (pane: PaneIndex, view: PaneView) => void;
   toggleSplit: () => void;
   reopenClosedTab: () => void;
 }
@@ -182,6 +185,10 @@ export function useEditorTabs({
     dispatch({ type: 'focusPane', pane });
   }, []);
 
+  const setPaneView = useCallback((pane: PaneIndex, view: PaneView) => {
+    dispatch({ type: 'setView', pane, view });
+  }, []);
+
   const toggleSplit = useCallback(() => {
     dispatch({ type: isSplit ? 'unsplit' : 'split' });
   }, [isSplit]);
@@ -231,6 +238,7 @@ export function useEditorTabs({
     closeTab,
     moveTab,
     focusPane,
+    setPaneView,
     toggleSplit,
     reopenClosedTab,
   };
