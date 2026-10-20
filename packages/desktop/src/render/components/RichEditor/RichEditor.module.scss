@@ -1858,50 +1858,6 @@ $page-rule-rows: repeating-linear-gradient(
   }
 }
 
-// ================================
-// LaTeX 编辑器样式
-// ================================
-
-.latexEditorSplit {
-  flex-direction: row;
-
-  .latexEditorPane {
-    width: 50%;
-  }
-}
-
-.latexEditorPane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  border-right: 1px solid var(--border-primary);
-}
-
-.latexEditorHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-2) var(--spacing-3);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  flex-shrink: 0;
-}
-
-.latexPreviewContent {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--spacing-4);
-  background-color: var(--bg-primary);
-
-  @include scrollbar;
-
-  // 复用 previewContent 的样式
-  @extend .previewContent;
-}
-
 .hidden {
   display: none !important;
 }
@@ -1945,26 +1901,8 @@ $page-rule-rows: repeating-linear-gradient(
 }
 
 // ================================
-// 实时渲染 LaTeX 编辑器样式
+// LaTeX 编辑器：容器、头部、状态指示器、面板（每个选择器只定义一次）
 // ================================
-
-.latexEditorHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-2) var(--spacing-4);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  flex-shrink: 0;
-}
-
-.latexEditorStatus {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  font-weight: 400;
-  font-style: italic;
-  animation: pulse 1.5s ease-in-out infinite;
-}
 
 @keyframes pulse {
   0%,
@@ -1982,73 +1920,9 @@ $page-rule-rows: repeating-linear-gradient(
   }
 }
 
-.latexEditorError {
-  color: var(--color-error);
-  font-size: var(--font-size-sm);
-  cursor: help;
-  margin-left: var(--spacing-1);
-}
-
-.latexEditorMeta {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.latexEditorMain {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.latexEditorPane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  border-right: 1px solid var(--border-primary);
-  overflow: hidden;
-}
-
-.latexPreviewContent {
-  max-width: 800px;
-  margin: 0 auto;
-  line-height: 1.8;
-  color: var(--text-primary);
-}
-
-// 响应式布局
-@media (max-width: 1024px) {
-  .latexEditorMain {
-    flex-direction: column;
-  }
-
-  .latexEditorPane {
-    border-right: none;
-    border-bottom: 1px solid var(--border-primary);
-    max-height: 50%;
-  }
-}
-
-@media (max-width: 768px) {
-  .latexEditorHeader {
-    padding: var(--spacing-2);
-  }
-}
-
-// ================================
-// LaTeX 编辑器容器、头部与状态指示器
-// ================================
-
-// 主容器 - 100% 宽度，无边框
-// LaTeX 编辑器容器
-// 重要：确保层叠上下文正确，不遮挡侧边栏
+// 主容器：不创建层叠上下文（z-index: auto），也不用 isolation / contain，避免影响 fixed 定位的对话框
 .latexEditorContainer {
-  // 简化样式，移除可能造成视觉问题的属性
   position: relative;
-  // z-index 设为 auto，避免创建不必要的层叠上下文
-  // 让对话框等 fixed 元素能够正常显示在上层
   z-index: auto;
   display: flex;
   flex-direction: column;
@@ -2058,39 +1932,49 @@ $page-rule-rows: repeating-linear-gradient(
   background-color: var(--bg-primary);
   overflow: hidden;
   border: none;
-  // 移除 isolation 和 contain，避免影响 fixed 定位的对话框
 }
 
-// 编辑器头部（包含视图切换按钮）
+// 头部（视图切换与状态指示器）
 .latexEditorHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  min-height: 44px;
   padding: var(--spacing-2) var(--spacing-4);
   background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
   flex-shrink: 0;
-  min-height: 44px;
 }
 
-// 头部右侧区域
+.latexEditorHeaderLeft,
 .latexEditorHeaderRight {
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
 }
 
-// 解析错误指示器
+// 渲染中
+.latexEditorStatus {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-weight: 400;
+  font-style: italic;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+// 解析错误指示器（悬停显示错误详情）
 .latexEditorError {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-1);
+  margin-left: var(--spacing-1);
   padding: var(--spacing-1) var(--spacing-2);
   font-size: var(--font-size-xs);
   color: var(--color-error);
   background-color: var(--color-error-bg);
   border-radius: var(--radius-sm);
+  cursor: help;
 
   svg {
     flex-shrink: 0;
@@ -2115,20 +1999,35 @@ $page-rule-rows: repeating-linear-gradient(
   }
 }
 
-// 大文件指示器
-.latexLargeFileIndicator {
+// 大文件 / 超大文件指示器
+.latexLargeFileIndicator,
+.latexHugeFileIndicator {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-1);
   padding: var(--spacing-1) var(--spacing-2);
   font-size: var(--font-size-xs);
-  color: var(--color-warning);
-  background-color: var(--color-warning-bg);
   border-radius: var(--radius-sm);
+
+  svg {
+    flex-shrink: 0;
+  }
 }
 
-// 元数据指示器（解析时间、Worker 状态等）
+.latexLargeFileIndicator {
+  color: var(--color-warning);
+  background-color: var(--color-warning-bg);
+}
+
+.latexHugeFileIndicator {
+  color: var(--color-error);
+  background-color: var(--color-error-bg);
+}
+
+// 最近一次增量解析的耗时与复用率
 .latexEditorMeta {
+  display: inline-flex;
+  gap: var(--spacing-2);
   padding: var(--spacing-1) var(--spacing-2);
   font-size: var(--font-size-xs);
   color: var(--text-muted);
@@ -2137,74 +2036,32 @@ $page-rule-rows: repeating-linear-gradient(
   font-family: var(--font-mono);
 }
 
-// ================================
-// LaTeX 编辑器新增样式
-// ================================
-
-// 超大文件指示器
-.latexHugeFileIndicator {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--color-error);
-  background-color: var(--color-error-bg);
-  border-radius: var(--radius-sm);
-
-  svg {
-    flex-shrink: 0;
-  }
-}
-
-// ================================
-// LaTeX 编辑器新版样式
-// 支持：源码视图、预览视图、分栏视图
-// ================================
-
-// 主编辑区域
+// 主编辑区域：源码与预览面板横向排列
 .latexEditorMain {
-  flex: 1;
   display: flex;
+  flex: 1;
   width: 100%;
   min-height: 0;
   overflow: hidden;
   background-color: var(--bg-primary);
 }
 
-// 面板尺寸由容器决定：contain: strict 让一侧的布局与绘制不波及另一侧
-// （大文档分栏时，源码每次按键都会触发整个预览重新布局与绘制）
-
-// 单个面板（源码或预览）
+// 源码或预览面板：尺寸由容器决定，contain: strict 让一侧的布局与绘制不波及另一侧
+// （大文档分栏时，源码每次按键都会触发整个预览重新布局与绘制）。面板内容自己滚动
 .latexEditorPane {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  width: 100%;
-  height: 100%;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
-  contain: strict;
-  @include scrollbar;
-}
-
-// 分栏模式下的左侧面板（源码）
-.latexEditorPaneLeft {
-  flex: 1;
-  min-width: 0;
   height: 100%;
-  overflow: auto;
-  border-right: none;
+  overflow: hidden;
   contain: strict;
-  @include scrollbar;
-}
 
-// 分栏模式下的右侧面板（预览）
-.latexEditorPaneRight {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  overflow: auto;
-  contain: strict;
-  @include scrollbar;
+  > * {
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 // 分栏分隔线
@@ -2213,19 +2070,6 @@ $page-rule-rows: repeating-linear-gradient(
   height: 100%;
   background-color: var(--border-primary);
   flex-shrink: 0;
-  cursor: col-resize;
-  transition: background-color 0.15s ease;
-
-  &:hover {
-    background-color: var(--accent-primary);
-  }
-}
-
-// 分栏模式容器样式
-.latexEditorSplit {
-  .latexEditorMain {
-    flex-direction: row;
-  }
 }
 
 // 视图模式切换按钮组
@@ -2311,6 +2155,9 @@ $page-rule-rows: repeating-linear-gradient(
       .cm-scroller {
         overflow: auto;
         padding: var(--spacing-4);
+        // 滚动同步直接设置 scrollTop，不用平滑滚动
+        scroll-behavior: auto;
+        will-change: scroll-position;
       }
 
       .cm-content {
@@ -2510,130 +2357,52 @@ $page-rule-rows: repeating-linear-gradient(
   }
 }
 
-// 预览区域容器
-.latexPreview {
+// 预览区：外框定位悬浮的“渲染中”提示，内层是滚动容器（渲染管线与滚动同步的 scrollContainer）
+.latexPreviewFrame {
   position: relative;
-  width: 100%;
-  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.latexPreview {
+  flex: 1;
   min-height: 0;
   overflow: auto;
   padding: var(--spacing-4) var(--spacing-6);
   background-color: var(--bg-primary);
   @include scrollbar;
 
-  // 平滑滚动（滚动同步时使用）
+  // 平滑滚动（滚动同步时禁用，避免延迟）
   scroll-behavior: smooth;
 
-  // 滚动同步时禁用平滑滚动（避免延迟）
   &.syncScrolling {
     scroll-behavior: auto;
   }
-}
 
-// 预览内容缩放：--latex-preview-zoom 由 LatexEditor 根据缩放级别写入
-.latexPreview .latexPreviewContent {
-  font-size: calc(var(--latex-preview-zoom, 1) * 100%);
+  // 预览内容缩放：--latex-preview-zoom 由 LatexEditor 根据缩放级别写入
+  .latexPreviewContent {
+    font-size: calc(var(--latex-preview-zoom, 1) * 100%);
+  }
 }
 
 // ================================
-// 分栏模式滚动同步优化样式
+// 分栏模式：左右各占一半；行号与预览顶部对齐，段落与标题间距贴近源码行高（滚动同步更稳定）
 // ================================
 
-// 分栏容器优化 - 确保左右对齐
 .latexEditorSplit {
-  .latexEditorMain {
-    display: flex;
-    flex-direction: row;
-    align-items: stretch;
-  }
-
-  // 左侧源码面板
-  .latexEditorPaneLeft {
-    flex: 1;
-    min-width: 0;
+  .latexEditorPane {
     max-width: 50%;
-    height: 100%;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-
-    // 源码编辑器填充整个面板
-    .latexSourceEditor {
-      flex: 1;
-      min-height: 0;
-    }
   }
 
-  // 右侧预览面板
-  .latexEditorPaneRight {
-    flex: 1;
-    min-width: 0;
-    max-width: 50%;
-    height: 100%;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-
-    // 预览内容填充整个面板
-    .latexPreview {
-      flex: 1;
-      min-height: 0;
-    }
-  }
-
-  // 分隔线样式增强
-  .latexEditorDivider {
-    width: 1px;
-    height: 100%;
-    background-color: var(--border-primary);
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
-
-    // 拖拽区域扩展（便于鼠标操作）
-    &::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -4px;
-      right: -4px;
-      bottom: 0;
-      cursor: col-resize;
-    }
-
-    &:hover {
-      background-color: var(--accent-primary);
-    }
-  }
-}
-
-// 源码编辑器滚动容器优化
-.latexSourceEditor {
-  :global {
-    .cm-editor {
-      .cm-scroller {
-        // 确保滚动平滑
-        scroll-behavior: auto;
-        // 优化滚动性能
-        will-change: scroll-position;
-      }
-    }
-  }
-}
-
-
-// 分栏模式行号对齐优化
-.latexEditorSplit {
   .latexSourceEditor {
     :global {
       .cm-editor {
         .cm-gutters {
-          // 行号区域固定宽度，便于对齐
           min-width: 40px;
         }
 
         .cm-content {
-          // 内容区域与预览区域对齐
           padding-top: 0;
           padding-bottom: var(--spacing-4);
         }
@@ -2643,16 +2412,13 @@ $page-rule-rows: repeating-linear-gradient(
 
   .latexPreview {
     .latexPreviewContent {
-      // 预览内容顶部对齐
       padding-top: 0;
 
-      // 段落间距与源码行高匹配
       p {
         margin-bottom: 1.2em;
         line-height: 1.6;
       }
 
-      // 标题间距优化
       h1,
       h2,
       h3,
@@ -2670,15 +2436,14 @@ $page-rule-rows: repeating-linear-gradient(
   }
 }
 
-// 移动端分栏模式优化
+// 窄窗口：分栏改为上下排列
 @media (max-width: 768px) {
   .latexEditorSplit {
     .latexEditorMain {
       flex-direction: column;
     }
 
-    .latexEditorPaneLeft,
-    .latexEditorPaneRight {
+    .latexEditorPane {
       max-width: 100%;
       width: 100%;
       height: 50%;
@@ -2687,13 +2452,15 @@ $page-rule-rows: repeating-linear-gradient(
     .latexEditorDivider {
       width: 100%;
       height: 1px;
+    }
+  }
 
-      &::before {
-        top: -4px;
-        bottom: -4px;
-        left: 0;
-        right: 0;
-        cursor: row-resize;
+  .latexViewModeGroup {
+    .latexViewModeBtn {
+      padding: var(--spacing-1);
+
+      span {
+        display: none;
       }
     }
   }
@@ -2701,11 +2468,16 @@ $page-rule-rows: repeating-linear-gradient(
 
 // 预览内容区域
 .latexPreviewContent {
+  overflow: auto;
   width: 100%;
   max-width: 100%;
+  padding: var(--spacing-4);
+  background-color: var(--bg-primary);
   line-height: 1.8;
   color: var(--text-primary);
   font-size: 1.1em;
+  @include scrollbar;
+  @extend .previewContent;
 
   :global(.math-display) {
     font-size: 1.4em;
@@ -3093,45 +2865,29 @@ $page-rule-rows: repeating-linear-gradient(
     vertical-align: middle;
     line-height: 1;
   }
-
-  // 旧的极限式布局样式 - 保留但降低优先级（由上面的规则覆盖）
-  // 旧的嵌套样式已移到外部，这里只保留注释以维护文件结构
-  // 极限式和积分式布局现在在 .latexPreviewContent 的顶层定义
-  // 以确保足够的 CSS 特异性
 }
 
-// 缩放控制栏
+// 预览缩放（头部视图切换旁，预览可见时显示）
 .zoomControls {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  z-index: 100;
-  opacity: 0.9;
-  transition: opacity 0.2s ease;
-
-  &:hover {
-    opacity: 1;
-  }
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
 }
 
 .zoomButton {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 1px solid var(--border-color);
+  border: none;
   border-radius: var(--radius-sm);
-  background-color: var(--bg-primary);
+  background-color: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -3139,7 +2895,6 @@ $page-rule-rows: repeating-linear-gradient(
   &:hover:not(:disabled) {
     background-color: var(--bg-hover);
     color: var(--text-primary);
-    border-color: var(--border-hover);
   }
 
   &:active:not(:disabled) {
@@ -3153,27 +2908,33 @@ $page-rule-rows: repeating-linear-gradient(
 }
 
 .zoomLevel {
-  min-width: 50px;
+  min-width: 44px;
   text-align: center;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: var(--spacing-1) var(--spacing-2);
+  padding: 2px var(--spacing-1);
+  border: none;
   border-radius: var(--radius-sm);
+  background-color: transparent;
   transition: all 0.15s ease;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background-color: var(--bg-hover);
     color: var(--text-primary);
   }
+
+  &:disabled {
+    cursor: default;
+  }
 }
 
-// 预览加载状态 - 使用绝对定位，不影响内容布局
+// 预览渲染中（悬浮在预览区右下角，不影响内容布局）
 .latexPreviewLoading {
   position: absolute;
   bottom: var(--spacing-4);
-  right: var(--spacing-4);
+  right: var(--spacing-5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3184,12 +2945,12 @@ $page-rule-rows: repeating-linear-gradient(
   background-color: var(--bg-secondary);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  z-index: 10;
+  z-index: 2;
   pointer-events: none;
 }
 
-// 预览加载旋转动画
-.latexPreviewSpinner {
+// 头部与预览共用的加载旋转图标
+.latexSpinner {
   animation: spin 1s linear infinite;
 }
 
@@ -3215,44 +2976,6 @@ $page-rule-rows: repeating-linear-gradient(
 
   svg {
     flex-shrink: 0;
-  }
-}
-
-
-// 编辑器加载旋转动画
-.latexEditorSpinner {
-  animation: spin 1s linear infinite;
-}
-
-
-// 分栏模式响应式
-@media (max-width: 768px) {
-  .latexEditorSplit {
-    .latexEditorMain {
-      flex-direction: column;
-    }
-
-    .latexEditorPaneLeft,
-    .latexEditorPaneRight {
-      height: 50%;
-      width: 100%;
-    }
-
-    .latexEditorDivider {
-      width: 100%;
-      height: 1px;
-      cursor: row-resize;
-    }
-  }
-
-  .latexViewModeGroup {
-    .latexViewModeBtn {
-      padding: var(--spacing-1);
-
-      span {
-        display: none;
-      }
-    }
   }
 }
 

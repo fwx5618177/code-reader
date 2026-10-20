@@ -36,7 +36,6 @@ import {
   FileText,
   ZoomIn,
   ZoomOut,
-  RotateCcw,
 } from 'lucide-react';
 import { latex } from '../../lib/latex/codemirror-latex';
 import { latexAnalysis } from '../../lib/latex/codemirror-analysis';
@@ -278,14 +277,24 @@ SourceEditor.displayName = 'SourceEditor';
 /** 缩放级别配置 - 使用字体大小百分比 */
 const ZOOM_LEVELS = [80, 100, 120, 150, 180, 200, 250, 300];
 const DEFAULT_ZOOM = 100;
-const MIN_ZOOM = 80;
-const MAX_ZOOM = 300;
+const MIN_ZOOM = ZOOM_LEVELS[0];
+const MAX_ZOOM = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
+
+/** 下一个缩放级别：direction 为 1 放大、-1 缩小 */
+function stepZoom(zoom: number, direction: 1 | -1): number {
+  if (direction > 0) return ZOOM_LEVELS.find((level) => level > zoom) ?? MAX_ZOOM;
+  return [...ZOOM_LEVELS].reverse().find((level) => level < zoom) ?? MIN_ZOOM;
+}
 
 interface RenderPreviewProps {
   /** 是否正在渲染 */
   isLoading: boolean;
   /** 错误信息 */
   error: string | null;
+  /** 缩放百分比（100 为原始大小） */
+  zoom: number;
+  /** 按住 Ctrl/Cmd 滚动滚轮时请求缩放 */
+  onZoomStep: (direction: 1 | -1) => void;
   /** 预览滚动容器的 scroll 事件 */
   onScroll: () => void;
   /** 预览区的用户输入（滚轮、触摸、指针、键盘） */
@@ -302,12 +311,9 @@ interface RenderPreviewHandle {
 
 const RenderPreview = memo(
   forwardRef<RenderPreviewHandle, RenderPreviewProps>(
-    ({ isLoading, error, onScroll, onUserInput }, ref) => {
+    ({ isLoading, error, zoom, onZoomStep, onScroll, onUserInput }, ref) => {
       const containerRef = useRef<HTMLDivElement>(null);
       const contentRef = useRef<HTMLDivElement>(null);
-
-      // 缩放状态 (百分比，如 100 表示 100%)
-      const [zoom, setZoom] = useState(DEFAULT_ZOOM);
 
       // 缩放比例通过 CSS 变量传给样式表，字号计算在 module.scss 中完成；
       // 块尺寸变化由渲染管线的 ResizeObserver 感知并重新测量
@@ -315,35 +321,16 @@ const RenderPreview = memo(
         contentRef.current?.style.setProperty('--latex-preview-zoom', String(zoom / 100));
       }, [zoom]);
 
-      const handleZoomIn = useCallback(() => {
-        setZoom((prev) => ZOOM_LEVELS.find((level) => level > prev) ?? MAX_ZOOM);
-      }, []);
-
-      const handleZoomOut = useCallback(() => {
-        setZoom((prev) => {
-          const prevLevels = ZOOM_LEVELS.filter((level) => level < prev);
-          return prevLevels.length > 0 ? prevLevels[prevLevels.length - 1] : MIN_ZOOM;
-        });
-      }, []);
-
-      const handleZoomReset = useCallback(() => {
-        setZoom(DEFAULT_ZOOM);
-      }, []);
-
       // 滚轮：普通滚动视为用户输入；按住 Ctrl/Cmd 时缩放
       const handleWheel = useCallback(
         (e: React.WheelEvent) => {
           onUserInput();
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            if (e.deltaY < 0) {
-              handleZoomIn();
-            } else {
-              handleZoomOut();
-            }
+            onZoomStep(e.deltaY < 0 ? 1 : -1);
           }
         },
-        [handleZoomIn, handleZoomOut, onUserInput]
+        [onZoomStep, onUserInput]
       );
 
       useImperativeHandle(ref, () => ({
@@ -352,53 +339,28 @@ const RenderPreview = memo(
       }));
 
       return (
-        <div
-          ref={containerRef}
-          className={`${styles.latexPreview} ${styles.syncScrolling}`}
-          onScroll={onScroll}
-          onWheel={handleWheel}
-          onTouchStart={onUserInput}
-          onPointerDown={onUserInput}
-          onKeyDown={onUserInput}
-        >
-          {/* 缩放控制栏 */}
-          <div className={styles.zoomControls}>
-            <button
-              className={styles.zoomButton}
-              onClick={handleZoomOut}
-              disabled={zoom <= MIN_ZOOM}
-              title="缩小 (Ctrl + 滚轮下)"
-            >
-              <ZoomOut size={16} />
-            </button>
-            <span className={styles.zoomLevel} onClick={handleZoomReset} title="点击重置为100%">
-              {zoom}%
-            </span>
-            <button
-              className={styles.zoomButton}
-              onClick={handleZoomIn}
-              disabled={zoom >= MAX_ZOOM}
-              title="放大 (Ctrl + 滚轮上)"
-            >
-              <ZoomIn size={16} />
-            </button>
-            {zoom !== DEFAULT_ZOOM && (
-              <button className={styles.zoomButton} onClick={handleZoomReset} title="重置缩放">
-                <RotateCcw size={14} />
-              </button>
+        <div className={styles.latexPreviewFrame}>
+          <div
+            ref={containerRef}
+            className={`${styles.latexPreview} ${styles.syncScrolling}`}
+            onScroll={onScroll}
+            onWheel={handleWheel}
+            onTouchStart={onUserInput}
+            onPointerDown={onUserInput}
+            onKeyDown={onUserInput}
+          >
+            {error && (
+              <div className={styles.latexPreviewError}>
+                <AlertTriangle size={24} />
+                <span>{error}</span>
+              </div>
             )}
+            {/* 子节点由渲染管线按块命令式管理，React 不渲染任何子元素 */}
+            <div ref={contentRef} className={styles.latexPreviewContent} />
           </div>
-          {error && (
-            <div className={styles.latexPreviewError}>
-              <AlertTriangle size={24} />
-              <span>{error}</span>
-            </div>
-          )}
-          {/* 子节点由渲染管线按块命令式管理，React 不渲染任何子元素 */}
-          <div ref={contentRef} className={styles.latexPreviewContent} />
           {isLoading && (
             <div className={styles.latexPreviewLoading}>
-              <Loader2 className={styles.latexPreviewSpinner} size={16} />
+              <Loader2 className={styles.latexSpinner} size={16} />
               <span>渲染中...</span>
             </div>
           )}
@@ -445,6 +407,49 @@ const ViewModeToggle = memo<ViewModeToggleProps>(({ mode, onModeChange }) => {
 });
 
 ViewModeToggle.displayName = 'ViewModeToggle';
+
+interface ZoomControlsProps {
+  zoom: number;
+  onZoomStep: (direction: 1 | -1) => void;
+  onReset: () => void;
+}
+
+/** 预览缩放（Ctrl/Cmd + 滚轮同样可用） */
+const ZoomControls = memo<ZoomControlsProps>(({ zoom, onZoomStep, onReset }) => (
+  <div className={styles.zoomControls} role="group" aria-label="预览缩放">
+    <button
+      type="button"
+      className={styles.zoomButton}
+      onClick={() => onZoomStep(-1)}
+      disabled={zoom <= MIN_ZOOM}
+      title="缩小预览 (Ctrl + 滚轮下)"
+      aria-label="缩小"
+    >
+      <ZoomOut size={14} />
+    </button>
+    <button
+      type="button"
+      className={styles.zoomLevel}
+      onClick={onReset}
+      disabled={zoom === DEFAULT_ZOOM}
+      title="重置为 100%"
+    >
+      {zoom}%
+    </button>
+    <button
+      type="button"
+      className={styles.zoomButton}
+      onClick={() => onZoomStep(1)}
+      disabled={zoom >= MAX_ZOOM}
+      title="放大预览 (Ctrl + 滚轮上)"
+      aria-label="放大"
+    >
+      <ZoomIn size={14} />
+    </button>
+  </div>
+));
+
+ZoomControls.displayName = 'ZoomControls';
 
 // ================================
 // 状态指示器组件
@@ -526,7 +531,7 @@ const StatusIndicators = memo<StatusIndicatorsProps>(
 
         {isRendering && (
           <div className={styles.latexEditorStatus}>
-            <Loader2 size={14} className={styles.latexEditorSpinner} />
+            <Loader2 size={14} className={styles.latexSpinner} />
             <span>渲染中...</span>
           </div>
         )}
@@ -592,6 +597,10 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   const [parseError, setParseError] = useState<string | null>(initial.error);
   const [parseStatus, setParseStatus] = useState<ParseStatus>(initial.status);
   const [diagnosticCounts, setDiagnosticCounts] = useState<DiagnosticCounts>(NO_DIAGNOSTICS);
+  // 预览缩放（百分比）：在“预览 / 分栏 / 源码”之间切换时保留
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const handleZoomStep = useCallback((direction: 1 | -1) => setZoom((prev) => stepZoom(prev, direction)), []);
+  const handleZoomReset = useCallback(() => setZoom(DEFAULT_ZOOM), []);
 
   const sourceViewRef = useRef<EditorView | null>(null);
   /** 在仅预览模式下请求打开诊断面板：源码编辑器挂载后再打开 */
@@ -902,7 +911,10 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
   return (
     <div className={containerClassName}>
       <div className={styles.latexEditorHeader}>
-        <ViewModeToggle mode={viewMode} onModeChange={setViewMode} />
+        <div className={styles.latexEditorHeaderLeft}>
+          <ViewModeToggle mode={viewMode} onModeChange={setViewMode} />
+          {previewVisible && <ZoomControls zoom={zoom} onZoomStep={handleZoomStep} onReset={handleZoomReset} />}
+        </div>
         <StatusIndicators
           fileSize={fileSize}
           isRendering={isRendering}
@@ -915,7 +927,7 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
 
       <div className={styles.latexEditorMain}>
         {viewMode !== 'render' && (
-          <div className={viewMode === 'split' ? styles.latexEditorPaneLeft : styles.latexEditorPane}>
+          <div className={styles.latexEditorPane}>
             <SourceEditor
               document={latexDocument}
               onDocumentChange={handleDocumentChange}
@@ -929,11 +941,13 @@ export const LatexEditor: React.FC<LatexEditorProps> = ({
         )}
         {viewMode === 'split' && <div className={styles.latexEditorDivider} />}
         {viewMode !== 'source' && (
-          <div className={viewMode === 'split' ? styles.latexEditorPaneRight : styles.latexEditorPane}>
+          <div className={styles.latexEditorPane}>
             <RenderPreview
               ref={previewRef}
               isLoading={isRendering}
               error={parseError}
+              zoom={zoom}
+              onZoomStep={handleZoomStep}
               onScroll={handlePreviewScroll}
               onUserInput={handlePreviewInput}
             />

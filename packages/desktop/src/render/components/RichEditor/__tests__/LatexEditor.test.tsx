@@ -40,6 +40,24 @@ const blocks = (container: HTMLElement) =>
 const previewText = (container: HTMLElement) => blocks(container).map((el) => el.textContent).join('');
 
 describe('LatexEditor', () => {
+  it('预览缩放在头部：仅源码时隐藏，缩放级别跨视图保留并写入预览的字号变量', async () => {
+    const { container } = render(<LatexEditor initialContent={SOURCE} />);
+    await waitFor(() => expect(previewText(container)).toContain('第二段'));
+    const zoomVar = () =>
+      container.querySelector<HTMLElement>('[data-latex-block]')?.parentElement?.style.getPropertyValue('--latex-preview-zoom');
+
+    fireEvent.click(screen.getByRole('button', { name: '放大' }));
+    expect(screen.getByRole('button', { name: '120%' })).toBeTruthy();
+    expect(zoomVar()).toBe('1.2');
+
+    fireEvent.click(screen.getByTitle('源码'));
+    expect(screen.queryByRole('group', { name: '预览缩放' })).toBeNull();
+    fireEvent.click(screen.getByTitle('分栏'));
+    await waitFor(() => expect(zoomVar()).toBe('1.2'));
+
+    fireEvent.click(screen.getByRole('button', { name: '120%' }));
+    expect(zoomVar()).toBe('1');
+  });
   it('挂载与渲染不触发 onChange（不会产生错误的未保存状态）', async () => {
     const onChange = vi.fn();
     const { container } = render(<LatexEditor initialContent={SOURCE} onChange={onChange} />);
