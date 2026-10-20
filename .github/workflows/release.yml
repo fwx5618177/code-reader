@@ -6,6 +6,8 @@
 #
 # 目前只构建 macOS（Apple 芯片 arm64）。其他平台在 build 的 matrix 中添加，
 # 并在 packages/desktop/electron-builder.json 中配置对应 target。
+# 自动更新（electron-updater）读取 Release 中的 latest-mac.yml；以后加 Intel Mac 时须在同一次 electron-builder
+# 运行中同时打 x64 与 arm64，生成包含两种架构的一份 latest-mac.yml（分开构建会互相覆盖）。
 #
 # 代码签名可选，未配置时产出 ad-hoc 签名的安装包（见 packages/desktop/scripts/adhoc-sign.mjs）：
 # - macOS 签名：CSC_LINK（.p12 的 base64 或下载地址）、CSC_KEY_PASSWORD
@@ -150,6 +152,8 @@ jobs:
           path: |
             packages/desktop/release/*.dmg
             packages/desktop/release/*.zip
+            packages/desktop/release/*.blockmap
+            packages/desktop/release/latest-mac.yml
 
   release:
     name: 发布到 GitHub Release
@@ -167,6 +171,8 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
+          # 缺少更新信息时已安装的应用收不到这个版本
+          test -f latest-mac.yml || { echo "::error::缺少 latest-mac.yml"; exit 1; }
           sha256sum * > SHA256SUMS.txt
           cat > ../release-notes.md <<EOF
           ## 下载
@@ -175,10 +181,13 @@ jobs:
           | --- | --- |
           | macOS（Apple 芯片 M1 / M2 / M3 / M4） | \`Code-Reader-${VERSION}-mac-arm64.dmg\`（或免安装的 \`.zip\`） |
 
-          暂未提供 Intel Mac、Windows、Linux 安装包。\`SHA256SUMS.txt\` 为各文件的校验和。
+          暂未提供 Intel Mac、Windows、Linux 安装包。\`SHA256SUMS.txt\` 为各文件的校验和；
+          \`latest-mac.yml\` 与 \`.blockmap\` 供应用内的自动更新使用，不需要下载。
 
           安装包未经 Apple 公证，第一次打开会被拦截：在“应用程序”中右键应用 → **打开**；
           仍被拦截时到 **系统设置 → 隐私与安全性**，点“仍要打开”。
+          应用启动后会检查新版本（也可以点菜单 **帮助 → 检查更新…**）；未签名的安装包无法在应用内自动安装，
+          会提示前往本页下载新版。
           EOF
 
       - uses: softprops/action-gh-release@v3
