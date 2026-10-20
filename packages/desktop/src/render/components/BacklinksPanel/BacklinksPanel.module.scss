@@ -36,7 +36,10 @@
   gap: 2px;
   overflow-x: auto;
 
-  @include scrollbar;
+  // 面板较窄时标签条可横向滚动，但不显示滚动条（否则会压在标签下面）
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .tab {
