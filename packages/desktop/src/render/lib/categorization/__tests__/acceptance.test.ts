@@ -18,6 +18,8 @@ const services = vi.hoisted(() => ({
   update: vi.fn(),
   setItemTags: vi.fn(),
   mergeTags: vi.fn(),
+  itemIdsWithTags: vi.fn(),
+  writeTagsToFrontMatter: vi.fn(),
   createFolder: vi.fn(),
   review: vi.fn(),
 }));
@@ -29,8 +31,10 @@ vi.mock('../../knowledge/repository', () => ({
     update: services.update,
     setItemTags: services.setItemTags,
     mergeTags: services.mergeTags,
+    itemIdsWithTags: services.itemIdsWithTags,
   },
 }));
+vi.mock('../../knowledge/front-matter-tags', () => ({ writeTagsToFrontMatter: services.writeTagsToFrontMatter }));
 vi.mock('../../folders/repository', () => ({ folderRepository: { getAll: services.getAll } }));
 vi.mock('../../folders/service', () => ({ folderService: { createFolder: services.createFolder } }));
 
@@ -142,6 +146,7 @@ describe('applyReview', () => {
     services.getAll.mockResolvedValue(FOLDERS);
     services.createFolder.mockResolvedValue(folder('new', '旅行'));
     services.review.mockResolvedValue(undefined);
+    services.itemIdsWithTags.mockResolvedValue(['i3']);
     vi.stubGlobal('electron', { categorization: { review: services.review } });
   });
 
@@ -163,6 +168,9 @@ describe('applyReview', () => {
     expect(services.update).toHaveBeenCalledWith('i2', { folderId: 'new' });
     expect(services.setItemTags).toHaveBeenCalledTimes(1);
     expect(services.setItemTags).toHaveBeenCalledWith('i2', ['AI']);
+    // 标签变了的条目（合并涉及的 i3、改了标签的 i2）最后一并写回 YAML
+    expect(services.itemIdsWithTags).toHaveBeenCalledWith(['t9']);
+    expect(services.writeTagsToFrontMatter).toHaveBeenCalledWith(['i3', 'i2']);
     expect(services.review).toHaveBeenCalledWith([
       { id: 'pm', status: 'accepted' },
       { id: 'p3', status: 'rejected' },

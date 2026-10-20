@@ -11,6 +11,7 @@ import type {
 import { folderRepository } from '../folders/repository';
 import { folderService } from '../folders/service';
 import { knowledgeRepository } from '../knowledge/repository';
+import { writeTagsToFrontMatter } from '../knowledge/front-matter-tags';
 import { planItemAcceptance, type AcceptanceContext, type ItemProposalEdit } from './acceptance';
 
 export interface ReviewRequest {
@@ -41,6 +42,8 @@ export async function applyReview(requests: ReviewRequest[]): Promise<ReviewRepo
   const decisions: CategorizationReviewDecision[] = [];
   const failures: ReviewReport['failures'] = [];
   const itemAccepts: Array<{ proposal: ItemCategorizationProposal; edit?: ItemProposalEdit }> = [];
+  /** 标签变了的条目：最后把笔记的 YAML 标签一并改写 */
+  const retagged = new Set<string>();
 
   for (const { proposal, accept, edit } of requests) {
     if (!accept) decisions.push({ id: proposal.id, status: 'rejected' });
@@ -48,7 +51,9 @@ export async function applyReview(requests: ReviewRequest[]): Promise<ReviewRepo
     else {
       // 先合并标签：条目提议中的标签名已按合并后的标签给出
       try {
+        const affected = await knowledgeRepository.itemIdsWithTags([proposal.sourceTagId]);
         await knowledgeRepository.mergeTags([proposal.sourceTagId], proposal.targetTagId);
+        affected.forEach((id) => retagged.add(id));
         decisions.push({ id: proposal.id, status: 'accepted' });
       } catch (error) {
         failures.push({ proposalId: proposal.id, message: errorMessage(error) });
@@ -76,7 +81,10 @@ export async function applyReview(requests: ReviewRequest[]): Promise<ReviewRepo
           }
           await knowledgeRepository.update(proposal.itemId, { folderId });
         }
-        if (plan.nextTags) await knowledgeRepository.setItemTags(proposal.itemId, plan.nextTags);
+        if (plan.nextTags) {
+          await knowledgeRepository.setItemTags(proposal.itemId, plan.nextTags);
+          retagged.add(proposal.itemId);
+        }
         decisions.push({ id: proposal.id, status: 'accepted', applied: { ...plan.applied, folderId } });
       } catch (error) {
         failures.push({ proposalId: proposal.id, message: errorMessage(error) });
@@ -84,6 +92,7 @@ export async function applyReview(requests: ReviewRequest[]): Promise<ReviewRepo
     }
   }
 
+  await writeTagsToFrontMatter([...retagged]);
   if (decisions.length > 0) await window.electron.categorization.review(decisions);
   return { reviewed: decisions.length, failures };
 }

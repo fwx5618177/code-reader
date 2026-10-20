@@ -12,6 +12,8 @@ import { agentActivity } from '../agent/agentStore';
 import { knowledgeRepository, type UpdateKnowledgeItemInput } from './repository';
 import { ensureKnowledgeReady, removeKnowledgeItem } from './service';
 import { onKnowledgeChanged } from './changes';
+import { writeTagsToFrontMatter } from './front-matter-tags';
+import { isTagPathWithin } from '../../../shared/tag-path';
 
 export interface KnowledgeBaseState {
   items: KnowledgeItem[];
@@ -28,7 +30,7 @@ export interface UseKnowledgeBaseReturn extends KnowledgeBaseState {
   refreshItem: (id: string) => Promise<void>;
   /** 更新条目字段 */
   updateItem: (id: string, input: UpdateKnowledgeItemInput) => Promise<void>;
-  /** 设置条目标签 */
+  /** 设置条目标签（笔记的 YAML 写了 tags 时一并改写） */
   setItemTags: (id: string, names: string[]) => Promise<void>;
   /** 删除条目（软删除，并清理文字识别缓存） */
   removeItem: (id: string) => Promise<void>;
@@ -118,6 +120,7 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
   const setItemTags = useCallback(
     async (id: string, names: string[]) => {
       await knowledgeRepository.setItemTags(id, names);
+      await writeTagsToFrontMatter([id]);
       await reloadItem(id);
     },
     [reloadItem]
@@ -160,10 +163,18 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
     [reload]
   );
 
-  // 重命名可能触发合并、合并会改变条目的标签，因此整体重新加载
+  // 重命名可能触发合并、合并会改变条目的标签，因此整体重新加载；受影响笔记的 YAML 标签一并改写
   const renameTag = useCallback(
     async (id: string, name: string) => {
+      const tags = await knowledgeRepository.listTags();
+      const renamed = tags.find((tag) => tag.id === id);
+      const affected = renamed
+        ? await knowledgeRepository.itemIdsWithTags(
+            tags.filter((tag) => isTagPathWithin(tag.name, renamed.name)).map((tag) => tag.id)
+          )
+        : [];
       await knowledgeRepository.renameTag(id, name);
+      await writeTagsToFrontMatter(affected);
       await reload();
     },
     [reload]
@@ -171,7 +182,9 @@ export function useKnowledgeBase(enabled: boolean): UseKnowledgeBaseReturn {
 
   const mergeTags = useCallback(
     async (sourceIds: string[], targetId: string) => {
+      const affected = await knowledgeRepository.itemIdsWithTags(sourceIds);
       await knowledgeRepository.mergeTags(sourceIds, targetId);
+      await writeTagsToFrontMatter(affected);
       await reload();
     },
     [reload]

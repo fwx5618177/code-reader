@@ -10,7 +10,7 @@ import { createEditorPlugins } from '../../editor';
 import { LinkIndex } from '../../links/link-index';
 import type { KnowledgeItem } from '../../../types/knowledge';
 import { frontMatterKey, createFrontMatterPlugin } from '../front-matter-plugin';
-import { documentProperties, lintFrontMatter, mergeDocumentTags } from '../front-matter';
+import { documentProperties, hasFrontMatterTags, lintFrontMatter, mergeDocumentTags, setFrontMatterTags } from '../front-matter';
 import { markdownSchema, parseMarkdown, serializeMarkdown } from '../index';
 
 describe('读取标签与别名', () => {
@@ -21,11 +21,51 @@ describe('读取标签与别名', () => {
     });
     expect(documentProperties('---\ntag: 项目/甲 项目/乙\nalias: 别名\n---\n')).toEqual({ tags: ['项目/甲', '项目/乙'], aliases: ['别名'] });
     expect(documentProperties('正文\n---\ntags: [x]\n---\n')).toEqual({ tags: [], aliases: [] });
+    expect(documentProperties('---\ntags: [a, b] # 行尾注释\n---\n').tags).toEqual(['a', 'b']);
   });
 
   it('合并：加入 YAML 中的标签，只去掉上次同步后从 YAML 删掉的', () => {
     expect(mergeDocumentTags(['界面添加', '旧'], ['旧'], ['新'])).toEqual(['界面添加', '新']);
     expect(mergeDocumentTags(['界面添加'], [], ['a', 'a'])).toEqual(['界面添加', 'a']);
+  });
+});
+
+describe('标签写回 YAML', () => {
+  it('行内数组：保留顺序与行尾注释，新标签追加，需要时加引号', () => {
+    const doc = '---\ntitle: 周报\ntags: [工作, 复盘] # 标签\n---\n正文\n';
+    expect(setFrontMatterTags(doc, ['复盘', '项目/甲', '工作', 'a: b'])).toBe(
+      '---\ntitle: 周报\ntags: [工作, 复盘, 项目/甲, "a: b"] # 标签\n---\n正文\n'
+    );
+    expect(setFrontMatterTags(doc, ['复盘'])).toBe('---\ntitle: 周报\ntags: [复盘] # 标签\n---\n正文\n');
+    expect(setFrontMatterTags(doc, [])).toBe('---\ntitle: 周报\ntags: [] # 标签\n---\n正文\n');
+  });
+
+  it('块列表：沿用缩进与前缀；只有键时用默认缩进；全部删掉后保留键', () => {
+    const doc = '---\ntags:\n    - 工作\n    - 旧\naliases: [周报]\n---\n';
+    expect(setFrontMatterTags(doc, ['工作', '新'])).toBe('---\ntags:\n    - 工作\n    - 新\naliases: [周报]\n---\n');
+    expect(setFrontMatterTags('---\ntags:\n---\n', ['a'])).toBe('---\ntags:\n  - a\n---\n');
+    expect(setFrontMatterTags(doc, [])).toBe('---\ntags:\naliases: [周报]\n---\n');
+  });
+
+  it('分隔符写法：保留逗号或空格与 #；放不下含空格的标签或空列表时改用行内数组', () => {
+    expect(setFrontMatterTags('---\ntag: a, b\n---\n', ['a', 'c'])).toBe('---\ntag: a, c\n---\n');
+    expect(setFrontMatterTags('---\ntags: #a #b\n---\n', ['b', 'c'])).toBe('---\ntags: #b #c\n---\n');
+    expect(setFrontMatterTags('---\ntags: a b\n---\n', ['a', '读 书'])).toBe('---\ntags: [a, 读 书]\n---\n');
+    expect(setFrontMatterTags('---\ntags: a\n---\n', [])).toBe('---\ntags: []\n---\n');
+  });
+
+  it('标签集合不变、没有 tags 键或没有头部时原样返回；CRLF 换行保留', () => {
+    const doc = '---\ntags: [b, a]\n---\n';
+    expect(setFrontMatterTags(doc, ['a', ' b '])).toBe(doc);
+    expect(setFrontMatterTags('---\ntitle: x\n---\n', ['a'])).toBe('---\ntitle: x\n---\n');
+    expect(setFrontMatterTags('正文 tags: [a]', ['b'])).toBe('正文 tags: [a]');
+    expect(setFrontMatterTags('---\r\ntags: [a]\r\n---\r\n正文', ['a', 'b'])).toBe('---\r\ntags: [a, b]\r\n---\r\n正文');
+  });
+
+  it('hasFrontMatterTags 只认头部里的顶层 tags / tag 键', () => {
+    expect(hasFrontMatterTags('---\ntags: []\n---\n')).toBe(true);
+    expect(hasFrontMatterTags('---\nmeta:\n  tags: [a]\n---\n')).toBe(false);
+    expect(hasFrontMatterTags('正文\n---\ntags: [a]\n---\n')).toBe(false);
   });
 });
 

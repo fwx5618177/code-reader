@@ -245,6 +245,19 @@ class KnowledgeRepository {
     );
   }
 
+  /**
+   * 合并写入 metadata 的部分字段（JSON merge patch：值为 null 的键被删除），在数据库里一步完成，
+   * 不会覆盖并发写入的其他字段（如阅读进度）；不算内容修改，不刷新更新时间
+   */
+  async patchMetadata(id: string, patch: Record<string, unknown>): Promise<void> {
+    await databaseService.run(
+      `UPDATE knowledge_items
+       SET metadata = json_patch(CASE WHEN json_valid(metadata) THEN metadata ELSE '{}' END, ?)
+       WHERE id = ? AND is_deleted = 0`,
+      [JSON.stringify(patch), id]
+    );
+  }
+
   /** 软删除 */
   async remove(id: string): Promise<void> {
     const timestamp = now();
@@ -274,6 +287,16 @@ class KnowledgeRepository {
       [itemId]
     );
     return rows.map((row) => row.name);
+  }
+
+  /** 关联了任一给定标签的条目 */
+  async itemIdsWithTags(tagIds: string[]): Promise<string[]> {
+    if (tagIds.length === 0) return [];
+    const rows = await databaseService.all<{ item_id: string }>(
+      `SELECT DISTINCT item_id FROM item_tags WHERE tag_id IN (${tagIds.map(() => '?').join(',')})`,
+      tagIds
+    );
+    return rows.map((row) => row.item_id);
   }
 
   /**

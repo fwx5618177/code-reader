@@ -51,7 +51,8 @@ export function splitFrontmatter(text: string): Frontmatter {
       continue;
     }
     const [, key, raw] = pair;
-    const value = raw.trim();
+    // 行内数组后的行尾注释去掉；普通值里的 #标签 按宽松写法保留
+    const value = raw.trim().replace(/^(\[.*\])\s+#.*$/, '$1');
     if (!value) {
       // 空值：可能是随后的块列表
       listKey = key;

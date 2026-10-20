@@ -62,6 +62,7 @@ import { onKnowledgeChanged } from './lib/knowledge/changes';
 import { refreshAfterSync } from './lib/sync/refresh';
 import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
+import { syncTagsFromFrontMatter } from './lib/knowledge/front-matter-tags';
 import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
 import { buildFolderTree, wouldCreateCycle, type FolderTreeNode } from './lib/folders/types';
 import {
@@ -77,9 +78,7 @@ import {
   useRelatedLinks,
 } from './lib/links';
 import {
-  documentProperties,
   extractWikiLinks,
-  mergeDocumentTags,
   parseWikiLinkInner,
   type BlockIdSlot,
   type RevealRequest,
@@ -165,27 +164,19 @@ const App: React.FC = () => {
 
   // 文档保存后：同步 [[链接]] 到 links 表、文档属性（YAML 头部）的 tags 到条目标签，并刷新知识库中的该条目（反向链接随之更新）。
   // 按保存的文档执行：分栏时保存的不一定是当前文档；最新的索引通过 ref 读取
-  const linkSyncRef = useRef({ linkIndex, refresh: kb.refreshItem, setItemTags: kb.setItemTags });
-  linkSyncRef.current = { linkIndex, refresh: kb.refreshItem, setItemTags: kb.setItemTags };
-  /** 各文档上次同步的 YAML 标签：从 YAML 删掉的标签据此从条目上去掉（应用启动后第一次保存只加不减） */
-  const yamlTagsRef = useRef(new Map<string, string[]>());
+  const linkSyncRef = useRef({ linkIndex, refresh: kb.refreshItem });
+  linkSyncRef.current = { linkIndex, refresh: kb.refreshItem };
   const syncDocumentLinks = useCallback((document: { id: string; content: string }) => {
-    const { linkIndex: index, refresh, setItemTags } = linkSyncRef.current;
+    const { linkIndex: index, refresh } = linkSyncRef.current;
     const targetIds = new Set<string>();
     for (const link of extractWikiLinks(document.content, document.id)) {
       const target = index.resolve(link.target);
       if (target && target.id !== document.id) targetIds.add(target.id);
     }
-    const { tags } = documentProperties(document.content);
-    const previousTags = yamlTagsRef.current.get(document.id) ?? [];
-    yamlTagsRef.current.set(document.id, tags);
-    const syncTags = async () => {
-      if (tags.length === 0 && previousTags.length === 0) return;
-      const current = await knowledgeRepository.itemTagNames(document.id);
-      const next = mergeDocumentTags(current, previousTags, tags);
-      if (next.length !== current.length || next.some((tag) => !current.includes(tag))) await setItemTags(document.id, next);
-    };
-    Promise.all([linkRepository.syncReferences(document.id, [...targetIds]), syncTags()])
+    Promise.all([
+      linkRepository.syncReferences(document.id, [...targetIds]),
+      syncTagsFromFrontMatter(document.id, document.content),
+    ])
       .then(() => refresh(document.id))
       .catch((error) => console.error('同步双向链接与文档属性失败:', error));
   }, []);
