@@ -1,14 +1,14 @@
 // ================================
 // Markdown → ProseMirror 文档
 // 分词由 @code-reader/markdown-parser 完成（CommonMark + 表格 + ~~删除线~~ + 任务列表 + 脚注、高亮、上下标、定义列表、
-// 容器、缩写、裸网址 + 扩展语法），输出 markdown-it 兼容的 token 流，由 prosemirror-markdown 构建文档
+// 容器、缩写、裸网址 + 扩展语法），输出 markdown-it 兼容的 token 流，由 TokenDocumentBuilder 按规则表构建文档
 // ================================
 
 import { MarkdownItCompatTokenizer, type MarkdownItToken as Token } from '@code-reader/markdown-parser';
-import { MarkdownParser } from 'prosemirror-markdown';
-import { DOMParser as PMDOMParser, type Node as PMNode, type Schema } from 'prosemirror-model';
+import { DOMParser as PMDOMParser, type Node as PMNode } from 'prosemirror-model';
 import { finalizeTokens, markdownBlockExtensions, markdownInlineExtensions } from './syntax-extensions';
 import { markdownSchema, type CellAlign } from './schema';
+import { TokenDocumentBuilder } from './token-document-builder';
 
 /** 列表是否紧凑（列表项的段落被标记为 hidden） */
 function isTightList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hidden'>>, index: number): boolean {
@@ -29,7 +29,7 @@ function isTightList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hid
  * 术语是否紧凑：第一条说明紧接在术语的下一行（与 markdown-it-deflist 一致按术语计）。
  * 按源码行号判断：说明有多个块时段落不会被标记为 hidden，光看 hidden 分不出来
  */
-function isTightDefinitionTerm(tokens: ReadonlyArray<{ type: string; position?: Token['position'] }>, index: number): boolean {
+function isTightDefinitionTerm(tokens: ReadonlyArray<Pick<Token, 'type' | 'position'>>, index: number): boolean {
   const termLine = tokens[index]?.position?.startLine;
   for (let i = index + 1; i < tokens.length; i++) {
     if (tokens[i]!.type !== 'dd_open') continue;
@@ -81,107 +81,99 @@ export function createTokenizer({ taskLists = true }: { taskLists?: boolean } = 
 /** 共享的分词器 */
 export const markdownTokenizer = createTokenizer();
 
-/**
- * 创建 Markdown 解析器。
- * prosemirror-markdown 只调用分词器的 parse()，token 与 markdown-it 的结构一致，因此按其声明的类型传入
- */
-function createParser(schema: Schema): MarkdownParser {
-  const tokenizer = markdownTokenizer as unknown as ConstructorParameters<typeof MarkdownParser>[1];
-  return new MarkdownParser(schema, tokenizer, {
-    front_matter: { block: 'front_matter', noCloseToken: true },
-    blockquote: { block: 'blockquote' },
-    paragraph: { block: 'paragraph' },
-    list_item: {
-      block: 'list_item',
-      getAttrs: (tok) => ({ checked: typeof tok.meta?.checked === 'boolean' ? tok.meta.checked : null }),
-    },
-    bullet_list: {
-      block: 'bullet_list',
-      getAttrs: (tok, tokens, i) => ({ tight: isTightList(tokens, i), bullet: tok.markup || '-' }),
-    },
-    ordered_list: {
-      block: 'ordered_list',
-      getAttrs: (tok, tokens, i) => ({
-        order: Number(tok.attrGet('start') ?? 1),
-        tight: isTightList(tokens, i),
-        delimiter: tok.markup || '.',
-      }),
-    },
-    heading: { block: 'heading', getAttrs: (tok) => ({ level: Number(tok.tag.slice(1)) }) },
-    code_block: { block: 'code_block', noCloseToken: true },
-    fence: {
-      block: 'code_block',
-      getAttrs: (tok) => ({ language: tok.info.trim().split(/\s+/)[0] || '' }),
-      noCloseToken: true,
-    },
-    hr: { node: 'horizontal_rule' },
-    image: {
-      node: 'image',
-      getAttrs: (tok) => ({
-        src: tok.attrGet('src'),
-        title: tok.attrGet('title') || null,
-        alt: tok.children?.[0]?.content || null,
-      }),
-    },
-    hardbreak: { node: 'hard_break' },
-    em: { mark: 'em' },
-    strong: { mark: 'strong' },
-    s: { mark: 'strike' },
-    mark: { mark: 'highlight' },
-    ins: { mark: 'insert' },
-    sub: { mark: 'subscript' },
-    sup: { mark: 'superscript' },
-    link: {
-      mark: 'link',
-      getAttrs: (tok) => ({ href: tok.attrGet('href'), title: tok.attrGet('title') || null, linkify: tok.markup === 'linkify' }),
-    },
-    // 正文中的缩写只是文字，全称由装饰显示
-    abbr: { ignore: true },
-    abbr_definition: { block: 'abbreviation_def', noCloseToken: true },
-    footnote_ref: { node: 'footnote_ref', noCloseToken: true, getAttrs: (tok) => ({ label: tok.meta.label }) },
-    footnote_inline: { node: 'footnote_inline', noCloseToken: true, getAttrs: (tok) => ({ content: tok.content }) },
-    footnote_reference: { block: 'footnote_def', getAttrs: (tok) => ({ label: tok.meta.label }) },
-    dl: { block: 'definition_list' },
-    dt: { block: 'definition_term', getAttrs: (_tok, tokens, i) => ({ tight: isTightDefinitionTerm(tokens, i) }) },
-    dd: { block: 'definition_description' },
-    container: { block: 'container', getAttrs: (tok) => ({ name: tok.meta.name, info: tok.info }) },
-    code_inline: { mark: 'code', noCloseToken: true },
-    table: { block: 'table' },
-    thead: { ignore: true },
-    tbody: { ignore: true },
-    tr: { block: 'table_row' },
-    th: { block: 'table_header', getAttrs: (tok) => ({ align: cellAlign(tok) }) },
-    td: { block: 'table_cell', getAttrs: (tok) => ({ align: cellAlign(tok) }) },
-    math_inline: {
-      node: 'math_inline',
-      noCloseToken: true,
-      getAttrs: (tok) => ({ latex: tok.content }),
-    },
-    math_block: {
-      node: 'math_block',
-      noCloseToken: true,
-      getAttrs: (tok) => ({ latex: tok.content }),
-    },
-    wiki_link: {
-      node: 'wiki_link',
-      noCloseToken: true,
-      getAttrs: (tok) => ({ target: tok.meta.target, heading: tok.meta.heading, alias: tok.meta.alias }),
-    },
-    wiki_embed: {
-      node: 'wiki_embed',
-      noCloseToken: true,
-      getAttrs: (tok) => ({ target: tok.meta.target, heading: tok.meta.heading, alias: tok.meta.alias }),
-    },
-  });
-}
-
-const parser = createParser(markdownSchema);
+/** token → 文档的规则表 */
+const documentBuilder = new TokenDocumentBuilder(markdownSchema, {
+  front_matter: { block: 'front_matter', noCloseToken: true },
+  blockquote: { block: 'blockquote' },
+  paragraph: { block: 'paragraph' },
+  list_item: {
+    block: 'list_item',
+    getAttrs: (tok) => ({ checked: typeof tok.meta?.checked === 'boolean' ? tok.meta.checked : null }),
+  },
+  bullet_list: {
+    block: 'bullet_list',
+    getAttrs: (tok, tokens, i) => ({ tight: isTightList(tokens, i), bullet: tok.markup || '-' }),
+  },
+  ordered_list: {
+    block: 'ordered_list',
+    getAttrs: (tok, tokens, i) => ({
+      order: Number(tok.attrGet('start') ?? 1),
+      tight: isTightList(tokens, i),
+      delimiter: tok.markup || '.',
+    }),
+  },
+  heading: { block: 'heading', getAttrs: (tok) => ({ level: Number(tok.tag.slice(1)) }) },
+  code_block: { block: 'code_block', noCloseToken: true },
+  fence: {
+    block: 'code_block',
+    getAttrs: (tok) => ({ language: tok.info.trim().split(/\s+/)[0] || '' }),
+    noCloseToken: true,
+  },
+  hr: { node: 'horizontal_rule' },
+  image: {
+    node: 'image',
+    getAttrs: (tok) => ({
+      src: tok.attrGet('src'),
+      title: tok.attrGet('title') || null,
+      alt: tok.children?.[0]?.content || null,
+    }),
+  },
+  hardbreak: { node: 'hard_break' },
+  em: { mark: 'em' },
+  strong: { mark: 'strong' },
+  s: { mark: 'strike' },
+  mark: { mark: 'highlight' },
+  ins: { mark: 'insert' },
+  sub: { mark: 'subscript' },
+  sup: { mark: 'superscript' },
+  link: {
+    mark: 'link',
+    getAttrs: (tok) => ({ href: tok.attrGet('href'), title: tok.attrGet('title') || null, linkify: tok.markup === 'linkify' }),
+  },
+  // 正文中的缩写只是文字，全称由装饰显示
+  abbr: { ignore: true },
+  abbr_definition: { block: 'abbreviation_def', noCloseToken: true },
+  footnote_ref: { node: 'footnote_ref', noCloseToken: true, getAttrs: (tok) => ({ label: tok.meta.label }) },
+  footnote_inline: { node: 'footnote_inline', noCloseToken: true, getAttrs: (tok) => ({ content: tok.content }) },
+  footnote_reference: { block: 'footnote_def', getAttrs: (tok) => ({ label: tok.meta.label }) },
+  dl: { block: 'definition_list' },
+  dt: { block: 'definition_term', getAttrs: (_tok, tokens, i) => ({ tight: isTightDefinitionTerm(tokens, i) }) },
+  dd: { block: 'definition_description' },
+  container: { block: 'container', getAttrs: (tok) => ({ name: tok.meta.name, info: tok.info }) },
+  code_inline: { mark: 'code', noCloseToken: true },
+  table: { block: 'table' },
+  thead: { ignore: true },
+  tbody: { ignore: true },
+  tr: { block: 'table_row' },
+  th: { block: 'table_header', getAttrs: (tok) => ({ align: cellAlign(tok) }) },
+  td: { block: 'table_cell', getAttrs: (tok) => ({ align: cellAlign(tok) }) },
+  math_inline: {
+    node: 'math_inline',
+    noCloseToken: true,
+    getAttrs: (tok) => ({ latex: tok.content }),
+  },
+  math_block: {
+    node: 'math_block',
+    noCloseToken: true,
+    getAttrs: (tok) => ({ latex: tok.content }),
+  },
+  wiki_link: {
+    node: 'wiki_link',
+    noCloseToken: true,
+    getAttrs: (tok) => ({ target: tok.meta.target, heading: tok.meta.heading, alias: tok.meta.alias }),
+  },
+  wiki_embed: {
+    node: 'wiki_embed',
+    noCloseToken: true,
+    getAttrs: (tok) => ({ target: tok.meta.target, heading: tok.meta.heading, alias: tok.meta.alias }),
+  },
+});
 
 /**
  * 解析 Markdown 文本为文档
  */
 export function parseMarkdown(markdown: string): PMNode {
-  return parser.parse(markdown);
+  return documentBuilder.build(markdownTokenizer.parse(markdown));
 }
 
 /**

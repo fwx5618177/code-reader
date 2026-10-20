@@ -11,19 +11,11 @@
 // ================================
 
 import { normalizeLink } from '@code-reader/markdown-parser';
-import { MarkdownSerializer, defaultMarkdownSerializer, type MarkdownSerializerState } from 'prosemirror-markdown';
 import type { Mark, Node as PMNode } from 'prosemirror-model';
+import { MarkdownSerializer, type MarkdownSerializerState } from './markdown-serializer';
 import { parseMarkdown } from './parser';
 import { markdownSchema, type CellAlign } from './schema';
 import { formatWikiLink, type WikiLinkParts } from './wiki-link';
-
-/** prosemirror-markdown 序列化状态中未在类型声明里公开的成员（内置的 renderList、link 等同样使用） */
-interface SerializerInternals {
-  inAutolink?: boolean;
-  atBlockStart: boolean;
-  flushClose(size?: number): void;
-}
-const internals = (state: MarkdownSerializerState) => state as unknown as SerializerInternals;
 
 /** 代码围栏：必须比内容中最长的反引号序列更长 */
 function fenceFor(content: string): string {
@@ -71,7 +63,42 @@ function nestedContainerDepth(node: PMNode): number {
 }
 
 type LinkMarkString = (state: MarkdownSerializerState, mark: Mark, parent: PMNode, index: number) => string;
-const baseLink = defaultMarkdownSerializer.marks.link as { open: LinkMarkString; close: LinkMarkString };
+
+/** 链接文字就是带协议的地址：写成 <地址> */
+function isPlainUrl(mark: Mark, parent: PMNode, index: number): boolean {
+  const href = mark.attrs.href as string;
+  if (mark.attrs.title || !/^\w+:/.test(href)) return false;
+  const content = parent.child(index);
+  if (!content.isText || content.text !== href || content.marks[content.marks.length - 1] !== mark) return false;
+  return index === parent.childCount - 1 || !mark.isInSet(parent.child(index + 1).marks);
+}
+
+const escapeTitle = (title: string) => title.replace(/"/g, '\\"');
+
+/** [文字](地址 "标题") 或 <地址> */
+const baseLink: { open: LinkMarkString; close: LinkMarkString } = {
+  open(state, mark, parent, index) {
+    state.inAutolink = isPlainUrl(mark, parent, index);
+    return state.inAutolink ? '<' : '[';
+  },
+  close(state, mark) {
+    const autolink = state.inAutolink;
+    state.inAutolink = undefined;
+    if (autolink) return '>';
+    const href = (mark.attrs.href as string).replace(/[()"]/g, '\\$&');
+    const title = mark.attrs.title as string | null;
+    return `](${href}${title ? ` "${escapeTitle(title)}"` : ''})`;
+  },
+};
+
+/** 行内代码的定界符：比内容中最长的反引号序列多一个；内容有反引号时内侧加空格 */
+function backticksFor(node: PMNode, side: -1 | 1): string {
+  const runs = node.isText ? (node.text!.match(/`+/g) ?? []) : [];
+  const longest = runs.reduce((max, run) => Math.max(max, run.length), 0);
+  const fence = '`'.repeat(longest + 1);
+  if (longest === 0) return fence;
+  return side > 0 ? ' ' + fence : fence + ' ';
+}
 
 /**
  * 创建序列化器。escapeExtraCharacters 为正文中额外转义的字符（每段文字分别匹配，^: 即段首的 :）
@@ -82,15 +109,44 @@ function createSerializer(escapeExtraCharacters: RegExp): MarkdownSerializer {
 
   const serializer: MarkdownSerializer = new MarkdownSerializer(
     {
-      ...defaultMarkdownSerializer.nodes,
+      blockquote(state, node) {
+        state.wrapBlock('> ', null, node, () => state.renderContent(node));
+      },
+      heading(state, node) {
+        state.write('#'.repeat(node.attrs.level as number) + ' ');
+        state.renderInline(node, false);
+        state.closeBlock(node);
+      },
+      horizontal_rule(state, node) {
+        state.write('---');
+        state.closeBlock(node);
+      },
+      paragraph(state, node) {
+        state.renderInline(node);
+        state.closeBlock(node);
+      },
+      image(state, node) {
+        const { src, alt, title } = node.attrs as { src: string; alt: string | null; title: string | null };
+        const titlePart = title ? ` "${escapeTitle(title)}"` : '';
+        state.write(`![${state.esc(alt || '')}](${src.replace(/[()]/g, '\\$&')}${titlePart})`);
+      },
+      // 之后只有换行的换行（行末）不输出
+      hard_break(state, node, parent, index) {
+        for (let i = index + 1; i < parent.childCount; i++) {
+          if (parent.child(i).type !== node.type) {
+            state.write('\\\n');
+            return;
+          }
+        }
+      },
       text(state, node) {
         const { subscript, superscript } = markdownSchema.marks;
         if (node.marks.some((mark) => mark.type === subscript || mark.type === superscript)) {
           // 上下标的内容不能有未转义的空白
-          state.text(state.esc(node.text!, internals(state).atBlockStart).replace(/ /g, '\\ '), false);
+          state.text(state.esc(node.text!, state.atBlockStart).replace(/ /g, '\\ '), false);
           return;
         }
-        state.text(node.text!, !internals(state).inAutolink);
+        state.text(node.text!, !state.inAutolink);
       },
       front_matter(state, node) {
         const yaml = node.textContent;
@@ -188,7 +244,7 @@ function createSerializer(escapeExtraCharacters: RegExp): MarkdownSerializer {
             return;
           }
           if (tight && index > 0 && node.child(index - 1).type === markdownSchema.nodes.definition_description) {
-            internals(state).flushClose(1);
+            state.flushClose(1);
           }
           state.wrapBlock('  ', ': ', node, () => state.renderContent(child));
         });
@@ -199,7 +255,7 @@ function createSerializer(escapeExtraCharacters: RegExp): MarkdownSerializer {
         state.write(fence + (node.attrs.info as string));
         state.ensureNewLine();
         state.renderContent(node);
-        internals(state).flushClose(1);
+        state.flushClose(1);
         state.write(fence);
         state.closeBlock(node);
       },
@@ -209,17 +265,23 @@ function createSerializer(escapeExtraCharacters: RegExp): MarkdownSerializer {
       },
     },
     {
-      ...defaultMarkdownSerializer.marks,
+      em: { open: '*', close: '*', mixable: true, expelEnclosingWhitespace: true },
+      strong: { open: '**', close: '**', mixable: true, expelEnclosingWhitespace: true },
+      code: {
+        open: (_state, _mark, parent, index) => backticksFor(parent.child(index), -1),
+        close: (_state, _mark, parent, index) => backticksFor(parent.child(index - 1), 1),
+        escape: false,
+      },
       link: {
         open(state, mark, parent, index) {
           if (!isBareLink(mark, parent, index)) return baseLink.open(state, mark, parent, index);
           bareLinks.add(state);
-          internals(state).inAutolink = true;
+          state.inAutolink = true;
           return '';
         },
         close(state, mark, parent, index) {
           if (!bareLinks.delete(state)) return baseLink.close(state, mark, parent, index);
-          internals(state).inAutolink = undefined;
+          state.inAutolink = undefined;
           return '';
         },
         mixable: true,
