@@ -36,6 +36,10 @@ const SNIPPETS = [
   'HTML 与 www.example.com\n',
   '$$\n',
   '- [ ] 任务\n',
+  '{.cls}\n',
+  '段落 {#id}\n',
+  '```py {.c}\n',
+  '--- {#hr}\n',
   '    \n',
   '中文段落，没有换行',
   '**',
@@ -93,6 +97,7 @@ describe('语法树级增量解析', () => {
   it('随机编辑（开启全部扩展语法）：与整篇解析逐节点相同', () => {
     const options: CommonMarkOptions = {
       linkify: true,
+      linkifyBareDomains: true,
       replacements: true,
       mark: true,
       insert: true,

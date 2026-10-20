@@ -9,6 +9,7 @@
 // 语法扩展在触发字符处先于内置语法尝试
 // ================================
 
+import { mergeAttributes, parseAttributes } from './attributes';
 import { lookupEntity } from './entities';
 import {
   InlineType,
@@ -63,6 +64,8 @@ const SPACES_AND_NEWLINE = /^[ \t]*(?:\n[ \t]*)?/;
 
 /** 可能含有裸网址或邮箱的文本（linkify 开启时不走“整段文本”的快速路径） */
 const LINKIFY_HINT = /www\.|:\/\/|@/i;
+/** 可能含有裸域名（linkifyBareDomains） */
+const BARE_DOMAIN_HINT = /[\p{L}\p{N}]\.[\p{L}\p{N}]/u;
 /** linkify 的候选位置：www.、http(s)://、mailto:、邮箱的 @ */
 const LINKIFY_CANDIDATE = /www\.|https?:\/\/|mailto:|@/gi;
 /** GFM：www. 与网址前只能是行首、空白或 * _ ~ ( */
@@ -70,6 +73,23 @@ const LINKIFY_BEFORE = /[\s*_~(]/u;
 const DOMAIN_CHAR = /[\p{L}\p{N}_-]/u;
 const EMAIL_LOCAL_CHAR = /[A-Za-z0-9._+-]/;
 const EMAIL_DOMAIN = /^[A-Za-z0-9._-]+/;
+
+/** 裸域名的顶级域（与 linkify-it 默认表相同：常用通用顶级域与全部两字母国家顶级域） */
+const BARE_DOMAIN_TLDS =
+  'biz|com|edu|gov|net|org|pro|web|xxx|aero|asia|coop|info|museum|name|shop|рф|' +
+  'a[cdefgilmnoqrstuwxz]|b[abdefghijmnorstvwyz]|c[acdfghiklmnoruvwxyz]|d[ejkmoz]|e[cegrstu]|f[ijkmor]|' +
+  'g[abdefghilmnpqrstuwy]|h[kmnrtu]|i[delmnoqrst]|j[emop]|k[eghimnprwyz]|l[abcikrstuvy]|' +
+  'm[acdeghklmnopqrstuvwxyz]|n[acefgilopruz]|om|p[aefghklmnrstwy]|qa|r[eosuw]|s[abcdeghijklmnortuvxyz]|' +
+  't[cdfghjklmnortvwz]|u[agksyz]|v[aceginu]|w[fs]|y[et]|z[amw]';
+/**
+ * 裸域名 example.com：与 linkify-it 的模糊链接一致，之前只能是行首、空白、标点或 $+<=>^`|（但不能是 . : / - _ @），
+ * 顶级域之后不能紧跟字母、数字、- _ 或后面还有域名字符的 .
+ */
+const BARE_DOMAIN = new RegExp(
+  `(?<=^|[\\p{Z}\\p{P}\\p{Cc}$+<=>^\`|｜])(?<![.:/_@-])` +
+    `(?:[\\p{L}\\p{N}](?:[\\p{L}\\p{N}-]{0,61}[\\p{L}\\p{N}])?\\.)+(?:${BARE_DOMAIN_TLDS})(?![\\p{L}\\p{N}_-]|\\.[\\p{L}\\p{N}])`,
+  'giu'
+);
 /** GFM：链接末尾的这些标点不属于链接 */
 const TRAILING_PUNCTUATION = '?!.,:*_~';
 
@@ -79,7 +99,6 @@ const SCRIPT_HAS_SPACE = /(^|[^\\])(\\\\)*\s/;
 
 /** {#id .class key=value} 属性块 */
 const ATTRIBUTE_BLOCK = /^\{([^{}\n]*)\}/;
-const ATTRIBUTE_TOKEN = /^(?:#([\w:.-]+)|\.([\w-]+)|([A-Za-z_:][\w:.-]*)=(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))$/;
 /** 紧跟在这些元素之后的 {…} 是元素的属性 */
 const ATTRIBUTE_TARGETS: ReadonlySet<InlineType> = new Set([
   InlineType.Link,
@@ -94,34 +113,6 @@ const ATTRIBUTE_TARGETS: ReadonlySet<InlineType> = new Set([
   InlineType.AutoLink,
 ]);
 
-/** 解析 {…} 中的属性：空白分隔的 #id、.class、key=value；任何一项不合法都不算属性 */
-export function parseAttributes(inner: string): Record<string, string> | null {
-  const parts = inner.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
-  if (!parts) return null;
-  const attributes: Record<string, string> = {};
-  const classes: string[] = [];
-  for (const part of parts) {
-    const match = ATTRIBUTE_TOKEN.exec(part);
-    if (!match) return null;
-    if (match[1] !== undefined) attributes.id = match[1];
-    else if (match[2] !== undefined) classes.push(match[2]);
-    else attributes[match[3]!] = match[4] ?? match[5] ?? match[6] ?? '';
-  }
-  if (classes.length > 0) attributes.class = [attributes.class, ...classes].filter(Boolean).join(' ');
-  return attributes;
-}
-
-/** 文本末尾的 {…} 属性（之前的空白一并去掉）：返回属性与去掉的长度 */
-export function trailingAttributes(text: string): { attributes: Record<string, string>; length: number } | null {
-  if (!text.endsWith('}')) return null;
-  const open = text.lastIndexOf('{');
-  if (open === -1) return null;
-  const attributes = parseAttributes(text.slice(open + 1, -1));
-  if (!attributes) return null;
-  let start = open;
-  while (start > 0 && (text[start - 1] === ' ' || text[start - 1] === '\t')) start--;
-  return { attributes, length: text.length - start };
-}
 
 /** 排版替换（与 markdown-it 的 replacements 规则相同） */
 const RARE_REPLACEMENT = /\+-|\.\.|\?\?\?\?|!!!!|,,|--/;
@@ -358,7 +349,7 @@ export class InlineParser {
 
     // 没有任何行内语法的内容（常见于表格单元格与短段落）：整体就是一段文本
     if (!this.subject) return [];
-    if (!this.special.test(this.subject) && !(this.options.linkify && LINKIFY_HINT.test(this.subject))) {
+    if (!this.special.test(this.subject) && !(this.options.linkify && (LINKIFY_HINT.test(this.subject) || (this.options.linkifyBareDomains && BARE_DOMAIN_HINT.test(this.subject))))) {
       const text = this.options.smartPunctuation ? smartDashesAndEllipses(this.subject) : this.subject;
       const result: InlineNode[] = [];
       this.flushText(result, { content: text, start: 0, end: this.subject.length });
@@ -476,6 +467,27 @@ export class InlineParser {
    */
   private linkifyIn(block: Node, end: number): boolean {
     const start = this.pos;
+    let found = this.linkCandidate(start, end, block);
+    if (this.options.linkifyBareDomains) {
+      const bare = this.matchBareDomain(start, found ? found.from : end);
+      if (bare) found = bare;
+    }
+    if (!found) return false;
+    if (found.from > start) {
+      const literal = this.subject.slice(start, found.from);
+      this.pos = found.from;
+      this.text(block, this.options.smartPunctuation ? smartDashesAndEllipses(literal) : literal, start);
+    }
+    this.pos = found.to;
+    const node = new Node(InlineType.AutoLink, this.subject.slice(found.from, found.to), found.from, found.to);
+    node.url = found.url;
+    node.marker = 'linkify';
+    block.append(node);
+    return true;
+  }
+
+  /** [start, end) 中第一个 GFM 裸网址或邮箱 */
+  private linkCandidate(start: number, end: number, block: Node): { from: number; to: number; url: string } | null {
     LINKIFY_CANDIDATE.lastIndex = start;
     for (let match = LINKIFY_CANDIDATE.exec(this.subject); match && match.index < end; match = LINKIFY_CANDIDATE.exec(this.subject)) {
       const candidate = match[0].toLowerCase();
@@ -485,23 +497,25 @@ export class InlineParser {
           : candidate === 'mailto:'
             ? this.matchMailto(match.index)
             : this.matchUrl(match.index, candidate);
-      if (!found) {
-        LINKIFY_CANDIDATE.lastIndex = match.index + 1;
-        continue;
-      }
-      if (found.from > start) {
-        const literal = this.subject.slice(start, found.from);
-        this.pos = found.from;
-        this.text(block, this.options.smartPunctuation ? smartDashesAndEllipses(literal) : literal, start);
-      }
-      this.pos = found.to;
-      const node = new Node(InlineType.AutoLink, this.subject.slice(found.from, found.to), found.from, found.to);
-      node.url = found.url;
-      node.marker = 'linkify';
-      block.append(node);
-      return true;
+      if (found) return found;
+      LINKIFY_CANDIDATE.lastIndex = match.index + 1;
     }
-    return false;
+    return null;
+  }
+
+  /** [start, end) 中第一个裸域名（example.com、example.com:8080/path），地址补 http:// */
+  private matchBareDomain(start: number, end: number): { from: number; to: number; url: string } | null {
+    BARE_DOMAIN.lastIndex = start;
+    const match = BARE_DOMAIN.exec(this.subject);
+    if (!match || match.index >= end) return null;
+    const from = match.index;
+    let to = from + match[0].length;
+    // 端口与路径只在紧跟 / ? # 或 :数字 时延伸，末尾标点按 GFM 规则去掉
+    if (/^(?:[/?#]|:\d)/.test(this.subject.slice(to, to + 2))) {
+      while (to < this.subject.length && !/[\s<]/.test(this.subject[to]!)) to++;
+      to = Math.max(from + match[0].length, this.trimLinkEnd(from, to));
+    }
+    return { from, to, url: `http://${this.subject.slice(from, to)}` };
   }
 
   /** GFM 有效域名：字母数字、_ 与 - 组成的段，用 . 分隔；末两段不能有 _；返回域名结束位置 */
@@ -1185,8 +1199,8 @@ export class InlineParser {
 
   // ---------- 输出 ----------
 
-  /** 内容偏移 → 源码偏移、行、列（1 起） */
-  private locate(offset: number): { offset: number; line: number; column: number } {
+  /** 内容偏移所在的行（0 起） */
+  private lineIndex(offset: number): number {
     let low = 0;
     let high = this.lineStarts.length - 1;
     while (low < high) {
@@ -1194,23 +1208,51 @@ export class InlineParser {
       if (this.lineStarts[mid]! <= offset) low = mid;
       else high = mid - 1;
     }
-    const origin = this.origin;
-    const column = offset - this.lineStarts[low]!;
-    if (!origin) return { offset, line: this.startLine + low, column: column + 1 };
-    const k = Math.min(low, origin.starts.length - 1);
-    let skipped = 0;
-    if (origin.gaps) for (const gap of origin.gaps) if (gap <= offset) skipped++;
-    return {
-      offset: origin.starts[k]! + column + skipped,
-      line: origin.startLine + k,
-      column: origin.columns[k]! + column + skipped + 1,
-    };
+    return low;
   }
 
+  /** 内容偏移 → 源码偏移、行、列（1 起） */
+  private locate(offset: number): { offset: number; line: number; column: number } {
+    const position = this.position(offset, offset);
+    return { offset: position.start, line: position.startLine, column: position.startColumn };
+  }
+
+  /** 内容范围 → 源码位置（每个行内节点都要算，直接求值、不建中间对象） */
   private position(start: number, end: number): Position {
-    const from = this.locate(start);
-    const to = this.locate(end);
-    return { start: from.offset, end: to.offset, startLine: from.line, startColumn: from.column, endLine: to.line, endColumn: to.column };
+    const startIndex = this.lineIndex(start);
+    const endIndex = end === start ? startIndex : this.lineIndex(end);
+    const startColumn = start - this.lineStarts[startIndex]!;
+    const endColumn = end - this.lineStarts[endIndex]!;
+    const origin = this.origin;
+    if (!origin) {
+      return {
+        start,
+        end,
+        startLine: this.startLine + startIndex,
+        startColumn: startColumn + 1,
+        endLine: this.startLine + endIndex,
+        endColumn: endColumn + 1,
+      };
+    }
+    const last = origin.starts.length - 1;
+    const startLine = startIndex < last ? startIndex : last;
+    const endLine = endIndex < last ? endIndex : last;
+    let startSkipped = 0;
+    let endSkipped = 0;
+    if (origin.gaps) {
+      for (const gap of origin.gaps) {
+        if (gap <= start) startSkipped++;
+        if (gap <= end) endSkipped++;
+      }
+    }
+    return {
+      start: origin.starts[startLine]! + startColumn + startSkipped,
+      end: origin.starts[endLine]! + endColumn + endSkipped,
+      startLine: origin.startLine + startLine,
+      startColumn: origin.columns[startLine]! + startColumn + startSkipped + 1,
+      endLine: origin.startLine + endLine,
+      endColumn: origin.columns[endLine]! + endColumn + endSkipped + 1,
+    };
   }
 
   /** 转成对外的节点：相邻文本合并、空文本丢弃，合并后的文本再做缩写、属性与排版替换 */
@@ -1271,7 +1313,7 @@ export class InlineParser {
       const match = ATTRIBUTE_BLOCK.exec(content);
       const attributes = match && parseAttributes(match[1]!);
       if (match && attributes) {
-        previous.attributes = { ...previous.attributes, ...attributes };
+        previous.attributes = mergeAttributes(previous.attributes, attributes);
         content = content.slice(match[0].length);
         offset = match[0].length;
       }

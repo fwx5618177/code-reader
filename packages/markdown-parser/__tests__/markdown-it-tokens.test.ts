@@ -136,3 +136,59 @@ describe('语法扩展', () => {
     expect(slices).toEqual(['$x$', '**粗体**']);
   });
 });
+
+describe('保留源码的 token（preserveSource，给编辑器用）', () => {
+  const tokenizer = new MarkdownItCompatTokenizer({ footnotes: true, abbreviations: true, preserveSource: true });
+  const brief = (markdown: string) =>
+    tokenizer.parse(markdown).map((token) => [token.type, token.meta, token.type === 'inline' ? token.children!.map((child) => [child.type, child.content]) : token.content]);
+
+  it('脚注定义原位输出，没有被引用的定义也保留；不再收集到文末', () => {
+    expect(brief('正文[^a]\n\n[^a]: 甲\n\n[^b]: 未引用\n')).toEqual([
+      ['paragraph_open', null, ''],
+      ['inline', null, [['text', '正文'], ['footnote_ref', '']]],
+      ['paragraph_close', null, ''],
+      ['footnote_reference_open', { label: 'a' }, ''],
+      ['paragraph_open', null, ''],
+      ['inline', null, [['text', '甲']]],
+      ['paragraph_close', null, ''],
+      ['footnote_reference_close', null, ''],
+      ['footnote_reference_open', { label: 'b' }, ''],
+      ['paragraph_open', null, ''],
+      ['inline', null, [['text', '未引用']]],
+      ['paragraph_close', null, ''],
+      ['footnote_reference_close', null, ''],
+    ]);
+  });
+
+  it('行内脚注的 content 为方括号内的原文；缩写定义输出 abbr_definition', () => {
+    const tokens = tokenizer.parse('a^[**粗** [x](u)]\n\n*[HTML]: Hyper Text\n');
+    expect(tokens[1]!.children![1]).toMatchObject({ type: 'footnote_ref', content: '**粗** [x](u)', meta: { id: 0 } });
+    expect(tokens[3]).toMatchObject({ type: 'abbr_definition', content: 'Hyper Text', meta: { label: 'HTML', title: 'Hyper Text' }, hidden: true, map: [2, 3] });
+  });
+
+  it('默认（不保留源码）时与 markdown-it 插件一致：不输出缩写定义', () => {
+    const plain = new MarkdownItCompatTokenizer({ abbreviations: true });
+    expect(plain.parse('*[HTML]: Hyper Text\n').map((token) => token.type)).toEqual([]);
+  });
+});
+
+describe('env.key 增量解析', () => {
+  it('同一 key 的连续编辑：token 与每次整篇解析相同；不同 key 互不影响；超过上限按最近使用淘汰', () => {
+    const options = { footnotes: true, abbreviations: true, definitionLists: true, attributes: true, incrementalDocuments: 2 };
+    const keyed = new MarkdownItCompatTokenizer(options);
+    const fresh = new MarkdownItCompatTokenizer(options);
+    const shapeOf = (tokens: ReturnType<typeof keyed.parse>) => JSON.stringify(tokens);
+    let text = Array.from({ length: 60 }, (_, i) => `## 节 ${i}\n\n正文 ${i}[^n${i % 3}] *强调*\n\n- a\n- b {.x}\n\n[^n${i % 3}]: 注\n`).join('\n');
+    const other = '# 另一篇\n';
+    let seed = 5;
+    const next = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (let step = 0; step < 120; step++) {
+      const at = Math.floor(next() * text.length);
+      text = next() < 0.6 ? text.slice(0, at) + ['字', '\n', '- ', '**', '[^n1]', '\n\n'][Math.floor(next() * 6)] + text.slice(at) : text.slice(0, at) + text.slice(at + 3);
+      expect(shapeOf(keyed.parse(text, { key: 'doc' }))).toBe(shapeOf(fresh.parse(text)));
+      if (step % 10 === 0) expect(shapeOf(keyed.parse(other, { key: `other-${step}` }))).toBe(shapeOf(fresh.parse(other)));
+    }
+    keyed.forget('doc');
+    expect(shapeOf(keyed.parse(text, { key: 'doc' }))).toBe(shapeOf(fresh.parse(text)));
+  });
+});

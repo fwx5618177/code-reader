@@ -16,6 +16,8 @@ import sup from 'markdown-it-sup';
 import { describe, expect, it } from 'vitest';
 import {
   BlockType,
+  domainToAscii,
+  domainToUnicode,
   InlineType,
   MarkdownItCompatTokenizer,
   parseCommonMark,
@@ -97,6 +99,60 @@ describe('GFM 扩展自动链接（linkify）', () => {
       ['text', '', '', 'https://a.b/c。'],
       ['link_close', 'linkify', 'auto', ''],
     ]);
+  });
+
+  // markdown-it 默认的 linkify-it 也识别裸域名；这些用例两边的识别规则相同，逐 token 比较
+  it.each([
+    'see example.com now',
+    'example.com/path?q=1#x.',
+    'foo.bar.org:8080/a, end',
+    'README.md 与 a.js',
+    '（example.com）括号',
+    'x@example.com 邮箱',
+    'http://a.com 与 b.net',
+    'a.b.c 与 example.comx 与 example.com-',
+    'sub.example.co.uk',
+    '中文example.com',
+    'xn--80ak6aa92e.com',
+    '[文本 example.com](u) `example.com`',
+    'example.com.',
+  ])('裸域名（linkifyBareDomains）与 markdown-it linkify 一致：%j', (markdown) => {
+    const markdownIt = new MarkdownIt('commonmark', { linkify: true }).enable(['linkify']);
+    const ours = new MarkdownItCompatTokenizer({ gfm: false, strikethrough: false, linkify: true, linkifyBareDomains: true });
+    expect(ours.parse(markdown).map(shape)).toEqual(markdownIt.parse(markdown, {}).map(shape));
+  });
+
+  it('裸域名默认不识别（README.md 这类文件名也会被当成域名）', () => {
+    expect(html('example.com', { linkify: true })).toBe('<p>example.com</p>\n');
+  });
+});
+
+describe('链接地址规范化（与 markdown-it 的 normalizeLink / normalizeLinkText 相同）', () => {
+  it.each([
+    '<http://a.com/%E4%B8%AD?x=%25>',
+    '<http://xn--fiq228c.com/a>',
+    '<http://中文.com/路径>',
+    '[a](http://中文.com/路径 "t")',
+    '![i](https://例子.测试/图.png)',
+    'https://例子.cn/a%20b',
+    'www.中文.com/x',
+    '<mailto:用户@例子.cn>',
+    '<user@xn--fiq228c.com>',
+    '[r](/相对/路径) [r](//中文.com/a) [r](HTTP://中文.COM/A) [r](ftp://中文.com/a)',
+    '<http://a.com/%C3%28%E4%B8>',
+  ])('IDN 主机名与百分号解码：%j', (markdown) => {
+    const markdownIt = new MarkdownIt('commonmark', { linkify: true }).enable(['linkify']);
+    const ours = new MarkdownItCompatTokenizer({ gfm: false, strikethrough: false, linkify: true });
+    expect(ours.parse(markdown).map(shape)).toEqual(markdownIt.parse(markdown, {}).map(shape));
+    expect(html(markdown, { gfm: false, linkify: true })).toBe(markdownIt.render(markdown));
+  });
+
+  it('Punycode（RFC 3492 的示例）', () => {
+    expect(domainToAscii('他们为什么不说中文')).toBe('xn--ihqwcrb4cv8a8dqg056pqjye');
+    expect(domainToAscii('ليهمابتكلموشعربي؟')).toBe('xn--egbpdaj6bu4bxfgehfvwxn');
+    expect(domainToAscii('bücher.de。例子')).toBe('xn--bcher-kva.de.xn--fsqu00a');
+    expect(domainToUnicode('xn--ihqwcrb4cv8a8dqg056pqjye.XN--FSQU00A')).toBe('他们为什么不说中文.例子');
+    expect(() => domainToUnicode('xn--中')).toThrow();
   });
 });
 

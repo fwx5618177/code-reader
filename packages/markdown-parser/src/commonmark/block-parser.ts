@@ -20,10 +20,10 @@ import {
   type TableCellNode,
   type TableNode,
   type TableRowNode,
-  InlineType,
 } from './types';
+import { blockAttributes, placeBlockAttributes, THEMATIC_BREAK_WITH_ATTRIBUTES, trailingAttributes, type Attributes } from './attributes';
 import { numberFootnotes } from './footnotes';
-import { InlineParser, trailingAttributes, unescapeString, type InlineOrigin, type ReferenceMap } from './inline-parser';
+import { InlineParser, unescapeString, type InlineOrigin, type ReferenceMap } from './inline-parser';
 
 const CODE_INDENT = 4;
 
@@ -87,7 +87,7 @@ type BlockKind =
   | 'deflist'
   | 'dt'
   | 'dd'
-  /** 缩写定义行：只用来结束前面的段落，关闭时从树中去掉 */
+  /** 缩写定义行 */
   | 'abbr_def';
 
 interface ListData {
@@ -130,6 +130,10 @@ class Block {
   extensionClosed = false;
   /** 自定义容器的名称 */
   containerName = '';
+  /** 围栏代码块信息串末尾的 {…} 属性 */
+  attributes: Attributes | undefined = undefined;
+  /** 缩写定义的缩写与全称 */
+  abbreviation: { label: string; title: string } | null = null;
 
   constructor(
     public kind: BlockKind,
@@ -309,17 +313,19 @@ export class BlockParser {
     this.warnings = [];
 
     const lineStarts = lineStartsOf(input);
-    const lines = lineStarts.map((start, index) => {
+    // 按需切出每一行（不预先建立整篇的行数组，减少大文档的内存与垃圾回收）
+    const lineAt = (index: number): string => {
+      const start = lineStarts[index]!;
       const next = lineStarts[index + 1];
       if (next === undefined) return input.slice(start);
-      return input.slice(start, next - (input[next - 1] === '\n' && input[next - 2] === '\r' ? 2 : 1));
-    });
-    let count = lines.length;
-    if (lineStarts[lineStarts.length - 1] === input.length && lines.length > 1) count -= 1;
-    const first = this.options.frontMatter && context.documentStart !== false ? this.frontMatter(lines, count) : 0;
+      return input.slice(start, next - (input.charCodeAt(next - 1) === 10 && input.charCodeAt(next - 2) === 13 ? 2 : 1));
+    };
+    let count = lineStarts.length;
+    if (lineStarts[count - 1] === input.length && count > 1) count -= 1;
+    const first = this.options.frontMatter && context.documentStart !== false ? this.frontMatter(lineAt, count) : 0;
     for (let i = first; i < count; i++) {
       this.lineStart = lineStarts[i]!;
-      this.incorporateLine(lines[i]!);
+      this.incorporateLine(lineAt(i));
     }
     while (this.tip !== this.document) this.finalize(this.tip, count);
     this.finalize(this.document, count);
@@ -336,20 +342,20 @@ export class BlockParser {
   }
 
   /** 文档开头的 YAML 头部：第一行为 ---，之后第一个 --- 或 ... 行结束；没有结束行时不是头部。返回正文的第一行 */
-  private frontMatter(lines: readonly string[], count: number): number {
-    if (count < 2 || !FRONT_MATTER_OPEN.test(lines[0]!)) return 0;
+  private frontMatter(lineAt: (index: number) => string, count: number): number {
+    if (count < 2 || !FRONT_MATTER_OPEN.test(lineAt(0))) return 0;
     let close = 1;
-    while (close < count && !FRONT_MATTER_CLOSE.test(lines[close]!)) close++;
+    while (close < count && !FRONT_MATTER_CLOSE.test(lineAt(close))) close++;
     if (close >= count) return 0;
     const block = new Block('front_matter', 1, 1);
-    block.content = lines.slice(1, close).join('\n');
+    block.content = Array.from({ length: close - 1 }, (_, index) => lineAt(index + 1)).join('\n');
     block.open = false;
     block.endLine = close + 1;
-    block.endColumn = lines[close]!.length;
+    block.endColumn = lineAt(close).length;
     block.parent = this.document;
     this.document.children.push(block);
     this.lineNumber = close + 1;
-    this.lastLineLength = lines[close]!.length;
+    this.lastLineLength = block.endColumn;
     return close + 1;
   }
 
@@ -771,7 +777,7 @@ export class BlockParser {
       const title = match[2]!.trim();
       if (title) {
         this.closeUnmatchedBlocks();
-        this.addChild('abbr_def', this.nextNonspace);
+        this.addChild('abbr_def', this.nextNonspace).abbreviation = { label, title };
         if (!this.abbreviations.has(label)) this.abbreviations.set(label, title);
         this.definitionLines.push(this.lineNumber);
         this.advanceOffset(line.length - this.offset, false);
@@ -1060,7 +1066,14 @@ export class BlockParser {
       case 'code_block':
         if (block.fenced) {
           const newline = block.content.indexOf('\n');
-          block.info = unescapeString(block.content.slice(0, newline).trim());
+          let info = block.content.slice(0, newline).trimStart();
+          // ```py {.cls data-x=1}：末尾的 {…} 是代码块的属性（与 markdown-it-attrs 一致，} 之后不能再有字符）
+          const found = this.options.attributes ? trailingAttributes(info) : null;
+          if (found) {
+            block.attributes = found.attributes;
+            info = info.slice(0, info.length - found.length);
+          }
+          block.info = unescapeString(info.trim());
           block.content = block.content.slice(newline + 1);
         } else {
           block.content = block.content.replace(/(\n *)+$/, '\n');
@@ -1085,9 +1098,6 @@ export class BlockParser {
           block.endLine = block.last.endLine;
           block.endColumn = block.last.endColumn;
         }
-        break;
-      case 'abbr_def':
-        block.remove();
         break;
       case 'list': {
         const data = block.listData!;
@@ -1163,14 +1173,25 @@ export class BlockParser {
       return inline.parse(content, starts.length > 0 ? origin : block.startLine);
     };
 
+    /** {…} 单独占一行的段落（属性可能属于外层的块，见 placeBlockAttributes） */
+    const ownLine = new Set<BlockNode>();
+
     /** 段落、标题、术语：行内内容，末尾的 {…} 作为块的属性 */
     const textual = (node: BlockNode, block: Block): BlockNode => {
       const content = block.content.trim();
       const nodes = inlineOf(block, content);
       const found = this.options.attributes ? blockAttributes(nodes) : null;
+      if (found && node.type === BlockType.Paragraph && THEMATIC_BREAK_WITH_ATTRIBUTES.test(content)) {
+        node.type = BlockType.ThematicBreak;
+        node.attributes = found.attributes;
+        return node;
+      }
       node.content = found ? content.slice(0, content.length - found.length).trimEnd() : content;
       node.inline = nodes;
-      if (found) node.attributes = found.attributes;
+      if (found) {
+        node.attributes = found.attributes;
+        if (found.ownLine) ownLine.add(node);
+      }
       return node;
     };
 
@@ -1225,8 +1246,12 @@ export class BlockParser {
           node.children = visitAll(block.children);
           return node;
         }
-        case 'abbr_def':
-          throw new Error('缩写定义在关闭时已从树中去掉');
+        case 'abbr_def': {
+          const node = create(BlockType.AbbreviationDefinition);
+          node.label = block.abbreviation!.label;
+          node.content = block.abbreviation!.title;
+          return node;
+        }
         case 'thematic_break':
           return create(BlockType.ThematicBreak);
         case 'code_block': {
@@ -1238,6 +1263,7 @@ export class BlockParser {
           }
           const language = block.info.split(/\s+/)[0];
           if (language) node.language = language;
+          if (block.attributes) node.attributes = block.attributes;
           return node;
         }
         case 'extension': {
@@ -1289,6 +1315,7 @@ export class BlockParser {
     };
 
     const document = visit(root, false);
+    if (this.options.attributes) placeBlockAttributes(document, ownLine);
     this.footnoteRefs = inline.sawFootnotes;
     if (this.options.footnotes && this.footnoteRefs) numberFootnotes(document);
     return document;
@@ -1337,15 +1364,19 @@ export class BlockParser {
         cells: Array.from({ length: columns }, (_, cellIndex): TableCellNode => {
           const cell = cells[cellIndex] ?? { text: '', start: text.length, end: text.length, gaps: [] };
           const origin: InlineOrigin = { startLine: line, starts: [source + cell.start], columns: [column - 1 + cell.start], gaps: cell.gaps };
-          return {
+          const nodes = inline.parse(cell.text, origin);
+          const found = this.options.attributes ? blockAttributes(nodes) : null;
+          const node: TableCellNode = {
             type: BlockType.TableCell,
             position: span(cell.start, cell.end),
             raw: text.slice(cell.start, cell.end),
-            content: cell.text,
+            content: found ? cell.text.slice(0, cell.text.length - found.length) : cell.text,
             isHeader,
             alignment: block.alignments[cellIndex] ?? null,
-            inline: inline.parse(cell.text, origin),
+            inline: nodes,
           };
+          if (found) node.attributes = found.attributes;
+          return node;
         }),
       };
     };
@@ -1364,6 +1395,11 @@ export class BlockParser {
 /** 各行在源码中的起始偏移（换行为 \r\n、\n 或 \r） */
 export function lineStartsOf(input: string): number[] {
   const starts = [0];
+  // 常见情况只有 \n：用原生的 indexOf 跳过整行，比逐字符判断快数倍
+  if (input.indexOf('\r') === -1) {
+    for (let at = input.indexOf('\n'); at !== -1; at = input.indexOf('\n', at + 1)) starts.push(at + 1);
+    return starts;
+  }
   for (let i = 0; i < input.length; i++) {
     const code = input.charCodeAt(i);
     if (code === 10 /* \n */) {
@@ -1388,22 +1424,4 @@ export function documentPosition(input: string, lineStarts: readonly number[]): 
     endLine,
     endColumn: input.length - lineStarts[endLine - 1]! + 1,
   };
-}
-
-/** 块末尾的 {…} 属性：去掉最后一个文本节点末尾的属性（文本变空时连同之前的换行一起去掉） */
-function blockAttributes(nodes: InlineNode[]): { attributes: Record<string, string>; length: number } | null {
-  const last = nodes[nodes.length - 1];
-  if (!last || last.type !== InlineType.Text) return null;
-  const found = trailingAttributes(last.content);
-  if (!found) return null;
-  last.content = last.content.slice(0, last.content.length - found.length);
-  if (last.position.end - last.position.start >= found.length) {
-    last.position = { ...last.position, end: last.position.end - found.length, endColumn: last.position.endColumn - found.length };
-  }
-  if (!last.content) {
-    nodes.pop();
-    const previous = nodes[nodes.length - 1];
-    if (previous && (previous.type === InlineType.SoftBreak || previous.type === InlineType.LineBreak)) nodes.pop();
-  }
-  return found;
 }

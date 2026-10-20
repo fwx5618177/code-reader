@@ -13,13 +13,15 @@ export {
   BlockType,
 } from './commonmark';
 
-export { renderHtml, escapeHtml, normalizeUrl, isSafeUrl } from './commonmark/html-renderer';
+export { renderHtml, escapeHtml } from './commonmark/html-renderer';
+export { normalizeUrl, normalizeLink, normalizeLinkText, isSafeUrl, domainToAscii, domainToUnicode } from './commonmark/url';
 export type { HtmlRenderOptions, ExtensionRenderContext } from './commonmark/html-renderer';
 export { collectFootnotes } from './commonmark/footnotes';
 export type { FootnoteEntry } from './commonmark/footnotes';
 export { IncrementalCommonMarkParser } from './commonmark/incremental-document';
 export type { DocumentUpdate } from './commonmark/incremental-document';
 export { MarkdownItToken, toMarkdownItTokens, MarkdownItCompatTokenizer } from './commonmark';
+export type { TokenOptions, TokenizerOptions, TokenizerEnv } from './commonmark';
 
 export type {
   ParseResult,

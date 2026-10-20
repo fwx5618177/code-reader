@@ -1,10 +1,11 @@
 // ================================
-// markdown-it 生态插件对照：脚注、定义列表、自定义容器、高亮 / 插入 / 上下标、缩写、YAML 头部。
+// markdown-it 生态插件对照：脚注、定义列表、自定义容器、高亮 / 插入 / 上下标、缩写、YAML 头部、{…} 属性。
 // 每组用例分别与 markdown-it（commonmark 预设 + 表格 + 删除线 + 对应插件）逐 token 比较
 // ================================
 
 import MarkdownIt from 'markdown-it';
 import abbr from 'markdown-it-abbr';
+import attrs from 'markdown-it-attrs';
 import container from 'markdown-it-container';
 import deflist from 'markdown-it-deflist';
 import footnote from 'markdown-it-footnote';
@@ -77,6 +78,9 @@ suite('高亮、插入、上下标（markdown-it-mark / ins / sub / sup）', bas
 
 suite('缩写（markdown-it-abbr）', base().use(abbr), { abbreviations: true }, [
   '*[HTML]: Hyper Text\nThe HTML spec. HTML5 xHTML',
+  '- a HTML\n  *[HTML]: 列表项中的定义\n- b HTML\n',
+  '- a\n\n  *[X]: 隔空行的定义\n\n- X\n',
+  '> 引用 X\n\n> *[X]: 引用中的定义\n',
   '*[W3C]: World Wide Web Consortium\n*[W3C]: 第二次定义不覆盖\n\n> W3C 与 (W3C) 和 [W3C](u)\n',
   '正文在前 ABC\n\n*[ABC]: 定义在后\n',
 ]);
@@ -85,3 +89,36 @@ suite('YAML 头部（markdown-it-front-matter）', base().use(frontMatter, () =>
   '---\ntitle: a\ntags: [x, y]\n---\n# H\n',
   '---\n---\n正文\n',
 ]);
+
+// {…} 属性：本包从语法树文本中去掉属性，inline token 的 content 也不含 {…}（markdown-it-attrs 保留原文），比较时不比这一项
+describe('{…} 属性（markdown-it-attrs）', () => {
+  const markdownIt = base().use(attrs);
+  const ours = new MarkdownItCompatTokenizer({ ...baseOptions, attributes: true });
+  const withoutInlineContent = (token: ReturnType<typeof shape>): ReturnType<typeof shape> => ({
+    ...token,
+    content: token.type === 'inline' ? '' : token.content,
+  });
+  it.each([
+    '# 标题 {#intro .lead}\n',
+    '段落 *强调*{.red} 与 [链接](u){target=_blank} 文字 {data-p=1}\n',
+    '```py {data=x .c}\ncode\n```\n',
+    '```py{.c}\ncode\n```\n',
+    '``` {.c}\ncode\n```\n',
+    '- item {.a}\n- b\n',
+    '1. *em*{.x} end {.y}\n',
+    '- [ ] 任务 {.todo}\n',
+    '- item\n{.a}\n',
+    '- a\n- b\n\n{.list}\n',
+    '- a\n\n  b {.c}\n',
+    '| h |\n| - |\n| c |\n\n{.t}\n',
+    '| h {.x} |\n| - |\n| c {#y} |\n',
+    '> q\n> {.q}\n',
+    '> q\n> {.q}\n\n后文\n',
+    'para\n{.p}\n',
+    '--- {#id}\n',
+    '- [link](u){.l}\n',
+  ])('%j', (markdown) => {
+    const expected = markdownIt.parse(markdown, {}).map(shape).map(withoutInlineContent);
+    expect(ours.parse(markdown).map(shape).map(withoutInlineContent)).toEqual(expected);
+  });
+});

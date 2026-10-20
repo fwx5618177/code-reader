@@ -39,10 +39,11 @@ describe('Markdown 解析健壮性', () => {
   it('随机输入 2 万次（含全部扩展语法）：不抛错，单次不超过 50ms', () => {
     let seed = 1;
     const random = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-    const pieces = ['*', '_', '[', ']', '(', ')', '`', '<', '>', '\n', ' ', '-', '#', '|', '!', '\\', '&amp;', 'a', '1.', '    ', '~', '"', "'", '\t', ':', '[^1]', '=', '+', '^', '{', '}', '{.c}', 'www.a.b', 'a@b.c', '*[a]: b', ':::', ': ', '---'];
+    const pieces = ['*', '_', '[', ']', '(', ')', '`', '<', '>', '\n', ' ', '-', '#', '|', '!', '\\', '&amp;', 'a', '1.', '    ', '~', '"', "'", '\t', ':', '[^1]', '=', '+', '^', '{', '}', '{.c}', 'www.a.b', 'a@b.c', 'x.com/p', '中文.cn', '*[a]: b', ':::', ': ', '---'];
     const options = {
       smartPunctuation: true,
       linkify: true,
+      linkifyBareDomains: true,
       replacements: true,
       mark: true,
       insert: true,

@@ -6,49 +6,16 @@
 // 不安全的链接（javascript: 等）输出空地址；扩展节点、代码高亮可以自定义
 // ================================
 
+import { mergeAttributes } from './attributes';
 import { collectFootnotes, type FootnoteEntry } from './footnotes';
 import { BlockType, InlineType, type BlockNode, type InlineNode, type TableNode } from './types';
+import { autolinkLabel, isSafeUrl, normalizeLink } from './url';
 
 /** HTML 转义（文本与属性值） */
 export function escapeHtml(text: string): string {
   return text.replace(/[&<>"]/g, (char) =>
     char === '&' ? '&amp;' : char === '<' ? '&lt;' : char === '>' ? '&gt;' : '&quot;'
   );
-}
-
-/** 不需要编码的 URL（只含结构字符与合法的 %XX） */
-const ENCODED_URL = /^(?:[A-Za-z0-9\-._~:/?#@!$&'()*+,;=]|%[0-9a-fA-F]{2})*$/;
-
-/**
- * URL 百分号编码：保留 URL 的结构字符与已有的 %XX，其余（空格、非 ASCII、反斜杠等）按 UTF-8 编码
- */
-export function normalizeUrl(url: string): string {
-  if (ENCODED_URL.test(url)) return url;
-  let result = '';
-  for (let i = 0; i < url.length; i++) {
-    const char = url[i]!;
-    if (char === '%' && /^[0-9a-fA-F]{2}$/.test(url.slice(i + 1, i + 3))) {
-      result += url.slice(i, i + 3);
-      i += 2;
-    } else if (/[A-Za-z0-9\-._~:/?#@!$&'()*+,;=]/.test(char)) {
-      result += char;
-    } else {
-      const code = url.codePointAt(i)!;
-      const symbol = String.fromCodePoint(code);
-      result += encodeURIComponent(symbol);
-      i += symbol.length - 1;
-    }
-  }
-  return result;
-}
-
-const BAD_PROTOCOL = /^(?:vbscript|javascript|file|data):/;
-const GOOD_DATA = /^data:image\/(?:gif|png|jpeg|webp);/;
-
-/** 与 markdown-it 默认规则相同：拒绝 javascript: vbscript: file: 与 data:（常见图片格式的 data: 除外） */
-export function isSafeUrl(url: string): boolean {
-  const normalized = url.trim().toLowerCase();
-  return !BAD_PROTOCOL.test(normalized) || GOOD_DATA.test(normalized);
 }
 
 /** 自定义扩展节点渲染时可用的工具 */
@@ -142,7 +109,7 @@ class HtmlRenderer {
   }
 
   private url(url: string): string {
-    return this.validateLink(url) ? escapeHtml(normalizeUrl(url)) : '';
+    return this.validateLink(url) ? escapeHtml(normalizeLink(url)) : '';
   }
 
   private extension(node: InlineNode | BlockNode, block: boolean): string {
@@ -185,7 +152,7 @@ class HtmlRenderer {
           break;
         }
         case InlineType.AutoLink:
-          out += `<a href="${this.url(node.url ?? node.content)}"${attributes}>${escapeHtml(node.content)}</a>`;
+          out += `<a href="${this.url(node.url ?? node.content)}"${attributes}>${escapeHtml(autolinkLabel(node.url ?? node.content, node.content, node.marker === 'linkify'))}</a>`;
           break;
         case InlineType.Abbreviation:
           out += `<abbr title="${escapeHtml(node.title ?? '')}">${escapeHtml(node.content)}</abbr>`;
@@ -215,10 +182,10 @@ class HtmlRenderer {
   private table(table: TableNode, writer: HtmlWriter): void {
     const cell = (tag: 'th' | 'td', node: TableNode['header']['cells'][number]) => {
       const align = node.alignment ? ` align="${node.alignment}"` : '';
-      return `<${tag}${align}>${this.inline(node.inline)}</${tag}>\n`;
+      return `<${tag}${align}${attributeString(node.attributes)}>${this.inline(node.inline)}</${tag}>\n`;
     };
     writer.cr();
-    writer.write('<table>\n<thead>\n<tr>\n');
+    writer.write(`<table${attributeString(table.attributes)}>\n<thead>\n<tr>\n`);
     for (const node of table.header.cells) writer.write(cell('th', node));
     writer.write('</tr>\n</thead>\n');
     if (table.rows.length > 0) {
@@ -241,9 +208,10 @@ class HtmlRenderer {
     if (highlighted && highlighted.startsWith('<pre')) {
       writer.write(highlighted);
     } else {
-      const className = language ? ` class="${escapeHtml(this.langPrefix + language)}"` : '';
+      // 与 markdown-it 一致：语言 class 追加在 {…} 的 class 之后
+      const attributes = language ? mergeAttributes(node.attributes, { class: this.langPrefix + language }) : node.attributes;
       const body = highlighted || `${escapeHtml(content)}${content && !content.endsWith('\n') ? '\n' : ''}`;
-      writer.write(`<pre><code${className}>${body}</code></pre>`);
+      writer.write(`<pre><code${attributeString(attributes)}>${body}</code></pre>`);
     }
     writer.cr();
   }
@@ -284,13 +252,13 @@ class HtmlRenderer {
         this.code(node, writer);
         return;
       case BlockType.Blockquote:
-        this.wrap(writer, '<blockquote>', '</blockquote>', node.children ?? []);
+        this.wrap(writer, `<blockquote${attributes}>`, '</blockquote>', node.children ?? []);
         return;
       case BlockType.List: {
         const tag = node.ordered ? 'ol' : 'ul';
         const start = node.ordered && node.start !== undefined && node.start !== 1 ? ` start="${node.start}"` : '';
         writer.cr();
-        writer.write(`<${tag}${start}>`);
+        writer.write(`<${tag}${start}${attributes}>`);
         writer.cr();
         for (const item of node.children ?? []) this.block(item, writer, node.tight ?? false);
         writer.cr();
@@ -301,7 +269,7 @@ class HtmlRenderer {
       case BlockType.ListItem:
       case BlockType.TaskListItem:
         writer.cr();
-        writer.write('<li>');
+        writer.write(`<li${attributes}>`);
         if (node.type === BlockType.TaskListItem) {
           writer.write(`<input type="checkbox" disabled=""${node.checked ? ' checked=""' : ''}${this.close} `);
         }
@@ -311,7 +279,7 @@ class HtmlRenderer {
         return;
       case BlockType.ThematicBreak:
         writer.cr();
-        writer.write(`<hr${this.close}`);
+        writer.write(`<hr${attributes}${this.close}`);
         writer.cr();
         return;
       case BlockType.HtmlBlock:
@@ -323,10 +291,11 @@ class HtmlRenderer {
         this.table(node as TableNode, writer);
         return;
       case BlockType.Container:
-        this.wrap(writer, `<div class="${escapeHtml(node.name ?? '')}">`, '</div>', node.children ?? []);
+        // 与 markdown-it-container 一致：容器名追加在 {…} 的 class 之后
+        this.wrap(writer, `<div${attributeString(mergeAttributes(node.attributes, { class: node.name ?? '' }))}>`, '</div>', node.children ?? []);
         return;
       case BlockType.DefinitionList:
-        this.wrap(writer, '<dl>', '</dl>', node.children ?? []);
+        this.wrap(writer, `<dl${attributes}>`, '</dl>', node.children ?? []);
         return;
       case BlockType.DefinitionTerm:
         writer.cr();
@@ -336,12 +305,12 @@ class HtmlRenderer {
       case BlockType.DefinitionDescription:
         if (node.tight) {
           writer.cr();
-          writer.write('<dd>');
+          writer.write(`<dd${attributes}>`);
           for (const child of node.children ?? []) this.block(child, writer, true);
           writer.write('</dd>');
           writer.cr();
         } else {
-          this.wrap(writer, '<dd>', '</dd>', node.children ?? []);
+          this.wrap(writer, `<dd${attributes}>`, '</dd>', node.children ?? []);
         }
         return;
       case BlockType.Extension:
@@ -349,9 +318,10 @@ class HtmlRenderer {
         writer.write(this.extension(node, true));
         writer.cr();
         return;
-      // 脚注定义收集到文末输出；YAML 头部不输出
+      // 脚注定义收集到文末输出；YAML 头部与缩写定义不输出
       case BlockType.FootnoteDefinition:
       case BlockType.FrontMatter:
+      case BlockType.AbbreviationDefinition:
       case BlockType.BlankLine:
       case BlockType.TableRow:
       case BlockType.TableCell:

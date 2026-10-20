@@ -68,6 +68,8 @@ export const enum BlockType {
   DefinitionTerm = 'definition_term',
   /** 定义列表的说明（以 : 或 ~ 开头的容器块） */
   DefinitionDescription = 'definition_description',
+  /** 缩写定义 *[缩写]: 全称（abbreviations 选项；缩写在 label、全称在 content 中；HTML 与默认 token 流不输出） */
+  AbbreviationDefinition = 'abbreviation_definition',
   /** 扩展语法（见 BlockExtension，节点名在 name 中） */
   Extension = 'extension',
 }
@@ -183,6 +185,8 @@ export interface BlockNode {
   checked?: boolean;
   /** 脚注标识符 */
   footnoteId?: string;
+  /** 缩写定义中的缩写（AbbreviationDefinition） */
+  label?: string;
   /** 脚注编号（按第一次引用的顺序，1 起）；没有被引用的定义没有编号 */
   footnoteIndex?: number;
   /** 围栏代码块开始围栏后的完整信息串（language 是其中第一个词）；自定义容器为 ::: 之后的整行参数 */
@@ -191,7 +195,7 @@ export interface BlockNode {
   name?: string;
   /** 扩展节点的附加数据 */
   data?: Record<string, unknown>;
-  /** 标题、段落末尾的 {#id .class key=value} 属性（attributes 选项） */
+  /** 块的 {#id .class key=value} 属性（attributes 选项；段落、标题、列表、列表项、表格、单元格、围栏代码块、引用等） */
   attributes?: Record<string, string>;
 }
 
@@ -281,6 +285,11 @@ export interface CommonMarkOptions {
   blockExtensions?: readonly BlockExtension[];
   /** GFM 扩展自动链接：裸写的 www.…、http(s)://…、邮箱（按 GFM 规范处理末尾标点与括号） */
   linkify?: boolean;
+  /**
+   * linkify 时也识别没有 www. 与协议的裸域名 example.com（与 markdown-it 默认的 linkify-it 模糊链接相同，
+   * 按顶级域表判断，地址补 http://）。注意 README.md 这类文件名也会被识别（.md 是摩尔多瓦的顶级域）
+   */
+  linkifyBareDomains?: boolean;
   /** 排版替换（与 markdown-it 的 replacements 相同）：(c) (r) (tm) +- .. ?.... !!!!! ,, -- --- */
   replacements?: boolean;
   /** 高亮 ==text== */
@@ -299,7 +308,8 @@ export interface CommonMarkOptions {
   containers?: boolean | readonly string[];
   /** 文档开头 --- 与 --- / ... 之间的 YAML 头部（必须闭合，未闭合时按普通内容解析） */
   frontMatter?: boolean;
-  /** 标题与段落末尾、行内元素（链接、图片、代码、强调）紧后的 {#id .class key=value} 属性 */
+  /** 标题与段落、表格单元格末尾，围栏代码块信息串末尾，行内元素（链接、图片、代码、强调）紧后的 {#id .class key=value} 属性；
+   *  列表、表格、引用等块的归属与 markdown-it-attrs 相同（见 attributes.ts） */
   attributes?: boolean;
 }
 
@@ -319,6 +329,7 @@ const DEFAULT_OPTIONS = {
   inlineExtensions: [],
   blockExtensions: [],
   linkify: false,
+  linkifyBareDomains: false,
   replacements: false,
   mark: false,
   insert: false,

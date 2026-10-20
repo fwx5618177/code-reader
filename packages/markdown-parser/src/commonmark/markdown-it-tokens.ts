@@ -8,7 +8,8 @@
 import { lineStartsOf } from './block-parser';
 import { CommonMarkParser } from './commonmark-parser';
 import { collectFootnotes } from './footnotes';
-import { isSafeUrl, normalizeUrl } from './html-renderer';
+import { IncrementalCommonMarkParser } from './incremental-document';
+import { autolinkLabel, isSafeUrl, normalizeLink } from './url';
 import {
   BlockType,
   InlineType,
@@ -64,10 +65,13 @@ export class Token {
   }
 }
 
-/** {…} 属性写入 token（与 markdown-it-attrs 相同，作为 attrs） */
+/** {…} 属性写入 token（与 markdown-it-attrs 相同：class 追加，其余覆盖） */
 function applyAttributes(token: Token, attributes: Record<string, string> | undefined): void {
   if (!attributes) return;
-  for (const [name, value] of Object.entries(attributes)) token.attrSet(name, value);
+  for (const [name, value] of Object.entries(attributes)) {
+    const existing = name === 'class' ? token.attrGet('class') : null;
+    token.attrSet(name, existing ? `${existing} ${value}` : value);
+  }
 }
 
 /** 行内元素对应的 markdown-it token：类型前缀、标签、默认标记 */
@@ -96,7 +100,10 @@ class TokenWriter {
   /** 各行起始偏移（只在列表需要判断空行时计算） */
   private lineStarts: number[] | null = null;
 
-  constructor(private readonly source: string) {}
+  constructor(
+    private readonly source: string,
+    private readonly preserveSource = false
+  ) {}
 
   /** 第 line 行（0 起）是否为空行；引用内只有 > 的行也是空行 */
   private isBlankLine(line: number, inQuote: boolean): boolean {
@@ -161,8 +168,9 @@ class TokenWriter {
       }
       case BlockType.ThematicBreak: {
         const token = this.push('hr', 'hr', 0, node);
-        const raw = node.raw.replace(/[ \t]/g, '');
-        token.markup = raw.trimEnd();
+        // 带属性的分隔线（--- {#id}）由段落变来，markup 为整行内容（与 markdown-it-attrs 一致）
+        token.markup = node.attributes ? node.raw.trim() : node.raw.replace(/[ \t]/g, '').trimEnd();
+        applyAttributes(token, node.attributes);
         return;
       }
       case BlockType.CodeBlock: {
@@ -179,17 +187,25 @@ class TokenWriter {
         token.markup = node.marker ?? '```';
         // 与 markdown-it 一致：信息串保留原样（未去转义、未去首尾空白）
         token.info = node.raw.split(/\r\n|\n|\r/, 1)[0]!.trimStart().slice(token.markup.length);
+        if (node.attributes) {
+          // markdown-it-attrs 去掉末尾的 {…} 及其前面的一个空格
+          token.info = token.info.slice(0, token.info.lastIndexOf('{')).replace(/[ \n]$/, '');
+          applyAttributes(token, node.attributes);
+        }
         return;
       }
       case BlockType.HtmlBlock: {
         this.push('html_block', '', 0, node).content = `${node.content ?? ''}\n`;
         return;
       }
-      case BlockType.Blockquote:
-        this.push('blockquote_open', 'blockquote', 1, node).markup = '>';
+      case BlockType.Blockquote: {
+        const open = this.push('blockquote_open', 'blockquote', 1, node);
+        open.markup = '>';
+        applyAttributes(open, node.attributes);
         this.blocks(node.children ?? [], node.position.endLine, true);
         this.push('blockquote_close', 'blockquote', -1).markup = '>';
         return;
+      }
       case BlockType.List: {
         const ordered = node.ordered === true;
         const type = ordered ? 'ordered_list' : 'bullet_list';
@@ -197,6 +213,7 @@ class TokenWriter {
         const open = this.push(`${type}_open`, tag, 1, node);
         open.markup = node.marker ?? '';
         if (ordered && node.start !== undefined && node.start !== 1) open.attrSet('start', String(node.start));
+        applyAttributes(open, node.attributes);
         const items = node.children ?? [];
         let end = open.map![1];
         items.forEach((item, index) => {
@@ -207,6 +224,7 @@ class TokenWriter {
           itemOpen.markup = item.marker ?? '';
           if (ordered) itemOpen.info = /^[ \t]*(\d+)/.exec(item.raw)?.[1] ?? String(item.start ?? '');
           if (item.type === BlockType.TaskListItem) itemOpen.meta = { checked: item.checked === true };
+          applyAttributes(itemOpen, item.attributes);
           this.blocks(item.children ?? [], limit, inQuote, node.tight === true);
           this.push('list_item_close', 'li', -1).markup = item.marker ?? '';
         });
@@ -217,9 +235,24 @@ class TokenWriter {
       case BlockType.Table:
         this.table(node as TableNode);
         return;
-      case BlockType.FootnoteDefinition:
-        // 与 markdown-it-footnote 一致：定义的内容收集到文末（见 footnotes）
+      case BlockType.FootnoteDefinition: {
+        // 与 markdown-it-footnote 一致：定义的内容收集到文末（见 footnotes）；
+        // 保留源码时原位输出（与 markdown-it-footnote 块级规则生成、尚未移到文末的 token 相同），没有被引用的定义也保留
+        if (!this.preserveSource) return;
+        this.push('footnote_reference_open', '', 1, node).meta = { label: node.footnoteId ?? '' };
+        this.blocks(node.children ?? [], node.position.endLine, inQuote);
+        this.push('footnote_reference_close', '', -1);
         return;
+      }
+      case BlockType.AbbreviationDefinition: {
+        // 缩写定义只在保留源码时输出（markdown-it-abbr 不生成 token）
+        if (!this.preserveSource) return;
+        const token = this.push('abbr_definition', '', 0, node);
+        token.content = node.content ?? '';
+        token.meta = { label: node.label ?? '', title: node.content ?? '' };
+        token.hidden = true;
+        return;
+      }
       case BlockType.FrontMatter: {
         // 与 markdown-it-front-matter 一致：meta 为 YAML 文本，渲染时隐藏
         const token = this.push('front_matter', '', 0, node);
@@ -233,6 +266,7 @@ class TokenWriter {
         const open = this.push(`container_${name}_open`, 'div', 1, node);
         open.markup = node.marker ?? ':::';
         open.info = node.info ?? '';
+        applyAttributes(open, node.attributes);
         // markdown-it-container 的 map 结束于闭合行之前（未闭合时到容器末尾）
         const lines = node.raw.split(/\r\n|\n|\r/);
         const closing = lines.length > 1 && new RegExp(`^[ \\t]*:{${open.markup.length},}[ \\t]*$`).test(lines[lines.length - 1]!);
@@ -261,6 +295,7 @@ class TokenWriter {
    */
   private definitionList(node: BlockNode, limit: number, inQuote: boolean): void {
     const open = this.push('dl_open', 'dl', 1, node);
+    applyAttributes(open, node.attributes);
     const children = node.children ?? [];
     let end = open.map![1];
     children.forEach((child, index) => {
@@ -275,6 +310,7 @@ class TokenWriter {
       }
       const previous = children[index - 1];
       const description = this.push('dd_open', 'dd', 1, child);
+      applyAttributes(description, child.attributes);
       const start = previous && previous.type === BlockType.DefinitionTerm && index > 1 ? previous.position.startLine - 1 : child.position.startLine - 1;
       const next = children[index + 1];
       end = next ? next.position.startLine - 1 : this.skipBlankLines(child.position.endLine, limit, inQuote);
@@ -306,7 +342,7 @@ class TokenWriter {
         const close = new Token('paragraph_close', 'p', -1);
         open.block = close.block = true;
         inline.content = entry.text ?? '';
-        inline.children = new InlineWriter(this.source).write(entry.inline);
+        inline.children = new InlineWriter(this.source, this.preserveSource).write(entry.inline);
         this.tokens.push(open, inline, close);
       } else {
         this.level = 1;
@@ -324,13 +360,16 @@ class TokenWriter {
 
   private table(node: TableNode): void {
     const startLine = node.position.startLine - 1;
-    this.push('table_open', 'table', 1, node);
+    const table = this.push('table_open', 'table', 1, node);
+    applyAttributes(table, node.attributes);
     const row = (cells: TableCellNode[], line: number, header: boolean) => {
       const tr = this.push('tr_open', 'tr', 1);
       tr.map = [line, line + 1];
       for (const cell of cells) {
         const tag = header ? 'th' : 'td';
-        this.push(`${tag}_open`, tag, 1).attrs = alignStyle(cell.alignment);
+        const open = this.push(`${tag}_open`, tag, 1);
+        open.attrs = alignStyle(cell.alignment);
+        applyAttributes(open, cell.attributes);
         const inline = this.inline(null, cell.content ?? '', cell.inline ?? []);
         inline.map = null;
         this.push(`${tag}_close`, tag, -1);
@@ -353,7 +392,7 @@ class TokenWriter {
   private inline(node: BlockNode | null, content: string, children: readonly InlineNode[]): Token {
     const token = this.push('inline', '', 0, node ?? undefined);
     token.content = content;
-    token.children = new InlineWriter(this.source).write(children);
+    token.children = new InlineWriter(this.source, this.preserveSource).write(children);
     return token;
   }
 }
@@ -362,7 +401,10 @@ class InlineWriter {
   private readonly tokens: Token[] = [];
   private level = 0;
 
-  constructor(private readonly source: string) {}
+  constructor(
+    private readonly source: string,
+    private readonly preserveSource: boolean
+  ) {}
 
   write(nodes: readonly InlineNode[]): Token[] {
     for (const node of nodes) this.node(node);
@@ -432,7 +474,7 @@ class InlineWriter {
           return;
         }
         const open = this.push('link_open', 'a', 1, node);
-        open.attrSet('href', normalizeUrl(url));
+        open.attrSet('href', normalizeLink(url));
         if (node.title) open.attrSet('title', node.title);
         applyAttributes(open, node.attributes);
         for (const child of node.children ?? []) this.node(child);
@@ -448,12 +490,12 @@ class InlineWriter {
         // 尖括号自动链接的 markup 为 autolink，裸网址为 linkify（与 markdown-it 一致）
         const markup = node.marker === 'linkify' ? 'linkify' : 'autolink';
         const open = this.push('link_open', 'a', 1, node);
-        open.attrSet('href', normalizeUrl(url));
+        open.attrSet('href', normalizeLink(url));
         open.markup = markup;
         open.info = 'auto';
         applyAttributes(open, node.attributes);
         const text = this.push('text', '', 0, node);
-        text.content = node.content;
+        text.content = autolinkLabel(url, node.content, markup === 'linkify');
         const close = this.push('link_close', 'a', -1, null);
         close.markup = markup;
         close.info = 'auto';
@@ -467,13 +509,13 @@ class InlineWriter {
         }
         const token = this.push('image', 'img', 0, node);
         token.attrs = [
-          ['src', normalizeUrl(url)],
+          ['src', normalizeLink(url)],
           ['alt', ''],
         ];
         if (node.title) token.attrSet('title', node.title);
         applyAttributes(token, node.attributes);
         const children = node.children ?? [];
-        token.children = new InlineWriter(this.source).write(children);
+        token.children = new InlineWriter(this.source, this.preserveSource).write(children);
         // 与 markdown-it 一致：content 为方括号内的原始文本
         const labelStart = node.position.start + 2;
         const labelEnd = children.length > 0 ? children[children.length - 1]!.position.end : labelStart;
@@ -492,10 +534,11 @@ class InlineWriter {
         this.push('html_inline', '', 0, node).content = node.content;
         return;
       case InlineType.FootnoteRef: {
-        // 与 markdown-it-footnote 一致：id 从 0 开始；行内脚注只有 id
+        // 与 markdown-it-footnote 一致：id 从 0 开始；行内脚注只有 id（保留源码时 content 为方括号内的原文）
         const token = this.push('footnote_ref', '', 0, node);
         const id = (node.footnoteIndex ?? 1) - 1;
         token.meta = node.footnoteId === undefined ? { id } : { id, subId: node.footnoteSubId ?? 0, label: node.footnoteId };
+        if (this.preserveSource && node.footnoteId === undefined) token.content = node.content.slice(2, -1);
         return;
       }
       case InlineType.Extension: {
@@ -508,15 +551,39 @@ class InlineWriter {
   }
 }
 
+/** 语法树转 token 的选项 */
+export interface TokenOptions {
+  /** 收集文末脚注（解析时未开启脚注时传 false，默认 true） */
+  footnotes?: boolean;
+  /**
+   * 保留源码（给编辑器用，保存时不丢内容）：脚注定义原位输出 footnote_reference_open / close（meta.label），
+   * 没有被引用的定义也保留、不再收集到文末；行内脚注的 footnote_ref.content 为方括号内的原文；
+   * 缩写定义输出 abbr_definition（meta 为 { label, title }）
+   */
+  preserveSource?: boolean;
+}
+
 /**
- * 语法树 → markdown-it 兼容的 token 序列。
- * footnotes 为 false 时（解析时未开启脚注）跳过文末脚注的收集
+ * 语法树 → markdown-it 兼容的 token 序列
  */
-export function toMarkdownItTokens(source: string, document: BlockNode, { footnotes = true }: { footnotes?: boolean } = {}): Token[] {
-  const writer = new TokenWriter(source);
+export function toMarkdownItTokens(source: string, document: BlockNode, { footnotes = true, preserveSource = false }: TokenOptions = {}): Token[] {
+  const writer = new TokenWriter(source, preserveSource);
   writer.blocks(document.children ?? [], document.position.endLine);
-  if (footnotes) writer.footnotes(document);
+  if (footnotes && !preserveSource) writer.footnotes(document);
   return writer.tokens;
+}
+
+/** 分词器选项 */
+export interface TokenizerOptions extends CommonMarkOptions {
+  /** 见 TokenOptions.preserveSource */
+  preserveSource?: boolean;
+  /** 最多保留几篇文档的增量解析状态（按最近使用淘汰，默认 8） */
+  incrementalDocuments?: number;
+}
+
+/** parse 的 env：带 key（如文档 id）时，同一 key 的连续解析走语法树级增量解析，只重新解析改动附近的块 */
+export interface TokenizerEnv {
+  key?: string;
 }
 
 /**
@@ -524,14 +591,45 @@ export function toMarkdownItTokens(source: string, document: BlockNode, { footno
  * 可直接作为 prosemirror-markdown 的 MarkdownParser 的 tokenizer
  */
 export class MarkdownItCompatTokenizer {
+  private readonly options: CommonMarkOptions;
   private readonly parser: CommonMarkParser;
+  private readonly tokenOptions: TokenOptions;
+  private readonly limit: number;
+  /** 各文档的增量解析器（Map 的顺序即最近使用顺序） */
+  private readonly documents = new Map<string, IncrementalCommonMarkParser>();
 
-  constructor(options?: CommonMarkOptions) {
+  constructor({ preserveSource = false, incrementalDocuments = 8, ...options }: TokenizerOptions = {}) {
+    this.options = options;
     this.parser = new CommonMarkParser(options);
+    this.tokenOptions = { footnotes: this.parser.getOptions().footnotes !== false, preserveSource };
+    this.limit = Math.max(1, incrementalDocuments);
   }
 
-  parse(source: string, _env?: unknown): Token[] {
-    const footnotes = this.parser.getOptions().footnotes !== false;
-    return toMarkdownItTokens(source, this.parser.parse(source).document, { footnotes });
+  /** 解析选项（展开默认值后） */
+  getOptions(): Readonly<CommonMarkOptions> {
+    return this.parser.getOptions();
+  }
+
+  parse(source: string, env?: unknown): Token[] {
+    const key = env !== null && typeof env === 'object' ? (env as TokenizerEnv).key : undefined;
+    const document = key === undefined ? this.parser.parse(source).document : this.incremental(key).update(source).result.document;
+    return toMarkdownItTokens(source, document, this.tokenOptions);
+  }
+
+  /** 释放某篇文档的增量解析状态（文档关闭时调用） */
+  forget(key: string): void {
+    this.documents.delete(key);
+  }
+
+  private incremental(key: string): IncrementalCommonMarkParser {
+    let parser = this.documents.get(key);
+    if (parser) {
+      this.documents.delete(key);
+    } else {
+      parser = new IncrementalCommonMarkParser(this.options);
+      if (this.documents.size >= this.limit) this.documents.delete(this.documents.keys().next().value!);
+    }
+    this.documents.set(key, parser);
+    return parser;
   }
 }

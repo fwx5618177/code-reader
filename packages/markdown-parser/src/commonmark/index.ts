@@ -46,10 +46,12 @@ export type {
   BlockExtensionLine,
 } from './commonmark-parser';
 
-export { renderHtml, escapeHtml, normalizeUrl, isSafeUrl } from './html-renderer';
+export { renderHtml, escapeHtml } from './html-renderer';
+export { normalizeUrl, normalizeLink, normalizeLinkText, isSafeUrl, domainToAscii, domainToUnicode } from './url';
 export type { HtmlRenderOptions, ExtensionRenderContext } from './html-renderer';
 export { collectFootnotes } from './footnotes';
 export type { FootnoteEntry } from './footnotes';
 export { IncrementalCommonMarkParser } from './incremental-document';
 export type { DocumentUpdate } from './incremental-document';
 export { Token as MarkdownItToken, toMarkdownItTokens, MarkdownItCompatTokenizer } from './markdown-it-tokens';
+export type { TokenOptions, TokenizerOptions, TokenizerEnv } from './markdown-it-tokens';
