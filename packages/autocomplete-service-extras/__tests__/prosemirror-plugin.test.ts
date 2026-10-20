@@ -225,6 +225,24 @@ describe('EditorAutocomplete', () => {
     view.destroy();
   });
 
+  it('面板弹出在静止的鼠标下不改变选中；鼠标真的移动后才跟随', async () => {
+    const autocomplete = new EditorAutocomplete({ providers: [provider('/', [item('a'), item('b'), item('c')])], minTriggerLength: 0 });
+    const view = mount(paragraph(''), autocomplete);
+    type(view, '/');
+    await vi.advanceTimersByTimeAsync(150);
+    const items = document.querySelectorAll<HTMLElement>('.pm-autocomplete-item');
+    const move = (index: number, x: number) =>
+      items[index]!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, screenX: x, screenY: 10 }));
+
+    items[1]!.dispatchEvent(new MouseEvent('mouseenter'));
+    move(1, 100);
+    move(1, 100);
+    expect(autocomplete.getState(view.state).selectedIndex).toBe(0);
+    move(2, 101);
+    expect(autocomplete.getState(view.state).selectedIndex).toBe(2);
+    view.destroy();
+  });
+
   it('点击补全项插入', async () => {
     const autocomplete = new EditorAutocomplete({ providers: [provider('/', [item('table')])], minTriggerLength: 0 });
     const view = mount(paragraph(''), autocomplete);
