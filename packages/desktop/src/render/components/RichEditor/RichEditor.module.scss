@@ -90,7 +90,7 @@
   width: 100%;
   font-size: 2rem;
   font-weight: 700;
-  font-family: var(--font-family-sans);
+  font-family: var(--font-sans);
   line-height: 1.3;
   padding: 0 0 var(--spacing-2) 0;
   margin: 0;
@@ -208,8 +208,8 @@
   outline: none;
   color: var(--text-primary);
   // 字体、字号与整数 px 行高由页面设置（PageSurface）提供，行高与纸张背景的线距一致
-  font-family: var(--page-font-family, var(--font-family-sans));
-  font-size: var(--page-font-size, var(--font-size-base));
+  font-family: var(--page-font-family, var(--font-sans));
+  font-size: var(--page-font-size, var(--font-size-md));
   line-height: var(--page-line, 1.75);
   white-space: pre-wrap; // Required by ProseMirror for proper text handling
   word-wrap: break-word;
@@ -346,7 +346,7 @@
   // Inline code
   code {
     padding: 2px 6px;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     font-size: 0.9em;
     background-color: var(--bg-tertiary);
     border-radius: var(--radius-sm);
@@ -1249,7 +1249,7 @@ $page-rule-rows: repeating-linear-gradient(
   .token.prolog,
   .token.doctype,
   .token.cdata {
-    color: var(--syntax-comment, #6a9955);
+    color: var(--code-comment);
     font-style: italic;
   }
 
@@ -1264,7 +1264,7 @@ $page-rule-rows: repeating-linear-gradient(
   .token.constant,
   .token.symbol,
   .token.deleted {
-    color: var(--syntax-number, #b5cea8);
+    color: var(--code-number);
   }
 
   .token.selector,
@@ -1273,7 +1273,7 @@ $page-rule-rows: repeating-linear-gradient(
   .token.char,
   .token.builtin,
   .token.inserted {
-    color: var(--syntax-string, #ce9178);
+    color: var(--code-string);
   }
 
   .token.operator,
@@ -1281,24 +1281,24 @@ $page-rule-rows: repeating-linear-gradient(
   .token.url,
   .language-css .token.string,
   .style .token.string {
-    color: var(--syntax-operator, #d4d4d4);
+    color: var(--code-operator);
   }
 
   .token.atrule,
   .token.attr-value,
   .token.keyword {
-    color: var(--syntax-keyword, #569cd6);
+    color: var(--code-keyword);
   }
 
   .token.function,
   .token.class-name {
-    color: var(--syntax-function, #dcdcaa);
+    color: var(--code-function);
   }
 
   .token.regex,
   .token.important,
   .token.variable {
-    color: var(--syntax-variable, #d16969);
+    color: var(--code-variable);
   }
 
   .code-block-language-bar {
@@ -1311,7 +1311,7 @@ $page-rule-rows: repeating-linear-gradient(
 
   .code-block-language-select {
     font-size: var(--font-size-xs);
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     padding: var(--spacing-1) var(--spacing-2);
     background-color: var(--bg-tertiary);
     border: 1px solid var(--border-primary);
@@ -1338,7 +1338,7 @@ $page-rule-rows: repeating-linear-gradient(
 
   .code-block-editor {
     .cm-editor {
-      font-family: var(--font-family-mono);
+      font-family: var(--font-mono);
       font-size: 0.9em;
       line-height: 1.5;
       background-color: transparent;
@@ -1404,40 +1404,40 @@ $page-rule-rows: repeating-linear-gradient(
 
       // Syntax highlighting colors
       .cm-keyword {
-        color: var(--syntax-keyword, #c678dd);
+        color: var(--code-keyword);
       }
 
       .cm-string {
-        color: var(--syntax-string, #98c379);
+        color: var(--code-string);
       }
 
       .cm-comment {
-        color: var(--syntax-comment, #5c6370);
+        color: var(--code-comment);
         font-style: italic;
       }
 
       .cm-number {
-        color: var(--syntax-number, #d19a66);
+        color: var(--code-number);
       }
 
       .cm-operator {
-        color: var(--syntax-operator, #56b6c2);
+        color: var(--code-operator);
       }
 
       .cm-function {
-        color: var(--syntax-function, #61afef);
+        color: var(--code-function);
       }
 
       .cm-variableName {
-        color: var(--syntax-variable, #e06c75);
+        color: var(--code-variable);
       }
 
       .cm-typeName {
-        color: var(--syntax-type, #e5c07b);
+        color: var(--code-class-name);
       }
 
       .cm-propertyName {
-        color: var(--syntax-property, #e06c75);
+        color: var(--code-property);
       }
 
       .cm-punctuation {
@@ -1449,11 +1449,11 @@ $page-rule-rows: repeating-linear-gradient(
       }
 
       .cm-tag {
-        color: var(--syntax-tag, #e06c75);
+        color: var(--code-tag);
       }
 
       .cm-attributeName {
-        color: var(--syntax-attribute, #d19a66);
+        color: var(--code-attr-name);
       }
     }
   }
@@ -1474,8 +1474,8 @@ $page-rule-rows: repeating-linear-gradient(
   max-width: var(--editor-content-max-width, 720px);
   margin: 0 auto;
   padding: var(--spacing-6);
-  font-family: var(--font-family-sans);
-  font-size: var(--font-size-base);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
   line-height: 1.75;
   color: var(--text-primary);
 
@@ -1523,7 +1523,7 @@ $page-rule-rows: repeating-linear-gradient(
 
   code {
     padding: 2px 6px;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     font-size: 0.9em;
     background-color: var(--bg-tertiary);
     border-radius: var(--radius-sm);
@@ -1532,7 +1532,7 @@ $page-rule-rows: repeating-linear-gradient(
   pre {
     margin: var(--spacing-4) 0;
     padding: var(--spacing-4);
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     font-size: 0.9em;
     line-height: 1.5;
     background-color: var(--bg-tertiary);
@@ -1760,7 +1760,7 @@ $page-rule-rows: repeating-linear-gradient(
   cursor: pointer;
   font-size: 11px;
   font-weight: $font-weight-medium;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-mono);
   transition: all 0.15s ease;
 
   &:hover {
@@ -1859,12 +1859,12 @@ $page-rule-rows: repeating-linear-gradient(
 // 搜索高亮样式（用于编辑器内的搜索匹配）
 :global {
   .search-highlight {
-    background-color: var(--highlight-bg, rgba(255, 215, 0, 0.3));
+    background-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
     border-radius: 2px;
   }
 
   .search-highlight-active {
-    background-color: var(--highlight-active-bg, rgba(255, 165, 0, 0.5));
+    background-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
     outline: 2px solid var(--accent-primary);
     outline-offset: 1px;
   }
@@ -2199,41 +2199,41 @@ $page-rule-rows: repeating-linear-gradient(
       // LaTeX 语法高亮
       .cm-keyword,
       .cm-meta {
-        color: var(--syntax-keyword);
+        color: var(--code-keyword);
         font-weight: 500;
       }
 
       .cm-comment {
-        color: var(--syntax-comment);
+        color: var(--code-comment);
         font-style: italic;
       }
 
       .cm-string {
-        color: var(--syntax-string);
+        color: var(--code-string);
       }
 
       .cm-number {
-        color: var(--syntax-number);
+        color: var(--code-number);
       }
 
       .cm-operator {
-        color: var(--syntax-operator);
+        color: var(--code-operator);
       }
 
       .cm-bracket {
-        color: var(--syntax-bracket);
+        color: var(--code-punctuation);
       }
 
       .cm-tag {
-        color: var(--syntax-tag);
+        color: var(--code-tag);
       }
 
       .cm-variableName {
-        color: var(--syntax-variable);
+        color: var(--code-variable);
       }
 
       .cm-typeName {
-        color: var(--syntax-type);
+        color: var(--code-class-name);
       }
 
       // 诊断下划线：以波浪线替代 lint 默认的固定色 SVG

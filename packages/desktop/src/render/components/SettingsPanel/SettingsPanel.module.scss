@@ -948,7 +948,7 @@
 }
 
 .themeIcon {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .themeName {
@@ -1252,7 +1252,7 @@
   transition: all $transition-fast;
 
   svg {
-    color: var(--text-tertiary);
+    color: var(--text-muted);
   }
 
   &:hover {

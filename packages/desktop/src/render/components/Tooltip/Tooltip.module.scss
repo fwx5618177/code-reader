@@ -63,7 +63,7 @@
   align-items: flex-start;
   gap: var(--spacing-1);
   padding: var(--spacing-2) var(--spacing-3);
-  background-color: var(--bg-elevated);
+  background-color: var(--bg-secondary);
   border: 1px solid var(--border-secondary);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
@@ -71,7 +71,7 @@
   -webkit-backdrop-filter: blur(8px);
   max-width: 250px;
   min-width: 40px;
-  font-family: var(--font-family-sans);
+  font-family: var(--font-sans);
 }
 
 // ================================
@@ -98,7 +98,7 @@
   min-width: 18px;
   height: 16px;
   padding: 0 4px;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: $font-weight-medium;
   color: var(--text-muted);
@@ -115,7 +115,7 @@
   position: absolute;
   width: 8px;
   height: 8px;
-  background-color: var(--bg-elevated);
+  background-color: var(--bg-secondary);
   border: 1px solid var(--border-secondary);
   transform: rotate(45deg);
 }

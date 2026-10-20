@@ -635,7 +635,7 @@
 
 // 有效放置指示器
 .canDrop {
-  background-color: rgba(var(--accent-primary-rgb, 0, 122, 204), 0.1);
+  background-color: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 // 放置位置指示器
@@ -664,7 +664,7 @@
 }
 
 .dropPositionInside {
-  background-color: rgba(var(--accent-primary-rgb, 0, 122, 204), 0.15);
+  background-color: color-mix(in srgb, var(--accent-primary) 15%, transparent);
   outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
 
@@ -676,7 +676,7 @@
 
 // 无效放置指示器
 .cannotDrop {
-  background-color: rgba(var(--color-error-rgb, 255, 85, 85), 0.1);
+  background-color: color-mix(in srgb, var(--color-error) 10%, transparent);
   cursor: not-allowed;
 
   &::before {
