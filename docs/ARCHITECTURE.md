@@ -40,14 +40,14 @@
 
 依赖方向：desktop 依赖子包，子包之间不依赖 desktop。desktop 直接按包接口使用子包，不保留转发入口：代码块补全由 `RichEditor/CodeBlockView.ts` 直接引用 `@code-reader/autocomplete-service`，Markdown 编辑器的补全跑在 `@code-reader/autocomplete-service-extras` 的 ProseMirror 补全插件上（Emoji 用 `fromServiceProvider` 接入核心包的 `EmojiProvider`）；`lib/core/delta` 只包含历史管理、内容哈希与版本快照，差分直接引用 `@code-reader/diff-algorithm`；LaTeX 渲染链路（`lib/latex/parser.ts` 起）只依赖 `@code-reader/text-buffer`，LaTeX 诊断 / 折叠 / 大纲（`lib/latex/analysis.ts`）使用 `syntax-parser` 与 `format-parser`，按内容识别文档格式用 `format-parser` 的 `isLaTeXDocument`，LaTeX 源码编辑器的注释与自动配对取自 `syntax-parser` 的语言配置；桌面端插件系统 `lib/plugins` 使用 `plugin-system` 的贡献点类型、`lifecycle` 模块与扩展点注册表；命令面板用 `fuzzy-match-algorithm` 排序与高亮。各算法的用途与调用位置见 `packages/desktop/src/render/lib/ALGORITHMS_README.md`。
 
-**子包接入对照**（桌面端的实际导入可用 `packages/desktop/.e2e` 外的脚本统计：遍历 `src` 中来自 `@code-reader/*` 的 import）：
+**子包接入对照**（桌面端的实际导入可用脚本统计：遍历 `src` 中来自 `@code-reader/*` 的 import）：
 
 | 子包 | 桌面端用到的能力 → 接入位置 | 未接入部分与处理 |
 |------|------|------|
 | `syntax-parser` | `LatexLezerParser` 语法诊断与 AST（折叠 / 大纲）→ `lib/latex/analysis.ts`（`LatexAnalyzer` 按块增量调用）；`LATEX_LANGUAGE_CONFIGURATION` → `lib/latex/codemirror-latex.ts`：`%` 行注释、自动配对、环境缩进（`indentationRules`：`\begin{…}` 后换行缩进一级，输入 `\end{…}` 时回退，`document` 除外） | 全部在用；包已零依赖 |
 | `syntax-parser-extras` | 桌面端不引用 | 语言注册表与高亮引擎（编辑器高亮由 CodeMirror 承担）、`LezerIncrementalParser`（复用 Lezer 树片段，但每次整体转换为统一 AST）、`ASTCache`、正则块扫描器（输出结构树，与桌面端 `block-segmenter` 的块边界粒度不同；后者与按块分析、分块渲染共用边界）。保持导出可用，有行为测试与基准 |
 | `format-parser` | LaTeX 交叉引用索引与文档元数据 → `analysis.ts`；`isLaTeXDocument`（先去掉代码块、行内代码、公式与注释再判断）→ `lib/documents/file-types.ts` 的 `resolveDocumentType`：文件名有已知扩展名时以扩展名为准，否则按内容决定 RichEditor 用 LaTeX 还是 Markdown 渲染（此前两处各写一套正则，`.md` 笔记里贴了 `\section{` 代码块会被当成 LaTeX） | 统一入口 `parse` / `autoParse` 的 Markdown 模式由 `markdown-parser` 提供 |
-| `markdown-parser` | `lib/markdown/parser.ts`（编辑器分词：YAML 头部、脚注、高亮 / 插入 / 上下标、定义列表、容器、缩写、裸网址；`preserveSource` 保留脚注与缩写定义的原位，`env.key` 按文档增量解析）、`lib/markdown/serializer.ts` 与 `lib/editor/prosemirror-rules.ts`（`normalizeLink`，裸网址链接的往返判断）、`lib/markdown/syntax-extensions.ts`（公式 / 双链 / 嵌入扩展）、`lib/markdown/extract.ts`、`lib/links/{rename,block-id}.ts` | 由 `format-parser` 拆出的零依赖 CommonMark / GFM 解析器：CommonMark 0.31.2 规范 652/652；语法扩展接口；块级与行内节点都带源码绝对位置；`MarkdownItCompatTokenizer` 输出与 markdown-it 一致的 token 流（规范用例 652/652 一致），编辑器经 prosemirror-markdown 构建文档；GFM 扩展自动链接（可选裸域名）与 markdown-it 生态常用语法（脚注、定义列表、容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性，与对应插件含 markdown-it-attrs 逐 token 一致）；与 markdown-it 相同的链接规范化（IDN 主机名 Punycode、自动链接文字解码）；带安全链接校验与高亮钩子的 HTML 渲染器；保留源码的 token 模式与按 `env.key` 缓存的增量分词；语法树级增量解析（`IncrementalCommonMarkParser`）与逐行 token 增量解析。详见 [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) |
+| `markdown-parser` | `lib/markdown/parser.ts`（编辑器分词：YAML 头部、脚注、高亮 / 插入 / 上下标、定义列表、容器、缩写、裸网址；`preserveSource` 保留脚注与缩写定义的原位，`env.key` 按文档增量解析）、`lib/markdown/serializer.ts` 与 `lib/editor/prosemirror-rules.ts`（`normalizeLink`，裸网址链接的往返判断）、`lib/markdown/syntax-extensions.ts`（公式 / 双链 / 嵌入扩展）、`lib/markdown/extract.ts`、`lib/links/{rename,block-id}.ts` | 由 `format-parser` 拆出的零依赖 CommonMark / GFM 解析器：CommonMark 0.31.2 规范 652/652；语法扩展接口；块级与行内节点都带源码绝对位置；`MarkdownItCompatTokenizer` 输出与 markdown-it 一致的 token 流（规范用例 652/652 一致），编辑器由自有的 `TokenDocumentBuilder` 构建文档（不再经 prosemirror-markdown，渲染包里没有 markdown-it）；GFM 扩展自动链接（可选裸域名）与 markdown-it 生态常用语法（脚注、定义列表、容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性，与对应插件含 markdown-it-attrs 逐 token 一致）；与 markdown-it 相同的链接规范化（IDN 主机名 Punycode、自动链接文字解码）；带安全链接校验与高亮钩子的 HTML 渲染器；保留源码的 token 模式与按 `env.key` 缓存的增量分词；语法树级增量解析（`IncrementalCommonMarkParser`）与逐行 token 增量解析。详见 [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) |
 | `plugin-system` | 贡献点类型（含主题、语言）、`lifecycle`（版本范围 / 依赖 / 激活事件，含 `onStartupFinished` 与 `matchedActivationEvent`）→ `lib/plugins/*`、`services/pluginService.ts`；`ExtensionRegistry` → `lib/plugins/extension-registry.ts` | 文件类型贡献点未开放。同进程的 `PluginManager` / `PluginSandbox` 已迁到 `plugin-system-extras`（桌面端保留每插件独占 Worker 的隔离） |
 | `plugin-system-extras` | 桌面端不引用 | 同进程插件管理器（依赖先激活、循环依赖报错、激活超时）与插件沙箱（按 `allowedAPIs` / `allowCommands` 拒绝未授权 API、带超时执行）。供插件与宿主同线程的场景（命令行工具、测试、服务端）单独引入，有行为测试 |
 | `fuzzy-match-algorithm` | `damerauLevenshteinDistance` → 拼写建议；`fuzzyScore` → 命令面板排序与高亮 | `RadixTree` 与 Levenshtein 变体由 `autocomplete-service` 内部使用；全包已有行为测试（前缀搜索丢字符、模糊搜索滤掉拼写错误两处缺陷已修复） |
@@ -55,7 +55,7 @@
 | `diff-algorithm-extras` | 桌面端不引用 | rsync / 滚动哈希、Patience、LCS、VCDIFF / BSDiff 适配器、CRDT 接口、流式哈希与流式差分、独立的 diff-match-patch Worker（`dmp-standalone`，原桌面端 `lib/writing` 中与核心库重复的实现）。导出保持可用并有行为测试，需要时单独引入 |
 | `search-service` | `SearchIndex` → 写作全文搜索；`FileSearcher` → ⌘P 的“精确”模式（`components/SearchPanel/exact-search.ts`：一次查询读出全部条目正文作为 `IFileProvider`，逐行查找，区分大小写 / 全词 / 正则，命中行经 `topLevelBlockAtLine` 换算成顶层块，写作编辑器据此定位，LaTeX 编辑器按行定位） | 修复：字面匹配重叠导致替换结果错误、全词判断只认 ASCII、`maxFiles` 实为“最多搜索的文件数”、不含 `/` 的排除模式（如 `*.min.js`）匹配不到子目录、glob 中的 `.` 未转义、正则无效时报未分类错误（现为 `InvalidSearchPatternError`）。中文 / 代码预设索引保持导出。有行为测试 |
 | `autocomplete-service` | `AutocompleteService` + `createCodeProviders` + `CodeMirrorAdapter` → 代码块补全（只注册代码片段，按代码块语言过滤，片段按 CodeMirror snippet 插入、Tab 跳字段）；`EmojiProvider` → Markdown 编辑器的 `:emoji` 补全（经 extras 的 `fromServiceProvider` 接入，可按别名与中文描述匹配） | 修复：服务初始化时用空上下文预载提供者结果，导致 Python 代码块出现 JavaScript 片段、代码里出现 Markdown 标题；缓存键只有查询词；`isIncomplete` 永远为假；片段 `$1` 原样插入。有行为测试 |
-| `autocomplete-service-extras` | ProseMirror 补全插件（`createAutocompletePlugin` / `EditorAutocomplete`：多提供者、触发符或单词触发、面板随插件状态渲染、结构化插入、按提供者的结果上限）→ `RichEditor` 的斜杠菜单、`[[` 双链与别名、Emoji、LaTeX 命令补全（业务提供者在 `lib/markdown/completion.ts`、`lib/editor/latex-completion.ts`） | `ProseMirrorAdapter`（把整个补全服务当作一个提供者接到同一个插件上，按单词查询）与预设工厂（全部内置提供者的服务、Markdown / 代码编辑器的 CodeMirror 扩展）桌面端不用。此前桌面端自己的补全插件与适配器是两套重复的插件状态 / 面板 / 键盘实现，已合并。有行为测试 |
+| `autocomplete-service-extras` | ProseMirror 补全插件（`createAutocompletePlugin` / `EditorAutocomplete`：多提供者、触发符或单词触发（`triggersAnywhere` 让单字符触发符紧跟在其他字符后也能触发）、面板随插件状态渲染、结构化插入、按提供者的结果上限；手动打开 Ctrl+空格 / Option+`）→ `RichEditor` 的斜杠菜单、`[[` 双链与别名、Emoji、LaTeX 命令补全（业务提供者在 `lib/markdown/completion.ts`、`lib/editor/latex-completion.ts`）；文本框补全 `TextFieldAutocomplete` → 公式节点的源码框；`filterAndSortItems` → .tex 源码编辑器的 CodeMirror 补全。插件与文本框共用触发、收集排序（`editor-completion.ts`）与面板（`completion-panel.ts`） | `ProseMirrorAdapter`（把整个补全服务当作一个提供者接到同一个插件上，按单词查询）与预设工厂（全部内置提供者的服务、Markdown / 代码编辑器的 CodeMirror 扩展）桌面端不用。此前桌面端自己的补全插件与适配器是两套重复的插件状态 / 面板 / 键盘实现，已合并。有行为测试 |
 | `text-buffer` | `createAutoBuffer` → LaTeX 文档模型（`lib/latex/latex-document.ts`，此前为测 UTF-8 字节数把整篇源码复制进 `Blob` 再选类型，现在按 `string.length` 选择） | `GapBuffer`、`recommendBufferType`、性能档案：按使用模式选型的接口，保持导出。三种实现有与字符串逐步对照的随机编辑测试 |
 
 ## 2. 主进程
@@ -91,7 +91,7 @@
 |------|------|
 | `components/RichEditor` | 唯一编辑器入口：ProseMirror 文档编辑 + CodeMirror 代码块（`CodeBlockView`）+ 数学节点（`MathNodeView`，展开源码与实时预览）+ 任务项（`ListItemView`）+ 脚注引用（显示编号）；`.tex` 文件切换为 `LatexEditor`（源码 / 渲染 / 分栏）。`mode`（编辑 / 预览 / 分屏）传入时由上层控制（写作区底栏与 ⌘/、⌘⇧/），工具栏不再显示模式按钮。`active` 决定是否为插件桥接的活动编辑器；`externalUpdate` 写入外部来的标题 / 正文（事务带标记，不回传 onChange、不进撤销历史） |
 | `components/SplitEditor` | 写作分栏：每栏一个 `PaneEditor`，各自持有文档的托管实例并直接写入（写入按文档 ID 路由，与聚焦栏无关）；同一文档两栏共用实例，模型变化不是本栏写入时作为外部更新同步（非聚焦栏合并 300ms）；微防抖 16ms 的编辑在卸载与落盘时先写入模型。专注模式复用 `PaneEditor` |
-| `lib/markdown` | Markdown 文档模型（schema，文档开头可有 `front_matter` YAML 头部节点；高亮 / 插入 / 上下标标记，脚注引用 / 行内脚注 / 脚注定义、定义列表、`:::` 容器、缩写定义节点，链接标记带 `linkify`）、文档属性（`front-matter.ts`：读取 tags / aliases、YAML 检查；`front-matter-plugin.ts`：Prism 着色与错误标注）、缩写装饰（`abbreviations.ts`：定义不变时只重扫改动的文本块）、脚注编号（`footnotes.ts`：按第一次引用的顺序，编辑器装饰与预览共用 `numberFootnotes`；只在改动涉及引用时重新编号）、分词（`markdown-parser` 的 markdown-it 兼容 token 流 + prosemirror-markdown；`$` 公式、`[[ ]]` / `[[笔记#标题|别名]]` / `![[ ]]` 嵌入为语法扩展（`syntax-extensions.ts`、`wiki-link.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并）、按顶层块缓存的序列化（`== ++ ^` 只在重新解析与原块不同时才转义）、Typora 式实时预览插件、斜杠命令与 `[[` / `[[笔记#` / `[[笔记#^` 补全、块级引用（`block-ref.ts`：`^id` 标记、块摘要与定位；`block-id-plugin.ts` 弱化显示标记）、表格行列命令与快捷键（`table-commands.ts`、`table-keymap.ts`）、HTML 渲染（预览 / 阅读共用，嵌入按深度上限与已访问集合防循环，标题与块输出锚点 id） |
+| `lib/markdown` | Markdown 文档模型（schema，文档开头可有 `front_matter` YAML 头部节点；高亮 / 插入 / 上下标标记，脚注引用 / 行内脚注 / 脚注定义、定义列表、`:::` 容器、缩写定义节点，链接标记带 `linkify`）、文档属性（`front-matter.ts`：读取 tags / aliases、YAML 检查；`front-matter-plugin.ts`：Prism 着色与错误标注）、缩写装饰（`abbreviations.ts`：定义不变时只重扫改动的文本块）、脚注编号（`footnotes.ts`：按第一次引用的顺序，编辑器装饰与预览共用 `numberFootnotes`；只在改动涉及引用时重新编号）、分词（`markdown-parser` 的 markdown-it 兼容 token 流 + `TokenDocumentBuilder`；`$` 公式、`[[ ]]` / `[[笔记#标题|别名]]` / `![[ ]]` 嵌入为语法扩展（`syntax-extensions.ts`、`wiki-link.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并）、按顶层块缓存的序列化（`== ++ ^` 只在重新解析与原块不同时才转义）、Typora 式实时预览插件、斜杠命令与 `[[` / `[[笔记#` / `[[笔记#^` 补全、块级引用（`block-ref.ts`：`^id` 标记、块摘要与定位；`block-id-plugin.ts` 弱化显示标记）、表格行列命令与快捷键（`table-commands.ts`、`table-keymap.ts`）、HTML 渲染（预览 / 阅读共用，嵌入按深度上限与已访问集合防循环，标题与块输出锚点 id） |
 | `lib/latex` | LaTeX 文档模型、块分割与块级增量引擎、解析器与渲染器、渲染管线（Worker + 帧调度）、实测高度映射与滚动所有权锁（见第 6 节） |
 | `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax）：TeX 原子间距、显示/行内样式、按内容高度伸缩的分隔符、严格模式校验 |
 | `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`，标签重命名 / 合并 / 颜色；`patchMetadata` 用 `json_patch` 原子合并 metadata）、条目标签与 YAML 标签的双向同步（`front-matter-tags.ts`：保存后并入条目、上次同步的 YAML 标签记在 `metadata.yamlTags`；界面改标签后改写写了 tags 键的笔记）、快速收集与附件保存、PDF / EPUB 正文提取（`document-text.ts`）、网页剪藏（`web-clip.ts`：Readability 提取正文后经 ProseMirror schema 转 Markdown；`clip-images.ts`：图片下载为图片条目并改写为 `![[ ]]`）、条目打开方式（`open-target.ts`：写作文档 → 写作，文档附件 → 阅读，其余 → 知识库）、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、删除条目的唯一入口 `removeKnowledgeItem`（软删除并清理文字识别缓存）、`useKnowledgeBase` |
@@ -210,18 +210,24 @@ LatexEditor 中的常量（`LatexEditor.tsx`）：
 ## 7. Markdown 写作链路
 
 ```
-存储内容（Markdown / 纯文本 / 旧版 HTML）
-   │ parseContent：markdown-parser 分词（CommonMark + 表格 + ~~删除线~~ + 任务列表 + YAML 头部 + 脚注 / 高亮 / 上下标 / 定义列表 / 容器 / 缩写 / 裸网址 + $ 公式 / [[ ]] / ![[ ]] 扩展）→ markdown-it 兼容 token → prosemirror-markdown
+存储内容（Markdown / 纯文本；旧版 HTML 笔记在启动时一次性转换，见 lib/knowledge/legacy-html-migration.ts）
+   │ parseContent：markdown-parser 分词（CommonMark + 表格 + ~~删除线~~ + 任务列表 + YAML 头部 + 脚注 / 高亮 / 上下标 / 定义列表 / 容器 / 缩写 / 裸网址 + $ 公式 / [[ ]] / ![[ ]] 扩展）→ markdown-it 兼容 token → TokenDocumentBuilder（token-document-builder.ts）
    ▼
 ProseMirror 文档（lib/markdown/schema.ts，节点与语法一一对应）
    │ 输入规则（行内标记、公式、双链、任务）、回车转换（``` / $$ / | a | b |）
    │ 实时预览插件：只扫描光标所在文本块，在格式两侧放只读语法标记
    ▼
-serializeContent：顶层块为不可变对象 → WeakMap 缓存每块的 Markdown，只重新序列化被改动的块
+serializeContent：序列化引擎在 markdown-serializer.ts；顶层块为不可变对象 → WeakMap 缓存每块的 Markdown，只重新序列化被改动的块
    │
    ▼
-onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（EditorModel）→ 实例自动保存 → 保存后同步 [[ ]] 到 links 表（[[别名]] 按 YAML aliases 解析）、YAML tags 到条目标签（界面改标签时反向写回 YAML）
+onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（EditorModel）→ 实例自动保存 → 保存后同步 [[ ]] 到 links 表（[[别名]] 按 YAML aliases 解析）、YAML tags 到条目标签（界面改标签与 AI 自动打标签后反向写回 YAML）
 ```
+
+编辑器不再依赖 prosemirror-markdown：它在模块顶层创建 markdown-it 实例，引入就会把 markdown-it 打进渲染包。`TokenDocumentBuilder`（token → 文档）与 `MarkdownSerializer` / `MarkdownSerializerState`（文档 → Markdown）是自有实现，替换时对照了 CommonMark 规范 652 例与 `docs/*.md`：解析出的文档与保存结果和原实现逐字节一致。markdown-it 只剩 `markdown-parser` 的开发依赖（对照测试）。
+
+视图模式（编辑 / 预览 / 并排）记在每个窗格上（`lib/editor-tabs` 的 `TabGroup.view`，随标签状态保存），底栏按钮与 `⌘/`、`⌘⇧/` 作用于聚焦的一栏。
+
+LaTeX 命令补全有三处入口，共用 `lib/editor/latex-completion.ts` 的命令数据（取自数学渲染器与 .tex 渲染器的符号表）：Markdown 正文（ProseMirror 补全插件，`\` 在未闭合的 `$` 之内紧跟运算符也能触发）、公式节点的源码框（`TextFieldAutocomplete`）、.tex 源码编辑器（`lib/latex/codemirror-completion.ts`，CodeMirror 补全，`{}` `[]` 是可 Tab 跳转的字段）。
 
 分块渲染的三层：
 
@@ -231,7 +237,7 @@ onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（Edito
 | 布局 / 绘制 | 顶层块数 ≥ 150 时对每个顶层块启用 `content-visibility: auto` + `contain-intrinsic-size: auto`，视口外的块跳过布局与绘制并记住真实高度；小文档不启用，避免绘制包含裁剪描边 |
 | 重型节点 | 代码块先输出未高亮文本（高度一致），共享 IntersectionObserver 在接近视口（800px）时做 Prism 高亮；语言下拉框首次打开时才生成完整选项。公式渲染实测单个约 25µs，不需要懒加载 |
 
-实测（开发机 macOS，Node，`lib/markdown`）：300KB / 10,000 个顶层块的文档，解析 55ms，冷序列化 27ms，修改一个段落后的增量序列化中位数 0.76ms。数学渲染：1000 个中等复杂度公式 25ms。图谱布局：3000 节点 / 6000 边单步约 3.7ms（Barnes–Hut，θ=0.9）。
+实测（开发机 macOS，Node，`lib/markdown`）：300KB / 10,000 个顶层块的文档，解析 55ms，冷序列化 27ms，修改一个段落后的增量序列化中位数 0.76ms。含 2000 个脚注的 4000 块文档（`footnotes.perf.test.ts`，全部 Markdown 插件）：解析约 22ms，逐键输入约 0.15ms，保存约 0.6ms，插入或删除引用触发全文重新编号约 11ms（其中大部分是 ProseMirror 建立装饰树的开销）。数学渲染：1000 个中等复杂度公式 25ms。图谱布局：3000 节点 / 6000 边单步约 3.7ms（Barnes–Hut，θ=0.9）。
 
 ## 8. 关键问题与根因记录
 
@@ -266,6 +272,11 @@ onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（Edito
 | 从 YAML 删掉的标签，重启后第一次保存不会从条目上去掉；在界面上删掉的标签，下次保存又被 YAML 加回来 | “上次同步的 YAML 标签”只存在内存里；界面改标签不写回 YAML | 记在条目 `metadata.yamlTags`（`json_patch` 原子合并）；详情面板、标签重命名 / 合并、整理建议改标签后改写写了 tags 键的笔记（保留原写法） |
 | 定义列表里紧凑与松散的术语混写时，保存后全部变松散 | 紧凑与否记在整个列表上，而 markdown-it-deflist（与本库解析器）是按术语计的 | `tight` 放到 `definition_term`，按术语与第一条说明的源码行号判断 |
 | 输入 `[^新标签]` 后编辑器里是脚注，重新打开却变回文字 | 输入规则只建了引用节点；没有定义的引用在 Markdown 里只是文字 | 标签还没有定义时在文末补上空定义（与 Obsidian 的“插入脚注”一致） |
+| 编辑器已用 markdown-parser 分词，渲染包里却仍有 markdown-it（约 100KB） | prosemirror-markdown 在模块顶层创建默认解析器 `MarkdownIt(...)`，只要引入它的 `MarkdownParser` / `MarkdownSerializer` 就会打包 markdown-it | 自有的 `TokenDocumentBuilder` 与序列化引擎替换并移除依赖；规范 652 例与仓库文档的解析与保存结果逐字节一致 |
+| 安装包里带着历次构建的旧 chunk（dist/render 约 28MB） | 主进程也写在 dist，Vite 的 `emptyOutDir` 只能关闭，带哈希的 chunk 一直累积，electron-builder 按 `dist/**` 打包 | 构建开始时只清空 `dist/render`（8MB） |
+| `\alph` 按回车有时插入的是 `\Alpha` | 补全面板弹出在静止的鼠标指针下，`mouseenter` 把选中改到了指针下的项。由 E2E 发现 | 鼠标真的移动（屏幕坐标变化）后才跟随选中，与 VS Code、CodeMirror 相同 |
+| `tags: [a,⏎ b]` 被标为“括号未闭合”，标签也读不到 | YAML 检查与读取都按行处理，行内数组必须写在一行 | 跨行拼接到右括号为止（引号内的括号与逗号不计）；括号没闭合就开始下一个键时在开始的行报错；写回保留展开写法 |
+| 脚注很多时插入引用卡顿 | 重新编号对每个引用调用 `doc.nodeAt`，它在每层线性查找子节点，整体成平方级 | 引用是叶子节点（大小为 1），直接用位置；2000 个脚注时 19ms → 11ms |
 
 ### 性能数据
 
@@ -280,3 +291,7 @@ pnpm --filter @code-reader/fuzzy-match-algorithm benchmark
 ```
 
 渲染进程另有运行时监控 `lib/writing/performance-monitor.ts`，写作服务基准为 `lib/writing/benchmark.ts`（`runQuickBenchmark` / `runFullBenchmark`）。
+
+### 端到端测试
+
+`packages/desktop/e2e`（`pnpm --filter @code-reader/desktop e2e`）在构建好的应用上执行真实操作：临时用户数据目录、写入种子数据，经 Chrome DevTools Protocol 模拟键盘、输入法提交与点击，再读数据库或页面核对。覆盖旧版 HTML 迁移、自动保存、视图按栏独立、三处 LaTeX 补全、跨多行 tags、标签重命名 / 合并 / 详情面板改标签后的 YAML 改写。`.github/workflows/e2e.yml` 在 macOS 运行器上执行它（尚未在 GitHub 上实际运行过）。

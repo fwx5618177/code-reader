@@ -3,7 +3,7 @@
 零依赖的 Markdown 解析库，桌面端编辑器用它替代了 markdown-it。包含：
 
 - **CommonMark / GFM 解析器**：输出语法树，块级与行内节点都带源码中的绝对位置（偏移、行、列）。CommonMark 0.31.2 规范 652 个用例全部通过。
-- **markdown-it 兼容的 token 流**：`MarkdownItCompatTokenizer` 输出与 markdown-it 结构相同的 token，可以直接交给 prosemirror-markdown 等工具；规范用例 652/652 与 markdown-it 逐 token 一致。
+- **markdown-it 兼容的 token 流**：`MarkdownItCompatTokenizer` 输出与 markdown-it 结构相同的 token，可以交给消费 markdown-it token 的工具（桌面端用自有的 token→ProseMirror 文档构建器，不再经过 prosemirror-markdown）；规范用例 652/652 与 markdown-it 逐 token 一致。
 - **常用扩展语法**：GFM 扩展自动链接（可选识别 `example.com` 这类裸域名）、脚注、定义列表、自定义容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性。token 与 markdown-it 对应插件（含 markdown-it-attrs）逐个比较一致。
 - **链接规范化与 markdown-it 相同**：主机名中的中文等字符按 IDNA 转成 `xn--`（零依赖的 Punycode），自动链接的文字把 `xn--` 与百分号编码还原。
 - **语法扩展接口**：行内扩展（触发字符 + 匹配函数）与块级扩展（开始行 + 续行），用于公式、双向链接等自定义语法。

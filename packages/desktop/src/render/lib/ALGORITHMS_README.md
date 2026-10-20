@@ -10,7 +10,7 @@
 | 文本差分（Myers 等，按内容自动选择） | `@code-reader/diff-algorithm` `createDiffEngine`、`quickDiff` | 版本对比、增量保存、撤销重做快照 | `lib/writing`（`writing-service.ts`、`DiffViewer`）、`lib/core/delta/history-manager.ts`、`lib/core/save-engine`、`lib/documents/writing-integration.ts` |
 | 全文索引与搜索 | `@code-reader/search-service` | 写作文档全文搜索与建议 | `lib/writing` |
 | 补全服务 | `@code-reader/autocomplete-service` | CodeMirror 代码块补全（代码片段 provider）；Markdown 编辑器的 Emoji 补全（`EmojiProvider`） | `components/RichEditor/CodeBlockView.ts`、`components/RichEditor/index.tsx` |
-| ProseMirror 补全插件 | `@code-reader/autocomplete-service-extras` `createAutocompletePlugin`、`fromServiceProvider` | 触发符定位、多提供者合并与排序（优先级 > 前缀 > 字母序）、面板与键盘导航 | `components/RichEditor/index.tsx`（提供者：`lib/markdown/completion.ts`、`lib/editor/latex-completion.ts`） |
+| 编辑器补全（ProseMirror 插件 / 文本框 / 排序） | `@code-reader/autocomplete-service-extras` `createAutocompletePlugin`、`fromServiceProvider`、`TextFieldAutocomplete`、`filterAndSortItems` | 触发符定位（可声明任意位置触发）、多提供者合并与排序（优先级 > 前缀 > 字母序）、面板与键盘导航（鼠标真的移动后才跟随选中） | `components/RichEditor/index.tsx`（提供者：`lib/markdown/completion.ts`、`lib/editor/latex-completion.ts`）、`components/RichEditor/MathNodeView.ts`（公式源码框）、`lib/latex/codemirror-completion.ts`（.tex 源码的 CodeMirror 补全） |
 | 文本存储（Piece Table / Rope） | `@code-reader/text-buffer` | LaTeX 编辑缓冲区，按规模选择结构 | `lib/latex/latex-document.ts` |
 
 ## 2. desktop 内的业务算法
@@ -30,4 +30,4 @@
 | 版本分层保留 | `main/database/version-retention.ts` | 版本清理 | 按时间段分层：近期全留，之后每个自然日 / 周 / 月各留一个，最新版本始终保留 |
 | 行级差分重建 | `lib/writing/components/diff-lines.ts` | 版本对比视图 | 把字符级差分重建为“旧行 + 新行”，行内只高亮变化部分 |
 
-Markdown 解析与序列化由 `lib/markdown`（`markdown-parser` 分词 + ProseMirror）负责，扩展语法（公式、双向链接、嵌入）以 markdown-parser 的语法扩展实现（`lib/markdown/syntax-extensions.ts`）；LaTeX 解析器在 `lib/latex/parser.ts`。子包的接入位置：`syntax-parser`（LaTeX 语法诊断、折叠、大纲；源码编辑器的注释、自动配对、环境缩进）、`format-parser`（LaTeX 交叉引用、按内容识别文档格式）、`plugin-system`（插件贡献点类型、生命周期、扩展点注册表），完整对照见 `docs/ARCHITECTURE.md` 第 1 节。数学公式使用自研解析与渲染（`lib/math`），不依赖 KaTeX / MathJax。
+Markdown 解析与序列化由 `lib/markdown`（`markdown-parser` 分词 + 自有的 token→文档构建器 `token-document-builder.ts` 与序列化引擎 `markdown-serializer.ts`，不依赖 prosemirror-markdown / markdown-it）负责，扩展语法（公式、双向链接、嵌入）以 markdown-parser 的语法扩展实现（`lib/markdown/syntax-extensions.ts`）；LaTeX 解析器在 `lib/latex/parser.ts`。子包的接入位置：`syntax-parser`（LaTeX 语法诊断、折叠、大纲；源码编辑器的注释、自动配对、环境缩进）、`format-parser`（LaTeX 交叉引用、按内容识别文档格式）、`plugin-system`（插件贡献点类型、生命周期、扩展点注册表），完整对照见 `docs/ARCHITECTURE.md` 第 1 节。数学公式使用自研解析与渲染（`lib/math`），不依赖 KaTeX / MathJax。
