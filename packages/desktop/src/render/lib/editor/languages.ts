@@ -684,9 +684,10 @@ class LanguageRegistryImpl {
     this.registerAll(remaining);
   }
 
-  /** 名称是否已被某个语言占用（ID 或别名的精确匹配，不含模糊匹配） */
+  /** 名称是否已被某个语言占用（ID、别名或扩展名的精确匹配，不含模糊匹配） */
   isNameTaken(name: string): boolean {
-    return this.byAlias.has(name.toLowerCase());
+    const lower = name.toLowerCase();
+    return this.byAlias.has(lower) || this.byExtension.has(lower.replace(/^\./, ''));
   }
 
   /**

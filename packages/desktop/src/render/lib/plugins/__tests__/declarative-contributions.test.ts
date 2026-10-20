@@ -39,4 +39,22 @@ describe('插件语言', () => {
     expect(getLanguageDefinition('dataview')?.id).not.toBe('dataview');
     expect(getLanguageOptions().some((option) => option.value === 'dataview')).toBe(false);
   });
+
+  it('不覆盖内置语言的扩展名（含带点与大小写写法），未占用的扩展名正常注册', () => {
+    syncPluginLanguages([
+      { id: 'modscript', name: 'ModScript', aliases: [], extensions: ['mjs', '.CJS', 'modx'], grammar: 'sql' },
+    ]);
+    expect(getLanguageDefinition('mjs')?.id).toBe('javascript');
+    expect(getLanguageDefinition('cjs')?.id).toBe('javascript');
+    expect(getLanguageDefinition('modx')?.id).toBe('modscript');
+
+    syncPluginLanguages([]);
+    expect(getLanguageDefinition('modx')?.id).not.toBe('modscript');
+  });
+
+  it('ID 与内置扩展名相同的插件语言不注册', () => {
+    syncPluginLanguages([{ id: 'mjs', name: '冒名语言', aliases: [], extensions: [], grammar: 'sql' }]);
+    expect(getLanguageDefinition('mjs')?.id).toBe('javascript');
+    syncPluginLanguages([]);
+  });
 });
