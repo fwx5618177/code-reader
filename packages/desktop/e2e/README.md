@@ -23,4 +23,4 @@ node e2e/run.mjs 标签     # 已构建时只跑名称含“标签”的场景
 - 启动参数关闭了 Chromium 对被遮挡、后台窗口的节流：否则窗口不在最前时不出帧，`ResizeObserver` 不触发，虚拟列表只渲染几行（截图会强制出帧，看起来却正常）。
 - 写作侧栏的虚拟文件树也是 `role=listitem`，且在 DOM 中更靠前；找知识库条目请用 `[role=listitem] [data-selected]`。
 - 只移动光标不会弹出补全；需要补全时逐字输入或按 Ctrl+空格 / Option+`（`press('Dead', { code: 'Backquote', modifiers: ALT })`）。
-- 需要 Node 22+（全局 `WebSocket`）；GitHub 工作流固定使用 Node 22。
+- 需要 Node 22+（全局 `WebSocket`）；仓库的 `.nvmrc` 与 GitHub 工作流都使用 Node 22。
