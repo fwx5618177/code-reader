@@ -39,6 +39,18 @@ describe('SearchIndex', () => {
     expect(result?.highlights.some((highlight) => highlight.snippet.includes('<mark>'))).toBe(true);
   });
 
+  it('重叠的命中合并为一段高亮，标签不会嵌套或被切断', () => {
+    const index = createSearchIndex();
+    index.addDocument({ id: 'x', title: 'note', content: 'see abc and ab here' });
+    // 命中词 ab 与 abc 在 abc 处重叠
+    const [result] = index.search('ab abc', { fuzzy: false });
+    const snippets = result!.highlights.map((highlight) => highlight.snippet);
+    expect(snippets).toContain('see <mark>abc</mark> and <mark>ab</mark> here');
+    for (const snippet of snippets) {
+      expect(snippet.replace(/<mark>([^<]*)<\/mark>/g, '$1')).not.toMatch(/[<>]/);
+    }
+  });
+
   it('导出后导入得到同样的检索结果', () => {
     const index = createSearchIndex();
     index.addDocument({ id: 'x', content: 'portable index data' });
