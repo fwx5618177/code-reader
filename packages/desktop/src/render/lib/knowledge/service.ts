@@ -14,6 +14,7 @@ import { agentActivity } from '../agent/agentStore';
 import { documentFormat } from '../reading/article';
 import { knowledgeRepository } from './repository';
 import { migrateLegacyKnowledgeStore } from './legacy-migration';
+import { migrateLegacyHtmlNotes } from './legacy-html-migration';
 import { extractDocumentText, type ExtractedDocument } from './document-text';
 import { clipWebPage, normalizeWebUrl, type WebClip } from './web-clip';
 import { localizeClipImages, type LocalizedClip } from './clip-images';
@@ -36,6 +37,12 @@ export function ensureKnowledgeReady(): Promise<void> {
       } catch (error) {
         // 迁移失败不阻塞知识库使用，旧文件保留，下次启动重试
         console.error('[Knowledge] 旧版数据迁移失败:', error);
+      }
+      try {
+        await migrateLegacyHtmlNotes();
+      } catch (error) {
+        // 未转换的笔记仍能在编辑器里打开（保存时写回 Markdown），下次启动重试
+        console.error('[Knowledge] 旧版 HTML 笔记转换失败:', error);
       }
     })().catch((error) => {
       readyPromise = null;

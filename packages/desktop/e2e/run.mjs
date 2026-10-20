@@ -25,6 +25,7 @@ const NOTES = [
   { id: 'e2e-merge', title: '合并标签笔记', content: '---\ntags:\n  - 甲\n  - 乙\n---\n\n正文\n', tags: ['甲', '乙'] },
   { id: 'e2e-detail', title: '详情标签笔记', content: '---\ntags: [原有]\n---\n\n正文\n', tags: ['原有'] },
   { id: 'e2e-multiline', title: '多行标签笔记', content: '---\ntags: [多行甲,\n  多行乙]\ntitle: x\n---\n\n正文\n' },
+  { id: 'e2e-html', title: '旧版笔记', content: '<p>旧版独有词 <strong>HTML</strong> 正文</p>' },
 ];
 
 async function seed(app) {
@@ -106,6 +107,25 @@ const scenarios = [
       await waitFor(() => app.exists('button'), { message: '界面没有渲染' });
       const fatal = app.errors.filter((error) => /TypeError|ReferenceError|is not a function/.test(error));
       if (fatal.length) throw new Error(fatal.join('\n'));
+    },
+  },
+  {
+    name: '迁移：旧版 HTML 笔记启动时转为 Markdown，搜索摘要不再显示标签',
+    async run(app) {
+      await waitFor(async () => (await contentOf(app, 'e2e-html')) === '旧版独有词 **HTML** 正文\n', {
+        message: '没有转换为 Markdown',
+      });
+      await app.press('p', { modifiers: MOD });
+      await waitFor(() => app.exists('input[aria-label="搜索"]'));
+      await app.call(() => document.querySelector('input[aria-label="搜索"]').select());
+      await app.type('独有词');
+      const snippet = await waitFor(
+        () => app.call(() => [...document.querySelectorAll('[role=option]')].map((el) => el.textContent).find((text) => text.includes('独有词'))),
+        { message: '搜不到旧版笔记' }
+      );
+      if (/<\/?(p|strong)>/.test(snippet)) throw new Error(`摘要里仍有标签：${snippet}`);
+      await app.press('Escape');
+      await sleep(300);
     },
   },
   {
