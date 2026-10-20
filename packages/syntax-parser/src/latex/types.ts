@@ -453,12 +453,15 @@ export const SECTION_COMMANDS: Record<string, number> = {
 export const LIST_ENVIRONMENTS = ['itemize', 'enumerate', 'description'] as const;
 
 /**
- * 数学环境名称
+ * 数学环境名称（环境内容处于数学模式）。
+ * subequations 不在其中：它只是给内部多个公式环境统一编号的文本级容器
  */
 export const MATH_ENVIRONMENTS = [
   // 基本公式环境
   'equation',
   'equation*',
+  'displaymath',
+  'math',
   // 对齐公式环境
   'align',
   'align*',
@@ -491,8 +494,6 @@ export const MATH_ENVIRONMENTS = [
   'cases',
   'dcases',
   'rcases',
-  // 子公式环境
-  'subequations',
 ] as const;
 
 /**

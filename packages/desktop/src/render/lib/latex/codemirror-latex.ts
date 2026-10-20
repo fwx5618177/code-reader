@@ -20,7 +20,12 @@ import {
   type StreamParser,
 } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
-import { LATEX_LANGUAGE_CONFIGURATION } from '@code-reader/syntax-parser';
+import {
+  LATEX_LANGUAGE_CONFIGURATION,
+  MATH_ENVIRONMENTS,
+  SECTION_COMMANDS,
+  VERBATIM_ENVIRONMENTS,
+} from '@code-reader/syntax-parser';
 
 const { indentationRules } = LATEX_LANGUAGE_CONFIGURATION;
 /** 使下一行缩进一级的标记（\begin{…}，document 除外） */
@@ -48,371 +53,210 @@ const LATEX_LANGUAGE_DATA = {
 };
 
 // ================================
-// LaTeX 语法定义
+// LaTeX 词法状态机（只用于着色，语法诊断由 analysis.ts 负责）
+//
+// 环境与命令名单来自 syntax-parser，与诊断用的解析器一致。
+// 数学模式的退出条件与 TeX 一致：对应的结束分隔符、同名的 \end{环境}；
+// $ / $$ / \[ / \( 公式不能跨段落，遇到空行即退出，未闭合的公式不会把后文整篇染成公式色
 // ================================
 
-/** LaTeX 解析状态 */
+/** 公式的结束标记：分隔符公式为结束分隔符，环境公式为环境名 */
+type MathClose = { kind: 'delimiter'; close: '$' | '$$' | '\\]' | '\\)' } | { kind: 'environment'; name: string };
+
 interface LatexState {
-  /** 当前模式 */
-  mode: 'text' | 'math' | 'command' | 'comment' | 'verbatim';
-  /** 数学模式类型 */
-  mathDelimiter: string | null;
-  /** 嵌套深度 */
-  braceDepth: number;
-  /** 方括号深度 */
-  bracketDepth: number;
-  /** verbatim 环境名称 */
+  /** 当前所在公式；null 为文本模式 */
+  math: MathClose | null;
+  /** 环境公式内同名环境的嵌套深度（\begin{matrix} 里再套 matrix） */
+  mathEnvDepth: number;
+  /** 已读到 \begin / \end，等待环境名参数 */
+  pendingEnv: 'begin' | 'end' | null;
+  /** 原样输出环境名（verbatim 等） */
   verbatimEnv: string | null;
-  /** 当前命令名 */
-  currentCommand: string | null;
 }
 
-/** 创建初始状态 */
 function createInitialState(): LatexState {
-  return {
-    mode: 'text',
-    mathDelimiter: null,
-    braceDepth: 0,
-    bracketDepth: 0,
-    verbatimEnv: null,
-    currentCommand: null,
-  };
+  return { math: null, mathEnvDepth: 0, pendingEnv: null, verbatimEnv: null };
 }
 
-/** 复制状态 */
 function copyState(state: LatexState): LatexState {
   return { ...state };
 }
 
-/** LaTeX 命令列表 */
-const SECTION_COMMANDS = [
-  'part',
-  'chapter',
-  'section',
-  'subsection',
-  'subsubsection',
-  'paragraph',
-  'subparagraph',
-];
+const SECTION_COMMAND_SET = new Set(Object.keys(SECTION_COMMANDS));
+const MATH_ENVIRONMENT_SET = new Set<string>(MATH_ENVIRONMENTS);
+const VERBATIM_ENVIRONMENT_SET = new Set<string>(VERBATIM_ENVIRONMENTS);
 
-const FORMAT_COMMANDS = [
-  'textbf',
-  'textit',
-  'texttt',
-  'textrm',
-  'textsf',
-  'textsc',
-  'emph',
-  'underline',
-];
-
-const DOCUMENT_COMMANDS = [
+/** 前言与文档结构命令 */
+const DOCUMENT_COMMANDS = new Set([
   'documentclass',
   'usepackage',
   'newcommand',
   'renewcommand',
+  'providecommand',
   'newenvironment',
+  'renewenvironment',
+  'DeclareMathOperator',
   'title',
   'author',
   'date',
   'maketitle',
   'tableofcontents',
-];
+]);
 
-const MATH_ENVIRONMENTS = [
-  'equation',
-  'equation*',
-  'align',
-  'align*',
-  'gather',
-  'gather*',
-  'multline',
-  'multline*',
-  'eqnarray',
-  'eqnarray*',
-  'split',
-  'cases',
-  'array',
-  'matrix',
-  'pmatrix',
-  'bmatrix',
-  'vmatrix',
-  'Vmatrix',
-];
-
-const VERBATIM_ENVIRONMENTS = ['verbatim', 'lstlisting', 'minted', 'alltt'];
-
-/** LaTeX 流解析器 */
 const latexStreamParser: StreamParser<LatexState> = {
   name: 'latex',
-
   languageData: LATEX_LANGUAGE_DATA,
-
   startState: createInitialState,
-
-  copyState: copyState,
+  copyState,
 
   token(stream: StringStream, state: LatexState): string | null {
-    // 处理 verbatim 模式
-    if (state.verbatimEnv) {
-      const endPattern = new RegExp(`\\\\end\\{${state.verbatimEnv}\\}`);
-      const endMatch = stream.match(endPattern);
-      if (endMatch) {
-        state.verbatimEnv = null;
-        state.mode = 'text';
-        return 'keyword';
-      }
-      stream.next();
-      return 'string';
+    if (state.verbatimEnv) return tokenVerbatim(stream, state);
+
+    if (state.pendingEnv) {
+      const env = tokenEnvironmentName(stream, state);
+      if (env !== undefined) return env;
     }
 
-    // 处理注释
     if (stream.peek() === '%') {
       stream.skipToEnd();
       return 'comment';
     }
 
-    // 处理数学模式
-    if (state.mode === 'math') {
-      return tokenMath(stream, state);
-    }
+    return state.math ? tokenMath(stream, state) : tokenText(stream, state);
+  },
 
-    // 处理命令模式
-    if (state.mode === 'command') {
-      return tokenCommand(stream, state);
-    }
-
-    // 文本模式
-    return tokenText(stream, state);
+  /** 空行（段落结束）：分隔符公式在 TeX 中不能跨段落，在此结束 */
+  blankLine(state: LatexState) {
+    if (state.math?.kind === 'delimiter') state.math = null;
+    state.pendingEnv = null;
   },
 
   indent: () => null,
 };
 
-/** 处理文本模式 */
+/** 原样输出环境：直到 \end{同名} 为止不做任何解释 */
+function tokenVerbatim(stream: StringStream, state: LatexState): string | null {
+  const end = `\\end{${state.verbatimEnv}}`;
+  if (stream.match(end)) {
+    state.verbatimEnv = null;
+    return 'keyword';
+  }
+  const index = stream.string.indexOf(end, stream.pos);
+  if (index === -1) stream.skipToEnd();
+  else stream.pos = index;
+  return 'string';
+}
+
+/**
+ * \begin / \end 之后的环境名参数 {name}：切换数学 / 原样输出模式。
+ * 不是环境名参数时返回 undefined，由常规流程继续处理
+ */
+function tokenEnvironmentName(stream: StringStream, state: LatexState): string | null | undefined {
+  if (stream.eatSpace()) return null;
+  const command = state.pendingEnv;
+  state.pendingEnv = null;
+  const match = stream.match(/^\{([^{}]*)\}/);
+  if (!match || typeof match === 'boolean') return undefined;
+  const name = match[1].trim();
+
+  const math = state.math;
+  if (math?.kind === 'environment') {
+    if (name === math.name) {
+      if (command === 'begin') state.mathEnvDepth++;
+      else if (state.mathEnvDepth > 0) state.mathEnvDepth--;
+      else state.math = null;
+    }
+  } else if (command === 'begin' && !math) {
+    if (VERBATIM_ENVIRONMENT_SET.has(name)) state.verbatimEnv = name;
+    else if (MATH_ENVIRONMENT_SET.has(name)) state.math = { kind: 'environment', name };
+  }
+  return 'typeName';
+}
+
+/** 反斜杠开头的命令（文本与数学模式共用）：返回命令名；单个符号的转义（\%  \,  \\）返回空串 */
+function readCommand(stream: StringStream): string {
+  stream.next();
+  const name = stream.match(/^[a-zA-Z@]+\*?/);
+  if (name && typeof name !== 'boolean') return name[0];
+  stream.next();
+  return '';
+}
+
+/** \verb|…| 的参数在同一行内原样读取 */
+function readVerbArgument(stream: StringStream): void {
+  const delimiter = stream.next();
+  if (!delimiter) return;
+  const end = stream.string.indexOf(delimiter, stream.pos);
+  if (end === -1) stream.skipToEnd();
+  else stream.pos = end + 1;
+}
+
 function tokenText(stream: StringStream, state: LatexState): string | null {
   const ch = stream.peek();
 
-  // 检查数学模式开始
   if (ch === '$') {
     stream.next();
-    if (stream.peek() === '$') {
-      stream.next();
-      state.mode = 'math';
-      state.mathDelimiter = '$$';
-      return 'keyword';
-    }
-    state.mode = 'math';
-    state.mathDelimiter = '$';
+    state.math = { kind: 'delimiter', close: stream.eat('$') ? '$$' : '$' };
     return 'keyword';
   }
 
-  // 检查 \[ 数学模式
-  if (ch === '\\' && stream.match(/^\\\[/, false)) {
-    stream.next();
-    stream.next();
-    state.mode = 'math';
-    state.mathDelimiter = '\\[';
-    return 'keyword';
-  }
-
-  // 检查 \( 数学模式
-  if (ch === '\\' && stream.match(/^\\\(/, false)) {
-    stream.next();
-    stream.next();
-    state.mode = 'math';
-    state.mathDelimiter = '\\(';
-    return 'keyword';
-  }
-
-  // 处理命令
   if (ch === '\\') {
-    stream.next();
-    // 检查特殊字符
-    if (stream.match(/^[%$&_{}#~^\\]/, true)) {
-      return 'escape';
-    }
-    // 匹配命令名
-    if (stream.match(/^[a-zA-Z@]+\*?/, true)) {
-      const cmd = stream.current().slice(1).replace('*', '');
-      state.currentCommand = cmd;
-
-      // 检查 begin/end 环境
-      if (cmd === 'begin' || cmd === 'end') {
-        state.mode = 'command';
-        return 'keyword';
-      }
-
-      // 检查章节命令
-      if (SECTION_COMMANDS.includes(cmd)) {
-        return 'heading';
-      }
-
-      // 检查格式命令
-      if (FORMAT_COMMANDS.includes(cmd)) {
-        return 'keyword';
-      }
-
-      // 检查文档命令
-      if (DOCUMENT_COMMANDS.includes(cmd)) {
-        return 'meta';
-      }
-
+    if (stream.match('\\[') || stream.match('\\(')) {
+      state.math = { kind: 'delimiter', close: stream.current() === '\\[' ? '\\]' : '\\)' };
       return 'keyword';
     }
+    const command = readCommand(stream);
+    if (!command) return 'escape';
+    if (command === 'begin' || command === 'end') {
+      state.pendingEnv = command;
+      return 'keyword';
+    }
+    if (command === 'verb' || command === 'verb*') {
+      readVerbArgument(stream);
+      return 'string';
+    }
+    if (SECTION_COMMAND_SET.has(command.replace('*', ''))) return 'heading';
+    if (DOCUMENT_COMMANDS.has(command)) return 'meta';
     return 'keyword';
   }
 
-  // 处理花括号
-  if (ch === '{') {
+  if (ch === '{' || ch === '}' || ch === '[' || ch === ']') {
     stream.next();
-    state.braceDepth++;
     return 'bracket';
   }
 
-  if (ch === '}') {
-    stream.next();
-    state.braceDepth = Math.max(0, state.braceDepth - 1);
-    return 'bracket';
-  }
-
-  // 处理方括号
-  if (ch === '[') {
-    stream.next();
-    state.bracketDepth++;
-    return 'bracket';
-  }
-
-  if (ch === ']') {
-    stream.next();
-    state.bracketDepth = Math.max(0, state.bracketDepth - 1);
-    return 'bracket';
-  }
-
-  // 处理普通文本
   stream.match(/^[^\\{}[\]$%]+/);
   return null;
 }
 
-/** 处理数学模式 */
 function tokenMath(stream: StringStream, state: LatexState): string | null {
-  const ch = stream.peek();
-
-  // 检查数学模式结束
-  if (state.mathDelimiter === '$' && ch === '$') {
-    stream.next();
-    state.mode = 'text';
-    state.mathDelimiter = null;
+  const math = state.math!;
+  if (math.kind === 'delimiter' && stream.match(math.close)) {
+    state.math = null;
     return 'keyword';
   }
 
-  if (state.mathDelimiter === '$$') {
-    if (ch === '$' && stream.match(/^\$\$/, false)) {
-      stream.next();
-      stream.next();
-      state.mode = 'text';
-      state.mathDelimiter = null;
+  const ch = stream.peek();
+  if (ch === '\\') {
+    const command = readCommand(stream);
+    if (command === 'begin' || command === 'end') {
+      state.pendingEnv = command;
       return 'keyword';
     }
+    return command ? 'variableName.function' : 'escape';
   }
 
-  if (state.mathDelimiter === '\\[' && ch === '\\' && stream.match(/^\\\]/, false)) {
-    stream.next();
-    stream.next();
-    state.mode = 'text';
-    state.mathDelimiter = null;
-    return 'keyword';
-  }
-
-  if (state.mathDelimiter === '\\(' && ch === '\\' && stream.match(/^\\\)/, false)) {
-    stream.next();
-    stream.next();
-    state.mode = 'text';
-    state.mathDelimiter = null;
-    return 'keyword';
-  }
-
-  // 数学命令
-  if (ch === '\\') {
-    stream.next();
-    if (stream.match(/^[a-zA-Z]+/, true)) {
-      return 'variableName';
-    }
-    return 'operator';
-  }
-
-  // 数字
-  if (stream.match(/^[0-9]+\.?[0-9]*/, true)) {
-    return 'number';
-  }
-
-  // 运算符
-  if (stream.match(/^[+\-*/=<>!^_&|]+/, true)) {
-    return 'operator';
-  }
-
-  // 括号
+  if (stream.match(/^[0-9]+(?:\.[0-9]+)?/)) return 'number';
+  if (stream.match(/^[+\-*/=<>!^_&|',.;:]+/)) return 'operator';
   if (ch === '{' || ch === '}' || ch === '(' || ch === ')' || ch === '[' || ch === ']') {
     stream.next();
     return 'bracket';
   }
-
-  // 希腊字母和其他变量
-  if (stream.match(/^[a-zA-Z]+/, true)) {
-    return 'variableName';
-  }
-
+  if (stream.match(/^[a-zA-Z]+/)) return 'variableName';
+  // 其他字符（空白、公式中的汉字等）不着色
   stream.next();
-  return 'variableName';
-}
-
-/** 处理命令模式（环境名称等） */
-function tokenCommand(stream: StringStream, state: LatexState): string | null {
-  const ch = stream.peek();
-
-  // 跳过空白
-  if (stream.eatSpace()) {
-    return null;
-  }
-
-  // 处理环境名称
-  if (ch === '{') {
-    stream.next();
-    // StringStream.match 传入正则时返回匹配数组，需排除字符串模式下的布尔返回值
-    const envMatch = stream.match(/^([a-zA-Z*]+)\}/, true);
-    if (envMatch && typeof envMatch !== 'boolean') {
-      const envName = envMatch[1];
-
-      // 检查是否为数学环境
-      if (MATH_ENVIRONMENTS.includes(envName)) {
-        if (state.currentCommand === 'begin') {
-          state.mode = 'math';
-          state.mathDelimiter = envName;
-        } else {
-          state.mode = 'text';
-          state.mathDelimiter = null;
-        }
-        return 'typeName';
-      }
-
-      // 检查是否为 verbatim 环境
-      if (VERBATIM_ENVIRONMENTS.includes(envName)) {
-        if (state.currentCommand === 'begin') {
-          state.verbatimEnv = envName;
-        }
-        state.mode = 'text';
-        return 'typeName';
-      }
-
-      state.mode = 'text';
-      return 'typeName';
-    }
-    return 'bracket';
-  }
-
-  // 退出命令模式
-  state.mode = 'text';
-  return tokenText(stream, state);
+  stream.match(/^[^\\{}()[\]$%+\-*/=<>!^_&|',.;:a-zA-Z0-9]+/);
+  return null;
 }
 
 // ================================
@@ -422,19 +266,24 @@ function tokenCommand(stream: StringStream, state: LatexState): string | null {
 /** LaTeX 语言定义 */
 const latexLanguage = StreamLanguage.define(latexStreamParser);
 
-/** LaTeX 高亮样式（颜色取自主题 CSS 变量，括号内为缺省值） */
+/**
+ * LaTeX 高亮样式（颜色取自主题 CSS 变量）。
+ * 公式内容与转义符不使用 --code-variable / --code-regex：两者在主题中是红色，
+ * 成片的公式会被误认为错误提示；错误只由诊断的波浪线表达
+ */
 const latexHighlightStyle = HighlightStyle.define([
-  { tag: t.keyword, color: 'var(--code-keyword, #569cd6)' },
-  { tag: t.heading, color: 'var(--code-function, #dcdcaa)', fontWeight: 'bold' },
-  { tag: t.meta, color: 'var(--code-tag, #4ec9b0)' },
-  { tag: t.comment, color: 'var(--code-comment, #6a9955)', fontStyle: 'italic' },
-  { tag: t.string, color: 'var(--code-string, #ce9178)' },
-  { tag: t.number, color: 'var(--code-number, #b5cea8)' },
-  { tag: t.variableName, color: 'var(--code-variable, #9cdcfe)' },
-  { tag: t.typeName, color: 'var(--code-class-name, #4ec9b0)' },
-  { tag: t.operator, color: 'var(--code-operator, #d4d4d4)' },
-  { tag: t.bracket, color: 'var(--code-punctuation, #808080)' },
-  { tag: t.escape, color: 'var(--code-regex, #d16969)' },
+  { tag: t.keyword, color: 'var(--code-keyword)' },
+  { tag: t.heading, color: 'var(--code-function)', fontWeight: 'bold' },
+  { tag: t.meta, color: 'var(--code-tag)' },
+  { tag: t.comment, color: 'var(--code-comment)', fontStyle: 'italic' },
+  { tag: t.string, color: 'var(--code-string)' },
+  { tag: t.escape, color: 'var(--code-string)' },
+  { tag: t.number, color: 'var(--code-number)' },
+  { tag: t.variableName, color: 'var(--code-property)' },
+  { tag: t.function(t.variableName), color: 'var(--code-function)' },
+  { tag: t.typeName, color: 'var(--code-class-name)' },
+  { tag: t.operator, color: 'var(--code-operator)' },
+  { tag: t.bracket, color: 'var(--code-punctuation)' },
 ]);
 
 /** 去掉行内 % 注释（\% 是转义的百分号，不是注释） */

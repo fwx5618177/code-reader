@@ -26,6 +26,7 @@ import type {
   LatexParseResult,
 } from './types';
 import { findClosingBrace, isAccentSymbol, isAccentWord } from './text-symbols';
+import { LIST_ENVIRONMENTS as LIST_ENVIRONMENT_NAMES, VERBATIM_ENVIRONMENTS as VERBATIM_ENVIRONMENT_NAMES } from '@code-reader/syntax-parser';
 
 // ================================
 // 常量定义
@@ -41,10 +42,14 @@ const SECTION_LEVELS: Record<string, SectionNode['level']> = {
   subparagraph: 'subparagraph',
 };
 
-/** 列表环境名称 */
-const LIST_ENVIRONMENTS = new Set(['itemize', 'enumerate', 'description']);
+/** 列表环境名称（与诊断用的 syntax-parser 共用名单） */
+const LIST_ENVIRONMENTS = new Set<string>(LIST_ENVIRONMENT_NAMES);
 
-/** 数学环境名称 */
+/**
+ * 解析为独立公式块（math_block）的顶层公式环境。
+ * 只是 syntax-parser 数学环境名单中可以独立成块的那部分；矩阵、aligned 等子环境
+ * 按普通环境节点解析，由渲染器的 renderMathEnvironment 处理
+ */
 const MATH_ENVIRONMENTS = new Set([
   'equation',
   'equation*',
@@ -59,8 +64,8 @@ const MATH_ENVIRONMENTS = new Set([
   'displaymath',
 ]);
 
-/** 需要特殊处理的环境 */
-const VERBATIM_ENVIRONMENTS = new Set(['verbatim', 'lstlisting', 'minted']);
+/** 原样输出环境 */
+const VERBATIM_ENVIRONMENTS = new Set<string>(VERBATIM_ENVIRONMENT_NAMES);
 
 /** 默认解析选项 */
 const DEFAULT_OPTIONS: Required<LatexParserOptions> = {
