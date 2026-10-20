@@ -11,7 +11,7 @@
 - **语法树级增量解析**：编辑后只重新解析受影响的顶层块，结果与整篇解析逐节点相同。
 - **逐行 token 增量解析**：面向超大文件与流式输入（与上面的语法树不是同一模型）。
 
-路线与取舍见 [`docs/FORMAT_PARSER_RESEARCH.md`](../../docs/FORMAT_PARSER_RESEARCH.md)。
+设计、编辑器管线与验证方法见 [`docs/MARKDOWN_PARSER.md`](../../docs/MARKDOWN_PARSER.md)。
 
 ## 现状
 

@@ -7,7 +7,7 @@
 | [USER_GUIDE.md](./USER_GUIDE.md) | 使用指南：界面布局与侧栏面板、支持的文件格式与条目类型、Markdown 写作（标签页与两栏编辑、页面设置、版本保留）与公式、知识库与 AI 配置（归类审阅、日历日记）、双向链接与块级引用、图谱与实体关系、阅读模式（扫描版 PDF 识别、跨页高亮）、多知识库与数据位置、快捷键、插件的使用与编写 |
 | [PRODUCT.md](./PRODUCT.md) | 产品定位、核心理念、三大模式、不做什么、路线图、产品演进 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构、存储与版本、UI 架构、LaTeX 与 Markdown 链路、子包接入对照、关键问题与根因记录 |
-| [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) | format-parser / markdown-parser 的调研与替换过程：规范一致性、token 流对照、性能 |
+| [MARKDOWN_PARSER.md](./MARKDOWN_PARSER.md) | Markdown 解析：设计、编辑器管线、增量解析、回归基准与性能 |
 
 模块级说明就近放在代码旁：
 

@@ -74,7 +74,7 @@ const DOMAIN_CHAR = /[\p{L}\p{N}_-]/u;
 const EMAIL_LOCAL_CHAR = /[A-Za-z0-9._+-]/;
 const EMAIL_DOMAIN = /^[A-Za-z0-9._-]+/;
 
-/** 裸域名的顶级域（与 linkify-it 默认表相同：常用通用顶级域与全部两字母国家顶级域） */
+/** 裸域名可识别的顶级域：常用通用顶级域与全部两字母国家顶级域 */
 const BARE_DOMAIN_TLDS =
   'biz|com|edu|gov|net|org|pro|web|xxx|aero|asia|coop|info|museum|name|shop|рф|' +
   'a[cdefgilmnoqrstuwxz]|b[abdefghijmnorstvwyz]|c[acdfghiklmnoruvwxyz]|d[ejkmoz]|e[cegrstu]|f[ijkmor]|' +
@@ -82,7 +82,7 @@ const BARE_DOMAIN_TLDS =
   'm[acdeghklmnopqrstuvwxyz]|n[acefgilopruz]|om|p[aefghklmnrstwy]|qa|r[eosuw]|s[abcdeghijklmnortuvxyz]|' +
   't[cdfghjklmnortvwz]|u[agksyz]|v[aceginu]|w[fs]|y[et]|z[amw]';
 /**
- * 裸域名 example.com：与 linkify-it 的模糊链接一致，之前只能是行首、空白、标点或 $+<=>^`|（但不能是 . : / - _ @），
+ * 裸域名 example.com：之前只能是行首、空白、标点或 $+<=>^`|（但不能是 . : / - _ @），
  * 顶级域之后不能紧跟字母、数字、- _ 或后面还有域名字符的 .
  */
 const BARE_DOMAIN = new RegExp(

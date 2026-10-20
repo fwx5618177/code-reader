@@ -2,7 +2,7 @@
 // @code-reader/markdown-parser - 链接地址规范化（IDN 主机名转 Punycode 并百分号编码；显示文字反向还原，零依赖）
 // - normalizeLink：http(s) / mailto / 无协议地址的主机名中的非 ASCII 字符按 IDNA 转成 xn--（Punycode），其余百分号编码
 // - normalizeLinkText：自动链接显示的文字中，xn-- 主机名还原为 Unicode，百分号编码还原为字符（保留 ;/?:@&=+$,#%）
-// 主机名的定位规则与 mdurl.parse 相同；Punycode 按 RFC 3492 实现
+// 主机名只在 http(s) / mailto / 无协议的 //host 中定位，不合法的标签截断主机名；Punycode 按 RFC 3492 实现
 // ================================
 
 /** 不需要编码的 URL（只含结构字符与合法的 %XX） */
@@ -136,7 +136,7 @@ function punycodeDecode(input: string): string {
   return String.fromCodePoint(...output);
 }
 
-/** 按标签转换域名（分隔符含全角句点，与 punycode.js 的 toASCII / toUnicode 相同） */
+/** 按标签转换域名（IDNA 规定的标签分隔符：. 与全角句点 。．｡） */
 function mapDomain(domain: string, label: (part: string) => string): string {
   return domain.replace(/[\u3002\uFF0E\uFF61]/g, '.').split('.').map(label).join('.');
 }
@@ -149,7 +149,7 @@ export function domainToUnicode(domain: string): string {
   return mapDomain(domain, (part) => (/^xn--/i.test(part) ? punycodeDecode(part.slice(4).toLowerCase()) : part));
 }
 
-// ---------- 主机名定位（mdurl.parse 的规则） ----------
+// ---------- 主机名定位：协议、// 之后到第一个 / ? # 为止，去掉用户信息与端口 ----------
 
 const PROTOCOL = /^([a-z0-9.+-]+:)/i;
 const SLASHED_PROTOCOLS = new Set(['http:', 'https:', 'ftp:', 'gopher:', 'file:']);
@@ -220,10 +220,10 @@ export function normalizeLink(url: string): string {
   return normalizeUrl(/[^\0-\x7F]/.test(trimmed) ? recodeHost(trimmed, domainToAscii) : trimmed);
 }
 
-/** 百分号解码时保留的字符（解码后会改变地址结构）：与 mdurl.decode 的默认值加 % 相同 */
+/** 百分号解码时保留的字符：URI 的保留字符与 %，解码后会改变地址结构 */
 const KEEP_ENCODED = new Set(';/?:@&=+$,#%');
 
-/** 百分号编码的 UTF-8 序列还原为字符；不合法的序列变成 U+FFFD（与 mdurl.decode 相同） */
+/** 百分号编码的 UTF-8 序列还原为字符；不合法的序列变成 U+FFFD */
 function percentDecode(text: string): string {
   return text.replace(/(?:%[a-f0-9]{2})+/gi, (sequence) => {
     const bytes = sequence.slice(1).split('%').map((hex) => parseInt(hex, 16));
