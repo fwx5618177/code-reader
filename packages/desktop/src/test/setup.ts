@@ -17,6 +17,27 @@ if (typeof Range !== 'undefined') {
   Range.prototype.getBoundingClientRect ??= () => new DOMRect();
 }
 
+// jsdom 没有 PointerEvent 与指针捕获：fireEvent.pointerDown 等会退化成不带坐标与按键的普通 Event。
+// 补成带指针字段的 MouseEvent，指针捕获为空操作（node 环境的测试文件没有 DOM，跳过）
+if (typeof window !== 'undefined' && typeof window.PointerEvent === 'undefined') {
+  class PointerEventPolyfill extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    readonly isPrimary: boolean;
+
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+      this.pointerType = init.pointerType ?? 'mouse';
+      this.isPrimary = init.isPrimary ?? true;
+    }
+  }
+  window.PointerEvent = PointerEventPolyfill as unknown as typeof PointerEvent;
+  Element.prototype.setPointerCapture ??= () => {};
+  Element.prototype.releasePointerCapture ??= () => {};
+  Element.prototype.hasPointerCapture ??= () => false;
+}
+
 // IndexedDB Mock
 const mockStorage = new Map<string, Map<string, unknown>>();
 
