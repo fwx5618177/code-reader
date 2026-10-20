@@ -296,8 +296,6 @@
 
   h1 {
     font-size: 2rem;
-    border-bottom: 1px solid var(--border-primary);
-    padding-bottom: var(--spacing-2);
   }
 
   h2 {
@@ -306,6 +304,14 @@
 
   h3 {
     font-size: 1.25rem;
+  }
+
+  @include heading-accents;
+
+  h1,
+  h2,
+  h3 {
+    padding-block: var(--spacing-1);
   }
 
   h4 {
@@ -465,13 +471,9 @@
     margin-right: 0.25em;
   }
 
-  // 双向链接
+  // 双向链接：高亮小标签，两侧淡显 [[ ]] 提示这是链接语法
   :global(.wiki-link) {
-    color: var(--accent-primary);
-    background-color: var(--accent-primary-alpha);
-    border-radius: var(--radius-sm);
-    padding: 0 2px;
-    cursor: pointer;
+    @include wiki-link-chip;
 
     &::before {
       content: '[[';
@@ -637,9 +639,11 @@ $page-rule-rows: repeating-linear-gradient(
     line-height: calc(2 * var(--page-line));
   }
 
-  h1 {
-    padding-bottom: 0;
-    border-bottom: none;
+  // 标题彩条只保留左右内边距，正文仍落在线格内
+  h1,
+  h2,
+  h3 {
+    padding-block: 0;
   }
 
   // 2px 分割线连同上下外边距恰好占一行
