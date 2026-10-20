@@ -1,33 +1,78 @@
-# 发布构建：推送 v* 标签（或手动触发）时在 macOS / Windows / Linux 上构建安装包，
-# 标签触发时汇总到 GitHub Release（草稿，人工确认后发布）。
+# 发布：构建安装包并发布到 GitHub Release（仓库首页右侧 Releases 可见）。
+# 触发方式：
+# - 推送 v* 标签（如 git tag v0.2.0 && git push origin v0.2.0）
+# - Actions → Release → Run workflow，填写版本号（如 0.2.0），自动在当前提交上打 v0.2.0 标签
+# 版本号带 “-”（如 0.2.0-beta.1）时发布为预发布版本。
 #
-# 代码签名全部可选，未配置对应 secrets 时产出未签名的安装包：
+# 目前只构建 macOS（Apple 芯片 arm64）。其他平台在 build 的 matrix 中添加，
+# 并在 packages/desktop/electron-builder.json 中配置对应 target。
+#
+# 代码签名可选，未配置时产出 ad-hoc 签名的安装包（见 packages/desktop/scripts/adhoc-sign.mjs）：
 # - macOS 签名：CSC_LINK（.p12 的 base64 或下载地址）、CSC_KEY_PASSWORD
 # - macOS 公证：APPLE_ID、APPLE_APP_SPECIFIC_PASSWORD、APPLE_TEAM_ID
-# - Windows 签名：WIN_CSC_LINK、WIN_CSC_KEY_PASSWORD
 name: Release
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不带 v，如 0.2.0；带 - 为预发布，如 0.2.0-beta.1）'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ inputs.version }}
   cancel-in-progress: false
 
 env:
   # 安装依赖时不需要 Electron 二进制；electron-builder 打包时按目标平台自行下载
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-  # 让 pnpm 用跨平台的 shell 模拟执行脚本（desktop 的 postinstall 含 `|| true`，Windows cmd 不支持）
-  npm_config_shell_emulator: 'true'
   # 性能断言的预算按开发机设定；GitHub 运行器约慢 10 倍且多个包并行测试，统一放宽（见 packages/test-support）
   PERF_BUDGET_SCALE: '10'
 
 jobs:
+  version:
+    name: 确定版本
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - id: resolve
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${INPUT_VERSION#v}"
+          fi
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::版本号无效：${version}（应为 1.2.3 或 1.2.3-beta.1）"
+            exit 1
+          fi
+          tag="v${version}"
+          # 手动触发时标签必须是新的，避免覆盖已发布的版本
+          if [ "${GITHUB_REF_TYPE}" != "tag" ] && gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" > /dev/null 2>&1; then
+            echo "::error::标签 ${tag} 已存在，请换一个版本号"
+            exit 1
+          fi
+          prerelease=false
+          if [[ "${version}" == *-* ]]; then prerelease=true; fi
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "prerelease=${prerelease}"
+          } >> "${GITHUB_OUTPUT}"
+
   verify:
     name: 类型检查与测试
     runs-on: ubuntu-latest
@@ -49,21 +94,16 @@ jobs:
 
   build:
     name: 构建 ${{ matrix.name }}
-    needs: verify
+    needs: [version, verify]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          # macos-latest 为 Apple 芯片运行器
+          - name: macOS-arm64
             os: macos-latest
-            target: --mac
-          - name: Windows
-            os: windows-latest
-            target: --win
-          - name: Linux
-            os: ubuntu-latest
-            target: --linux
+            target: --mac --arm64
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -81,13 +121,11 @@ jobs:
       - name: 构建应用
         run: pnpm build:desktop
 
-      # 标签触发时以标签为版本号（v1.2.0 → 1.2.0），手动触发时使用 package.json 中的版本
       - name: 准备应用目录
         working-directory: packages/desktop
-        shell: bash
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then export APP_VERSION="${GITHUB_REF_NAME}"; fi
-          node scripts/stage-app.mjs
+        env:
+          APP_VERSION: ${{ needs.version.outputs.version }}
+        run: node scripts/stage-app.mjs
 
       - name: 打包安装包
         working-directory: packages/desktop
@@ -98,12 +136,9 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
-          # 没有证书时跳过签名，而不是去钥匙串里自动查找
+          # 没有证书时不去钥匙串里自动查找，由 afterPack 钩子做 ad-hoc 签名
           if [ -z "${CSC_LINK}" ]; then export CSC_IDENTITY_AUTO_DISCOVERY=false; unset CSC_LINK CSC_KEY_PASSWORD; fi
-          if [ -z "${WIN_CSC_LINK}" ]; then unset WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; fi
           if [ -z "${APPLE_ID}" ]; then unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; fi
           npx electron-builder ${{ matrix.target }} --publish never
 
@@ -115,15 +150,10 @@ jobs:
           path: |
             packages/desktop/release/*.dmg
             packages/desktop/release/*.zip
-            packages/desktop/release/*.exe
-            packages/desktop/release/*.AppImage
-            packages/desktop/release/*.deb
-            packages/desktop/release/latest*.yml
 
   release:
     name: 发布到 GitHub Release
-    needs: build
-    if: github.ref_type == 'tag'
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
@@ -132,12 +162,31 @@ jobs:
           path: installers
           merge-multiple: true
 
-      - name: 生成校验和
+      - name: 生成校验和与说明
         working-directory: installers
-        run: sha256sum * > SHA256SUMS.txt
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat > ../release-notes.md <<EOF
+          ## 下载
+
+          | 平台 | 安装包 |
+          | --- | --- |
+          | macOS（Apple 芯片 M1 / M2 / M3 / M4） | \`Code-Reader-${VERSION}-mac-arm64.dmg\`（或免安装的 \`.zip\`） |
+
+          暂未提供 Intel Mac、Windows、Linux 安装包。\`SHA256SUMS.txt\` 为各文件的校验和。
+
+          安装包未经 Apple 公证，第一次打开会被拦截：在“应用程序”中右键应用 → **打开**；
+          仍被拦截时到 **系统设置 → 隐私与安全性**，点“仍要打开”。
+          EOF
 
       - uses: softprops/action-gh-release@v3
         with:
-          draft: true
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Code Reader ${{ needs.version.outputs.version }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          body_path: release-notes.md
           generate_release_notes: true
           files: installers/*
