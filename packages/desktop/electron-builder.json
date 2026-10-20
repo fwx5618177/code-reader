@@ -8,6 +8,7 @@
     "buildResources": "assets"
   },
   "files": ["dist/**/*"],
+  "afterPack": "./scripts/adhoc-sign.mjs",
   "asarUnpack": ["**/*.node"],
   "extraResources": [
     {
@@ -37,20 +38,20 @@
     "target": [
       {
         "target": "dmg",
-        "arch": ["x64", "arm64"]
+        "arch": ["arm64"]
       },
       {
         "target": "zip",
-        "arch": ["x64", "arm64"]
+        "arch": ["arm64"]
       }
     ],
+    "artifactName": "Code-Reader-${version}-mac-${arch}.${ext}",
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
     "entitlements": "entitlements.mac.plist",
     "entitlementsInherit": "entitlements.mac.plist"
   },
   "dmg": {
-    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "icon": "assets/icons/icon_512x512.png",
     "contents": [
       {
