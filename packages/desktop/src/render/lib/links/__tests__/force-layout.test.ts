@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ForceLayout } from '../force-layout';
+import { perfBudget } from '@code-reader/test-support';
 
 /** 可复现的伪随机数（mulberry32） */
 function seededRandom(seed: number): () => number {
@@ -244,6 +245,6 @@ describe('ForceLayout', () => {
         `中位数 ${median.toFixed(2)}ms，P95 ${p95.toFixed(2)}ms`
     );
     // 宽松上限：仅防止退化为 O(n²)（暴力计算约为此数倍）
-    expect(median).toBeLessThan(50);
+    expect(median).toBeLessThan(perfBudget(50));
   });
 });

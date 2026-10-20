@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { hashContent } from '../content-hasher';
+import { perfBudget } from '@code-reader/test-support';
 
 /** 原实现（先展开为字节数组），作为对照 */
 function referenceXxhash32(str: string, seed: number = 0): number {
@@ -131,6 +132,6 @@ describe('hashContent（xxHash）', () => {
     expect(hashContent(big)).toBe(referenceXxhash64(big));
     const start = performance.now();
     for (let i = 0; i < 5; i++) hashContent(big + i);
-    expect((performance.now() - start) / 5).toBeLessThan(50);
+    expect((performance.now() - start) / 5).toBeLessThan(perfBudget(50));
   });
 });

@@ -1,10 +1,11 @@
 // ================================
 // 长列表性能：命令面板规模的模糊评分、补全规模的 Radix Tree 前缀与模糊检索
-// 预算按普通开发机设定并留有余量，用来发现数量级的退化
+// 预算按开发机设定并留有余量，用来发现数量级的退化；CI 上由 PERF_BUDGET_SCALE 统一放宽（见 @code-reader/test-support）
 // ================================
 
 import { describe, expect, it } from 'vitest';
 import { RadixTree, fuzzyScore, getAllMatchPositions } from '../src';
+import { perfBudget } from '@code-reader/test-support';
 
 /** 可复现的伪随机数 */
 function random(seed: number): () => number {
@@ -42,7 +43,7 @@ describe('fuzzyScore 长列表', () => {
       matched = ranked.length;
     });
     expect(matched).toBeGreaterThan(0);
-    expect(ms).toBeLessThan(60);
+    expect(ms).toBeLessThan(perfBudget(60));
   });
 
   it('长文本（2000 字符的说明）单次 < 0.5ms（回归：原递归枚举所有对齐，指数级，长文本不会结束）', () => {
@@ -50,7 +51,7 @@ describe('fuzzyScore 长列表', () => {
     const ms = median(() => {
       for (let i = 0; i < 500; i++) fuzzyScore('plugintag', long);
     });
-    expect(ms / 500).toBeLessThan(0.5);
+    expect(ms / 500).toBeLessThan(perfBudget(0.5));
   });
 });
 
@@ -63,14 +64,14 @@ describe('RadixTree 大词表', () => {
     expect(tree.prefixSearch('kari').length).toBeGreaterThan(0);
     expect(median(() => {
       for (let i = 0; i < 100; i++) tree.prefixSearch(syllables[i % syllables.length]!);
-    }) / 100).toBeLessThan(5);
+    }) / 100).toBeLessThan(perfBudget(5));
   });
 
   it('5 万词模糊检索（编辑距离 1）单次 < 50ms', () => {
     const target = words[123]!;
     const typo = target.slice(0, -1) + (target.endsWith('a') ? 'e' : 'a');
     expect(tree.fuzzySearch(typo, { maxEditDistance: 1 }).some((result) => result.key === target)).toBe(true);
-    expect(median(() => tree.fuzzySearch(typo, { maxEditDistance: 1 }), 5)).toBeLessThan(50);
+    expect(median(() => tree.fuzzySearch(typo, { maxEditDistance: 1 }), 5)).toBeLessThan(perfBudget(50));
   });
 });
 

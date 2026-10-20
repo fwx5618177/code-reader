@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { parseCommonMark, renderHtml, BlockType } from '../src';
+import { perfBudget } from '@code-reader/test-support';
 
 /** CommonMark 0.31.2 规范用例 81、82、93、138、145、215、278、347 */
 const FORMERLY_HANGING = [
@@ -23,7 +24,7 @@ describe('Markdown 解析健壮性', () => {
     const started = performance.now();
     const result = parseCommonMark(input);
     expect(result.document.children?.length ?? 0).toBeGreaterThan(0);
-    expect(performance.now() - started).toBeLessThan(500);
+    expect(performance.now() - started).toBeLessThan(perfBudget(500));
   });
 
   it('多行段落后的 setext 下划线：整段成为标题', () => {
@@ -55,7 +56,7 @@ describe('Markdown 解析健壮性', () => {
       frontMatter: true,
       attributes: true,
     };
-    const LIMIT = 50;
+    const LIMIT = perfBudget(50);
     const run = (text: string, i: number) => {
       const started = performance.now();
       renderHtml(parseCommonMark(text, i % 2 === 0 ? options : { smartPunctuation: true }).document);

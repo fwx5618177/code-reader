@@ -89,6 +89,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "@code-reader/test-support": "workspace:*",
     "@electron/rebuild": "^3.6.0",
     "@testing-library/react": "^14.2.0",
     "@types/better-sqlite3": "^7.6.11",

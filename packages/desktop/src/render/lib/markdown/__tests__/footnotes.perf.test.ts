@@ -16,6 +16,7 @@ import {
   parseMarkdown,
   serializeMarkdown,
 } from '../index';
+import { perfBudget } from '@code-reader/test-support';
 
 const PARAGRAPHS = 2000;
 
@@ -92,8 +93,8 @@ describe('大量脚注的大文档性能', () => {
     console.log(`[perf] ${PARAGRAPHS} 段 + ${PARAGRAPHS} 个脚注（ms）`, report);
 
     // 一帧 16ms：逐键处理留给布局与绘制的时间要足够
-    expect(median(keyTimes)).toBeLessThan(4);
-    expect(median(saveTimes)).toBeLessThan(30);
-    expect(median(renumberTimes)).toBeLessThan(16);
+    expect(median(keyTimes)).toBeLessThan(perfBudget(4));
+    expect(median(saveTimes)).toBeLessThan(perfBudget(30));
+    expect(median(renumberTimes)).toBeLessThan(perfBudget(16));
   });
 });

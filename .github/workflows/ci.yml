@@ -13,6 +13,8 @@ concurrency:
 env:
   # CI 不需要 Electron 二进制，跳过下载以加快安装
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  # 性能断言的预算按开发机设定；GitHub 运行器约慢 10 倍且多个包并行测试，统一放宽（见 packages/test-support）
+  PERF_BUDGET_SCALE: '10'
 
 jobs:
   verify:

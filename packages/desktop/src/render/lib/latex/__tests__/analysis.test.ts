@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { analyzeLatex } from '../analysis';
 import { requestLatexAnalysis } from '../analysis-client';
+import { perfBudget } from '@code-reader/test-support';
 
 const DOC = String.raw`\documentclass{article}
 \title{Paper on \textbf{Things}}
@@ -106,6 +107,6 @@ describe('analyzeLatex', () => {
     const elapsed = performance.now() - start;
     expect(result.diagnostics.filter((d) => d.severity === 'error')).toEqual([]);
     expect(result.outline.length).toBeGreaterThan(10);
-    expect(elapsed).toBeLessThan(500);
+    expect(elapsed).toBeLessThan(perfBudget(500));
   });
 });

@@ -24,6 +24,8 @@ env:
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
   # 让 pnpm 用跨平台的 shell 模拟执行脚本（desktop 的 postinstall 含 `|| true`，Windows cmd 不支持）
   npm_config_shell_emulator: 'true'
+  # 性能断言的预算按开发机设定；GitHub 运行器约慢 10 倍且多个包并行测试，统一放宽（见 packages/test-support）
+  PERF_BUDGET_SCALE: '10'
 
 jobs:
   verify:

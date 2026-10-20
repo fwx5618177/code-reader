@@ -11,6 +11,7 @@ import {
   quickFindMostSimilar,
   quickSpellingSuggestions,
 } from '../src';
+import { perfBudget } from '@code-reader/test-support';
 
 /** 恒等键提取函数（候选项本身就是字符串） */
 const identity = (value: string): string => value;
@@ -336,8 +337,7 @@ describe('性能验证', () => {
     engine.distance(str1, str2);
     const duration = performance.now() - start;
 
-    // 应该在 1 秒内完成
-    expect(duration).toBeLessThan(1000);
+    expect(duration).toBeLessThan(perfBudget(1000));
   });
 
   it('应该能批量处理多个比较', () => {
@@ -349,7 +349,6 @@ describe('性能验证', () => {
     const duration = performance.now() - start;
 
     expect(results[0]?.key).toBe('word500');
-    // 应该在 500ms 内完成
-    expect(duration).toBeLessThan(500);
+    expect(duration).toBeLessThan(perfBudget(500));
   });
 });

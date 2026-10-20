@@ -13,6 +13,7 @@ import {
   quickSearchStrings,
   quickHighlight,
 } from '../src';
+import { perfBudget } from '@code-reader/test-support';
 
 describe('FuzzyMatchEngine', () => {
   let engine: FuzzyMatchEngine;
@@ -353,8 +354,7 @@ describe('性能验证', () => {
     engine.search('item-5000', items, { limit: 10 });
     const duration = performance.now() - start;
 
-    // 应该在 500ms 内完成
-    expect(duration).toBeLessThan(500);
+    expect(duration).toBeLessThan(perfBudget(500));
   });
 
   it('应该高效处理长查询', () => {
@@ -368,8 +368,8 @@ describe('性能验证', () => {
     }
     const duration = performance.now() - start;
 
-    // 100 次搜索应该在 1 秒内完成
-    expect(duration).toBeLessThan(1000);
+    // 100 次搜索
+    expect(duration).toBeLessThan(perfBudget(1000));
   });
 });
 

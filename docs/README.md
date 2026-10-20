@@ -46,6 +46,7 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `plugin-system-extras` | desktop 未使用的同进程插件管理器与插件沙箱（按需引入） |
 | `search-service` | 全文搜索倒排索引、文件内容搜索、模糊匹配 |
 | `text-buffer` | 文本存储数据结构：Piece Table、Rope、Gap Buffer |
+| `test-support` | 只供测试使用的共用工具：性能断言的耗时预算 `perfBudget`（CI 上按 `PERF_BUDGET_SCALE` 统一放宽），不需要构建 |
 
 ## 常用命令
 
@@ -72,7 +73,7 @@ pnpm --filter @code-reader/desktop dist:mac       # dmg / zip（x64 + arm64）�
 
 ## 持续集成与发布
 
-- `.github/workflows/ci.yml`：push main 与 PR 时运行类型检查、单元测试与基准测试。
-- `.github/workflows/e2e.yml`：push main 与 PR 时在 macOS 运行器上构建并运行端到端测试，失败时上传截图（尚未在 GitHub 上实际运行过）。
+- `.github/workflows/ci.yml`：push main 与 PR 时运行类型检查、单元测试与基准测试。GitHub 运行器比开发机慢约 10 倍，单元测试里的耗时预算由 `PERF_BUDGET_SCALE` 统一放宽（见 `packages/test-support`）。
+- `.github/workflows/e2e.yml`：push main 与 PR 时在 macOS 运行器上构建并运行端到端测试，失败时上传截图。
 - `.github/workflows/release.yml`：推送 `v*` 标签（如 `git tag v0.2.0 && git push origin v0.2.0`）或在 Actions 页手动触发。先做类型检查与测试，再在 macOS / Windows / Linux 三个运行器上分别打包；标签触发时把全部安装包与 `SHA256SUMS.txt` 上传到 GitHub Release **草稿**，人工确认后发布；手动触发只保留为构建产物（Artifacts）。版本号取自标签。
 - 代码签名可选：在仓库 Secrets 中配置 `CSC_LINK` / `CSC_KEY_PASSWORD`（macOS 证书）、`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`（公证）、`WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`（Windows 证书）；未配置时产出未签名安装包（macOS 首次打开需右键→打开）。

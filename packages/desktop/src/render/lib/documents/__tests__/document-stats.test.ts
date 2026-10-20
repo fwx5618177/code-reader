@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { calculateStats } from '../useDocuments';
 import { stripMarkup } from '../../markdown/extract';
+import { perfBudget } from '@code-reader/test-support';
 
 /** 原来的统计方式（多次正则与 split），作为对照 */
 function reference(content: string) {
@@ -26,7 +27,7 @@ describe('calculateStats', () => {
     const big = '这是正文内容，包含公式 $x^2$ 与 \\textbf{粗体} and words.\n'.repeat(18000);
     const start = performance.now();
     const stats = calculateStats(big);
-    expect(performance.now() - start).toBeLessThan(30);
+    expect(performance.now() - start).toBeLessThan(perfBudget(30));
     expect(stats).toEqual(reference(big));
   });
 });

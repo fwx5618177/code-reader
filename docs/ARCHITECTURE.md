@@ -58,7 +58,7 @@
 | `autocomplete-service-extras` | ProseMirror 补全插件（`createAutocompletePlugin` / `EditorAutocomplete`：多提供者、触发符或单词触发（`triggersAnywhere` 让单字符触发符紧跟在其他字符后也能触发）、面板随插件状态渲染、结构化插入、按提供者的结果上限；手动打开 Ctrl+空格 / Option+`）→ `RichEditor` 的斜杠菜单、`[[` 双链与别名、Emoji、LaTeX 命令补全（业务提供者在 `lib/markdown/completion.ts`、`lib/editor/latex-completion.ts`）；文本框补全 `TextFieldAutocomplete` → 公式节点的源码框；`filterAndSortItems` → .tex 源码编辑器的 CodeMirror 补全。插件与文本框共用触发、收集排序（`editor-completion.ts`）与面板（`completion-panel.ts`） | `ProseMirrorAdapter`（把整个补全服务当作一个提供者接到同一个插件上，按单词查询）与预设工厂（全部内置提供者的服务、Markdown / 代码编辑器的 CodeMirror 扩展）桌面端不用。此前桌面端自己的补全插件与适配器是两套重复的插件状态 / 面板 / 键盘实现，已合并。有行为测试 |
 | `text-buffer` | `createAutoBuffer` → LaTeX 文档模型（`lib/latex/latex-document.ts`，此前为测 UTF-8 字节数把整篇源码复制进 `Blob` 再选类型，现在按 `string.length` 选择） | `GapBuffer`、`recommendBufferType`、性能档案：按使用模式选型的接口，保持导出。三种实现有与字符串逐步对照的随机编辑测试 |
 
-**子包构建约定**：desktop 通过 `dist` 引用子包（`main` / `types` 指向 `dist`），`pnpm build:libs` 先构建全部子包。每个子包的 `build` 都是 `rimraf dist && tsc…`：先清空再编译，源文件改名或删除后不会在 `dist` 里留下旧的 `.js` / `.d.ts`。子包之间没有项目引用，因此不开 `composite` / `tsc --build`，不产生 `tsbuildinfo`（增量构建记录在清空 `dist` 后会让 `tsc` 误判为最新而不输出）。新增子包按同样的写法。
+**子包构建约定**：desktop 通过 `dist` 引用子包（`main` / `types` 指向 `dist`），`pnpm build:libs` 先构建全部子包。每个子包的 `build` 都是 `rimraf dist && tsc…`：先清空再编译，源文件改名或删除后不会在 `dist` 里留下旧的 `.js` / `.d.ts`。子包之间没有项目引用，因此不开 `composite` / `tsc --build`，不产生 `tsbuildinfo`（增量构建记录在清空 `dist` 后会让 `tsc` 误判为最新而不输出）。新增子包按同样的写法。唯一的例外是只供测试使用的 `test-support`：Vitest 直接加载其 TypeScript 源码，没有构建步骤。
 
 ## 2. 主进程
 
@@ -304,4 +304,4 @@ pnpm --filter @code-reader/fuzzy-match-algorithm benchmark
 
 ### 端到端测试
 
-`packages/desktop/e2e`（`pnpm --filter @code-reader/desktop e2e`）在构建好的应用上执行真实操作：临时用户数据目录、写入种子数据，经 Chrome DevTools Protocol 模拟键盘、输入法提交与点击，再读数据库或页面核对。共 15 个场景，覆盖 F1 与 Ribbon 打开使用指南及目录 / 站内链接跳转、旧版 HTML 迁移、自动保存、视图按栏独立、三处 LaTeX 补全、Option+` 与 Ctrl+空格手动打开补全、补全面板翻到光标上方且只滚动自身、跨多行 tags、标签重命名 / 合并 / 详情面板改标签后的 YAML 改写、AI 提取标签后写回 YAML（E2E 进程内起一个 OpenAI 兼容的本机服务，不联网）。`.github/workflows/e2e.yml` 在 macOS 运行器上用 Node 22 执行它：尚未在 GitHub 上实际运行过，但已在本地按同样的步骤（干净克隆、冻结 lockfile 安装、构建子包、E2E）模拟通过。
+`packages/desktop/e2e`（`pnpm --filter @code-reader/desktop e2e`）在构建好的应用上执行真实操作：临时用户数据目录、写入种子数据，经 Chrome DevTools Protocol 模拟键盘、输入法提交与点击，再读数据库或页面核对。共 15 个场景，覆盖 F1 与 Ribbon 打开使用指南及目录 / 站内链接跳转、旧版 HTML 迁移、自动保存、视图按栏独立、三处 LaTeX 补全、Option+` 与 Ctrl+空格手动打开补全、补全面板翻到光标上方且只滚动自身、跨多行 tags、标签重命名 / 合并 / 详情面板改标签后的 YAML 改写、AI 提取标签后写回 YAML（E2E 进程内起一个 OpenAI 兼容的本机服务，不联网）。`.github/workflows/e2e.yml` 在 macOS 运行器上用 Node 22（`.nvmrc`）执行它，PR #1 上的首次运行 15 个场景全部通过。

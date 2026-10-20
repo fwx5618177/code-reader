@@ -13,6 +13,7 @@ import {
   createMockDocuments,
   wait,
 } from './setup';
+import { perfBudget } from '@code-reader/test-support';
 
 // ================================
 // Test Configuration
@@ -498,7 +499,7 @@ describe('WritingService', () => {
       const duration = Date.now() - startTime;
 
       expect(result).toHaveProperty('diffs');
-      expect(duration).toBeLessThan(5000); // Should complete within 5 seconds
+      expect(duration).toBeLessThan(perfBudget(5000));
     });
   });
 
