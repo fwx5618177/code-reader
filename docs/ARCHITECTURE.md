@@ -47,7 +47,7 @@
 | `syntax-parser` | `LatexLezerParser` 语法诊断与 AST（折叠 / 大纲）→ `lib/latex/analysis.ts`（`LatexAnalyzer` 按块增量调用）；`LATEX_LANGUAGE_CONFIGURATION` → `lib/latex/codemirror-latex.ts`：`%` 行注释、自动配对、环境缩进（`indentationRules`：`\begin{…}` 后换行缩进一级，输入 `\end{…}` 时回退，`document` 除外） | 全部在用；包已零依赖 |
 | `syntax-parser-extras` | 桌面端不引用 | 语言注册表与高亮引擎（编辑器高亮由 CodeMirror 承担）、`LezerIncrementalParser`（复用 Lezer 树片段，但每次整体转换为统一 AST）、`ASTCache`、正则块扫描器（输出结构树，与桌面端 `block-segmenter` 的块边界粒度不同；后者与按块分析、分块渲染共用边界）。保持导出可用，有行为测试与基准 |
 | `format-parser` | LaTeX 交叉引用索引与文档元数据 → `analysis.ts`；`isLaTeXDocument`（先去掉代码块、行内代码、公式与注释再判断）→ `lib/documents/file-types.ts` 的 `resolveDocumentType`：文件名有已知扩展名时以扩展名为准，否则按内容决定 RichEditor 用 LaTeX 还是 Markdown 渲染（此前两处各写一套正则，`.md` 笔记里贴了 `\section{` 代码块会被当成 LaTeX） | 统一入口 `parse` / `autoParse` 的 Markdown 模式由 `markdown-parser` 提供 |
-| `markdown-parser` | `lib/markdown/parser.ts`（编辑器分词，开启 `frontMatter`）、`lib/markdown/syntax-extensions.ts`（公式 / 双链 / 嵌入扩展）、`lib/markdown/extract.ts`、`lib/links/{rename,block-id}.ts` | 由 `format-parser` 拆出的零依赖 CommonMark / GFM 解析器：CommonMark 0.31.2 规范 652/652；语法扩展接口；块级与行内节点都带源码绝对位置；`MarkdownItCompatTokenizer` 输出与 markdown-it 一致的 token 流（规范用例 652/652 一致），编辑器经 prosemirror-markdown 构建文档；GFM 扩展自动链接与 markdown-it 生态常用语法（脚注、定义列表、容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性，与对应插件逐 token 一致）；带安全链接校验与高亮钩子的 HTML 渲染器；语法树级增量解析（`IncrementalCommonMarkParser`）与逐行 token 增量解析。详见 [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) |
+| `markdown-parser` | `lib/markdown/parser.ts`（编辑器分词：YAML 头部、脚注、高亮 / 插入 / 上下标、定义列表、容器、缩写、裸网址；`preserveSource` 保留脚注与缩写定义的原位，`env.key` 按文档增量解析）、`lib/markdown/serializer.ts` 与 `lib/editor/prosemirror-rules.ts`（`normalizeLink`，裸网址链接的往返判断）、`lib/markdown/syntax-extensions.ts`（公式 / 双链 / 嵌入扩展）、`lib/markdown/extract.ts`、`lib/links/{rename,block-id}.ts` | 由 `format-parser` 拆出的零依赖 CommonMark / GFM 解析器：CommonMark 0.31.2 规范 652/652；语法扩展接口；块级与行内节点都带源码绝对位置；`MarkdownItCompatTokenizer` 输出与 markdown-it 一致的 token 流（规范用例 652/652 一致），编辑器经 prosemirror-markdown 构建文档；GFM 扩展自动链接（可选裸域名）与 markdown-it 生态常用语法（脚注、定义列表、容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性，与对应插件含 markdown-it-attrs 逐 token 一致）；与 markdown-it 相同的链接规范化（IDN 主机名 Punycode、自动链接文字解码）；带安全链接校验与高亮钩子的 HTML 渲染器；保留源码的 token 模式与按 `env.key` 缓存的增量分词；语法树级增量解析（`IncrementalCommonMarkParser`）与逐行 token 增量解析。详见 [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) |
 | `plugin-system` | 贡献点类型（含主题、语言）、`lifecycle`（版本范围 / 依赖 / 激活事件，含 `onStartupFinished` 与 `matchedActivationEvent`）→ `lib/plugins/*`、`services/pluginService.ts`；`ExtensionRegistry` → `lib/plugins/extension-registry.ts` | 文件类型贡献点未开放。同进程的 `PluginManager` / `PluginSandbox` 已迁到 `plugin-system-extras`（桌面端保留每插件独占 Worker 的隔离） |
 | `plugin-system-extras` | 桌面端不引用 | 同进程插件管理器（依赖先激活、循环依赖报错、激活超时）与插件沙箱（按 `allowedAPIs` / `allowCommands` 拒绝未授权 API、带超时执行）。供插件与宿主同线程的场景（命令行工具、测试、服务端）单独引入，有行为测试 |
 | `fuzzy-match-algorithm` | `damerauLevenshteinDistance` → 拼写建议；`fuzzyScore` → 命令面板排序与高亮 | `RadixTree` 与 Levenshtein 变体由 `autocomplete-service` 内部使用；全包已有行为测试（前缀搜索丢字符、模糊搜索滤掉拼写错误两处缺陷已修复） |
@@ -91,7 +91,7 @@
 |------|------|
 | `components/RichEditor` | 唯一编辑器入口：ProseMirror 文档编辑 + CodeMirror 代码块（`CodeBlockView`）+ 数学节点（`MathNodeView`，展开源码与实时预览）+ 任务项（`ListItemView`）；`.tex` 文件切换为 `LatexEditor`（源码 / 渲染 / 分栏）。`active` 决定是否为插件桥接的活动编辑器；`externalUpdate` 写入外部来的标题 / 正文（事务带标记，不回传 onChange、不进撤销历史） |
 | `components/SplitEditor` | 写作分栏：每栏一个 `PaneEditor`，各自持有文档的托管实例并直接写入（写入按文档 ID 路由，与聚焦栏无关）；同一文档两栏共用实例，模型变化不是本栏写入时作为外部更新同步（非聚焦栏合并 300ms）；微防抖 16ms 的编辑在卸载与落盘时先写入模型。专注模式复用 `PaneEditor` |
-| `lib/markdown` | Markdown 文档模型（schema，文档开头可有 `front_matter` YAML 头部节点）、分词（`markdown-parser` 的 markdown-it 兼容 token 流 + prosemirror-markdown；`$` 公式、`[[ ]]` / `[[笔记#标题|别名]]` / `![[ ]]` 嵌入为语法扩展（`syntax-extensions.ts`、`wiki-link.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并）、按顶层块缓存的序列化、Typora 式实时预览插件、斜杠命令与 `[[` / `[[笔记#` / `[[笔记#^` 补全、块级引用（`block-ref.ts`：`^id` 标记、块摘要与定位；`block-id-plugin.ts` 弱化显示标记）、表格行列命令与快捷键（`table-commands.ts`、`table-keymap.ts`）、HTML 渲染（预览 / 阅读共用，嵌入按深度上限与已访问集合防循环，标题与块输出锚点 id） |
+| `lib/markdown` | Markdown 文档模型（schema，文档开头可有 `front_matter` YAML 头部节点；高亮 / 插入 / 上下标标记，脚注引用 / 行内脚注 / 脚注定义、定义列表、`:::` 容器、缩写定义节点，链接标记带 `linkify`）、文档属性（`front-matter.ts`：读取 tags / aliases、YAML 检查；`front-matter-plugin.ts`：Prism 着色与错误标注）、缩写装饰（`abbreviations.ts`：定义不变时只重扫改动的文本块）、分词（`markdown-parser` 的 markdown-it 兼容 token 流 + prosemirror-markdown；`$` 公式、`[[ ]]` / `[[笔记#标题|别名]]` / `![[ ]]` 嵌入为语法扩展（`syntax-extensions.ts`、`wiki-link.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并）、按顶层块缓存的序列化（`== ++ ^` 只在重新解析与原块不同时才转义）、Typora 式实时预览插件、斜杠命令与 `[[` / `[[笔记#` / `[[笔记#^` 补全、块级引用（`block-ref.ts`：`^id` 标记、块摘要与定位；`block-id-plugin.ts` 弱化显示标记）、表格行列命令与快捷键（`table-commands.ts`、`table-keymap.ts`）、HTML 渲染（预览 / 阅读共用，嵌入按深度上限与已访问集合防循环，标题与块输出锚点 id） |
 | `lib/latex` | LaTeX 文档模型、块分割与块级增量引擎、解析器与渲染器、渲染管线（Worker + 帧调度）、实测高度映射与滚动所有权锁（见第 6 节） |
 | `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax）：TeX 原子间距、显示/行内样式、按内容高度伸缩的分隔符、严格模式校验 |
 | `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`，标签重命名 / 合并 / 颜色）、快速收集与附件保存、PDF / EPUB 正文提取（`document-text.ts`）、网页剪藏（`web-clip.ts`：Readability 提取正文后经 ProseMirror schema 转 Markdown；`clip-images.ts`：图片下载为图片条目并改写为 `![[ ]]`）、条目打开方式（`open-target.ts`：写作文档 → 写作，文档附件 → 阅读，其余 → 知识库）、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、删除条目的唯一入口 `removeKnowledgeItem`（软删除并清理文字识别缓存）、`useKnowledgeBase` |
@@ -101,7 +101,7 @@
 | `lib/entities` | 实体图谱数据（实体节点 + 条目节点 + 实体间关系边）、关系类型显示名、`useEntityGraph` / `useItemEntityRelations` |
 | `lib/links` | 双向链接索引（按条目更新时间增量解析，标题 / 块引用与嵌入计入目标笔记）、反向链接、未解析链接、图谱数据、Barnes–Hut 力导向布局、嵌入解析（`embed.ts`，可只嵌入一个块）、块 ID 写入（`block-id.ts`）、重命名时改写指向旧名的链接（`rename.ts`）、`links` 表同步 |
 | `lib/reading` | 阅读状态（书架、进度、书签、高亮，存于条目 `metadata.reading`；PDF 高亮按页记录片段 `segments`，可跨页）、跨文本节点高亮定位、PDF（pdfjs-dist，按需加载，页面懒渲染 + 文字层 + 书签目录，内容哈希）、扫描页检测与文字识别（`ocr.ts` 结果格式与整理、`ocr-engine.ts` 直接按消息协议驱动 tesseract 的 Worker 脚本，自行持有 Worker 句柄，初始化或识别失败、取消时都会终止 Worker、`ocr-text-layer.ts` 用识别结果生成与 pdf.js 同构的透明文字层）、EPUB（jszip 解析 container / OPF / spine / 目录）、HTML 白名单净化（`sanitize-html.ts`）、排版设置、摘录生成 |
-| `lib/documents` | 文档 CRUD、文件类型（markdown / latex / plain，`keepFileExtension` 改标题时保留扩展名）、`useDocuments`（当前文档从托管模型派生；对外提供 `saveExecutor` 与 `onDocumentSaved`）、托盘最近文档选取（`recent.ts`）；`versions/` 为版本历史（reducer + service + `useVersions`，保留策略读写与全库清理，`getVersionBefore` 供“对比上一版”按需读取） |
+| `lib/documents` | 文档 CRUD、文件类型（markdown / latex / plain，`keepFileExtension` 改标题时保留扩展名）、`useDocuments`（当前文档从托管模型派生，内容加载完成后才获取托管实例；对外提供 `saveExecutor` 与 `onDocumentSaved`）、托盘最近文档选取（`recent.ts`）；`versions/` 为版本历史（reducer + service + `useVersions`，保留策略读写与全库清理，`getVersionBefore` 供“对比上一版”按需读取） |
 | `lib/editor-tabs` | 写作标签页与分栏的纯状态逻辑（打开 / 关闭 / 重开 / 排序 / 跨窗格移动 / 清理已删除文档）与 localStorage 持久化；`hooks/useEditorTabs.ts` 让聚焦窗格的活动标签驱动 `useDocuments` 的当前文档（底栏、版本历史、反链、大纲作用于它），两栏编辑器各自写入各自的文档 |
 | `lib/spellcheck` | 自研 Hunspell 拼写检查：词缀解析与查词（含复合词与 COMPOUNDRULE，`compound-rule.ts`）、建议、分词跳过规则、Worker 协议，ProseMirror 插件只检查可见且有变化的块；`services/spellcheckService.ts` 管理 Worker、词典热切换与个人词典 |
 | `lib/core` | 版本化编辑基础：EditorModel（versionId + contentHash）、拉取式 SaveEngine、`DocumentEditorManager`（按文档 ID 唯一的实例，引用计数 + 缓存；实例自身连接自动保存与保存后标记，`flushAll` 写回全部实例）、`useManagedEditor`（每个持有方各自订阅 / 取消）、撤销重做（`delta/history-manager.ts`，差分直接引用 `@code-reader/diff-algorithm`）、IndexedDB 离线存储、操作日志与同步接口（仅类型） |
@@ -211,7 +211,7 @@ LatexEditor 中的常量（`LatexEditor.tsx`）：
 
 ```
 存储内容（Markdown / 纯文本 / 旧版 HTML）
-   │ parseContent：markdown-parser 分词（CommonMark + 表格 + ~~删除线~~ + 任务列表 + YAML 头部 + $ 公式 / [[ ]] / ![[ ]] 扩展）→ markdown-it 兼容 token → prosemirror-markdown
+   │ parseContent：markdown-parser 分词（CommonMark + 表格 + ~~删除线~~ + 任务列表 + YAML 头部 + 脚注 / 高亮 / 上下标 / 定义列表 / 容器 / 缩写 / 裸网址 + $ 公式 / [[ ]] / ![[ ]] 扩展）→ markdown-it 兼容 token → prosemirror-markdown
    ▼
 ProseMirror 文档（lib/markdown/schema.ts，节点与语法一一对应）
    │ 输入规则（行内标记、公式、双链、任务）、回车转换（``` / $$ / | a | b |）
@@ -220,7 +220,7 @@ ProseMirror 文档（lib/markdown/schema.ts，节点与语法一一对应）
 serializeContent：顶层块为不可变对象 → WeakMap 缓存每块的 Markdown，只重新序列化被改动的块
    │
    ▼
-onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（EditorModel）→ 实例自动保存 → 保存后同步 [[ ]] 到 links 表
+onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（EditorModel）→ 实例自动保存 → 保存后同步 [[ ]] 到 links 表（[[别名]] 按 YAML aliases 解析）、YAML tags 到条目标签
 ```
 
 分块渲染的三层：
@@ -259,6 +259,8 @@ onChange(markdown) → PaneEditor 微防抖 → 该文档的托管实例（Edito
 | 音频摘要偶发失败 | 同一条目的转写与摘要并发执行，摘要时还没有转写文字；重试无延迟 | 同条目任务按优先级串行，`next_attempt_at` 延迟重试 |
 | 在编辑器里按 ⌘B 加粗会同时收起侧边栏 | App 的全局快捷键不区分事件是否已被编辑器处理 | 全局处理器跳过 `defaultPrevented` 的事件 |
 | `x^12`、`\frac12` 渲染错误；公式中的 `]` 截断后续内容 | 自研解析器非花括号参数读取整串数字；顶层表达式遇到 `]` 即停止 | 解析器重写：统一的参数读取（单记号）、表达式终止条件与表格解析，符号表唯一来源 `extended-symbols.ts`，覆盖测试见 `lib/math/__tests__` |
+| 打开第二篇文档时显示为空白的“无标题”（知识库有 3 篇及以上笔记时必现） | `selectDocument` 先发出 `EDITOR_LOAD_START`（只有 id、没有内容），编辑会话的 `useManagedEditor` 随即以空内容获取托管实例；编辑窗格发现“已有托管实例”就把它当作正在编辑的内容显示，之后 `switchDocument` 也沿用了这个空实例。由真实应用的端到端测试发现，与内容大小无关 | 文档内容加载完成前不获取托管实例（`useDocuments` 传给 `useManagedEditor` 的 `documentId` 在加载期间为 null）；回归测试 `lib/documents/__tests__/useDocuments.test.tsx` |
+| 搜索摘要中出现 `rk>` 一类残片 | `search-service` 的摘要把每个命中词的位置分别用 `<mark>` 包裹、从后往前插入；命中词重叠时（如 `ab` 与 `abc`、`2` 与 `e2e`），后插入的标签切进了先插入的标签 | 先合并重叠或相邻的命中，再插入标签（中文逐字命中也合并为一段高亮） |
 
 ### 性能数据
 

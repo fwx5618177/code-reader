@@ -12,21 +12,24 @@ Markdown 解析已经拆成独立子包 `@code-reader/markdown-parser`，第 5 �
 | 算法 | 块级按结构整段消费，行内递归匹配 | 块级为规范的“打开的块”逐行算法，行内为分隔符栈和方括号栈，与 commonmark.js 相同 |
 | 链接引用定义 / 字符引用 | 不支持 / 不解码 | 全部支持，内置 HTML5 命名字符引用表（2125 个） |
 | HTML 渲染器 | 无 | `renderHtml`，输出格式与 commonmark.js 一致 |
-| 88 万字符 | 解析 28ms | 解析 27ms、生成 markdown-it 兼容 token 7ms（markdown-it 为 25ms）。编辑器完整分词（含扩展与后处理）93 万字符 40ms，markdown-it 26ms；常见笔记在 5ms 以内。规范用例与中文笔记混合的 91 万字符：语法树 83ms、语法树加 token 126ms，markdown-it 74ms（优化前分别为 121ms 与 172ms） |
+| 88 万字符 | 解析 28ms | 解析 27ms、生成 markdown-it 兼容 token 7ms（markdown-it 为 25ms）。编辑器完整分词（含扩展与后处理）93 万字符 40ms，markdown-it 26ms；常见笔记在 5ms 以内。规范用例与中文笔记混合的 91 万字符：语法树约 79ms、语法树加 token 约 110ms，markdown-it 约 76ms（最初分别为 121ms 与 172ms；最近一轮剖析去掉了行内位置计算的临时对象、整篇行数组与逐字符找换行） |
 | 健壮性 | 8 例死循环 | 随机输入 4 万次（含全部扩展语法）无异常，单次不超过 50ms |
-| GFM | 以开关硬编码 | 表格、任务列表项、删除线、脚注（可单独开关）、扩展自动链接（`linkify`，规范用例全部通过）；智能标点、`hardBreaks`、`maxNestingDepth`、仅 `~~` 删除线均已实现 |
-| markdown-it 生态插件 | 无 | 脚注（按第一次引用编号、行内脚注、文末回链）、定义列表、自定义容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换：与 markdown-it-footnote / deflist / container / mark / ins / sub / sup / abbr / front-matter 及 markdown-it 的 replacements 逐 token 一致（`markdown-it-plugins.test.ts`）；`{…}` 属性支持 markdown-it-attrs 的常用写法 |
+| GFM | 以开关硬编码 | 表格、任务列表项、删除线、脚注（可单独开关）、扩展自动链接（`linkify`，规范用例全部通过；`linkifyBareDomains` 按 linkify-it 的顶级域名表识别裸域名）；智能标点、`hardBreaks`、`maxNestingDepth`、仅 `~~` 删除线均已实现 |
+| markdown-it 生态插件 | 无 | 脚注（按第一次引用编号、行内脚注、文末回链）、定义列表、自定义容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换：与 markdown-it-footnote / deflist / container / mark / ins / sub / sup / abbr / front-matter 及 markdown-it 的 replacements 逐 token 一致（`markdown-it-plugins.test.ts`）；`{…}` 属性的位置规则（标题、段落、列表项、列表、表格、单元格、围栏代码块、引用、分隔线）与 markdown-it-attrs 逐 token 一致 |
+| 链接规范化 | 只做百分号编码 | 与 markdown-it 的 normalizeLink / normalizeLinkText 相同：IDN 主机名转 `xn--`（零依赖 Punycode，与 punycode.js 3000 组随机输入一致），自动链接文字还原 `xn--` 与百分号编码 |
 | HTML 渲染选项 | 无 | 默认拒绝不安全链接（与 markdown-it 的 validateLink 相同），`highlight`、`langPrefix`、`xhtmlOut`、扩展节点的自定义渲染 |
 | 扩展接口 | 无 | `inlineExtensions`（触发字符 + match）、`blockExtensions`（可跨行的叶子块，可在引用与列表中，可选能否打断段落） |
 | 位置信息 | 行内节点相对段落文字 | 块级与行内都是源码中的绝对位置（引用 `>`、列表缩进等前缀已计入），表格的行与单元格各有位置（含 `\|` 的单元格也准确）；markdown-it 只有块级行号 |
 | 解析结果 | 只有语法树 | 另外提供链接引用定义（`references`）与缩写定义（`abbreviations`） |
-| 编辑器对接 | 无 | `MarkdownItCompatTokenizer` 输出与 markdown-it 相同结构的 token，652 个规范用例逐个 token 对照全部一致（`__tests__/markdown-it-tokens.test.ts`，下限 652） |
+| 编辑器对接 | 无 | `MarkdownItCompatTokenizer` 输出与 markdown-it 相同结构的 token，652 个规范用例逐个 token 对照全部一致（`__tests__/markdown-it-tokens.test.ts`，下限 652）；`preserveSource` 保留脚注定义与缩写定义的原位（编辑器保存不丢内容）；`env.key` 按文档缓存增量解析（大纲、链接同步） |
 
 阶段状态：
 - **阶段 2 扩展接口**：已完成。桌面端的公式 `$…$` / `$$…$$`、双向链接 `[[…]]`、块级嵌入 `![[…]]` 都改写为扩展（`desktop/src/render/lib/markdown/syntax-extensions.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并。
 - **阶段 4 编辑器集成**：已完成，编辑器已替换。走的是“输出 markdown-it 兼容 token 流、复用 prosemirror-markdown”这条路，链接改写、块 ID、标题 / 链接提取等用法不变。替换前对照了旧管线：仓库文档、用户笔记与规范用例共 689 篇，688 篇 token 完全一致，另 1 篇只多出公式定界符元数据；桌面端 1326 个测试与真实应用里的渲染、保存状态都已验证。desktop 不再直接依赖 markdown-it（prosemirror-markdown 自身仍引入它，用于其默认解析器）。
 - **阶段 3 真正的增量**：已完成。`IncrementalCommonMarkParser` 编辑后只重新解析受影响的顶层块，其余块平移位置后复用；12 万次随机编辑与整篇解析逐节点相同，约 87% 的编辑走增量路径。编辑器输入时不重新解析 Markdown（ProseMirror 持有文档），增量解析供源码模式、外部工具等按文本工作的场景使用。
-- **编辑器中的 YAML 头部**：文档开头的 `---…---` 以前会被解析成分割线加二级标题，保存时被改写。现在是独立的“文档属性”块，往返不变（已在真实应用中验证）。
+- **编辑器中的 YAML 头部**：文档开头的 `---…---` 以前会被解析成分割线加二级标题，保存时被改写。现在是独立的“文档属性”块，往返不变；YAML 按语法着色并标出写错的行，`tags` 同步为条目标签，`aliases` 参与 `[[ ]]` 解析（已在真实应用中验证）。
+- **编辑器接入扩展语法**：脚注、高亮 / 插入 / 上下标、定义列表、`:::` 提示块、缩写、裸网址都有对应节点或标记、输入规则与斜杠命令，往返不变；在真实应用中验证了显示、输入、保存逐字不变与阅读视图的样式。
+- **增量解析接入实际流程**：写作大纲与保存后的链接同步按文档 id 走增量解析。真实应用中 1500 个小节的文档逐键输入，每次按键含渲染往返中位数约 26ms，大纲与内容一致。
 
 下文保留调研时的原始结论。
 

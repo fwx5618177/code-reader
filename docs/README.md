@@ -38,7 +38,7 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `syntax-parser` | 零依赖的手写 LaTeX 解析器与 LaTeX 语言配置（desktop 用于语法诊断、折叠、大纲，以及源码编辑器的注释、自动配对与环境缩进） |
 | `syntax-parser-extras` | desktop 未使用的语言注册表与高亮引擎、Lezer 增量解析封装、AST 缓存、正则 LaTeX 块扫描器（按需引入） |
 | `format-parser` | LaTeX 解析（交叉引用索引、文档元数据）与按内容识别格式（desktop 用其做交叉引用检查与无扩展名文档的格式判断） |
-| `markdown-parser` | 零依赖的 CommonMark / GFM 解析器（规范 100% 通过、语法扩展、源码绝对位置、markdown-it 兼容 token 流）、HTML 渲染器与增量解析；编辑器的 Markdown 分词已由它完成 |
+| `markdown-parser` | 零依赖的 CommonMark / GFM 解析器（规范 100% 通过、markdown-it 生态常用语法与 `{…}` 属性、与 markdown-it 相同的链接规范化、语法扩展、源码绝对位置、markdown-it 兼容 token 流与保留源码模式）、HTML 渲染器与增量解析；编辑器的 Markdown 分词、大纲与链接同步都由它完成 |
 | `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）与 CodeMirror 适配器（desktop 用于代码块片段补全与 Markdown 编辑器的 Emoji 补全） |
 | `autocomplete-service-extras` | desktop 未使用的 ProseMirror 补全适配器与补全预设（按需引入） |
 | `fuzzy-match-algorithm` | 补全与拼写建议的核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
