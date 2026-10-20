@@ -29,7 +29,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rimraf dist && tsc",
     "dev": "tsc --watch",
     "clean": "rimraf dist",
     "test": "vitest run",

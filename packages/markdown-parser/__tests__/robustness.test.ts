@@ -36,7 +36,7 @@ describe('Markdown 解析健壮性', () => {
     expect(paragraph?.type).toBe(BlockType.Paragraph);
   });
 
-  it('随机输入 2 万次（含全部扩展语法）：不抛错，单次不超过 50ms', () => {
+  it('随机输入 2 万次（含全部扩展语法）：不抛错，没有稳定超过 50ms 的输入', () => {
     let seed = 1;
     const random = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
     const pieces = ['*', '_', '[', ']', '(', ')', '`', '<', '>', '\n', ' ', '-', '#', '|', '!', '\\', '&amp;', 'a', '1.', '    ', '~', '"', "'", '\t', ':', '[^1]', '=', '+', '^', '{', '}', '{.c}', 'www.a.b', 'a@b.c', 'x.com/p', '中文.cn', '*[a]: b', ':::', ': ', '---'];
@@ -55,13 +55,18 @@ describe('Markdown 解析健壮性', () => {
       frontMatter: true,
       attributes: true,
     };
-    let slowest = 0;
-    for (let i = 0; i < 20000; i++) {
-      const text = Array.from({ length: 1 + Math.floor(random() * 60) }, () => pieces[Math.floor(random() * pieces.length)]).join('');
+    const LIMIT = 50;
+    const run = (text: string, i: number) => {
       const started = performance.now();
       renderHtml(parseCommonMark(text, i % 2 === 0 ? options : { smartPunctuation: true }).document);
-      slowest = Math.max(slowest, performance.now() - started);
+      return performance.now() - started;
+    };
+    const slow: string[] = [];
+    for (let i = 0; i < 20000; i++) {
+      const text = Array.from({ length: 1 + Math.floor(random() * 60) }, () => pieces[Math.floor(random() * pieces.length)]).join('');
+      // 超时的输入重测 5 次取最快：病态输入每次都慢，并行跑测试时的调度与 GC 停顿不会每次出现
+      if (run(text, i) >= LIMIT && Math.min(...Array.from({ length: 5 }, () => run(text, i))) >= LIMIT) slow.push(text);
     }
-    expect(slowest).toBeLessThan(50);
+    expect(slow).toEqual([]);
   });
 });

@@ -58,6 +58,8 @@
 | `autocomplete-service-extras` | ProseMirror 补全插件（`createAutocompletePlugin` / `EditorAutocomplete`：多提供者、触发符或单词触发（`triggersAnywhere` 让单字符触发符紧跟在其他字符后也能触发）、面板随插件状态渲染、结构化插入、按提供者的结果上限；手动打开 Ctrl+空格 / Option+`）→ `RichEditor` 的斜杠菜单、`[[` 双链与别名、Emoji、LaTeX 命令补全（业务提供者在 `lib/markdown/completion.ts`、`lib/editor/latex-completion.ts`）；文本框补全 `TextFieldAutocomplete` → 公式节点的源码框；`filterAndSortItems` → .tex 源码编辑器的 CodeMirror 补全。插件与文本框共用触发、收集排序（`editor-completion.ts`）与面板（`completion-panel.ts`） | `ProseMirrorAdapter`（把整个补全服务当作一个提供者接到同一个插件上，按单词查询）与预设工厂（全部内置提供者的服务、Markdown / 代码编辑器的 CodeMirror 扩展）桌面端不用。此前桌面端自己的补全插件与适配器是两套重复的插件状态 / 面板 / 键盘实现，已合并。有行为测试 |
 | `text-buffer` | `createAutoBuffer` → LaTeX 文档模型（`lib/latex/latex-document.ts`，此前为测 UTF-8 字节数把整篇源码复制进 `Blob` 再选类型，现在按 `string.length` 选择） | `GapBuffer`、`recommendBufferType`、性能档案：按使用模式选型的接口，保持导出。三种实现有与字符串逐步对照的随机编辑测试 |
 
+**子包构建约定**：desktop 通过 `dist` 引用子包（`main` / `types` 指向 `dist`），`pnpm build:libs` 先构建全部子包。每个子包的 `build` 都是 `rimraf dist && tsc…`：先清空再编译，源文件改名或删除后不会在 `dist` 里留下旧的 `.js` / `.d.ts`。子包之间没有项目引用，因此不开 `composite` / `tsc --build`，不产生 `tsbuildinfo`（增量构建记录在清空 `dist` 后会让 `tsc` 误判为最新而不输出）。新增子包按同样的写法。
+
 ## 2. 主进程
 
 | 模块 | 文件 | 职责 |
@@ -283,7 +285,7 @@ LaTeX 命令补全有三处入口，共用 `lib/editor/latex-completion.ts` 的�
 | 公式源码框光标在开头且第一个字符是换行时，Ctrl+空格接受补全抛异常 | `lastIndexOf('\n', -1)` 会检查下标 0，行起点被算成 1 | 光标在开头时行起点为 0 |
 | 管理标签里重命名后按 Esc 关不掉对话框（整理建议对话框接受一条后同样） | Esc 绑在对话框元素上，重命名框（或被处理的建议行）卸载后焦点回到 body，事件到不了对话框。由 E2E 发现 | 对话框打开期间在 document 上监听 Esc；重命名框自己的 Esc 已阻止冒泡，仍只取消编辑 |
 | 详情面板里加了标签马上删另一个，刚加的标签也没了 | 保存（写库、写回 YAML、重新读取条目）完成前条目数据仍是旧的，删除按旧列表计算。由 E2E 间歇失败发现 | 修改立即显示，保存按顺序排队，后一次基于前一次的结果；最后一次保存结束后以条目数据为准 |
-| `markdown-parser` 源文件改名后，`dist` 里仍留着旧名的 `.js` / `.d.ts` | 子包的 `build` 只运行 `tsc`，它只写不删 | `markdown-parser` 的 `build` 改为 `rimraf dist && tsc` |
+| 子包源文件改名后，`dist` 里仍留着旧名的 `.js` / `.d.ts` | 子包的 `build` 只运行 `tsc`，它只写不删；`text-buffer` 用 `tsc --build`，清空 `dist` 后还会因 `tsbuildinfo` 判断为最新而不输出 | 全部子包统一为 `rimraf dist && tsc…`，去掉没有项目引用却开着的 `composite`（见第 1 节“子包构建约定”） |
 
 ### 性能数据
 
