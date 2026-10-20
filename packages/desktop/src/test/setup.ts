@@ -9,6 +9,14 @@ import { beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 // Mock Browser APIs
 // ================================
 
+// jsdom 没有排版引擎，不提供 Range 的几何接口。CodeMirror / ProseMirror 在动画帧里测量文字位置，
+// 缺少这些接口时在计时器回调中抛错：在较慢的机器上（CI），编辑器销毁前动画帧就会触发。
+// 与没有排版结果的浏览器一样返回空的矩形（node 环境的测试文件没有 DOM，跳过）
+if (typeof Range !== 'undefined') {
+  Range.prototype.getClientRects ??= () => Object.assign([], { item: () => null }) as unknown as DOMRectList;
+  Range.prototype.getBoundingClientRect ??= () => new DOMRect();
+}
+
 // IndexedDB Mock
 const mockStorage = new Map<string, Map<string, unknown>>();
 

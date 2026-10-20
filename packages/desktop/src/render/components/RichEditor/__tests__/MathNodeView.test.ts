@@ -8,9 +8,6 @@ import { EditorView } from 'prosemirror-view';
 import { markdownSchema } from '../../../lib/markdown';
 import { createMathInlineView } from '../MathNodeView';
 
-Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
-Range.prototype.getBoundingClientRect = () => new DOMRect();
-
 function mountFormula(latex: string) {
   const host = document.body.appendChild(document.createElement('div'));
   const { doc, paragraph, math_inline } = markdownSchema.nodes;
