@@ -6,7 +6,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CTRL, META, launch, reloadWithData, sleep, waitFor } from './cdp.mjs';
+import { ALT, CTRL, META, launch, reloadWithData, sleep, waitFor } from './cdp.mjs';
 
 const ARTIFACTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'test-results', 'e2e');
 /** 自动保存的防抖加写入时间 */
@@ -237,6 +237,81 @@ const scenarios = [
     },
   },
   {
+    name: '补全：Option+` 与 Ctrl+空格手动打开补全',
+    async run(app) {
+      await switchMode(app, '写作');
+      await quickOpen(app, '端到端笔记');
+      await caretToEnd(app);
+      // 另起一段：上一个场景留下的 $x+\alpha 会与新的 $ 配成一对，让光标落在公式外。
+      // 光标放到 \alpha 末尾不会自动弹出补全，这里的回车是换行
+      await sleep(300);
+      if (await app.exists('.pm-autocomplete-panel')) throw new Error('只移动光标不应弹出补全');
+      await app.press('Enter');
+      await app.type('$y+\\', { perChar: true });
+      const panelOpen = () => app.exists('.pm-autocomplete-panel');
+      // 先等输入 \ 自动弹出的面板（如果有）出现再关掉，确保下面是快捷键打开的
+      await sleep(300);
+      await app.press('Escape');
+      await waitFor(async () => !(await panelOpen()), { message: 'Esc 没有关闭面板' });
+
+      // macOS 上 Option+` 是死键：key 为 Dead，按物理键位（code）识别
+      await app.press('Dead', { code: 'Backquote', modifiers: ALT });
+      await waitFor(panelOpen, { message: 'Option+` 没有打开补全' });
+      const latex = await app.call(() => [...document.querySelectorAll('.pm-autocomplete-label')].some((el) => el.textContent.startsWith('\\')));
+      if (!latex) throw new Error('Option+` 打开的不是 LaTeX 命令补全');
+      await app.press('Escape');
+      await waitFor(async () => !(await panelOpen()));
+
+      await app.press(' ', { code: 'Space', modifiers: CTRL });
+      await waitFor(panelOpen, { message: 'Ctrl+空格没有打开补全' });
+      await app.press('Escape');
+      const text = await app.text('.ProseMirror');
+      if (!text.endsWith('$y+\\')) throw new Error(`快捷键不应插入字符，正文结尾为：${text.slice(-20)}`);
+    },
+  },
+  {
+    name: '补全：光标在编辑区底部时面板翻到上方；方向键只滚动面板，编辑区不动',
+    async run(app) {
+      await switchMode(app, '写作');
+      await quickOpen(app, '端到端笔记');
+      await caretToEnd(app);
+      for (let i = 0; i < 40; i++) await app.press('Enter');
+      await app.type('/', { perChar: true });
+      await waitFor(() => app.exists('.pm-autocomplete-panel'), { message: '没有出现斜杠命令' });
+      await sleep(200);
+      const layout = () =>
+        app.call(() => {
+          const panel = document.querySelector('.pm-autocomplete-panel');
+          const caret = window.getSelection().getRangeAt(0).getBoundingClientRect();
+          let scroller = document.querySelector('[class*=splitEditor] .ProseMirror').parentElement;
+          while (scroller && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+          const rect = panel.getBoundingClientRect();
+          const bounds = scroller.getBoundingClientRect();
+          return {
+            panelTop: rect.top,
+            panelBottom: rect.bottom,
+            caretTop: caret.top,
+            boundsTop: bounds.top,
+            boundsBottom: Math.min(bounds.bottom, window.innerHeight),
+            editorScroll: scroller.scrollTop,
+            panelScroll: panel.scrollTop,
+            overflowing: panel.scrollHeight > panel.clientHeight,
+          };
+        });
+      const before = await layout();
+      if (before.panelBottom > before.caretTop + 1 || before.panelTop < before.boundsTop - 1) {
+        throw new Error(`面板应在光标上方且不超出编辑区：${JSON.stringify(before)}`);
+      }
+      for (let i = 0; i < 9; i++) await app.press('ArrowDown');
+      await sleep(200);
+      const after = await layout();
+      if (after.editorScroll !== before.editorScroll) throw new Error(`编辑区不应滚动：${before.editorScroll} → ${after.editorScroll}`);
+      if (after.overflowing && after.panelScroll === 0) throw new Error('选中最后一项时面板应滚动到它');
+      await app.press('Escape');
+      await app.press('Backspace');
+    },
+  },
+  {
     name: '文档属性：跨多行的 tags 不误报括号未闭合，保存后同步为条目标签',
     async run(app) {
       await switchMode(app, '写作');
@@ -305,10 +380,16 @@ const scenarios = [
     name: '标签：详情面板里添加、删除标签，笔记 YAML 同步改写',
     async run(app) {
       await switchMode(app, '知识库');
-      await app.call(() => {
-        const item = [...document.querySelectorAll('[role=listitem]')].find((el) => el.textContent.includes('详情标签笔记'));
-        item.querySelector('[data-selected]').click();
-      });
+      // 合并标签后知识库会重新加载，列表可能稍晚才渲染出该条目
+      await waitFor(
+        () =>
+          app.call(() => {
+            const item = [...document.querySelectorAll('[role=listitem]')].find((el) => el.textContent.includes('详情标签笔记'));
+            item?.querySelector('[data-selected]').click();
+            return Boolean(item);
+          }),
+        { message: '列表里没有详情标签笔记' }
+      );
       await waitFor(() => app.exists('aside[aria-label="条目详情"] input[aria-label="添加标签"]'), { message: '详情面板没有打开' });
       await app.call(() => document.querySelector('aside[aria-label="条目详情"] input[aria-label="添加标签"]').focus());
       await app.type('新增');
