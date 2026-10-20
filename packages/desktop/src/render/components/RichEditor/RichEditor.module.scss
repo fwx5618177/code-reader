@@ -652,6 +652,14 @@ $page-rule-rows: repeating-linear-gradient(
 // ================================
 
 :global {
+  // NodeView 用 hidden 属性切换渲染 / 编辑容器；下面各容器的 display 会压过浏览器对 [hidden] 的默认样式，这里保证 hidden 生效
+  .math-node-inline,
+  .math-node-block {
+    [hidden] {
+      display: none !important;
+    }
+  }
+
   // 行内数学公式节点
   // 修复：移除内部边框，使用整行宽度
   .math-node-inline {
