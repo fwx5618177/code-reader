@@ -37,7 +37,8 @@ export function isDirectMediaUrl(src: string): boolean {
 export function localMediaTarget(src: string): string {
   let path = src.trim();
   try {
-    path = decodeURI(path);
+    // 按组件解码：%26、%23、%3F 等保留字符也要还原为文件名里的 &、#、?
+    path = decodeURIComponent(path);
   } catch {
     // 保留原样
   }
