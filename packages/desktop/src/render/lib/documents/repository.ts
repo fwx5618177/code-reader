@@ -55,20 +55,6 @@ class DocumentRepository {
   }
 
   /**
-   * Check if a document with the given title exists
-   */
-  async existsByTitle(title: string): Promise<boolean> {
-    const row = await databaseService.get<{ id: string }>(
-      `SELECT id FROM knowledge_items
-       WHERE title = ? AND type = ? AND is_deleted = 0
-       LIMIT 1`,
-      [title, DOCUMENT_TYPE]
-    );
-
-    return row !== undefined;
-  }
-
-  /**
    * Create a new document
    */
   async create(input: CreateDocumentInput): Promise<Document> {

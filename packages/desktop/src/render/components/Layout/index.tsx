@@ -30,6 +30,8 @@ interface LayoutProps {
   onOpenSearch?: () => void;
   /** 打开设置回调 */
   onOpenSettings?: () => void;
+  /** 打开使用指南 */
+  onOpenGuide?: () => void;
   /** 进入专注模式回调 */
   onEnterFocusMode?: () => void;
   /** 是否处于专注模式 */
@@ -59,6 +61,7 @@ const Layout: React.FC<LayoutProps> = ({
   onModeChange,
   onOpenSearch,
   onOpenSettings,
+  onOpenGuide,
   onEnterFocusMode,
   isInFocusMode = false,
   activePanel,
@@ -111,6 +114,7 @@ const Layout: React.FC<LayoutProps> = ({
           onStartRecording={onStartRecording}
           currentMode={currentMode}
           onOpenSettings={onOpenSettings}
+          onOpenGuide={onOpenGuide}
           onOpenSearch={onOpenSearch}
         />
 

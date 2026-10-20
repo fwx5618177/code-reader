@@ -93,7 +93,7 @@
 |------|------|
 | `components/RichEditor` | 唯一编辑器入口：ProseMirror 文档编辑 + CodeMirror 代码块（`CodeBlockView`）+ 数学节点（`MathNodeView`，展开源码与实时预览）+ 任务项（`ListItemView`）+ 脚注引用（显示编号）；`.tex` 文件切换为 `LatexEditor`（源码 / 渲染 / 分栏）。`mode`（编辑 / 预览 / 分屏）传入时由上层控制（写作区底栏与 ⌘/、⌘⇧/），工具栏不再显示模式按钮。`active` 决定是否为插件桥接的活动编辑器；`externalUpdate` 写入外部来的标题 / 正文（事务带标记，不回传 onChange、不进撤销历史） |
 | `components/SplitEditor` | 写作分栏：每栏一个 `PaneEditor`，各自持有文档的托管实例并直接写入（写入按文档 ID 路由，与聚焦栏无关）；同一文档两栏共用实例，模型变化不是本栏写入时作为外部更新同步（非聚焦栏合并 300ms）；微防抖 16ms 的编辑在卸载与落盘时先写入模型。专注模式复用 `PaneEditor` |
-| `lib/markdown` | Markdown 文档模型（schema，文档开头可有 `front_matter` YAML 头部节点；高亮 / 插入 / 上下标标记，脚注引用 / 行内脚注 / 脚注定义、定义列表、`:::` 容器、缩写定义节点，链接标记带 `linkify`）、文档属性（`front-matter.ts`：读取 tags / aliases、YAML 检查；`front-matter-plugin.ts`：Prism 着色与错误标注）、缩写装饰（`abbreviations.ts`：定义不变时只重扫改动的文本块）、脚注编号（`footnotes.ts`：按第一次引用的顺序，编辑器装饰与预览共用 `numberFootnotes`；只在改动涉及引用时重新编号）、分词（`markdown-parser` 的 token 流 + `TokenDocumentBuilder`；`$` 公式、`[[ ]]` / `[[笔记#标题|别名]]` / `![[ ]]` 嵌入为语法扩展（`syntax-extensions.ts`、`wiki-link.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并）、按顶层块缓存的序列化（`== ++ ^` 只在重新解析与原块不同时才转义）、Typora 式实时预览插件、斜杠命令与 `[[` / `[[笔记#` / `[[笔记#^` 补全、块级引用（`block-ref.ts`：`^id` 标记、块摘要与定位；`block-id-plugin.ts` 弱化显示标记）、表格行列命令与快捷键（`table-commands.ts`、`table-keymap.ts`）、HTML 渲染（预览 / 阅读共用，嵌入按深度上限与已访问集合防循环，标题与块输出锚点 id） |
+| `lib/markdown` | Markdown 文档模型（schema，文档开头可有 `front_matter` YAML 头部节点；高亮 / 插入 / 上下标标记，脚注引用 / 行内脚注 / 脚注定义、定义列表、`:::` 容器、缩写定义节点，链接标记带 `linkify`）、文档属性（`front-matter.ts`：读取 tags / aliases、YAML 检查；`front-matter-plugin.ts`：Prism 着色与错误标注）、缩写装饰（`abbreviations.ts`：定义不变时只重扫改动的文本块）、脚注编号（`footnotes.ts`：按第一次引用的顺序，编辑器装饰与预览共用 `numberFootnotes`；只在改动涉及引用时重新编号）、分词（`markdown-parser` 的 token 流 + `TokenDocumentBuilder`；`$` 公式、`[[ ]]` / `[[笔记#标题\|别名]]` / `![[ ]]` 嵌入为语法扩展（`syntax-extensions.ts`、`wiki-link.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并）、按顶层块缓存的序列化（`== ++ ^` 只在重新解析与原块不同时才转义）、Typora 式实时预览插件、斜杠命令与 `[[` / `[[笔记#` / `[[笔记#^` 补全、块级引用（`block-ref.ts`：`^id` 标记、块摘要与定位；`block-id-plugin.ts` 弱化显示标记）、表格行列命令与快捷键（`table-commands.ts`、`table-keymap.ts`）、HTML 渲染（预览 / 阅读共用，嵌入按深度上限与已访问集合防循环，标题与块输出锚点 id） |
 | `lib/latex` | LaTeX 文档模型、块分割与块级增量引擎、解析器与渲染器、渲染管线（Worker + 帧调度）、实测高度映射与滚动所有权锁（见第 6 节） |
 | `lib/math` | 自研数学公式解析与渲染（不依赖 KaTeX / MathJax）：TeX 原子间距、显示/行内样式、按内容高度伸缩的分隔符、严格模式校验 |
 | `lib/knowledge` | 知识库仓储（SQLite `knowledge_items` / `tags` / `item_tags`，标签重命名 / 合并 / 颜色；`patchMetadata` 用 `json_patch` 原子合并 metadata）、条目标签与 YAML 标签的双向同步（`front-matter-tags.ts`：保存后并入条目、上次同步的 YAML 标签记在 `metadata.yamlTags`；界面改标签后改写写了 tags 键的笔记）、快速收集与附件保存、PDF / EPUB 正文提取（`document-text.ts`）、网页剪藏（`web-clip.ts`：Readability 提取正文后经 ProseMirror schema 转 Markdown；`clip-images.ts`：图片下载为图片条目并改写为 `![[ ]]`）、条目打开方式（`open-target.ts`：写作文档 → 写作，文档附件 → 阅读，其余 → 知识库）、提交 Agent 处理、智能文件夹规则、旧版 JSON 数据迁移、删除条目的唯一入口 `removeKnowledgeItem`（软删除并清理文字识别缓存）、`useKnowledgeBase` |
@@ -147,16 +147,17 @@
 | 区域 | 职责 |
 |------|------|
 | TitleBar | 窗口控制、知识库选择器（`WorkspaceSelector`：切换 / 新建 / 编辑 / 删除）、模式标签（knowledge / writing / reading）、搜索入口、进入专注模式 |
-| Ribbon | 左侧图标栏：快速操作、随当前模式变化的侧栏面板按钮（`MODE_SIDEBAR_PANELS`，受控，每个模式各自记住活动面板）、设置入口 |
+| Ribbon | 左侧图标栏：快速操作、随当前模式变化的侧栏面板按钮（`MODE_SIDEBAR_PANELS`，受控，每个模式各自记住活动面板）、使用指南与设置入口 |
 | Sidebar | 当前面板（`components/SidebarPanels`）：知识库为文件夹（`VirtualFolders`）/ 搜索 / 标签云 / 录音 / 图谱 / 日历 / 最近，写作为大纲 / 文件（WritingSidebar）/ 参考（反链）/ 标签 / 最近，阅读为章节 / 书签（由阅读视图渲染到挂载点）/ 书库（`ReadingShelf`）/ 搜索 / 最近阅读 |
 | MainContent | 知识库 `KnowledgeWorkspace`（条目 / 图谱（笔记链接 / 实体两层）/ 问答 + 详情面板 + 标签管理 + 待审阅归类）；写作 `EditorTabs` + `SplitEditor`（每栏一个 `PaneEditor`）+ `BacklinksPanel`，外层 `PageSurface` 应用页面设置；阅读 `ReadingView`（文章、PDF、EPUB） |
 | EditorFooter | 字数、保存状态、视图模式（编辑 / 预览 / 分屏，LaTeX 文档不显示）、反向链接面板开关、版本历史按钮、页面设置浮层 |
+| 帮助 | `WelcomeGuide`“从这里开始”卡片（第一次启动显示一次，之后从写作侧栏 ?、菜单栏 帮助 → 从这里开始 打开）；`UserGuide` 使用指南（Ribbon、F1、菜单栏 帮助 → 使用指南）：按需加载随应用打包的 `docs/USER_GUIDE.md`，用写作预览的渲染器与排版（`markdown-preview` mixin）显示，章节目录可过滤，站内锚点按 GitHub 规则换算。菜单栏由主进程 `app-menu.ts` 设置：沿用标准角色，只替换帮助菜单 |
 | AgentActivity | 右下角浮窗，任意模式下显示 Agent 处理进度与归类建议记录（「去审阅」） |
 | PluginHost | 包裹整个应用：初始化插件服务、注册插件界面管理器、授权对话框（`PermissionDialog`）、⌘⇧P 命令面板（显示快捷键）、插件快捷键分发；状态栏项由 Layout 中的 `PluginStatusBar` 显示，标签栏按钮由 `EditorTabs` 中的 `PluginToolbar` 显示，侧栏「插件视图」为 `PluginViews`（Ribbon 只在有插件视图时显示按钮），斜杠菜单经 `SlashCommandProvider` 的外部命令接入 |
 
 App 层的跨模式导航：条目按 `lib/knowledge/open-target.ts` 决定进入的模式（写作文档进写作、文档附件进阅读、其余进知识库），`openWikiTarget` 解析 `[[ ]]`（含标题 / 块片段，目标不存在时新建文档；阅读模式下目标可在阅读视图呈现时留在阅读模式并由阅读视图定位）。编辑器已处理的按键（`defaultPrevented`）不再触发全局快捷键。
 
-快捷键（`App.tsx`）：⌘N 快速输入（文本）、⌘⇧R 快速输入（录音）、⌘P 搜索（写作文档 + 知识条目）、⌘, 设置、⌘B 侧边栏、⌘S 保存、⌘/ 写作区编辑 ↔ 预览、⌘⇧/ 分屏、⌘1/2/3 切换模式、⌘⇧F 专注模式、Esc 退出专注、关闭页面设置或弹窗。写作标签页（`useEditorTabs.ts`）：⌘W 关闭、⌘⇧T 重开、⌃Tab / ⌃⇧Tab 切换、⌘\ 分栏。插件命令面板（`PluginHost`）：⌘⇧P；插件快捷键来自 manifest，与以上快捷键冲突的不生效（`lib/plugins/keybindings.ts` 的 `RESERVED_KEYBINDINGS`）。LaTeX 源码：⌘⇧M 诊断面板、F8 下一处诊断、⌘⌥[ / ⌘⌥] 折叠 / 展开。
+快捷键（`App.tsx`）：⌘N 快速输入（文本）、⌘⇧R 快速输入（录音）、⌘P 搜索（写作文档 + 知识条目）、⌘, 设置、⌘B 侧边栏、⌘S 保存、⌘/ 写作区编辑 ↔ 预览、⌘⇧/ 分屏、⌘1/2/3 切换模式、⌘⇧F 专注模式、F1 使用指南、Esc 退出专注、关闭页面设置或弹窗。写作标签页（`useEditorTabs.ts`）：⌘W 关闭、⌘⇧T 重开、⌃Tab / ⌃⇧Tab 切换、⌘\ 分栏。插件命令面板（`PluginHost`）：⌘⇧P；插件快捷键来自 manifest，与以上快捷键冲突的不生效（`lib/plugins/keybindings.ts` 的 `RESERVED_KEYBINDINGS`）。LaTeX 源码：⌘⇧M 诊断面板、F8 下一处诊断、⌘⌥[ / ⌘⌥] 折叠 / 展开。
 
 样式约定（详见 `packages/desktop/src/render/styles/DESIGN_SYSTEM.md`）：
 
@@ -303,4 +304,4 @@ pnpm --filter @code-reader/fuzzy-match-algorithm benchmark
 
 ### 端到端测试
 
-`packages/desktop/e2e`（`pnpm --filter @code-reader/desktop e2e`）在构建好的应用上执行真实操作：临时用户数据目录、写入种子数据，经 Chrome DevTools Protocol 模拟键盘、输入法提交与点击，再读数据库或页面核对。共 14 个场景，覆盖旧版 HTML 迁移、自动保存、视图按栏独立、三处 LaTeX 补全、Option+` 与 Ctrl+空格手动打开补全、补全面板翻到光标上方且只滚动自身、跨多行 tags、标签重命名 / 合并 / 详情面板改标签后的 YAML 改写、AI 提取标签后写回 YAML（E2E 进程内起一个 OpenAI 兼容的本机服务，不联网）。`.github/workflows/e2e.yml` 在 macOS 运行器上用 Node 22 执行它：尚未在 GitHub 上实际运行过，但已在本地按同样的步骤（干净克隆、冻结 lockfile 安装、构建子包、E2E）模拟通过。
+`packages/desktop/e2e`（`pnpm --filter @code-reader/desktop e2e`）在构建好的应用上执行真实操作：临时用户数据目录、写入种子数据，经 Chrome DevTools Protocol 模拟键盘、输入法提交与点击，再读数据库或页面核对。共 15 个场景，覆盖 F1 与 Ribbon 打开使用指南及目录 / 站内链接跳转、旧版 HTML 迁移、自动保存、视图按栏独立、三处 LaTeX 补全、Option+` 与 Ctrl+空格手动打开补全、补全面板翻到光标上方且只滚动自身、跨多行 tags、标签重命名 / 合并 / 详情面板改标签后的 YAML 改写、AI 提取标签后写回 YAML（E2E 进程内起一个 OpenAI 兼容的本机服务，不联网）。`.github/workflows/e2e.yml` 在 macOS 运行器上用 Node 22 执行它：尚未在 GitHub 上实际运行过，但已在本地按同样的步骤（干净克隆、冻结 lockfile 安装、构建子包、E2E）模拟通过。

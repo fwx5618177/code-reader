@@ -13,7 +13,6 @@ import {
   UpdateDocumentInput,
   documentToListItem,
 } from './types';
-import { WELCOME_DOCUMENT_TITLE, WELCOME_DOCUMENT_CONTENT } from './constants';
 import { getEditorManager } from '../core';
 
 // ================================
@@ -33,31 +32,6 @@ class DocumentService {
     this.initialized = true;
 
     console.log('[DocumentService] Initialized');
-  }
-
-  /**
-   * Ensure welcome document exists, create if not
-   * Returns the welcome document if it was just created
-   */
-  async ensureWelcomeDocument(): Promise<Document | null> {
-    await this.initialize();
-
-    const exists = await documentRepository.existsByTitle(WELCOME_DOCUMENT_TITLE);
-
-    if (exists) {
-      return null;
-    }
-
-    console.log('[DocumentService] Creating welcome document...');
-
-    const welcomeDoc = await documentRepository.create({
-      title: WELCOME_DOCUMENT_TITLE,
-      content: WELCOME_DOCUMENT_CONTENT,
-    });
-
-    console.log('[DocumentService] Welcome document created:', welcomeDoc.id);
-
-    return welcomeDoc;
   }
 
   /**

@@ -20,6 +20,7 @@ import {
   BookMarked,
   Link2,
   Puzzle,
+  BookOpen,
 } from 'lucide-react';
 import { AppMode, MODE_SIDEBAR_PANELS, SidebarPanel } from '../../types/app-modes';
 import { pluginService } from '../../services/pluginService';
@@ -37,6 +38,7 @@ interface RibbonProps {
   onStartRecording?: () => void;
   currentMode?: AppMode;
   onOpenSettings?: () => void;
+  onOpenGuide?: () => void;
   onOpenSearch?: () => void;
 }
 
@@ -116,6 +118,7 @@ const Ribbon: React.FC<RibbonProps> = ({
   onStartRecording,
   currentMode = 'knowledge',
   onOpenSettings,
+  onOpenGuide,
 }) => {
   const showPluginViews = useSyncExternalStore(pluginService.subscribe, hasPluginViews);
   // 「插件视图」只在有插件贡献视图时显示
@@ -161,8 +164,14 @@ const Ribbon: React.FC<RibbonProps> = ({
         </div>
       </div>
 
-      {/* 底部区域 - 设置 */}
+      {/* 底部区域 - 使用指南与设置 */}
       <div className={styles.bottom}>
+        <RibbonButton
+          icon={<BookOpen size={20} />}
+          label="使用指南"
+          shortcut="F1"
+          onClick={() => onOpenGuide?.()}
+        />
         <RibbonButton
           icon={<Settings size={20} />}
           label="设置"

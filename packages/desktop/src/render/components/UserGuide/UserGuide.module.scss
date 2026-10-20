@@ -1,0 +1,177 @@
+// ================================
+// 使用指南（应用内）样式
+// 正文排版沿用写作预览的 markdown-preview
+// ================================
+
+@use '../../styles/variables' as *;
+
+.overlay {
+  @include overlay;
+  @include flex-center;
+  z-index: $z-modal;
+}
+
+.dialog {
+  @include card;
+  display: flex;
+  flex-direction: column;
+  width: min(1080px, 92vw);
+  height: 86vh;
+  overflow: hidden;
+}
+
+.header {
+  @include flex-between;
+  padding: var(--spacing-3) var(--spacing-5);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+
+  svg {
+    color: var(--accent-primary);
+  }
+
+  h2 {
+    margin: 0;
+    font-size: var(--font-size-lg);
+    font-weight: $font-weight-semibold;
+    color: var(--text-primary);
+  }
+}
+
+.closeButton {
+  @include button-reset;
+  @include flex-center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+// ---------- 目录 ----------
+
+.outline {
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  background-color: var(--bg-secondary);
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin: var(--spacing-3);
+  padding: 0 var(--spacing-2);
+  @include input-base;
+  color: var(--text-muted);
+
+  &:focus-within {
+    border-color: var(--border-focus);
+  }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--spacing-1) 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+
+    &::placeholder {
+      color: var(--text-muted);
+    }
+  }
+}
+
+.outlineList {
+  flex: 1;
+  margin: 0;
+  padding: 0 var(--spacing-2) var(--spacing-3);
+  list-style: none;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.outlineItem {
+  @include button-reset;
+  @include truncate;
+  display: block;
+  width: 100%;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+  text-align: left;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.outlineSection {
+  padding-left: var(--spacing-5);
+  font-weight: $font-weight-normal;
+  color: var(--text-secondary);
+}
+
+.outlineCurrent {
+  background-color: var(--bg-active);
+  color: var(--accent-primary);
+}
+
+.outlineEmpty {
+  padding: var(--spacing-2);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+// ---------- 正文 ----------
+
+.scroller {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.article {
+  @include markdown-preview;
+
+  a {
+    color: var(--accent-primary);
+    text-decoration: none;
+    cursor: pointer;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.status {
+  padding: var(--spacing-6);
+  color: var(--text-muted);
+}

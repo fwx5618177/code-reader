@@ -52,8 +52,6 @@ export { rowToDocument, rowToListItem, documentToListItem } from './types';
 export {
   DOCUMENT_TYPE,
   DOCUMENT_STATUS,
-  WELCOME_DOCUMENT_TITLE,
-  WELCOME_DOCUMENT_CONTENT,
   PLACEHOLDERS,
 } from './constants';
 

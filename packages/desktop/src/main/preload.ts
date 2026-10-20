@@ -195,6 +195,8 @@ const eventChannels = [
   'tray:open-settings',
   'tray:open-document',
   'sync:applied',
+  'help:open-guide',
+  'help:open-start',
 ];
 
 /** 流式对话序号；事件只发往发起请求的窗口，窗口内唯一即可 */
@@ -434,6 +436,12 @@ contextBridge.exposeInMainWorld('electron', {
     writeIndexedText: (itemId: string, text: string) => ipcRenderer.invoke('ocr:writeIndexedText', itemId, text),
     writeScanResult: (itemId: string, data: string) => ipcRenderer.invoke('ocr:writeScanResult', itemId, data),
     removeResults: (itemId: string) => ipcRenderer.invoke('ocr:removeResults', itemId),
+  },
+
+  // 帮助菜单：使用指南与“从这里开始”
+  help: {
+    onOpenGuide: (callback: () => void) => subscribe('help:open-guide', callback),
+    onOpenStart: (callback: () => void) => subscribe('help:open-start', callback),
   },
 
   // 托盘菜单：动作由主进程推送；最近文档列表由渲染进程提供

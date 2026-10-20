@@ -932,6 +932,12 @@ interface ElectronAPI {
     removeResults: (itemId: string) => Promise<void>;
   };
 
+  /** 帮助菜单：订阅“使用指南”“从这里开始”菜单项，返回取消订阅函数 */
+  help: {
+    onOpenGuide: (callback: () => void) => () => void;
+    onOpenStart: (callback: () => void) => () => void;
+  };
+
   /** 托盘菜单：on* 订阅菜单动作并返回取消订阅函数；setRecentDocuments 更新“最近打开”子菜单 */
   tray: {
     onQuickNote: (callback: () => void) => () => void;

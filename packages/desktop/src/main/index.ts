@@ -32,6 +32,7 @@ import { cleanupSyncHandlers, getSyncService, registerSyncHandlers } from './syn
 import { cleanupTransferHandlers, registerTransferHandlers } from './transfer/files';
 import { cleanupOrganizeHandlers, getOrganizeScheduler, registerOrganizeHandlers } from './agent/organize-schedule';
 import { initializeTray } from './tray/tray-manager';
+import { installAppMenu } from './app-menu';
 import {
   registerFlushHandlers,
   cleanupFlushHandlers,
@@ -547,6 +548,7 @@ async function cleanup() {
 
 // 应用准备就绪时创建窗口
 app.whenReady().then(async () => {
+  installAppMenu(platform.id === 'mac');
   setupIPC();
   await initializeServices();
   createWindow();

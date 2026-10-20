@@ -47,7 +47,7 @@
 lib/documents/
 ├── index.ts            # 统一导出
 ├── types.ts            # 类型定义
-├── constants.ts        # 常量（欢迎文档等）
+├── constants.ts        # 常量（条目类型、状态、占位文字）
 ├── state.ts            # 状态类型和初始值
 ├── actions.ts          # Action 类型定义
 ├── reducer.ts          # 纯函数状态转换
@@ -157,7 +157,6 @@ function WritingEditor() {
     
     // 全局状态
     isInitialized,
-    isFirstTime,
     
     // 计算值
     title,

@@ -143,6 +143,36 @@ const scenarios = [
     },
   },
   {
+    name: '帮助：F1 打开使用指南，目录与站内链接跳到对应章节；Ribbon 入口；Esc 关闭',
+    async run(app) {
+      const dialog = '[role=dialog][aria-label="使用指南"]';
+      /** 标题已滚到正文顶部 */
+      const atTop = (title) =>
+        app.call(
+          (sel, text) => {
+            const article = document.querySelector(`${sel} article`);
+            const heading = [...(article?.querySelectorAll('h2') ?? [])].find((el) => el.textContent === text);
+            if (!heading) return false;
+            return Math.abs(heading.getBoundingClientRect().top - article.parentElement.getBoundingClientRect().top) < 40;
+          },
+          dialog,
+          title
+        );
+      await app.press('F1');
+      await waitFor(() => app.exists(`${dialog} article h2`), { message: 'F1 没有打开使用指南' });
+      await app.click(`${dialog} nav button`, { text: '13. 插件' });
+      await waitFor(() => atTop('13. 插件'), { message: '目录没有跳到第 13 节' });
+      await app.click(`${dialog} article a`, { text: '7. 配置 AI 服务' });
+      await waitFor(() => atTop('7. 配置 AI 服务'), { message: '站内链接没有跳到第 7 节' });
+      await app.press('Escape');
+      await waitFor(async () => !(await app.exists(dialog)), { message: 'Esc 没有关闭使用指南' });
+      await app.click('button[aria-label="使用指南"]');
+      await waitFor(() => app.exists(`${dialog} article h2`), { message: 'Ribbon 的使用指南按钮没有打开指南' });
+      await app.press('Escape');
+      await waitFor(async () => !(await app.exists(dialog)));
+    },
+  },
+  {
     name: '迁移：旧版 HTML 笔记启动时转为 Markdown，搜索摘要不再显示标签',
     async run(app) {
       await waitFor(async () => (await contentOf(app, 'e2e-html')) === '旧版独有词 **HTML** 正文\n', {

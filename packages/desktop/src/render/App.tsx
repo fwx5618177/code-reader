@@ -5,6 +5,7 @@ import SearchPanel from './components/SearchPanel';
 import SettingsPanel from './components/SettingsPanel';
 import EditorFooter from './components/EditorFooter';
 import WelcomeGuide, { wasWelcomeGuideDismissed } from './components/WelcomeGuide';
+import UserGuide from './components/UserGuide';
 import WritingSidebar, { type CreateDocumentOptions } from './components/WritingSidebar';
 import VersionHistory from './components/VersionHistory';
 import TitleInput from './components/TitleInput';
@@ -201,7 +202,6 @@ const App: React.FC = () => {
 
     // Global state
     isInitialized: documentsInitialized,
-    isFirstTime,
 
     // Computed values
     wordCount: docWordCount,
@@ -334,8 +334,9 @@ const App: React.FC = () => {
 
   const [writingSidebarCollapsed, setWritingSidebarCollapsed] = useState(false);
 
-  // Welcome guide state - show on first time or when manually triggered
-  const [showWelcomeGuide, setShowWelcomeGuide] = useState(false);
+  // “从这里开始”卡片：第一次启动时显示一次；使用指南：Ribbon、F1、菜单栏 帮助
+  const [showWelcomeGuide, setShowWelcomeGuide] = useState(() => !wasWelcomeGuideDismissed());
+  const [showUserGuide, setShowUserGuide] = useState(false);
 
   // Version history panel state
   const [showVersionHistory, setShowVersionHistory] = useState(false);
@@ -358,27 +359,17 @@ const App: React.FC = () => {
     }
   }, [appState.mode, documentsInitialized, initializeDocuments]);
 
-  // Show welcome guide for first-time users (when documents list is empty and not dismissed before)
+  const handleOpenWelcomeGuide = useCallback(() => setShowWelcomeGuide(true), []);
+  const handleCloseWelcomeGuide = useCallback(() => setShowWelcomeGuide(false), []);
+  const handleOpenUserGuide = useCallback(() => setShowUserGuide(true), []);
+  const handleCloseUserGuide = useCallback(() => setShowUserGuide(false), []);
+
+  // 菜单栏 帮助 → 使用指南 / 从这里开始
   useEffect(() => {
-    if (
-      appState.mode === 'writing' &&
-      documentsInitialized &&
-      isFirstTime &&
-      !wasWelcomeGuideDismissed()
-    ) {
-      setShowWelcomeGuide(true);
-    }
-  }, [appState.mode, documentsInitialized, isFirstTime]);
-
-  // Handler to open welcome guide (for ? button)
-  const handleOpenWelcomeGuide = useCallback(() => {
-    setShowWelcomeGuide(true);
-  }, []);
-
-  // Handler to close welcome guide
-  const handleCloseWelcomeGuide = useCallback(() => {
-    setShowWelcomeGuide(false);
-  }, []);
+    const { help } = window.electron;
+    const unsubscribers = [help.onOpenGuide(handleOpenUserGuide), help.onOpenStart(handleOpenWelcomeGuide)];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [handleOpenUserGuide, handleOpenWelcomeGuide]);
 
   // Create a new document - wrapper around hook's createDocument
   // Uses the folderId parameter if provided
@@ -430,6 +421,13 @@ const App: React.FC = () => {
       const target = e.target as HTMLElement;
       const isInputActive =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+      // F1 打开使用指南（编辑器内也生效）
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setShowUserGuide(true);
+        return;
+      }
 
       // Cmd/Ctrl + N 打开快速输入（文本模式）
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'n') {
@@ -1541,6 +1539,7 @@ const App: React.FC = () => {
       onModeChange={handleModeChange}
       onOpenSearch={() => dispatch({ type: 'TOGGLE_SEARCH', payload: true })}
       onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
+      onOpenGuide={handleOpenUserGuide}
       onEnterFocusMode={() => dispatch({ type: 'ENTER_FOCUS_MODE' })}
       isInFocusMode={isInFocusMode}
       activePanel={appState.sidebarVisible ? activeSidebarPanel.id : null}
@@ -1611,12 +1610,8 @@ const App: React.FC = () => {
         onClose={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: false })}
       />
 
-      {/* Welcome Guide Modal (for writing mode) */}
-      <WelcomeGuide
-        isOpen={showWelcomeGuide}
-        onClose={handleCloseWelcomeGuide}
-        persistDismissal={isFirstTime}
-      />
+      <WelcomeGuide isOpen={showWelcomeGuide} onClose={handleCloseWelcomeGuide} onOpenGuide={handleOpenUserGuide} />
+      <UserGuide isOpen={showUserGuide} onClose={handleCloseUserGuide} />
 
       {/* AI 后台任务进度（任意模式可见） */}
       <AgentActivityPanel

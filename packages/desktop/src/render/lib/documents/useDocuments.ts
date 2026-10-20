@@ -72,7 +72,6 @@ export interface UseDocumentsReturn {
 
   // 全局状态
   isInitialized: boolean;
-  isFirstTime: boolean;
 
   // 计算值
   title: string;
@@ -689,7 +688,6 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
     [loadedDocument, title, content]
   );
 
-  const isFirstTime = state.initialized && state.list.items.length === 0;
   // 修复：只使用 editor.isSaving 作为唯一来源，避免状态不同步
   // 之前使用 OR 逻辑会导致 state.editor.saving 卡在 true 不重置
   const isSaving = editor.isSaving;
@@ -721,7 +719,6 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
 
       // Global state
       isInitialized: state.initialized,
-      isFirstTime,
 
       // Computed values
       title,
@@ -762,7 +759,6 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       isSaving,
       lastSavedAt,
       state.initialized,
-      isFirstTime,
       title,
       content,
       wordCount,

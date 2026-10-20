@@ -36,7 +36,7 @@
   display: flex;
   flex-direction: column;
   width: 90%;
-  max-width: 520px;
+  max-width: 560px;
   max-height: 80vh;
   overflow: hidden;
   animation: slideUp 0.25s ease;
@@ -134,12 +134,6 @@
   font-size: var(--font-size-sm);
   font-weight: $font-weight-semibold;
   color: var(--text-primary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-
-  svg {
-    color: var(--accent-secondary);
-  }
 }
 
 .guideSectionText {
@@ -165,78 +159,77 @@
   color: var(--text-muted);
 }
 
-// 高亮区块（如焦点模式）
-.guideSectionHighlight {
-  background-color: var(--bg-highlight);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-3);
-  margin-top: var(--spacing-3);
-
-  .guideSectionTitle {
-    color: var(--accent-primary);
-
-    svg {
-      color: var(--accent-primary);
-    }
-  }
-}
-
 // ================================
-// 引导列表
+// 三种模式
 // ================================
 
-.guideList {
-  list-style: none;
+.modeList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
-.guideListItem {
+.modeItem {
+  display: flex;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3);
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.modeIcon {
+  @include flex-center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-primary);
+  color: var(--accent-primary);
+}
+
+.modeName {
   display: flex;
   align-items: center;
-  gap: var(--spacing-3);
-  padding: var(--spacing-2) 0;
-  border-bottom: 1px solid var(--border-subtle);
-
-  &:last-child {
-    border-bottom: none;
-  }
-}
-
-.guideListItemKbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 50px;
-  height: 24px;
-  padding: 0 var(--spacing-2);
-  background-color: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-xs);
-  font-family: $font-sans;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-.guideListItemText {
+  gap: var(--spacing-1);
+  margin-bottom: 2px;
   font-size: var(--font-size-sm);
-  color: var(--text-secondary);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
 }
 
-// 紧凑变体（用于较长列表）
-.guideListCompact {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--spacing-1) var(--spacing-4);
+// ================================
+// 前四步
+// ================================
 
-  .guideListItem {
-    padding: var(--spacing-1) 0;
-    border-bottom: none;
+.stepList {
+  margin: 0;
+  padding-left: var(--spacing-5);
+  font-size: var(--font-size-sm);
+  line-height: $line-height-relaxed;
+  color: var(--text-secondary);
+
+  li + li {
+    margin-top: var(--spacing-1);
   }
 
-  .guideListItemKbd {
-    min-width: 40px;
+  kbd {
+    @extend .kbd;
+  }
+
+  code {
+    padding: 0 var(--spacing-1);
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-tertiary);
+    font-family: $font-mono;
+    font-size: var(--font-size-xs);
+    color: var(--accent-secondary);
+  }
+
+  strong {
+    color: var(--text-primary);
   }
 }
 
@@ -245,6 +238,9 @@
 // ================================
 
 .shortcutGrid {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--spacing-2);
@@ -291,29 +287,20 @@
   flex-shrink: 0;
 }
 
-.footerHint {
+.secondaryButton {
+  @include button-reset;
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--accent-primary);
+  transition: background-color $transition-fast;
 
-  svg {
-    flex-shrink: 0;
+  &:hover {
+    background-color: var(--bg-hover);
   }
-}
-
-.footerHintKey {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  background-color: var(--bg-quaternary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  color: var(--text-secondary);
 }
 
 .startButton {

@@ -106,6 +106,7 @@ const VIRTUAL_KEYS = {
   '/': 191,
   '\\': 220,
   '`': 192,
+  F1: 112,
 };
 
 function keyCode(key) {

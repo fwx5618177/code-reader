@@ -770,8 +770,8 @@ const WritingSidebar: React.FC<WritingSidebarProps> = ({
             }}
             title={
               activeFolderId
-                ? '在当前文件夹中新建文档 (⌘N)\n右键快速创建 Markdown'
-                : '新建文档 (⌘N)\n右键快速创建 Markdown'
+                ? '在当前文件夹中新建文档\n右键快速创建 Markdown'
+                : '新建文档\n右键快速创建 Markdown'
             }
           >
             <Plus size={14} />
@@ -788,7 +788,7 @@ const WritingSidebar: React.FC<WritingSidebarProps> = ({
           <button
             className={`${styles.headerActionBtn} ${styles.helpBtn}`}
             onClick={onOpenHelp}
-            title="使用帮助"
+            title="从这里开始"
           >
             <HelpCircle size={14} />
           </button>
