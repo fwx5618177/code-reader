@@ -290,7 +290,9 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
   // ================================
 
   const editor = useManagedEditor({
-    documentId: state.editor.documentId,
+    // 文档内容加载完成前不获取托管实例：否则会以空内容创建实例，编辑窗格把它当作正在编辑的内容显示，
+    // 之后 switchDocument 也会沿用这个空实例（打开文档显示为空白的“无标题”）
+    documentId: state.editor.document ? state.editor.documentId : null,
     initialTitle: state.editor.document?.title ?? '',
     initialContent: state.editor.document?.content ?? '',
     executor: saveExecutor,
