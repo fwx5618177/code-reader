@@ -60,9 +60,9 @@ interface FootnoteNumberSpec {
 function buildDecorations(doc: PMNode): DecorationSet {
   const decorations: Decoration[] = [];
   for (const [pos, number] of numberFootnotes(doc).at) {
-    const node = doc.nodeAt(pos)!;
+    // 引用与行内脚注都是叶子节点（大小为 1）；不用 doc.nodeAt——它在每层线性查找子节点，脚注一多就成了平方级
     decorations.push(
-      Decoration.node(pos, pos + node.nodeSize, { 'data-footnote-number': String(number) }, {
+      Decoration.node(pos, pos + 1, { 'data-footnote-number': String(number) }, {
         footnoteNumber: number,
       } satisfies FootnoteNumberSpec)
     );
