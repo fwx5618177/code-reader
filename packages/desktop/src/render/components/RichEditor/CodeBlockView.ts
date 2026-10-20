@@ -15,6 +15,12 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 import { lineNumbers, highlightActiveLineGutter } from '@codemirror/view';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import {
+  CodeMirrorAdapter,
+  createAutocompleteService,
+  createCodeProviders,
+  type AutocompleteService,
+} from '@code-reader/autocomplete-service';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/components/prism-typescript';
@@ -40,11 +46,7 @@ import {
   getLanguageOptions,
   getLanguageDefinition,
 } from '../../lib/editor/languages';
-import {
-  AutocompleteService,
-  CodeMirrorAdapter,
-  createDefaultProviders,
-} from '../../lib/autocomplete';
+import { whenNearViewport } from '../../lib/editor/lazy-visibility';
 
 // ================================
 // 类型定义
@@ -68,54 +70,17 @@ export interface CodeBlockViewOptions {
 // ================================
 
 let sharedAutocompleteService: AutocompleteService | null = null;
-let autocompleteServiceInitPromise: Promise<AutocompleteService> | null = null;
 
 /**
- * 获取或创建共享的 AutocompleteService 实例
- * 使用单例模式避免重复创建
+ * 所有代码块共享一个补全服务，只注册代码片段提供者；语言随每次查询传入（适配器的 language），
+ * 片段按当前代码块的语言过滤
  */
-async function getSharedAutocompleteService(): Promise<AutocompleteService> {
-  if (sharedAutocompleteService) {
-    return sharedAutocompleteService;
+function getSharedAutocompleteService(): AutocompleteService {
+  if (!sharedAutocompleteService) {
+    sharedAutocompleteService = createAutocompleteService({ maxResults: 50, fuzzy: true, cacheEnabled: true });
+    for (const provider of createCodeProviders()) sharedAutocompleteService.registerProvider(provider);
   }
-
-  if (autocompleteServiceInitPromise) {
-    return autocompleteServiceInitPromise;
-  }
-
-  autocompleteServiceInitPromise = (async () => {
-    const service = new AutocompleteService({
-      maxResults: 50,
-      fuzzy: true,
-      debounceMs: 100,
-      cacheEnabled: true,
-    });
-
-    // 注册默认提供者
-    const providers = createDefaultProviders();
-    for (const provider of providers) {
-      service.registerProvider(provider);
-    }
-
-    // 初始化服务
-    await service.initialize();
-
-    sharedAutocompleteService = service;
-    return service;
-  })();
-
-  return autocompleteServiceInitPromise;
-}
-
-/**
- * 销毁共享的补全服务（应用退出时调用）
- */
-export function destroySharedAutocompleteService(): void {
-  if (sharedAutocompleteService) {
-    sharedAutocompleteService.destroy();
-    sharedAutocompleteService = null;
-    autocompleteServiceInitPromise = null;
-  }
+  return sharedAutocompleteService;
 }
 
 /**
@@ -196,6 +161,10 @@ export class CodeBlockView {
   editContainer: HTMLElement;
   languageBar: HTMLElement;
 
+  /** 是否已接近视口（之前只渲染未高亮的纯文本，节省大文档首次渲染开销） */
+  private nearViewport = false;
+  private cancelVisibilityWatch: () => void;
+
   constructor(
     node: PMNode,
     view: PMEditorView,
@@ -240,8 +209,12 @@ export class CodeBlockView {
     // 绑定事件
     this.bindEvents();
 
-    // 初始渲染
+    // 初始渲染：先输出纯文本占位（高度与最终一致），接近视口时再高亮
     this.renderCode();
+    this.cancelVisibilityWatch = whenNearViewport(this.dom, () => {
+      this.nearViewport = true;
+      if (!this.isEditing) this.renderCode();
+    });
   }
 
   /**
@@ -267,6 +240,7 @@ export class CodeBlockView {
 
   /**
    * 创建语言选择器栏
+   * 完整的语言列表在首次打开时才创建，避免每个代码块都生成上百个 option
    */
   private createLanguageBar(): HTMLElement {
     const bar = document.createElement('div');
@@ -275,25 +249,31 @@ export class CodeBlockView {
     const select = document.createElement('select');
     select.className = 'code-block-language-select';
 
-    // 添加空选项
-    const emptyOption = document.createElement('option');
-    emptyOption.value = '';
-    emptyOption.textContent = '选择语言';
-    select.appendChild(emptyOption);
-
-    // 从注册表添加语言选项
-    const languages = getLanguageOptions();
-    for (const lang of languages) {
+    const addOption = (value: string, label: string) => {
       const option = document.createElement('option');
-      option.value = lang.value;
-      option.textContent = lang.label;
+      option.value = value;
+      option.textContent = label;
       select.appendChild(option);
-    }
+    };
 
-    // 设置初始值
-    const initialLang = this.node.attrs.language || '';
-    const langDef = getLanguageDefinition(initialLang);
-    select.value = langDef ? langDef.id : '';
+    addOption('', '选择语言');
+    const initialDef = getLanguageDefinition(this.node.attrs.language || '');
+    if (initialDef) addOption(initialDef.id, initialDef.name);
+    select.value = initialDef ? initialDef.id : '';
+
+    let populated = false;
+    const populate = () => {
+      if (populated) return;
+      populated = true;
+      const current = select.value;
+      select.length = 1;
+      for (const lang of getLanguageOptions()) {
+        addOption(lang.value, lang.label);
+      }
+      select.value = current;
+    };
+    select.addEventListener('pointerdown', populate);
+    select.addEventListener('focus', populate);
 
     // 处理语言变更
     select.addEventListener('change', () => {
@@ -310,7 +290,7 @@ export class CodeBlockView {
   }
 
   /**
-   * 渲染代码（使用 Prism.js 语法高亮）
+   * 渲染代码：接近视口前为未高亮的纯文本，之后使用 Prism.js 语法高亮
    */
   private renderCode(): void {
     const code = this.node.textContent;
@@ -321,8 +301,7 @@ export class CodeBlockView {
       return;
     }
 
-    // 使用 Prism 高亮代码
-    const highlightedCode = highlightCode(code, language);
+    const highlightedCode = this.nearViewport ? highlightCode(code, language) : escapeHtml(code);
 
     // 构建行号和代码内容
     const lines = code.split('\n');
@@ -408,43 +387,30 @@ export class CodeBlockView {
       parent: this.editContainer,
     });
 
-    // 异步初始化补全服务
     if (this.options.enableAutocomplete) {
       this.initAutocomplete(language);
     }
   }
 
   /**
-   * 异步初始化补全服务
+   * 接入代码片段补全
    */
-  private async initAutocomplete(language: string): Promise<void> {
-    try {
-      const service = this.options.autocompleteService || (await getSharedAutocompleteService());
+  private initAutocomplete(language: string): void {
+    this.autocompleteAdapter = new CodeMirrorAdapter({
+      service: this.options.autocompleteService ?? getSharedAutocompleteService(),
+      language,
+      fuzzy: true,
+      maxResults: 30,
+      minTriggerLength: 1,
+      activateOnTyping: true,
+      triggerCharacters: ['.', '/', '<', ':', '@', '#'],
+      showDetail: true,
+      showDocumentation: true,
+    });
 
-      // 创建补全适配器
-      this.autocompleteAdapter = new CodeMirrorAdapter({
-        service,
-        language,
-        fuzzy: true,
-        maxResults: 30,
-        minTriggerLength: 1,
-        activateOnTyping: true,
-        triggerCharacters: ['.', '/', '<', ':', '@', '#'],
-        showDetail: true,
-        showDocumentation: true,
-      });
-
-      // 更新 CodeMirror 配置，添加补全扩展
-      if (this.cm) {
-        this.cm.dispatch({
-          effects: this.autocompleteCompartment.reconfigure(
-            this.autocompleteAdapter.createFullExtension()
-          ),
-        });
-      }
-    } catch (error) {
-      console.error('初始化代码补全失败:', error);
-    }
+    this.cm?.dispatch({
+      effects: this.autocompleteCompartment.reconfigure(this.autocompleteAdapter.createFullExtension()),
+    });
   }
 
   /**
@@ -698,6 +664,13 @@ export class CodeBlockView {
       const normalizedLang = langDef ? langDef.id : '';
 
       if (select.value !== normalizedLang) {
+        // 完整列表可能尚未生成，确保目标语言有对应选项
+        if (langDef && !Array.from(select.options).some((o) => o.value === langDef.id)) {
+          const option = document.createElement('option');
+          option.value = langDef.id;
+          option.textContent = langDef.name;
+          select.appendChild(option);
+        }
         select.value = normalizedLang;
 
         // 如果 CodeMirror 已创建，更新语言
@@ -760,6 +733,7 @@ export class CodeBlockView {
    * 清理资源
    */
   destroy(): void {
+    this.cancelVisibilityWatch();
     // 销毁补全适配器
     if (this.autocompleteAdapter) {
       this.autocompleteAdapter.destroy();

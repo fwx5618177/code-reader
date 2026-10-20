@@ -27,7 +27,6 @@ export type CompletionSourceType =
   | 'text' // 纯文本
   | 'history' // 历史记录
   | 'symbol' // 符号
-  | 'spell' // 拼写建议
   | 'custom'; // 自定义
 
 // ================================
@@ -152,8 +151,6 @@ export interface AutocompleteServiceOptions {
   caseSensitive?: boolean;
   /** 最小触发长度 */
   minTriggerLength?: number;
-  /** 防抖延迟（毫秒） */
-  debounceMs?: number;
   /** 是否缓存结果 */
   cacheEnabled?: boolean;
   /** 缓存过期时间（毫秒） */
@@ -186,39 +183,6 @@ export interface ServiceStats {
   isInitialized: boolean;
 }
 
-// ================================
-// 拼写检查相关类型
-// ================================
-
-/** 拼写检查结果 */
-export interface SpellCheckResult {
-  /** 是否拼写正确 */
-  correct: boolean;
-  /** 建议的修正列表 */
-  suggestions: SpellSuggestion[];
-  /** 原始单词 */
-  word: string;
-}
-
-/** 拼写建议 */
-export interface SpellSuggestion {
-  /** 建议的单词 */
-  word: string;
-  /** 置信度（0-100） */
-  confidence: number;
-  /** 编辑距离 */
-  distance: number;
-}
-
-/** 词典配置 */
-export interface DictionaryConfig {
-  /** 词典语言 */
-  language: string;
-  /** 词典名称 */
-  name: string;
-  /** 词汇数量 */
-  wordCount: number;
-}
 
 // ================================
 // 编辑器适配器相关类型
@@ -280,7 +244,6 @@ export const DEFAULT_ICON_MAP: IconMap = {
   heading: '📑',
   history: '🕐',
   symbol: '🔣',
-  spell: '✏️',
 };
 
 // ================================

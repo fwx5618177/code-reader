@@ -8,6 +8,7 @@
 // ================================
 
 // Background Colors (Layered depth)
+$bg-canvas: #161616; // 应用底色（外框），内容卡片放在上面
 $bg-primary: #1e1e1e; // Main background
 $bg-secondary: #252526; // Sidebar, secondary panels
 $bg-tertiary: #2d2d2d; // Headers, elevated elements
@@ -109,6 +110,7 @@ $shadow-focus: 0 0 0 2px rgba(124, 58, 237, 0.5);
 // Color Palette - Light Theme
 // ================================
 
+$light-bg-canvas: #eceef1;
 $light-bg-primary: #ffffff;
 $light-bg-secondary: #f8f9fa;
 $light-bg-tertiary: #f1f3f5;
@@ -193,6 +195,8 @@ $spacing-16: 64px;
 $font-sans:
   -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 $font-mono: 'Fira Code', 'JetBrains Mono', 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+// 正文衬线字体（阅读排版与写作页面设置共用）
+$font-serif: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', Georgia, serif;
 
 // Font Sizes
 $font-size-xs: 11px;
@@ -221,9 +225,6 @@ $font-weight-bold: 700;
 // Widths
 $ribbon-width: 48px; // Left icon bar (collapsed)
 $ribbon-width-expanded: 180px; // Left icon bar (expanded with workspace selector)
-$sidebar-width: 280px; // File tree sidebar
-$sidebar-min-width: 180px;
-$sidebar-max-width: 480px;
 
 // Heights
 $titlebar-height: 38px; // macOS traffic lights area
@@ -265,186 +266,6 @@ $z-modal: 400;
 $z-popover: 500;
 $z-tooltip: 600;
 $z-toast: 700;
-
-// ================================
-// CSS Custom Properties (Runtime Theming)
-// ================================
-
-:root {
-  // === Colors - Dark theme (default) ===
-  --bg-primary: #{$bg-primary};
-  --bg-secondary: #{$bg-secondary};
-  --bg-tertiary: #{$bg-tertiary};
-  --bg-quaternary: #{$bg-quaternary};
-
-  --bg-hover: #{$bg-hover};
-  --bg-active: #{$bg-active};
-  --bg-selected: #{$bg-selected};
-  --bg-highlight: #{$bg-highlight};
-
-  --overlay-bg: #{$overlay-bg};
-  --overlay-blur: #{$overlay-blur};
-
-  --border-primary: #{$border-primary};
-  --border-secondary: #{$border-secondary};
-  --border-subtle: #{$border-subtle};
-  --border-focus: #{$border-focus};
-
-  --text-primary: #{$text-primary};
-  --text-secondary: #{$text-secondary};
-  --text-muted: #{$text-muted};
-  --text-faint: #{$text-faint};
-  --text-accent: #{$text-accent};
-  --text-on-accent: #{$text-on-accent};
-
-  --accent-primary: #{$accent-primary};
-  --accent-primary-hover: #{$accent-primary-hover};
-  --accent-primary-active: #{$accent-primary-active};
-  --accent-primary-alpha: #{$accent-primary-alpha};
-  --accent-secondary: #{$accent-secondary};
-
-  --color-success: #{$color-success};
-  --color-success-bg: #{$color-success-bg};
-  --color-warning: #{$color-warning};
-  --color-warning-bg: #{$color-warning-bg};
-  --color-error: #{$color-error};
-  --color-error-hover: #{$color-error-hover};
-  --color-error-bg: #{$color-error-bg};
-  --color-info: #{$color-info};
-  --color-info-bg: #{$color-info-bg};
-
-  // === Scrollbar ===
-  --scrollbar-thumb: #{$scrollbar-thumb};
-  --scrollbar-thumb-hover: #{$scrollbar-thumb-hover};
-
-  // === Shadows ===
-  --shadow-color: #{$shadow-color};
-  --shadow-sm: #{$shadow-sm};
-  --shadow-md: #{$shadow-md};
-  --shadow-lg: #{$shadow-lg};
-  --shadow-xl: #{$shadow-xl};
-  --shadow-focus: #{$shadow-focus};
-
-  // === Spacing ===
-  --spacing-0: #{$spacing-0};
-  --spacing-1: #{$spacing-1};
-  --spacing-2: #{$spacing-2};
-  --spacing-3: #{$spacing-3};
-  --spacing-4: #{$spacing-4};
-  --spacing-5: #{$spacing-5};
-  --spacing-6: #{$spacing-6};
-  --spacing-8: #{$spacing-8};
-  --spacing-10: #{$spacing-10};
-  --spacing-12: #{$spacing-12};
-  --spacing-16: #{$spacing-16};
-
-  // === Typography ===
-  --font-sans: #{$font-sans};
-  --font-mono: #{$font-mono};
-
-  --font-size-xs: #{$font-size-xs};
-  --font-size-sm: #{$font-size-sm};
-  --font-size-md: #{$font-size-md};
-  --font-size-lg: #{$font-size-lg};
-  --font-size-xl: #{$font-size-xl};
-  --font-size-2xl: #{$font-size-2xl};
-  --font-size-3xl: #{$font-size-3xl};
-
-  // === Border Radius ===
-  --radius-sm: #{$radius-sm};
-  --radius-md: #{$radius-md};
-  --radius-lg: #{$radius-lg};
-  --radius-xl: #{$radius-xl};
-  --radius-full: #{$radius-full};
-
-  // === Code Syntax Highlighting ===
-  --code-comment: #{$code-comment};
-  --code-punctuation: #{$code-punctuation};
-  --code-property: #{$code-property};
-  --code-number: #{$code-number};
-  --code-string: #{$code-string};
-  --code-operator: #{$code-operator};
-  --code-keyword: #{$code-keyword};
-  --code-function: #{$code-function};
-  --code-variable: #{$code-variable};
-  --code-deleted: #{$code-deleted};
-  --code-inserted: #{$code-inserted};
-  --code-tag: #{$code-tag};
-  --code-attr-name: #{$code-attr-name};
-  --code-class-name: #{$code-class-name};
-  --code-regex: #{$code-regex};
-  --code-url: #{$code-url};
-
-  // === Window Controls (macOS style) ===
-  --window-control-close: #ff5f57;
-  --window-control-minimize: #febc2e;
-  --window-control-maximize: #28c840;
-  --window-control-close-hover: #e81123;
-}
-
-// ================================
-// Light Theme Overrides
-// ================================
-
-[data-theme='light'],
-:root.light {
-  // === Colors ===
-  --bg-primary: #{$light-bg-primary};
-  --bg-secondary: #{$light-bg-secondary};
-  --bg-tertiary: #{$light-bg-tertiary};
-  --bg-quaternary: #{$light-bg-quaternary};
-
-  --bg-hover: #{$light-bg-hover};
-  --bg-active: #{$light-bg-active};
-  --bg-selected: #{$light-bg-selected};
-  --bg-highlight: #{$light-bg-highlight};
-
-  --overlay-bg: #{$light-overlay-bg};
-
-  --border-primary: #{$light-border-primary};
-  --border-secondary: #{$light-border-secondary};
-  --border-subtle: #{$light-border-subtle};
-  --border-focus: #{$light-border-focus};
-
-  --text-primary: #{$light-text-primary};
-  --text-secondary: #{$light-text-secondary};
-  --text-muted: #{$light-text-muted};
-  --text-faint: #{$light-text-faint};
-  --text-accent: #{$light-text-accent};
-  --text-on-accent: #{$light-text-on-accent};
-
-  // === Accent Alpha ===
-  --accent-primary-alpha: #{$light-accent-primary-alpha};
-
-  // === Scrollbar ===
-  --scrollbar-thumb: #{$light-scrollbar-thumb};
-  --scrollbar-thumb-hover: #{$light-scrollbar-thumb-hover};
-
-  // === Shadows ===
-  --shadow-color: #{$light-shadow-color};
-  --shadow-sm: #{$light-shadow-sm};
-  --shadow-md: #{$light-shadow-md};
-  --shadow-lg: #{$light-shadow-lg};
-  --shadow-xl: #{$light-shadow-xl};
-
-  // === Code Syntax Highlighting ===
-  --code-comment: #{$light-code-comment};
-  --code-punctuation: #{$light-code-punctuation};
-  --code-property: #{$light-code-property};
-  --code-number: #{$light-code-number};
-  --code-string: #{$light-code-string};
-  --code-operator: #{$light-code-operator};
-  --code-keyword: #{$light-code-keyword};
-  --code-function: #{$light-code-function};
-  --code-variable: #{$light-code-variable};
-  --code-deleted: #{$light-code-deleted};
-  --code-inserted: #{$light-code-inserted};
-  --code-tag: #{$light-code-tag};
-  --code-attr-name: #{$light-code-attr-name};
-  --code-class-name: #{$light-code-class-name};
-  --code-regex: #{$light-code-regex};
-  --code-url: #{$light-code-url};
-}
 
 // ================================
 // Mixins
@@ -527,6 +348,499 @@ $z-toast: 700;
   inset: 0;
   background-color: var(--overlay-bg);
   backdrop-filter: blur(var(--overlay-blur));
+}
+
+// 文档开头的 YAML 头部（文档属性）：编辑器、预览与阅读视图共用
+@mixin front-matter {
+  :global(.front-matter) {
+    position: relative;
+    margin: 0 0 var(--spacing-4);
+    padding: var(--spacing-6) var(--spacing-4) var(--spacing-3);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    border: 1px dashed var(--border-primary);
+    border-radius: var(--radius-md);
+    white-space: pre-wrap;
+
+    &::before {
+      content: '文档属性 · YAML';
+      position: absolute;
+      top: var(--spacing-1);
+      left: var(--spacing-4);
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    code {
+      padding: 0;
+      font: inherit;
+      background: none;
+    }
+
+    // YAML 写错的行（lib/markdown/front-matter.ts 的检查），悬停显示原因
+    :global(.front-matter-error) {
+      text-decoration: underline wavy var(--color-error);
+      text-underline-offset: 0.25em;
+      cursor: help;
+    }
+  }
+}
+
+// 只读渲染（预览、阅读视图）里的任务项：方框占第一列，段落与嵌套列表都在第二列。
+// 文字在块级 <p> 里，行内的 ::before 会把它挤到下一行；$indent 抵消列表缩进，让方框对齐普通项的圆点
+@mixin task-list-static($indent) {
+  :global(li.task-item) {
+    list-style: none;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 0.5em;
+    margin-left: calc(-1 * #{$indent});
+
+    > * {
+      grid-column: 2;
+    }
+
+    &::before {
+      content: '';
+      grid-column: 1;
+      align-self: start;
+      width: 1.2em;
+      height: 1.2em;
+      margin-top: 0.4em;
+      font-size: 0.75em;
+      line-height: 1.2em;
+      text-align: center;
+      border: 1.5px solid var(--text-muted);
+      border-radius: var(--radius-sm);
+      box-sizing: border-box;
+    }
+
+    &[data-checked='true'] {
+      color: var(--text-muted);
+      text-decoration: line-through;
+
+      &::before {
+        content: '✓';
+        color: var(--text-on-accent);
+        background-color: var(--accent-primary);
+        border-color: var(--accent-primary);
+      }
+    }
+  }
+}
+
+// 扩展语法（类名与元素由 lib/markdown/schema.ts 的 toDOM 生成）：高亮、插入、上下标、脚注、定义列表、
+// ::: 提示块、缩写。编辑器、预览与阅读视图共用
+@mixin markdown-extensions {
+  mark {
+    padding: 0 0.15em;
+    color: inherit;
+    background-color: var(--color-warning-bg);
+    border-radius: var(--radius-sm);
+  }
+
+  ins {
+    text-decoration: underline;
+    text-decoration-color: var(--accent-primary);
+    text-underline-offset: 0.2em;
+  }
+
+  sub,
+  sup {
+    font-size: 0.75em;
+    line-height: 0;
+  }
+
+  :global(.footnote-ref) {
+    color: var(--accent-primary);
+    cursor: default;
+
+    &::before {
+      content: '[';
+    }
+
+    &::after {
+      content: ']';
+    }
+  }
+
+  :global(.footnote-inline) {
+    margin: 0 0.15em;
+    padding: 0 0.3em;
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    vertical-align: super;
+
+    // 按引用顺序的编号（lib/markdown/footnotes.ts）
+    &[data-footnote-number]::before {
+      content: attr(data-footnote-number) ' ';
+      color: var(--accent-primary);
+    }
+  }
+
+  :global(.footnote-def) {
+    position: relative;
+    margin: var(--spacing-2) 0;
+    padding-left: var(--spacing-8);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+
+    // 编辑器里显示标签便于对照源码；预览与阅读视图里被引用的定义显示编号
+    &::before {
+      content: '[^' attr(data-footnote-def) ']';
+      position: absolute;
+      left: 0;
+      color: var(--accent-primary);
+      font-family: var(--font-mono);
+      font-size: var(--font-size-xs);
+      line-height: 2;
+      pointer-events: none;
+    }
+
+    &[data-footnote-number]::before {
+      content: attr(data-footnote-number) '.';
+    }
+
+    > :first-child {
+      margin-top: 0;
+    }
+  }
+
+  :global(.definition-list) {
+    margin: var(--spacing-3) 0;
+
+    dt {
+      font-weight: $font-weight-semibold;
+      color: var(--text-primary);
+    }
+
+    dd {
+      margin: 0 0 var(--spacing-2) var(--spacing-6);
+      color: var(--text-secondary);
+
+      > p {
+        margin: var(--spacing-1) 0;
+      }
+    }
+  }
+
+  :global(.markdown-container) {
+    position: relative;
+    margin: var(--spacing-4) 0;
+    padding: var(--spacing-6) var(--spacing-4) var(--spacing-2);
+    background-color: var(--color-info-bg);
+    border-left: 3px solid var(--color-info);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+
+    &::before {
+      content: attr(data-container-info);
+      position: absolute;
+      top: var(--spacing-1);
+      left: var(--spacing-4);
+      font-size: var(--font-size-xs);
+      font-weight: $font-weight-semibold;
+      color: var(--color-info);
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+
+    > :first-child {
+      margin-top: 0;
+    }
+  }
+
+  :global(.markdown-container-tip) {
+    background-color: var(--color-success-bg);
+    border-left-color: var(--color-success);
+
+    &::before {
+      color: var(--color-success);
+    }
+  }
+
+  :global(.markdown-container-warning) {
+    background-color: var(--color-warning-bg);
+    border-left-color: var(--color-warning);
+
+    &::before {
+      color: var(--color-warning);
+    }
+  }
+
+  :global(.markdown-container-danger) {
+    background-color: var(--color-error-bg);
+    border-left-color: var(--color-error);
+
+    &::before {
+      color: var(--color-error);
+    }
+  }
+
+  :global(.abbreviation-def) {
+    margin: var(--spacing-1) 0;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    white-space: pre-wrap;
+  }
+
+  :global(abbr.abbreviation) {
+    text-decoration: underline dotted;
+    text-decoration-color: var(--text-muted);
+    cursor: help;
+  }
+}
+
+// 块级嵌入（类名由 lib/markdown/html.ts 生成）：编辑器、预览与阅读视图共用
+@mixin wiki-embed {
+  :global(.wiki-embed) {
+    margin: var(--spacing-4) 0;
+    padding: var(--spacing-2) var(--spacing-4) var(--spacing-3);
+    border-left: 3px solid var(--accent-primary-alpha);
+    background-color: var(--bg-secondary);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  }
+
+  :global(.wiki-embed-title) {
+    display: inline-block;
+    margin-bottom: var(--spacing-1);
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--accent-primary);
+    }
+  }
+
+  :global(.wiki-embed-content) {
+    & > :first-child {
+      margin-top: 0;
+    }
+
+    & > :last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  :global(.wiki-embed-missing) {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  :global(.wiki-embed-media) {
+    display: block;
+    max-width: 100%;
+    margin: 0;
+    border-radius: var(--radius-md);
+  }
+
+  :global(img.wiki-embed-media) {
+    height: auto;
+    cursor: pointer;
+  }
+
+  :global(audio.wiki-embed-media) {
+    width: 100%;
+  }
+
+  // ![](视频 / 音频)：正文中的播放器
+  :global(.markdown-media) {
+    display: block;
+    max-width: 100%;
+    margin: var(--spacing-2) 0;
+    border-radius: var(--radius-md);
+    background-color: var(--bg-tertiary);
+  }
+
+  :global(.markdown-audio) {
+    width: 100%;
+    background-color: transparent;
+  }
+}
+
+// 一到三级标题的彩条：左侧竖条与同色浅底，一级取主题强调色、二级信息色、三级成功色。
+// 只加左右内边距，纸张线格模式下标题仍按整行对齐（上下内边距由调用处按需设置）
+@mixin heading-accents {
+  h1,
+  h2,
+  h3 {
+    padding-inline: var(--spacing-3);
+    border-left: 3px solid var(--heading-accent);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    background-color: color-mix(in srgb, var(--heading-accent) 10%, transparent);
+  }
+
+  h1 {
+    --heading-accent: var(--accent-primary);
+  }
+
+  h2 {
+    --heading-accent: var(--color-info);
+  }
+
+  h3 {
+    --heading-accent: var(--color-success);
+  }
+}
+
+// [[双链]]：强调色描边的高亮小标签，换行时每段都带完整的边框与圆角
+@mixin wiki-link-chip {
+  padding: 0 var(--spacing-1);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background-color: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--text-accent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+
+// 渲染后的 Markdown 排版（写作预览、使用指南）：标题、段落、代码、引用、列表、表格、任务列表、扩展语法与嵌入
+@mixin markdown-preview {
+  max-width: var(--editor-content-max-width, 720px);
+  margin: 0 auto;
+  padding: var(--spacing-6);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  line-height: 1.75;
+  color: var(--text-primary);
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: var(--spacing-6) 0 var(--spacing-3);
+    font-weight: $font-weight-semibold;
+    line-height: 1.3;
+
+    &:first-child {
+      margin-top: 0;
+    }
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  h3 {
+    font-size: 1.25rem;
+  }
+
+  @include heading-accents;
+
+  h1,
+  h2,
+  h3 {
+    padding-block: var(--spacing-1);
+  }
+
+  p {
+    margin: 0 0 var(--spacing-4);
+  }
+
+  strong {
+    font-weight: $font-weight-bold;
+  }
+
+  em {
+    font-style: italic;
+  }
+
+  code {
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background-color: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+  }
+
+  pre {
+    margin: var(--spacing-4) 0;
+    padding: var(--spacing-4);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    line-height: 1.5;
+    background-color: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+
+    code {
+      padding: 0;
+      background: none;
+    }
+  }
+
+  blockquote {
+    margin: var(--spacing-4) 0;
+    padding: var(--spacing-3) var(--spacing-4);
+    border-left: 3px solid var(--accent-primary);
+    background-color: var(--bg-primary);
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    color: var(--text-secondary);
+    font-style: italic;
+  }
+
+  ul,
+  ol {
+    margin: var(--spacing-4) 0;
+    padding-left: var(--spacing-6);
+  }
+
+  hr {
+    border: none;
+    border-top: 2px solid var(--border-primary);
+    margin: var(--spacing-6) 0;
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+  }
+
+  s {
+    color: var(--text-muted);
+  }
+
+  table {
+    width: 100%;
+    margin: var(--spacing-4) 0;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px solid var(--border-primary);
+  }
+
+  th {
+    background-color: var(--bg-tertiary);
+  }
+
+  @include task-list-static(var(--spacing-5));
+
+  :global(.wiki-link) {
+    @include wiki-link-chip;
+  }
+
+  @include front-matter;
+  @include markdown-extensions;
+  @include wiki-embed;
 }
 
 @mixin card {
@@ -658,15 +972,4 @@ $z-toast: 700;
 
 @mixin themed-border($property: border-color) {
   #{$property}: var(--border-primary);
-}
-
-// ================================
-// Utility Classes
-// ================================
-
-.theme-transition {
-  transition:
-    background-color 0.3s ease,
-    color 0.3s ease,
-    border-color 0.3s ease;
 }

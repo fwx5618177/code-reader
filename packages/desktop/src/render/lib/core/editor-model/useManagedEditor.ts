@@ -213,6 +213,9 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
   // 追踪当前实例
   const instanceRef = useRef<ManagedEditorInstance | null>(null);
 
+  // 本 hook 在当前实例上的订阅：同一文档可能被多个 hook 持有，各自订阅、各自取消
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
   // 将回调保存在 refs 中以避免闭包过期
   const configRef = useRef(config);
   configRef.current = config;
@@ -246,6 +249,17 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
   // 实例获取/释放
   // ================================
 
+  // 取消订阅并释放当前实例（自动保存由实例自身负责，释放后待保存的更改照常写回）
+  const detachInstance = useCallback(() => {
+    unsubscribeRef.current?.();
+    unsubscribeRef.current = null;
+    if (acquiredDocIdRef.current) {
+      manager.release(acquiredDocIdRef.current);
+    }
+    acquiredDocIdRef.current = null;
+    instanceRef.current = null;
+  }, [manager]);
+
   const acquireInstance = useCallback(
     (documentId: string): ManagedEditorInstance | null => {
       // 已经获取了此文档
@@ -254,11 +268,7 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
       }
 
       // 如果有旧实例则释放
-      if (acquiredDocIdRef.current && acquiredDocIdRef.current !== documentId) {
-        manager.release(acquiredDocIdRef.current);
-        acquiredDocIdRef.current = null;
-        instanceRef.current = null;
-      }
+      detachInstance();
 
       // 准备创建选项
       const options: CreateEditorOptions = {
@@ -270,8 +280,8 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
         maxIntervalMs: configRef.current.maxIntervalMs,
       };
 
-      // 获取新实例
-      const { instance, isNew } = manager.acquire(documentId, options);
+      // 获取实例（已存在时沿用其内容，初始标题与内容不生效）
+      const { instance } = manager.acquire(documentId, options);
 
       if (instance.isDestroyed) {
         console.error('[useManagedEditor] 获取到已销毁的实例');
@@ -282,69 +292,56 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
       acquiredDocIdRef.current = documentId;
       instanceRef.current = instance;
 
-      // 为新实例设置事件监听器
-      if (isNew) {
-        // 内容变更监听器
-        instance.model.onContentChange((event) => {
-          if (!isMountedRef.current) return;
+      // 订阅内容与保存事件，只更新本 hook 的状态
+      const offContent = instance.model.onContentChange((event) => {
+        if (!isMountedRef.current) return;
+        setCurrentVersionId(event.newVersionId);
+        configRef.current.onContentChange?.(event);
+      });
+      const offSave = instance.saveEngine.addEventListener((event) => {
+        if (!isMountedRef.current) return;
 
-          setCurrentVersionId(event.newVersionId);
-          configRef.current.onContentChange?.(event);
+        switch (event.type) {
+          case 'SAVE_STARTED':
+            setIsSaving(true);
+            break;
+          case 'SAVE_SUCCESS':
+            setIsSaving(false);
+            setIsScheduled(false);
+            setLastSavedAt(event.result.savedAt);
+            setLastSavedVersionId(event.result.savedVersionId);
+            configRef.current.onSaveSuccess?.(event.result);
+            break;
+          case 'SAVE_FAILED':
+            setIsSaving(false);
+            configRef.current.onSaveError?.(event.result);
+            break;
+          case 'SAVE_SCHEDULED':
+            setIsScheduled(true);
+            break;
+          case 'SAVE_CANCELLED':
+            setIsScheduled(false);
+            break;
+        }
 
-          // 请求自动保存
-          if (configRef.current.autoSaveEnabled !== false) {
-            instance.saveEngine.requestSave();
-          }
-        });
-
-        // 保存引擎事件监听器
-        instance.saveEngine.addEventListener((event) => {
-          if (!isMountedRef.current) return;
-
-          switch (event.type) {
-            case 'SAVE_STARTED':
-              setIsSaving(true);
-              break;
-            case 'SAVE_SUCCESS':
-              setIsSaving(false);
-              setIsScheduled(false);
-              setLastSavedAt(event.result.savedAt);
-              setLastSavedVersionId(event.result.savedVersionId);
-              instance.model.markAsSaved(
-                event.result.savedVersionId,
-                event.result.savedContentHash
-              );
-              configRef.current.onSaveSuccess?.(event.result);
-              break;
-            case 'SAVE_FAILED':
-              setIsSaving(false);
-              configRef.current.onSaveError?.(event.result);
-              break;
-            case 'SAVE_SCHEDULED':
-              setIsScheduled(true);
-              break;
-            case 'SAVE_CANCELLED':
-              setIsScheduled(false);
-              break;
-          }
-
-          configRef.current.onSaveEvent?.(event);
-        });
-      }
+        configRef.current.onSaveEvent?.(event);
+      });
+      unsubscribeRef.current = () => {
+        offContent();
+        offSave();
+      };
 
       return instance;
     },
-    [manager]
+    [manager, detachInstance]
   );
 
   const releaseInstance = useCallback(() => {
     if (acquiredDocIdRef.current) {
-      manager.release(acquiredDocIdRef.current);
-      acquiredDocIdRef.current = null;
-      instanceRef.current = null;
+      detachInstance();
       setIsAcquired(false);
     }
-  }, [manager]);
+  }, [detachInstance]);
 
   // ================================
   // Effect: documentId 变更时获取/释放
@@ -367,13 +364,9 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
     return () => {
       isMountedRef.current = false;
       // 卸载时释放
-      if (acquiredDocIdRef.current) {
-        manager.release(acquiredDocIdRef.current);
-        acquiredDocIdRef.current = null;
-        instanceRef.current = null;
-      }
+      detachInstance();
     };
-  }, [config.documentId, acquireInstance, releaseInstance, manager]);
+  }, [config.documentId, acquireInstance, releaseInstance, detachInstance]);
 
   // ================================
   // 安全的实例访问
@@ -440,16 +433,19 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
       }
       // 先取消待处理的保存
       instance.saveEngine.cancelPendingSave();
-      // 用新内容重置模型
+      // 用存储中的内容重置模型，并以它为已保存的基线
       instance.model.reset({
         documentId: instance.documentId,
         initialTitle: title,
         initialContent: content,
         initialVersionId: 1,
       });
+      instance.model.markCurrentAsSaved();
+      // 重置时的内容变化通知已请求了一次保存，内容与存储一致，取消它
+      instance.saveEngine.cancelPendingSave();
       // 更新 React 状态
       setCurrentVersionId(1);
-      setLastSavedVersionId(null);
+      setLastSavedVersionId(1);
       setLastSavedAt(null);
     },
     [getInstance]
@@ -473,7 +469,7 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
       if (instance) {
         setIsAcquired(true);
         setCurrentVersionId(instance.model.getVersionId());
-        setLastSavedVersionId(null);
+        setLastSavedVersionId(instance.model.getLastSavedVersionId());
         setLastSavedAt(null);
       }
     },

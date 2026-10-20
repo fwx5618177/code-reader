@@ -32,9 +32,8 @@ export {
   // 主要插件工厂
   createInputRulesPlugin,
   createEditorPlugins,
-  // 代码块键盘映射
-  createCodeBlockEnterKeymap,
-  createCodeBlockShiftEnterKeymap,
+  // 键盘映射
+  createBlockEnterKeymap,
   // 单独的规则创建器
   createCodeBlockInputRules,
   createHeadingInputRules,
@@ -42,6 +41,10 @@ export {
   createBulletListInputRule,
   createOrderedListInputRule,
   createHorizontalRuleInputRule,
+  createMarkInputRules,
+  createMathInputRules,
+  createWikiLinkInputRule,
+  createTaskListInputRule,
   // 工具函数
   parseCodeFence,
   createCodeBlockTransaction,

@@ -1,46 +1,8 @@
 // ================================
-// @code-reader/parser
-// 高性能内容解析器
-// 提供 Markdown、LaTeX 等格式的解析功能
+// @code-reader/format-parser
+// LaTeX 解析（文档结构、元数据、交叉引用索引）与按内容选择解析器的统一入口。
+// Markdown 解析在 @code-reader/markdown-parser
 // ================================
-
-// ================================
-// Markdown 模块导出
-// ================================
-
-export {
-  // 解析器
-  CommonMarkParser,
-  createCommonMarkParser,
-  parseCommonMark,
-  parseInline,
-
-  // 枚举
-  InlineType,
-  BlockType,
-} from './markdown';
-
-export type {
-  // 解析结果
-  ParseResult as MarkdownParseResult,
-  ParseWarning as MarkdownParseWarning,
-
-  // 位置
-  Position as MarkdownPosition,
-
-  // 节点类型
-  InlineNode as MarkdownInlineNode,
-  BlockNode as MarkdownBlockNode,
-
-  // 表格类型
-  TableAlignment,
-  TableCellNode as MarkdownTableCellNode,
-  TableRowNode as MarkdownTableRowNode,
-  TableNode as MarkdownTableNode,
-
-  // 配置类型
-  CommonMarkOptions,
-} from './markdown';
 
 // ================================
 // LaTeX 模块导出
@@ -105,50 +67,25 @@ export type {
   DocumentClass,
   PreambleItem,
   DocumentMetadata,
+
+  // 交叉引用
+  CrossReferenceEntry,
+  CrossReferenceIndex,
 } from './latex';
-
-// ================================
-// 增量解析模块导出
-// ================================
-
-export {
-  // 增量解析器
-  IncrementalParser,
-  createIncrementalParser,
-  parseMarkdown,
-  parseMarkdownStream,
-  ParserState,
-  TokenType,
-
-  // 增量编辑解析器
-  IncrementalEditParser,
-  createIncrementalEditParser,
-  parseWithEdit,
-  createEditOperation,
-  EditOperationType,
-} from './incremental';
-
-export type {
-  // 增量解析类型
-  Token,
-  IncrementalParseResult,
-  ParseError,
-  ParserConfig,
-
-  // 增量编辑类型
-  EditOperation,
-  AffectedRange,
-  IncrementalEditParseResult,
-  IncrementalEditParserConfig,
-} from './incremental';
 
 // ================================
 // 统一解析接口
 // ================================
 
-import { parseCommonMark, type CommonMarkOptions, type ParseResult } from './markdown';
+import {
+  parseCommonMark,
+  parseMarkdown as parseIncremental,
+  type CommonMarkOptions,
+  type ParseResult,
+  type ParserConfig,
+  type IncrementalParseResult,
+} from '@code-reader/markdown-parser';
 import { parseLaTeX, type LaTeXParserOptions, type LaTeXParseResult } from './latex';
-import { parseMarkdown as parseIncremental, type ParserConfig } from './incremental';
 
 /**
  * 解析模式
@@ -189,7 +126,7 @@ export interface UnifiedParseResult {
   /** LaTeX 解析结果 */
   latex?: LaTeXParseResult;
   /** 增量解析结果 */
-  incremental?: import('./incremental').IncrementalParseResult;
+  incremental?: IncrementalParseResult;
 }
 
 /**
@@ -252,52 +189,52 @@ export function autoParse(input: string, config?: UnifiedParseConfig): UnifiedPa
   return parse(input, { ...config, mode: ParseMode.CommonMark });
 }
 
+/** 只在 LaTeX 文档里出现的标记 */
+const LATEX_DOCUMENT_MARKERS = [/\\documentclass\s*[[{]/, /\\begin\s*\{document\}/];
+
+/** LaTeX 片段常见的行首命令；Markdown 笔记偶尔也会提到，需结合有无 Markdown 结构判断 */
+const LATEX_LINE_COMMANDS =
+  /^[ \t]*\\(?:usepackage\s*[[{]|(?:part|chapter|(?:sub){0,2}section|paragraph)\*?\s*[[{]|maketitle\b|begin\s*\{(?:equation|align|gather|figure|table|itemize|enumerate|abstract)\*?\})/m;
+
+/** Markdown 的块级结构：ATX 标题、列表、引用、表格分隔行 */
+const MARKDOWN_BLOCK_PATTERNS = [/^#{1,6}[ \t]/m, /^[ \t]*[-*+][ \t]/m, /^[ \t]*\d+[.)][ \t]/m, /^[ \t]*>/m, /^\|?[ \t]*:?-{3,}:?[ \t]*\|/m];
+
+/** Markdown 的行内结构：链接、图片、双链 */
+const MARKDOWN_INLINE_PATTERNS = [/!?\[[^\]\n]+\]\([^)\n]+\)/, /\[\[[^\]\n]+\]\]/];
+
 /**
- * 检测是否为 LaTeX 文档
+ * 去掉不参与判断的部分：Markdown 围栏代码块、行内代码、公式（Markdown 与 LaTeX 共有的语法），
+ * 以及 LaTeX 注释。代码块里贴的 LaTeX 源码不应让整篇 Markdown 被当成 LaTeX
  */
-export function isLaTeXDocument(input: string): boolean {
-  // 检查是否包含 LaTeX 特征
-  const latexPatterns = [
-    /\\documentclass/,
-    /\\begin\{document\}/,
-    /\\usepackage/,
-    /\\section\{/,
-    /\\subsection\{/,
-    /\\begin\{equation\}/,
-    /\\begin\{align\}/,
-    /\\begin\{figure\}/,
-    /\\begin\{table\}/,
-  ];
-
-  for (const pattern of latexPatterns) {
-    if (pattern.test(input)) {
-      return true;
-    }
-  }
-
-  return false;
+function stripNeutralRegions(input: string): string {
+  return input
+    .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[ \t]*$|(?![\s\S]))/gm, '')
+    .replace(/`[^`\n]+`/g, '')
+    .replace(/\$\$[\s\S]*?\$\$/g, '')
+    .replace(/(^|[^\\])%[^\n]*/g, '$1');
 }
 
 /**
- * 检测是否为 Markdown 文档
+ * 检测是否为 LaTeX 文档
+ * - 代码块、行内代码、公式之外出现 \documentclass 或 \begin{document}：是
+ * - 否则有行首的章节 / 宏包 / 常用环境命令，且没有 Markdown 的块级或行内结构：是
+ */
+export function isLaTeXDocument(input: string): boolean {
+  const content = stripNeutralRegions(input);
+  if (LATEX_DOCUMENT_MARKERS.some((pattern) => pattern.test(content))) return true;
+  return LATEX_LINE_COMMANDS.test(content) && !hasMarkdownStructure(content);
+}
+
+function hasMarkdownStructure(content: string): boolean {
+  return (
+    MARKDOWN_BLOCK_PATTERNS.some((pattern) => pattern.test(content)) ||
+    MARKDOWN_INLINE_PATTERNS.some((pattern) => pattern.test(content))
+  );
+}
+
+/**
+ * 检测是否为 Markdown 文档：有 Markdown 的块级或行内结构，或有围栏代码块
  */
 export function isMarkdownDocument(input: string): boolean {
-  // 检查是否包含 Markdown 特征
-  const markdownPatterns = [
-    /^#{1,6}\s/m, // 标题
-    /^\s*[-*+]\s/m, // 无序列表
-    /^\s*\d+\.\s/m, // 有序列表
-    /\[.+\]\(.+\)/, // 链接
-    /!\[.+\]\(.+\)/, // 图片
-    /```[\s\S]*?```/, // 代码块
-    /^\s*>/m, // 引用
-  ];
-
-  for (const pattern of markdownPatterns) {
-    if (pattern.test(input)) {
-      return true;
-    }
-  }
-
-  return false;
+  return /^[ \t]*(`{3,}|~{3,})/m.test(input) || hasMarkdownStructure(input);
 }

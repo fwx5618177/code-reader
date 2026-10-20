@@ -21,11 +21,13 @@ export {
   // 工具函数
   getFileType,
   getFileTypeId,
+  keepFileExtension,
   supportsMath,
   supportsCodeBlocks,
   getDefaultTemplate,
   getCreatableTypes,
   inferTypeFromContent,
+  resolveDocumentType,
   getFileTypeDisplayInfo,
   getAllSupportedExtensions,
   isSupportedFile,
@@ -50,8 +52,6 @@ export { rowToDocument, rowToListItem, documentToListItem } from './types';
 export {
   DOCUMENT_TYPE,
   DOCUMENT_STATUS,
-  WELCOME_DOCUMENT_TITLE,
-  WELCOME_DOCUMENT_CONTENT,
   PLACEHOLDERS,
 } from './constants';
 

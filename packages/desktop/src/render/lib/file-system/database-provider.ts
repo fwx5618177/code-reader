@@ -418,11 +418,7 @@ export class DatabaseFileSystemProvider implements IFileSystemProvider {
       );
 
       if (children.length > 0 && !options.recursive) {
-        throw new FileSystemError(
-          'Unknown' as any,
-          'Directory not empty. Use recursive delete.',
-          uri
-        );
+        throw FileSystemError.DirectoryNotEmpty(uri);
       }
 
       if (options.recursive) {

@@ -1,0 +1,107 @@
+// ================================
+// 侧栏搜索样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.inputWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: var(--spacing-2) var(--spacing-3);
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--spacing-2);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.input {
+  @include input-base;
+  width: 100%;
+  height: 28px;
+  padding: 0 26px 0 28px;
+  font-size: var(--font-size-sm);
+}
+
+.clear {
+  @include button-reset;
+  @include flex-center;
+  position: absolute;
+  right: var(--spacing-1);
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3) var(--spacing-1);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-semibold;
+  color: var(--text-muted);
+}
+
+.groupCount {
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background-color: var(--bg-tertiary);
+  font-weight: $font-weight-normal;
+}
+
+.hit {
+  @include button-reset;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--spacing-2) var(--spacing-3);
+  text-align: left;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.hitSelected {
+  background-color: var(--bg-selected);
+}
+
+.hitTitle {
+  @include truncate;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.hitIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}

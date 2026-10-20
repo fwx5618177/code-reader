@@ -13,7 +13,6 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "composite": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,

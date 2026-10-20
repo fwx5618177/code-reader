@@ -173,6 +173,10 @@ function murmur3_128(str: string): string {
  * xxHash32 纯 JavaScript 实现
  * 极高性能，广泛用于数据完整性检查
  * 参考: https://github.com/Cyan4973/xxHash
+ *
+ * 输入按 UTF-16 小端字节序计算（每个码元 2 字节）。4 字节的 lane 直接由相邻两个码元拼成
+ * （低码元在低 16 位），与逐字节展开的结果完全相同，但不分配字节数组：
+ * 大文档每次按键都要计算哈希，展开成字节数组会产生数百万元素的临时数组与大量 GC
  */
 function xxhash32(str: string, seed: number = 0): number {
   const PRIME32_1 = 0x9e3779b1;
@@ -181,17 +185,12 @@ function xxhash32(str: string, seed: number = 0): number {
   const PRIME32_4 = 0x27d4eb2f;
   const PRIME32_5 = 0x165667b1;
 
-  const length = str.length * 2; // UTF-16 编码，每字符 2 字节
+  const units = str.length;
+  const length = units * 2; // UTF-16 编码，每字符 2 字节
+  /** 从第 i 个码元开始的 4 字节 lane */
+  const lane = (i: number): number => str.charCodeAt(i) | (str.charCodeAt(i + 1) << 16);
   let hash = 0;
-  let index = 0;
-
-  // 将字符串转换为字节数组
-  const bytes: number[] = [];
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    bytes.push(code & 0xff);
-    bytes.push((code >> 8) & 0xff);
-  }
+  let unit = 0;
 
   if (length >= 16) {
     let v1 = (seed + PRIME32_1 + PRIME32_2) | 0;
@@ -199,45 +198,25 @@ function xxhash32(str: string, seed: number = 0): number {
     let v3 = seed;
     let v4 = (seed - PRIME32_1) | 0;
 
-    while (index <= bytes.length - 16) {
-      const lane1 =
-        bytes[index] |
-        (bytes[index + 1] << 8) |
-        (bytes[index + 2] << 16) |
-        (bytes[index + 3] << 24);
-      const lane2 =
-        bytes[index + 4] |
-        (bytes[index + 5] << 8) |
-        (bytes[index + 6] << 16) |
-        (bytes[index + 7] << 24);
-      const lane3 =
-        bytes[index + 8] |
-        (bytes[index + 9] << 8) |
-        (bytes[index + 10] << 16) |
-        (bytes[index + 11] << 24);
-      const lane4 =
-        bytes[index + 12] |
-        (bytes[index + 13] << 8) |
-        (bytes[index + 14] << 16) |
-        (bytes[index + 15] << 24);
-
-      v1 = Math.imul(v1 + Math.imul(lane1, PRIME32_2), 1) | 0;
+    // 每轮 16 字节 = 8 个码元
+    while (unit <= units - 8) {
+      v1 = Math.imul(v1 + Math.imul(lane(unit), PRIME32_2), 1) | 0;
       v1 = (v1 << 13) | (v1 >>> 19) | 0;
       v1 = Math.imul(v1, PRIME32_1) | 0;
 
-      v2 = Math.imul(v2 + Math.imul(lane2, PRIME32_2), 1) | 0;
+      v2 = Math.imul(v2 + Math.imul(lane(unit + 2), PRIME32_2), 1) | 0;
       v2 = (v2 << 13) | (v2 >>> 19) | 0;
       v2 = Math.imul(v2, PRIME32_1) | 0;
 
-      v3 = Math.imul(v3 + Math.imul(lane3, PRIME32_2), 1) | 0;
+      v3 = Math.imul(v3 + Math.imul(lane(unit + 4), PRIME32_2), 1) | 0;
       v3 = (v3 << 13) | (v3 >>> 19) | 0;
       v3 = Math.imul(v3, PRIME32_1) | 0;
 
-      v4 = Math.imul(v4 + Math.imul(lane4, PRIME32_2), 1) | 0;
+      v4 = Math.imul(v4 + Math.imul(lane(unit + 6), PRIME32_2), 1) | 0;
       v4 = (v4 << 13) | (v4 >>> 19) | 0;
       v4 = Math.imul(v4, PRIME32_1) | 0;
 
-      index += 16;
+      unit += 8;
     }
 
     hash =
@@ -252,19 +231,20 @@ function xxhash32(str: string, seed: number = 0): number {
 
   hash = (hash + length) | 0;
 
-  // 处理剩余字节
-  while (index <= bytes.length - 4) {
-    const lane =
-      bytes[index] | (bytes[index + 1] << 8) | (bytes[index + 2] << 16) | (bytes[index + 3] << 24);
-    hash = (hash + Math.imul(lane, PRIME32_3)) | 0;
+  // 剩余的 4 字节块（2 个码元）
+  while (unit <= units - 2) {
+    hash = (hash + Math.imul(lane(unit), PRIME32_3)) | 0;
     hash = Math.imul((hash << 17) | (hash >>> 15), PRIME32_4) | 0;
-    index += 4;
+    unit += 2;
   }
 
-  while (index < bytes.length) {
-    hash = (hash + Math.imul(bytes[index], PRIME32_5)) | 0;
-    hash = Math.imul((hash << 11) | (hash >>> 21), PRIME32_1) | 0;
-    index++;
+  // 剩余的单个码元：低字节、高字节依次处理
+  if (unit < units) {
+    const code = str.charCodeAt(unit);
+    for (const byte of [code & 0xff, (code >> 8) & 0xff]) {
+      hash = (hash + Math.imul(byte, PRIME32_5)) | 0;
+      hash = Math.imul((hash << 11) | (hash >>> 21), PRIME32_1) | 0;
+    }
   }
 
   // 最终混合

@@ -40,6 +40,8 @@ import {
   type CommandNode,
   type SpecialCharNode,
   type GroupNode,
+  type CrossReferenceEntry,
+  type CrossReferenceIndex,
   LaTeXBlockType,
   LaTeXInlineType,
   DEFAULT_LATEX_OPTIONS,
@@ -83,10 +85,10 @@ const SPECIAL_CHAR_MAP: Record<string, string> = {
   '\\@': '',
   '---': '—',
   '--': '–',
-  "``": '"',
-  "''": '"',
-  '`': ''',
-  "'": ''',
+  "``": '\u201C',
+  "''": '\u201D',
+  '`': '\u2018',
+  "'": '\u2019',
 };
 
 /** 章节命令及其级别 */
@@ -159,6 +161,34 @@ const REFERENCE_COMMANDS = new Set([
   'labelcref',
 ]);
 
+/** 可一次引用多个标签（逗号分隔）的引用命令 */
+const MULTI_KEY_REFERENCE_COMMANDS = new Set(['cref', 'Cref', 'labelcref']);
+
+/** 第一个必选参数需要记入交叉引用索引的命令 */
+const INDEXED_ARGUMENT_COMMANDS = new Set([
+  'bibitem',
+  'bibliography',
+  'addbibresource',
+  'input',
+  'include',
+  'subfile',
+]);
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function createCrossReferenceIndex(): CrossReferenceIndex {
+  return {
+    labels: [],
+    references: [],
+    citations: [],
+    bibItems: [],
+    bibliographySources: [],
+    includedFiles: [],
+  };
+}
+
 // ================================
 // 词法分析器
 // ================================
@@ -188,17 +218,33 @@ interface Token {
   offset: number;
 }
 
+/** 词法分析的起点：解析子串（如章节标题）时使 Token 位置仍是整篇文档的绝对位置 */
+interface SourceOrigin {
+  /** 偏移（从 0 计） */
+  offset: number;
+  /** 行（从 1 计） */
+  line: number;
+  /** 列（从 1 计） */
+  column: number;
+}
+
+const DOCUMENT_ORIGIN: SourceOrigin = { offset: 0, line: 1, column: 1 };
+
 /**
  * LaTeX 词法分析器
  */
 class LaTeXLexer {
   private input: string;
+  private base: number;
   private pos: number = 0;
-  private line: number = 1;
-  private column: number = 1;
+  private line: number;
+  private column: number;
 
-  constructor(input: string) {
+  constructor(input: string, origin: SourceOrigin = DOCUMENT_ORIGIN) {
     this.input = input;
+    this.base = origin.offset;
+    this.line = origin.line;
+    this.column = origin.column;
   }
 
   /**
@@ -209,7 +255,7 @@ class LaTeXLexer {
       return this.createToken(TokenType.EOF, '');
     }
 
-    const char = this.input[this.pos];
+    const char = this.input.charAt(this.pos);
 
     // 注释
     if (char === '%') {
@@ -260,34 +306,13 @@ class LaTeXLexer {
     return this.readText();
   }
 
-  /**
-   * 预览下一个 Token（不消费）
-   */
-  peek(): Token {
-    const savedPos = this.pos;
-    const savedLine = this.line;
-    const savedColumn = this.column;
-    const token = this.nextToken();
-    this.pos = savedPos;
-    this.line = savedLine;
-    this.column = savedColumn;
-    return token;
-  }
-
-  /**
-   * 获取当前位置
-   */
-  getPosition(): { line: number; column: number; offset: number } {
-    return { line: this.line, column: this.column, offset: this.pos };
-  }
-
   private createToken(type: TokenType, value: string): Token {
     return {
       type,
       value,
       line: this.line,
       column: this.column,
-      offset: this.pos,
+      offset: this.base + this.pos,
     };
   }
 
@@ -309,11 +334,11 @@ class LaTeXLexer {
   private readComment(): Token {
     const startLine = this.line;
     const startColumn = this.column;
-    const startOffset = this.pos;
+    const startOffset = this.base + this.pos;
 
     let value = '';
-    while (this.pos < this.input.length && this.input[this.pos] !== '\n') {
-      value += this.input[this.pos];
+    while (this.pos < this.input.length && this.input.charAt(this.pos) !== '\n') {
+      value += this.input.charAt(this.pos);
       this.pos++;
       this.column++;
     }
@@ -330,7 +355,7 @@ class LaTeXLexer {
   private readCommand(): Token {
     const startLine = this.line;
     const startColumn = this.column;
-    const startOffset = this.pos;
+    const startOffset = this.base + this.pos;
 
     let value = '\\';
     this.pos++;
@@ -338,7 +363,7 @@ class LaTeXLexer {
 
     // 检查是否是特殊单字符命令
     if (this.pos < this.input.length) {
-      const nextChar = this.input[this.pos];
+      const nextChar = this.input.charAt(this.pos);
       if (!this.isAlpha(nextChar)) {
         value += nextChar;
         this.pos++;
@@ -354,8 +379,8 @@ class LaTeXLexer {
     }
 
     // 读取字母命令
-    while (this.pos < this.input.length && this.isAlpha(this.input[this.pos])) {
-      value += this.input[this.pos];
+    while (this.pos < this.input.length && this.isAlpha(this.input.charAt(this.pos))) {
+      value += this.input.charAt(this.pos);
       this.pos++;
       this.column++;
     }
@@ -369,34 +394,67 @@ class LaTeXLexer {
     };
   }
 
+  /** 公式内遇到未配对的 }：属于公式外层的分组（如 \section{a $b}），公式应在此结束 */
+  private closesEnclosingGroup(depth: number): boolean {
+    return depth === 0 && this.input.charAt(this.pos) === '}';
+  }
+
+  /** 更新公式内的花括号深度（转义的 \{ \} 由调用方整体跳过，不计入） */
+  private mathBraceDepth(depth: number): number {
+    const char = this.input.charAt(this.pos);
+    if (char === '{') return depth + 1;
+    if (char === '}') return depth - 1;
+    return depth;
+  }
+
+  /** 当前位置是否为段落分隔：换行之后的下一行只含空白 */
+  private atParagraphBreak(): boolean {
+    if (this.input.charAt(this.pos) !== '\n') return false;
+    for (let i = this.pos + 1; i < this.input.length; i++) {
+      const char = this.input.charAt(i);
+      if (char === '\n') return true;
+      if (char !== ' ' && char !== '\t' && char !== '\r') return false;
+    }
+    return false;
+  }
+
   private readMath(): Token {
     const startLine = this.line;
     const startColumn = this.column;
-    const startOffset = this.pos;
+    const startOffset = this.base + this.pos;
 
     // 检查是否是 $$ (display math)
-    if (this.pos + 1 < this.input.length && this.input[this.pos + 1] === '$') {
+    if (this.pos + 1 < this.input.length && this.input.charAt(this.pos + 1) === '$') {
       this.pos += 2;
       this.column += 2;
       let value = '';
+      let depth = 0;
 
       while (this.pos < this.input.length) {
         if (
-          this.input[this.pos] === '$' &&
+          this.input.charAt(this.pos) === '$' &&
           this.pos + 1 < this.input.length &&
-          this.input[this.pos + 1] === '$'
+          this.input.charAt(this.pos + 1) === '$'
         ) {
           this.pos += 2;
           this.column += 2;
           break;
         }
-        if (this.input[this.pos] === '\n') {
+        // 未闭合的公式在空行或所在分组的 } 处结束（TeX 在段落 / 分组结束时报 Missing $），不吞掉后面的正文
+        if (this.atParagraphBreak() || this.closesEnclosingGroup(depth)) break;
+        depth = this.mathBraceDepth(depth);
+        if (this.input.charAt(this.pos) === '\\' && this.pos + 1 < this.input.length) {
+          value += this.input.charAt(this.pos);
+          this.pos++;
+          this.column++;
+        }
+        if (this.input.charAt(this.pos) === '\n') {
           this.line++;
           this.column = 1;
         } else {
           this.column++;
         }
-        value += this.input[this.pos];
+        value += this.input.charAt(this.pos);
         this.pos++;
       }
 
@@ -413,33 +471,36 @@ class LaTeXLexer {
     this.pos++;
     this.column++;
     let value = '';
+    let depth = 0;
 
-    while (this.pos < this.input.length && this.input[this.pos] !== '$') {
+    while (this.pos < this.input.length && this.input.charAt(this.pos) !== '$') {
+      if (this.atParagraphBreak() || this.closesEnclosingGroup(depth)) break;
+      depth = this.mathBraceDepth(depth);
       // 处理转义的 $
-      if (this.input[this.pos] === '\\' && this.pos + 1 < this.input.length) {
-        value += this.input[this.pos];
+      if (this.input.charAt(this.pos) === '\\' && this.pos + 1 < this.input.length) {
+        value += this.input.charAt(this.pos);
         this.pos++;
         this.column++;
         if (this.pos < this.input.length) {
-          value += this.input[this.pos];
+          value += this.input.charAt(this.pos);
           this.pos++;
           this.column++;
         }
         continue;
       }
 
-      if (this.input[this.pos] === '\n') {
+      if (this.input.charAt(this.pos) === '\n') {
         this.line++;
         this.column = 1;
       } else {
         this.column++;
       }
-      value += this.input[this.pos];
+      value += this.input.charAt(this.pos);
       this.pos++;
     }
 
-    // 跳过结束的 $
-    if (this.pos < this.input.length) {
+    // 跳过结束的 $（在空行处中止时没有）
+    if (this.pos < this.input.length && this.input.charAt(this.pos) === '$') {
       this.pos++;
       this.column++;
     }
@@ -464,11 +525,11 @@ class LaTeXLexer {
   private readWhitespace(): Token {
     const startLine = this.line;
     const startColumn = this.column;
-    const startOffset = this.pos;
+    const startOffset = this.base + this.pos;
 
     let value = '';
-    while (this.pos < this.input.length && this.isWhitespace(this.input[this.pos])) {
-      value += this.input[this.pos];
+    while (this.pos < this.input.length && this.isWhitespace(this.input.charAt(this.pos))) {
+      value += this.input.charAt(this.pos);
       this.pos++;
       this.column++;
     }
@@ -485,11 +546,11 @@ class LaTeXLexer {
   private readText(): Token {
     const startLine = this.line;
     const startColumn = this.column;
-    const startOffset = this.pos;
+    const startOffset = this.base + this.pos;
 
     let value = '';
     while (this.pos < this.input.length) {
-      const char = this.input[this.pos];
+      const char = this.input.charAt(this.pos);
       // 遇到特殊字符停止
       if (
         char === '\\' ||
@@ -533,6 +594,9 @@ export class LaTeXParser {
   private currentToken!: Token;
   private warnings: ParseWarning[] = [];
   private input: string = '';
+  /** this.input 在整篇文档中的起始偏移（子串解析时非 0） */
+  private baseOffset: number = 0;
+  private crossRefs: CrossReferenceIndex = createCrossReferenceIndex();
 
   constructor(options?: LaTeXParserOptions) {
     this.options = { ...DEFAULT_LATEX_OPTIONS, ...options };
@@ -544,17 +608,14 @@ export class LaTeXParser {
   parse(input: string): LaTeXParseResult {
     const startTime = performance.now();
 
-    this.input = input;
-    this.lexer = new LaTeXLexer(input);
-    this.warnings = [];
-    this.currentToken = this.lexer.nextToken();
-
+    this.reset(input, DOCUMENT_ORIGIN, createCrossReferenceIndex());
     const document = this.parseDocument();
     const duration = performance.now() - startTime;
 
     return {
       document,
       warnings: this.warnings,
+      crossReferences: this.crossRefs,
       duration,
     };
   }
@@ -563,12 +624,25 @@ export class LaTeXParser {
    * 仅解析行内内容
    */
   parseInline(input: string): LaTeXInlineNode[] {
-    this.input = input;
-    this.lexer = new LaTeXLexer(input);
-    this.warnings = [];
-    this.currentToken = this.lexer.nextToken();
-
+    this.reset(input, DOCUMENT_ORIGIN, createCrossReferenceIndex());
     return this.parseInlineContent();
+  }
+
+  /**
+   * 解析文档中一段参数内的行内内容：位置按整篇文档计算，交叉引用记入父解析器的索引
+   */
+  private parseInlineAt(input: string, origin: SourceOrigin, crossRefs: CrossReferenceIndex): LaTeXInlineNode[] {
+    this.reset(input, origin, crossRefs);
+    return this.parseInlineContent();
+  }
+
+  private reset(input: string, origin: SourceOrigin, crossRefs: CrossReferenceIndex): void {
+    this.input = input;
+    this.baseOffset = origin.offset;
+    this.lexer = new LaTeXLexer(input, origin);
+    this.warnings = [];
+    this.crossRefs = crossRefs;
+    this.currentToken = this.lexer.nextToken();
   }
 
   /**
@@ -586,16 +660,20 @@ export class LaTeXParser {
     this.currentToken = this.lexer.nextToken();
   }
 
-  private expect(type: TokenType): Token {
+  /**
+   * 期望当前 Token 为指定类型：匹配则消费并返回 true；
+   * 不匹配则记录语法警告且不消费，返回 false，由调用方决定恢复策略
+   */
+  private expect(type: TokenType): boolean {
     if (this.currentToken.type !== type) {
       this.addWarning(
         `期望 ${type}，但得到 ${this.currentToken.type}`,
         'syntax'
       );
+      return false;
     }
-    const token = this.currentToken;
     this.advance();
-    return token;
+    return true;
   }
 
   private match(type: TokenType): boolean {
@@ -609,16 +687,45 @@ export class LaTeXParser {
     );
   }
 
-  private createPosition(startToken: Token, endToken?: Token): Position {
-    const end = endToken ?? startToken;
+  /** 单个 Token 的位置（Token 值即其源码文本时使用） */
+  private tokenPosition(token: Token): Position {
+    return {
+      startLine: token.line,
+      startColumn: token.column,
+      endLine: token.line,
+      endColumn: token.column + token.value.length,
+      startOffset: token.offset,
+      endOffset: token.offset + token.value.length,
+    };
+  }
+
+  /** 从 startToken 到当前 Token 之前（不含当前 Token）的范围 */
+  private spanFrom(startToken: Token): Position {
     return {
       startLine: startToken.line,
       startColumn: startToken.column,
-      endLine: end.line,
-      endColumn: end.column + (end.value?.length ?? 0),
+      endLine: this.currentToken.line,
+      endColumn: this.currentToken.column,
       startOffset: startToken.offset,
-      endOffset: end.offset + (end.value?.length ?? 0),
+      endOffset: this.currentToken.offset,
     };
+  }
+
+  /** 从 startToken 到当前 Token 之前的源码 */
+  private rawFrom(startToken: Token): string {
+    return this.sourceBetween(startToken.offset, this.currentToken.offset);
+  }
+
+  private sourceBetween(from: number, to: number): string {
+    return this.input.substring(from - this.baseOffset, to - this.baseOffset);
+  }
+
+  /** 当前位置是否为 \begin{name} / \end{name} */
+  private atEnvironmentCommand(command: 'begin' | 'end', name: string): boolean {
+    if (!this.matchCommand(`\\${command}`)) return false;
+    const pattern = new RegExp(`\\\\${command}\\s*\\{${escapeRegExp(name)}\\}`, 'y');
+    pattern.lastIndex = this.currentToken.offset - this.baseOffset;
+    return pattern.test(this.input);
   }
 
   private addWarning(
@@ -627,7 +734,7 @@ export class LaTeXParser {
   ): void {
     this.warnings.push({
       message,
-      position: this.createPosition(this.currentToken),
+      position: this.tokenPosition(this.currentToken),
       type,
     });
   }
@@ -648,37 +755,47 @@ export class LaTeXParser {
       documentClass = this.parseDocumentClass();
     }
 
-    // 解析导言区
-    if (this.options.parsePreamble) {
-      while (!this.match(TokenType.EOF) && !this.matchCommand('\\begin')) {
+    // 只有存在 \begin{document} 时才有导言区；片段文档整体作为正文解析
+    const hasDocumentEnvironment = /\\begin\s*\{document\}/.test(this.input);
+
+    if (hasDocumentEnvironment) {
+      while (true) {
+        this.skipWhitespaceAndComments();
+        if (this.match(TokenType.EOF) || this.atEnvironmentCommand('begin', 'document')) break;
         const item = this.parsePreambleItem();
         if (item) {
-          preamble.push(item);
+          if (this.options.parsePreamble) preamble.push(item);
           this.extractMetadata(item, metadata);
         }
       }
-    }
 
-    // 解析 \begin{document}
-    if (this.matchCommand('\\begin')) {
-      this.advance();
-      this.skipWhitespace();
-      if (this.match(TokenType.BeginGroup)) {
+      // 跳过 \begin{document}
+      if (this.matchCommand('\\begin')) {
         this.advance();
-        this.readUntilEndGroup(); // 跳过 "document"
         this.skipWhitespace();
+        if (this.match(TokenType.BeginGroup)) {
+          this.advance();
+          this.readUntilEndGroup();
+        }
       }
     }
 
     // 解析文档主体
     while (!this.match(TokenType.EOF)) {
-      // 检查 \end{document}
+      if (this.atEnvironmentCommand('end', 'document')) {
+        break;
+      }
+
+      // 正文层级出现的其他 \end{...} 没有对应的 \begin：记录后跳过，继续解析后文
       if (this.matchCommand('\\end')) {
-        const lookahead = this.lexer.peek();
-        if (lookahead.type === TokenType.BeginGroup) {
-          // 可能是 \end{document}，退出循环
-          break;
+        this.addWarning('多余的 \\end（没有对应的 \\begin）', 'unmatched_brace');
+        this.advance();
+        this.skipWhitespace();
+        if (this.match(TokenType.BeginGroup)) {
+          this.advance();
+          this.readUntilEndGroup();
         }
+        continue;
       }
 
       const block = this.parseBlock();
@@ -687,10 +804,7 @@ export class LaTeXParser {
       }
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Document,
@@ -698,7 +812,7 @@ export class LaTeXParser {
       preamble,
       children,
       metadata,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -755,7 +869,12 @@ export class LaTeXParser {
       // 解析必选参数
       while (this.match(TokenType.BeginGroup)) {
         this.advance();
-        args.push(this.readUntilEndGroup());
+        const { text, origin } = this.readArgument(TokenType.EndGroup);
+        const name = command.substring(1);
+        if (args.length === 0 && INDEXED_ARGUMENT_COMMANDS.has(name)) {
+          this.indexCommandArgument(name, text, origin);
+        }
+        args.push(text);
         this.skipWhitespace();
       }
 
@@ -766,10 +885,7 @@ export class LaTeXParser {
       else if (command === '\\input') type = 'input';
       else if (command === '\\include') type = 'include';
 
-      const raw = this.input.substring(
-        startToken.offset,
-        this.currentToken.offset
-      );
+      const raw = this.rawFrom(startToken);
 
       return { type, command, args, optArgs, raw };
     }
@@ -794,13 +910,16 @@ export class LaTeXParser {
   // ================================
 
   private parseBlock(): LaTeXBlockNode | null {
-    this.skipWhitespaceAndComments();
+    this.skipWhitespace();
 
     if (this.match(TokenType.EOF)) {
       return null;
     }
 
-    const startToken = this.currentToken;
+    // 块级注释：按 preserveComments 选项决定保留为注释节点或丢弃
+    if (this.match(TokenType.Comment)) {
+      return this.parseComment();
+    }
 
     // 处理命令
     if (this.currentToken.type === TokenType.Command) {
@@ -828,8 +947,29 @@ export class LaTeXParser {
       return this.parseMathBlock();
     }
 
+    if (this.matchCommand('\\[')) {
+      return this.parseBracketMath();
+    }
+
     // 普通段落
     return this.parseParagraph();
+  }
+
+  private parseComment(): CommentNode | null {
+    const commentToken = this.currentToken;
+    this.advance();
+
+    if (!this.options.preserveComments) {
+      return null;
+    }
+
+    return {
+      type: LaTeXBlockType.Comment,
+      // 去掉行首的 % 标记
+      content: commentToken.value.substring(1),
+      position: this.tokenPosition(commentToken),
+      raw: commentToken.value,
+    };
   }
 
   private parseSection(): SectionNode {
@@ -846,8 +986,7 @@ export class LaTeXParser {
     let shortTitle: LaTeXInlineNode[] | undefined;
     if (this.match(TokenType.BeginOptional)) {
       this.advance();
-      const content = this.readUntilEndOptional();
-      shortTitle = this.parseInlineString(content);
+      shortTitle = this.readInlineArgument(TokenType.EndOptional);
     }
 
     this.skipWhitespace();
@@ -856,8 +995,7 @@ export class LaTeXParser {
     let title: LaTeXInlineNode[] = [];
     if (this.match(TokenType.BeginGroup)) {
       this.advance();
-      const content = this.readUntilEndGroup();
-      title = this.parseInlineString(content);
+      title = this.readInlineArgument(TokenType.EndGroup);
     }
 
     this.skipWhitespace();
@@ -865,12 +1003,7 @@ export class LaTeXParser {
     // 检查标签
     let label: string | undefined;
     if (this.matchCommand('\\label')) {
-      this.advance();
-      this.skipWhitespace();
-      if (this.match(TokenType.BeginGroup)) {
-        this.advance();
-        label = this.readUntilEndGroup();
-      }
+      label = this.readLabel();
     }
 
     // 解析子内容（直到下一个同级或更高级章节）
@@ -896,10 +1029,7 @@ export class LaTeXParser {
       }
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     let type: LaTeXBlockType.Section | LaTeXBlockType.Subsection | LaTeXBlockType.Subsubsection;
     if (level <= 1) {
@@ -918,7 +1048,7 @@ export class LaTeXParser {
       numbered,
       label,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -930,8 +1060,7 @@ export class LaTeXParser {
 
     // 读取环境名称
     let envName = '';
-    if (this.match(TokenType.BeginGroup)) {
-      this.advance();
+    if (this.expect(TokenType.BeginGroup)) {
       envName = this.readUntilEndGroup();
     }
 
@@ -975,37 +1104,80 @@ export class LaTeXParser {
   }
 
   private parseMathEnvironment(startToken: Token, envName: string): MathBlockNode {
-    const numbered = !envName.endsWith('*');
+    const body = this.readMathBody(() => this.atEnvironmentCommand('end', envName));
+
+    if (body.closed) {
+      this.advance(); // 跳过 \end
+      this.skipWhitespace();
+      if (this.match(TokenType.BeginGroup)) {
+        this.advance();
+        this.readUntilEndGroup();
+      }
+    } else {
+      this.addWarning(`数学环境未闭合，缺少 \\end{${envName}}`, 'syntax');
+    }
+
+    return {
+      type: LaTeXBlockType.MathBlock,
+      content: body.content,
+      environment: envName,
+      numbered: !envName.endsWith('*'),
+      label: body.label,
+      position: this.spanFrom(startToken),
+      raw: this.rawFrom(startToken),
+    };
+  }
+
+  /**
+   * \[ ... \] 行间公式
+   */
+  private parseBracketMath(): MathBlockNode {
+    const startToken = this.currentToken;
+    this.advance(); // 跳过 \[
+    const body = this.readMathBody(() => this.matchCommand('\\]'));
+
+    if (body.closed) {
+      this.advance(); // 跳过 \]
+    } else {
+      this.addWarning('行间公式未闭合，缺少 \\]', 'syntax');
+    }
+
+    return {
+      type: LaTeXBlockType.MathBlock,
+      content: body.content,
+      environment: '\\[',
+      numbered: false,
+      label: body.label,
+      position: this.spanFrom(startToken),
+      raw: this.rawFrom(startToken),
+    };
+  }
+
+  /**
+   * 读取公式内容直到 isEnd() 为真（不消费结束标记）。
+   * 公式中的 \label 与 \ref 类命令（如 \tag{\ref{x}}、\text{由 \eqref{a}}）记入交叉引用索引；
+   * align 等多行公式可以有多个标签，节点保留第一个
+   */
+  private readMathBody(isEnd: () => boolean): { content: string; label?: string; closed: boolean } {
+    let content = '';
     let label: string | undefined;
 
-    // 读取数学内容直到 \end{envName}
-    let content = '';
-    const endPattern = `\\end{${envName}}`;
-
     while (!this.match(TokenType.EOF)) {
-      // 检查标签
+      if (isEnd()) {
+        return { content: content.trim(), label, closed: true };
+      }
+
       if (this.matchCommand('\\label')) {
-        this.advance();
-        this.skipWhitespace();
-        if (this.match(TokenType.BeginGroup)) {
-          this.advance();
-          label = this.readUntilEndGroup();
-        }
+        const name = this.readLabel();
+        label ??= name;
         continue;
       }
 
-      // 检查是否到达结束
-      if (this.matchCommand('\\end')) {
-        this.advance();
-        this.skipWhitespace();
-        if (this.match(TokenType.BeginGroup)) {
-          this.advance();
-          const endEnv = this.readUntilEndGroup();
-          if (endEnv === envName) {
-            break;
-          }
-          content += `\\end{${endEnv}}`;
-        }
+      if (
+        this.currentToken.type === TokenType.Command &&
+        REFERENCE_COMMANDS.has(this.currentToken.value.substring(1))
+      ) {
+        content += this.parseReference(this.currentToken.value.substring(1)).raw;
         continue;
       }
 
@@ -1013,20 +1185,7 @@ export class LaTeXParser {
       this.advance();
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
-
-    return {
-      type: LaTeXBlockType.MathBlock,
-      content: content.trim(),
-      environment: envName,
-      numbered,
-      label,
-      position: this.createPosition(startToken, this.currentToken),
-      raw,
-    };
+    return { content: content.trim(), label, closed: false };
   }
 
   private parseCodeEnvironment(startToken: Token, envName: string): CodeBlockNode {
@@ -1071,10 +1230,7 @@ export class LaTeXParser {
       this.advance();
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.CodeBlock,
@@ -1082,7 +1238,7 @@ export class LaTeXParser {
       language,
       environment: envName,
       options,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1095,29 +1251,20 @@ export class LaTeXParser {
     this.skipWhitespace();
     if (this.match(TokenType.BeginOptional)) {
       this.advance();
-      const content = this.readUntilEndOptional();
-      title = this.parseInlineString(content);
+      title = this.readInlineArgument(TokenType.EndOptional);
     }
 
     this.skipWhitespace();
 
     // 检查标签
     if (this.matchCommand('\\label')) {
-      this.advance();
-      this.skipWhitespace();
-      if (this.match(TokenType.BeginGroup)) {
-        this.advance();
-        label = this.readUntilEndGroup();
-      }
+      label = this.readLabel();
     }
 
     // 解析内容
     const children = this.parseBlocksUntilEnd(envName);
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Theorem,
@@ -1125,7 +1272,7 @@ export class LaTeXParser {
       title,
       label,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1164,16 +1311,13 @@ export class LaTeXParser {
       this.advance();
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.List,
       listType: envName,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1188,8 +1332,7 @@ export class LaTeXParser {
     // 对于 description，解析可选标签
     if (listType === 'description' && this.match(TokenType.BeginOptional)) {
       this.advance();
-      const content = this.readUntilEndOptional();
-      label = this.parseInlineString(content);
+      label = this.readInlineArgument(TokenType.EndOptional);
     }
 
     // 解析内容直到下一个 \item 或 \end
@@ -1227,16 +1370,13 @@ export class LaTeXParser {
       children.push(...inlineContent);
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.ListItem,
       label,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1277,20 +1417,14 @@ export class LaTeXParser {
           this.skipWhitespace();
           if (this.match(TokenType.BeginGroup)) {
             this.advance();
-            const content = this.readUntilEndGroup();
-            caption = this.parseInlineString(content);
+            caption = this.readInlineArgument(TokenType.EndGroup);
           }
           continue;
         }
 
         // 解析标签
         if (this.matchCommand('\\label')) {
-          this.advance();
-          this.skipWhitespace();
-          if (this.match(TokenType.BeginGroup)) {
-            this.advance();
-            label = this.readUntilEndGroup();
-          }
+          label = this.readLabel();
           continue;
         }
 
@@ -1319,10 +1453,7 @@ export class LaTeXParser {
       children.push(...result.rows);
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Table,
@@ -1330,7 +1461,7 @@ export class LaTeXParser {
       children,
       caption,
       label,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1408,16 +1539,13 @@ export class LaTeXParser {
   }
 
   private createTableRow(startToken: Token, cells: TableCellNode[], isHeader: boolean): TableRowNode {
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.TableRow,
       children: cells,
       isHeader,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1447,17 +1575,14 @@ export class LaTeXParser {
       }
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.TableCell,
       children,
       colspan: 1,
       rowspan: 1,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1525,30 +1650,21 @@ export class LaTeXParser {
         this.skipWhitespace();
         if (this.match(TokenType.BeginGroup)) {
           this.advance();
-          const content = this.readUntilEndGroup();
-          caption = this.parseInlineString(content);
+          caption = this.readInlineArgument(TokenType.EndGroup);
         }
         continue;
       }
 
       // 解析标签
       if (this.matchCommand('\\label')) {
-        this.advance();
-        this.skipWhitespace();
-        if (this.match(TokenType.BeginGroup)) {
-          this.advance();
-          label = this.readUntilEndGroup();
-        }
+        label = this.readLabel();
         continue;
       }
 
       this.advance();
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Figure,
@@ -1558,7 +1674,7 @@ export class LaTeXParser {
       label,
       placement,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1569,16 +1685,13 @@ export class LaTeXParser {
   ): QuoteNode {
     const children = this.parseBlocksUntilEnd(envName);
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Quote,
       environment: envName,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1586,15 +1699,12 @@ export class LaTeXParser {
   private parseAbstractEnvironment(startToken: Token): LaTeXBlockNode {
     const children = this.parseBlocksUntilEnd('abstract');
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Abstract,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1621,10 +1731,7 @@ export class LaTeXParser {
 
     const children = this.parseBlocksUntilEnd(envName);
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Environment,
@@ -1632,7 +1739,7 @@ export class LaTeXParser {
       args,
       optArgs,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1668,17 +1775,14 @@ export class LaTeXParser {
     const content = this.currentToken.value;
     this.advance();
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.MathBlock,
       content,
       environment: '$$',
       numbered: false,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1687,15 +1791,12 @@ export class LaTeXParser {
     const startToken = this.currentToken;
     const children = this.parseInlineContent();
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXBlockType.Paragraph,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1728,6 +1829,7 @@ export class LaTeXParser {
           command in SECTION_COMMANDS ||
           command === 'begin' ||
           command === 'end' ||
+          command === '[' ||
           command === 'maketitle' ||
           command === 'tableofcontents'
         ) {
@@ -1767,7 +1869,7 @@ export class LaTeXParser {
         return {
           type: LaTeXInlineType.Whitespace,
           count: 1,
-          position: this.createPosition(startToken),
+          position: this.tokenPosition(startToken),
           raw: startToken.value,
         };
 
@@ -1777,7 +1879,7 @@ export class LaTeXParser {
           return {
             type: LaTeXInlineType.Text,
             content: '',
-            position: this.createPosition(startToken),
+            position: this.tokenPosition(startToken),
             raw: startToken.value,
           };
         }
@@ -1805,7 +1907,7 @@ export class LaTeXParser {
     return {
       type: LaTeXInlineType.Text,
       content,
-      position: this.createPosition(startToken),
+      position: this.tokenPosition(startToken),
       raw: startToken.value,
     };
   }
@@ -1821,7 +1923,7 @@ export class LaTeXParser {
         type: LaTeXInlineType.SpecialChar,
         char: SPECIAL_CHAR_MAP['\\' + command],
         command,
-        position: this.createPosition(startToken),
+        position: this.tokenPosition(startToken),
         raw: startToken.value,
       } as SpecialCharNode;
     }
@@ -1880,17 +1982,14 @@ export class LaTeXParser {
       }
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     if (command === 'textbf' || command === 'bfseries' || command === 'bf') {
       return {
         type: LaTeXInlineType.Bold,
         children,
         command: command as 'textbf' | 'bfseries' | 'bf',
-        position: this.createPosition(startToken, this.currentToken),
+        position: this.spanFrom(startToken),
         raw,
       };
     }
@@ -1900,7 +1999,7 @@ export class LaTeXParser {
         type: LaTeXInlineType.Monospace,
         children,
         command: command as 'texttt' | 'ttfamily' | 'verb',
-        position: this.createPosition(startToken, this.currentToken),
+        position: this.spanFrom(startToken),
         raw,
       };
     }
@@ -1909,7 +2008,7 @@ export class LaTeXParser {
       type: LaTeXInlineType.Italic,
       children,
       command: command as 'textit' | 'itshape' | 'it' | 'emph',
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1921,7 +2020,7 @@ export class LaTeXParser {
 
     let prefix: string | undefined;
     let suffix: string | undefined;
-    const keys: string[] = [];
+    let keys: string[] = [];
 
     // 解析可选参数
     if (this.match(TokenType.BeginOptional)) {
@@ -1940,14 +2039,11 @@ export class LaTeXParser {
     // 解析必选参数（引用键）
     if (this.match(TokenType.BeginGroup)) {
       this.advance();
-      const content = this.readUntilEndGroup();
-      keys.push(...content.split(',').map((s) => s.trim()).filter(Boolean));
+      const { text, origin } = this.readArgument(TokenType.EndGroup);
+      keys = this.indexKeys(this.crossRefs.citations, command, text, origin, true).map((entry) => entry.key);
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXInlineType.Citation,
@@ -1955,7 +2051,7 @@ export class LaTeXParser {
       command,
       prefix,
       suffix,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -1969,44 +2065,38 @@ export class LaTeXParser {
 
     if (this.match(TokenType.BeginGroup)) {
       this.advance();
-      label = this.readUntilEndGroup();
+      const { text, origin } = this.readArgument(TokenType.EndGroup);
+      label = text.trim();
+      this.indexKeys(
+        this.crossRefs.references,
+        command,
+        text,
+        origin,
+        MULTI_KEY_REFERENCE_COMMANDS.has(command)
+      );
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXInlineType.Reference,
       label,
       command,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
 
   private parseLabel(): LabelNode {
     const startToken = this.currentToken;
-    this.advance();
-    this.skipWhitespace();
+    const name = this.readLabel();
 
-    let name = '';
-
-    if (this.match(TokenType.BeginGroup)) {
-      this.advance();
-      name = this.readUntilEndGroup();
-    }
-
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXInlineType.Label,
       name,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -2039,17 +2129,14 @@ export class LaTeXParser {
       }
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXInlineType.Hyperlink,
       url,
       text,
       command: command as 'href' | 'hyperref',
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -2076,15 +2163,12 @@ export class LaTeXParser {
       }
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXInlineType.FootnoteRef,
       content: children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -2107,21 +2191,22 @@ export class LaTeXParser {
     // 解析必选参数
     while (this.match(TokenType.BeginGroup)) {
       this.advance();
-      args.push(this.readUntilEndGroup());
+      const { text, origin } = this.readArgument(TokenType.EndGroup);
+      if (args.length === 0 && INDEXED_ARGUMENT_COMMANDS.has(command)) {
+        this.indexCommandArgument(command, text, origin);
+      }
+      args.push(text);
       this.skipWhitespace();
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXInlineType.Command,
       name: command,
       args,
       optArgs,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
@@ -2135,8 +2220,8 @@ export class LaTeXParser {
       type: LaTeXInlineType.MathInline,
       content,
       delimiter: '$',
-      position: this.createPosition(startToken),
-      raw: `$${content}$`,
+      position: this.spanFrom(startToken),
+      raw: this.rawFrom(startToken),
     };
   }
 
@@ -2159,23 +2244,16 @@ export class LaTeXParser {
       this.advance();
     }
 
-    const raw = this.input.substring(
-      startToken.offset,
-      this.currentToken.offset
-    );
+    const raw = this.rawFrom(startToken);
 
     return {
       type: LaTeXInlineType.Group,
       children,
-      position: this.createPosition(startToken, this.currentToken),
+      position: this.spanFrom(startToken),
       raw,
     };
   }
 
-  private parseInlineString(content: string): LaTeXInlineNode[] {
-    const parser = new LaTeXParser(this.options);
-    return parser.parseInline(content);
-  }
 
   // ================================
   // 辅助方法
@@ -2200,49 +2278,142 @@ export class LaTeXParser {
     }
   }
 
-  private readUntilEndGroup(): string {
-    let content = '';
-    let depth = 1;
+  /**
+   * 以参数原文解析行内内容（当前 Token 为左括号之后的第一个 Token）
+   */
+  private readInlineArgument(close: TokenType.EndGroup | TokenType.EndOptional): LaTeXInlineNode[] {
+    const { text, origin } = this.readArgument(close);
+    const parser = new LaTeXParser(this.options);
+    return parser.parseInlineAt(text, origin, this.crossRefs);
+  }
 
-    while (!this.match(TokenType.EOF) && depth > 0) {
-      if (this.match(TokenType.BeginGroup)) {
-        depth++;
-        content += '{';
-      } else if (this.match(TokenType.EndGroup)) {
-        depth--;
-        if (depth > 0) {
-          content += '}';
-        }
-      } else {
-        content += this.currentToken.value;
-      }
-      this.advance();
+  /**
+   * 读取当前位置的 \label{name}，并登记到交叉引用索引
+   */
+  private readLabel(): string {
+    this.advance(); // 跳过 \label
+    this.skipWhitespace();
+    if (!this.match(TokenType.BeginGroup)) return '';
+    this.advance();
+    const { text, origin } = this.readArgument(TokenType.EndGroup);
+    const [entry] = this.indexKeys(this.crossRefs.labels, 'label', text, origin, false);
+    return entry?.key ?? '';
+  }
+
+  /**
+   * 把参数中的键登记到索引；split 为真时按逗号拆分为多个键，每个键使用其自身的位置
+   */
+  private indexKeys(
+    target: CrossReferenceEntry[],
+    command: string,
+    text: string,
+    origin: SourceOrigin,
+    split: boolean
+  ): CrossReferenceEntry[] {
+    const entries: CrossReferenceEntry[] = [];
+    const pattern = split ? /[^,]+/g : /[\s\S]+/g;
+    for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+      const key = match[0].trim();
+      if (!key) continue;
+      const from = match.index + (match[0].length - match[0].trimStart().length);
+      const entry = { key, command, position: positionWithin(origin, text, from, from + key.length) };
+      target.push(entry);
+      entries.push(entry);
     }
+    return entries;
+  }
 
-    return content;
+  /**
+   * 登记导言区或正文中与交叉引用相关的命令参数（\bibitem、\bibliography、\input 等）
+   */
+  private indexCommandArgument(command: string, text: string, origin: SourceOrigin): void {
+    switch (command) {
+      case 'bibitem':
+        this.indexKeys(this.crossRefs.bibItems, command, text, origin, false);
+        break;
+      case 'bibliography':
+      case 'addbibresource':
+        this.crossRefs.bibliographySources.push(
+          ...text.split(',').map((source) => source.trim()).filter(Boolean)
+        );
+        break;
+      default:
+        this.crossRefs.includedFiles.push(text.trim());
+    }
+  }
+
+  private readUntilEndGroup(): string {
+    return this.readArgument(TokenType.EndGroup).text;
   }
 
   private readUntilEndOptional(): string {
-    let content = '';
+    return this.readArgument(TokenType.EndOptional).text;
+  }
+
+  /**
+   * 读取到配对的右括号（当前 Token 为左括号之后的第一个 Token），返回括号内的源码原文与其起点
+   */
+  private readArgument(close: TokenType.EndGroup | TokenType.EndOptional): { text: string; origin: SourceOrigin } {
+    const open = close === TokenType.EndGroup ? TokenType.BeginGroup : TokenType.BeginOptional;
+    const origin: SourceOrigin = {
+      offset: this.currentToken.offset,
+      line: this.currentToken.line,
+      column: this.currentToken.column,
+    };
+    let end = origin.offset;
     let depth = 1;
 
-    while (!this.match(TokenType.EOF) && depth > 0) {
-      if (this.match(TokenType.BeginOptional)) {
+    while (!this.match(TokenType.EOF)) {
+      if (this.match(open)) {
         depth++;
-        content += '[';
-      } else if (this.match(TokenType.EndOptional)) {
+      } else if (this.match(close)) {
         depth--;
-        if (depth > 0) {
-          content += ']';
+        if (depth === 0) {
+          end = this.currentToken.offset;
+          this.advance();
+          break;
         }
-      } else {
-        content += this.currentToken.value;
       }
       this.advance();
+      end = this.currentToken.offset;
     }
 
-    return content;
+    return { text: this.sourceBetween(origin.offset, end), origin };
   }
+}
+
+/**
+ * 参数原文中 [from, to) 的位置（origin 为参数原文第一个字符的位置）
+ */
+function positionWithin(origin: SourceOrigin, text: string, from: number, to: number): Position {
+  let line = origin.line;
+  let column = origin.column;
+  let startLine = line;
+  let startColumn = column;
+  for (let i = 0; i < to; i++) {
+    if (i === from) {
+      startLine = line;
+      startColumn = column;
+    }
+    if (text[i] === '\n') {
+      line++;
+      column = 1;
+    } else {
+      column++;
+    }
+  }
+  if (from === to) {
+    startLine = line;
+    startColumn = column;
+  }
+  return {
+    startLine,
+    startColumn,
+    endLine: line,
+    endColumn: column,
+    startOffset: origin.offset + from,
+    endOffset: origin.offset + to,
+  };
 }
 
 // ================================

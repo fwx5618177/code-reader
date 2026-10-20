@@ -168,7 +168,7 @@ log.acknowledge(['op-1', 'op-2']);
 
 ### 5. 统一差分引擎 (DiffEngine)
 
-基于成熟 npm 包的统一差分引擎，整合多种算法：
+基于成熟 npm 包的统一差分引擎，整合多种算法（直接从 `@code-reader/diff-algorithm` 包导入，`lib/core` 不再转发）：
 
 | 算法 | npm 包 | 时间复杂度 | 特点 | 适用场景 |
 |------|--------|-----------|------|---------|
@@ -188,7 +188,7 @@ import {
   DIFF_INSERT,
   DIFF_DELETE,
   DIFF_EQUAL,
-} from './lib/core';
+} from '@code-reader/diff-algorithm';
 
 // 创建差分引擎
 const engine = createDiffEngine();
@@ -398,8 +398,8 @@ import { DocumentEditorManager, createSuccessResult } from './lib/core';
 
 const manager = DocumentEditorManager.getInstance();
 
-// 获取实例
-const { instance, isNew } = manager.acquire('doc-123', {
+// 获取实例（同一文档只有一个实例；已存在时沿用其内容，initialTitle / initialContent 不生效）
+const { instance } = manager.acquire('doc-123', {
   initialTitle: '我的文档',
   executor: {
     save: async (snapshot) => {
@@ -413,11 +413,15 @@ const { instance, isNew } = manager.acquire('doc-123', {
   },
 });
 
-// 使用
-instance.model.updateContent('<p>Hello World</p>');
-instance.saveEngine.requestSave();
+// 使用：实例自身负责自动保存（内容变化 → requestSave）与保存成功后的 markAsSaved，
+// 不依赖任何订阅方；多个持有方（如分栏的两栏）写入同一实例
+const unsubscribe = instance.model.onContentChange(() => {
+  /* 只更新本持有方的状态 */
+});
+instance.model.updateContent('Hello World');
 
-// 释放
+// 释放：先取消自己的订阅；实例留在缓存中，待保存的更改照常写回
+unsubscribe();
 manager.release('doc-123');
 ```
 
@@ -532,7 +536,6 @@ core/
 │       └── immediate.ts       # 立即策略
 ├── delta/
 │   ├── index.ts               # 模块导出
-│   ├── diff-engine.ts         # 统一差分引擎 (diff-match-patch/fossil-delta)
 │   ├── content-hasher.ts      # 内容哈希 (xxHash/SHA-256)
 │   ├── history-manager.ts     # 撤销/重做管理器
 │   └── versioned-snapshot.ts  # 版本化快照
@@ -673,7 +676,7 @@ const editor = useManagedEditor({
 ### 算法选择指南
 
 ```typescript
-import { DiffEngine, createDiffEngine } from './lib/core';
+import { createDiffEngine } from '@code-reader/diff-algorithm';
 
 const engine = createDiffEngine();
 

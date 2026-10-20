@@ -4,24 +4,22 @@
 // ================================
 
 import Database from 'better-sqlite3';
-import { app } from 'electron';
-import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
+import { mkdirSync } from 'fs';
+import { TASK_TYPES } from '../agent/task-types';
+import { ENTITY_TYPES } from '../agent/entity-types';
+import { RELATION_TYPES } from '../agent/relation-types';
+import { highlight } from '../../shared/search-highlight';
 
 // ================================
 // Types
 // ================================
 
-export interface DatabaseConfig {
-  path: string;
-  walMode?: boolean;
-  foreignKeys?: boolean;
-  cacheSize?: number;
-}
 
 export interface FTSResult {
   id: string;
   rank: number;
+  /** 命中摘要，命中的文字用 shared/search-highlight 的私用区字符包住 */
   snippet: string;
   title?: string;
   type?: string;
@@ -36,9 +34,223 @@ export interface RunResult {
 // Schema Definitions
 // ================================
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 8;
 
-const CREATE_TABLES_SQL = `
+/** 字符串常量列表 → SQL 的 IN 列表（取值均为代码内常量，不含引号） */
+const sqlList = (values: readonly string[]) => values.map((value) => `'${value}'`).join(', ');
+
+/** agent_tasks.type 允许的取值，来自执行器支持的任务类型 */
+const AGENT_TASK_TYPES_SQL = sqlList(TASK_TYPES);
+
+/** v4 迁移当时保留的任务类型；迁移是历史快照，不随 TASK_TYPES 变化 */
+const V4_TASK_TYPES_SQL = sqlList([
+  'transcribe',
+  'summarize',
+  'extract-tags',
+  'generate-embedding',
+  'find-related',
+]);
+
+/**
+ * agent_tasks 建表语句；全新数据库与重建迁移共用，保证两条路径结构一致。
+ * target_item_id 为空表示面向整个知识库的任务（如整库自动归类）
+ */
+const agentTasksTableSql = (name: string) => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL CHECK (type IN (${AGENT_TASK_TYPES_SQL})),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
+  target_item_id TEXT,
+  priority INTEGER NOT NULL DEFAULT 5,
+  progress INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  max_retries INTEGER NOT NULL DEFAULT 3,
+  result TEXT,
+  -- 同一次处理请求（processItem）创建的任务共享 batch_id，用于判定条目最终状态
+  batch_id TEXT,
+  -- 失败重试时的最早可执行时间（ISO 字符串），为空表示可立即执行
+  next_attempt_at TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  is_deleted INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT,
+  FOREIGN KEY (target_item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+);
+`;
+
+const AGENT_TASKS_COLUMNS =
+  'id, type, status, target_item_id, priority, progress, error_message, retry_count, max_retries, ' +
+  'result, batch_id, next_attempt_at, started_at, completed_at, created_at, updated_at, is_deleted, deleted_at';
+
+const AGENT_TASKS_INDEXES_SQL = `
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON agent_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_type ON agent_tasks(type);
+CREATE INDEX IF NOT EXISTS idx_tasks_target ON agent_tasks(target_item_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_priority ON agent_tasks(priority DESC, created_at ASC);
+`;
+
+/**
+ * 重建 agent_tasks：SQLite 不支持修改 CHECK / NOT NULL 约束，只能建新表、复制、替换并重建索引。
+ * 只保留 keepTypesSql 中的类型，以及库级任务或目标条目仍存在的任务
+ */
+const rebuildAgentTasksSql = (keepTypesSql: string) => `
+  DROP TABLE IF EXISTS agent_tasks_rebuild;
+  ${agentTasksTableSql('agent_tasks_rebuild')}
+  INSERT INTO agent_tasks_rebuild (${AGENT_TASKS_COLUMNS})
+    SELECT ${AGENT_TASKS_COLUMNS} FROM agent_tasks
+    WHERE type IN (${keepTypesSql})
+      AND (target_item_id IS NULL OR target_item_id IN (SELECT id FROM knowledge_items));
+  DROP TABLE agent_tasks;
+  ALTER TABLE agent_tasks_rebuild RENAME TO agent_tasks;
+  ${AGENT_TASKS_INDEXES_SQL}
+`;
+
+/** 实体图谱：实体按规范化名称去重，条目与实体多对多关联；全新数据库与 v5 迁移共用 */
+const ENTITY_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS entities (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'other' CHECK (type IN (${sqlList(ENTITY_TYPES)})),
+  normalized_name TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS item_entities (
+  item_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  mention_count INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (item_id, entity_id),
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE,
+  FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
+CREATE INDEX IF NOT EXISTS idx_item_entities_entity ON item_entities(entity_id);
+`;
+
+/**
+ * 语义索引：条目全文按段切分后逐段生成向量，每段一行（vector 为 Float32 小端 BLOB），
+ * 检索时以条目最相近的一段作为条目得分；全新数据库与 v6 迁移共用
+ */
+const EMBEDDING_CHUNKS_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS item_embedding_chunks (
+  item_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  model TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  vector BLOB NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (item_id, chunk_index),
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+);
+`;
+
+/**
+ * 实体关系：由实体抽取任务从条目正文中得出，item_id 为来源条目（重新抽取时整体替换该条目的关系）；
+ * 同一来源条目内 (source, target, type) 唯一。全新数据库与 v7 迁移共用
+ */
+const ENTITY_RELATIONS_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS entity_relations (
+  id TEXT PRIMARY KEY,
+  source_entity_id TEXT NOT NULL,
+  target_entity_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL CHECK (relation_type IN (${sqlList(RELATION_TYPES)})),
+  label TEXT,
+  item_id TEXT NOT NULL,
+  evidence TEXT,
+  confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (source_entity_id != target_entity_id),
+  UNIQUE (item_id, source_entity_id, target_entity_id, relation_type),
+  FOREIGN KEY (source_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_entity_id) REFERENCES entities(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_relations_source ON entity_relations(source_entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_relations_target ON entity_relations(target_entity_id);
+`;
+
+/**
+ * 多设备同步的本地状态（见 main/sync）。全新数据库与 v8 迁移共用
+ * - sync_records：每个实体（条目 / 文件夹 / 标签）上次同步（导出或应用）的内容哈希、同步时钟与产生该版本的设备，
+ *   用于发现本地变化与判断并发修改
+ * - sync_cursors：每台远端设备已应用到的变更集序号
+ * - sync_file_hashes：附件文件的 SHA-256 缓存（按路径、大小与修改时间失效）
+ */
+const SYNC_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS sync_records (
+  entity TEXT NOT NULL CHECK (entity IN ('item', 'folder', 'tag')),
+  id TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  clock INTEGER NOT NULL,
+  device_id TEXT NOT NULL,
+  PRIMARY KEY (entity, id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_cursors (
+  device_id TEXT PRIMARY KEY,
+  last_seq INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_file_hashes (
+  path TEXT PRIMARY KEY,
+  size INTEGER NOT NULL,
+  mtime_ms INTEGER NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sync_file_hashes_hash ON sync_file_hashes(hash);
+`;
+
+/**
+ * 自动归类提议：归类任务只写入待审阅的提议，用户逐条接受后才修改知识库。
+ * - kind = 'item'：条目移入 folder_id（已有文件夹）或新建名为 folder_name 的顶层文件夹（folder_id 为空时），
+ *   两者皆空表示不移动；tags 为要追加的标签名（JSON 数组）。folder_id 不设外键，接受时校验文件夹仍存在
+ * - kind = 'tag-merge'：把 source_tag_id 合并到 target_tag_id
+ * 每个条目 / 每个源标签最多一条待审阅提议。全新数据库与 v7 迁移共用
+ */
+const CATEGORIZATION_PROPOSALS_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS categorization_proposals (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('item', 'tag-merge')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+  item_id TEXT,
+  folder_id TEXT,
+  folder_name TEXT,
+  tags TEXT NOT NULL DEFAULT '[]',
+  source_tag_id TEXT,
+  target_tag_id TEXT,
+  reason TEXT,
+  confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_at TEXT,
+  CHECK (
+    (kind = 'item' AND item_id IS NOT NULL AND source_tag_id IS NULL AND target_tag_id IS NULL)
+    OR (kind = 'tag-merge' AND item_id IS NULL AND source_tag_id IS NOT NULL AND target_tag_id IS NOT NULL
+        AND source_tag_id != target_tag_id)
+  ),
+  CHECK ((status = 'pending') = (reviewed_at IS NULL)),
+  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE,
+  FOREIGN KEY (source_tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_tag_id) REFERENCES tags(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_status ON categorization_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_source_tag ON categorization_proposals(source_tag_id);
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_target_tag ON categorization_proposals(target_tag_id);
+CREATE INDEX IF NOT EXISTS idx_categorization_proposals_item ON categorization_proposals(item_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_categorization_proposals_pending_item
+  ON categorization_proposals(item_id) WHERE status = 'pending' AND kind = 'item';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_categorization_proposals_pending_merge
+  ON categorization_proposals(source_tag_id) WHERE status = 'pending' AND kind = 'tag-merge';
+`;
+
+export const CREATE_TABLES_SQL = `
 -- Knowledge Items table
 CREATE TABLE IF NOT EXISTS knowledge_items (
   id TEXT PRIMARY KEY,
@@ -166,25 +378,17 @@ CREATE TABLE IF NOT EXISTS links (
 );
 
 -- Agent Tasks table
-CREATE TABLE IF NOT EXISTS agent_tasks (
-  id TEXT PRIMARY KEY,
-  type TEXT NOT NULL CHECK (type IN ('transcribe', 'summarize', 'extract-tags', 'categorize', 'extract-entities', 'generate-embedding', 'find-related')),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
-  target_item_id TEXT NOT NULL,
-  priority INTEGER NOT NULL DEFAULT 5,
-  progress INTEGER NOT NULL DEFAULT 0,
-  error_message TEXT,
-  retry_count INTEGER NOT NULL DEFAULT 0,
-  max_retries INTEGER NOT NULL DEFAULT 3,
-  result TEXT,
-  started_at TEXT,
-  completed_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  is_deleted INTEGER NOT NULL DEFAULT 0,
-  deleted_at TEXT,
-  FOREIGN KEY (target_item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
-);
+${agentTasksTableSql('agent_tasks')}
+
+-- Entity graph tables
+${ENTITY_TABLES_SQL}
+${ENTITY_RELATIONS_TABLE_SQL}
+
+-- Categorization proposals awaiting review
+${CATEGORIZATION_PROPOSALS_TABLE_SQL}
+
+-- Multi-device sync state
+${SYNC_TABLES_SQL}
 
 -- App Settings table
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -208,16 +412,8 @@ CREATE TABLE IF NOT EXISTS ai_providers (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Embeddings table for vector search
-CREATE TABLE IF NOT EXISTS embeddings (
-  id TEXT PRIMARY KEY,
-  item_id TEXT NOT NULL,
-  model TEXT NOT NULL,
-  dimensions INTEGER NOT NULL,
-  vector BLOB NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE
-);
+-- Chunked embeddings for vector search
+${EMBEDDING_CHUNKS_TABLE_SQL}
 
 -- ================================
 -- Version History Tables (Phase 4)
@@ -249,56 +445,6 @@ CREATE TABLE IF NOT EXISTS document_versions (
 
   FOREIGN KEY (item_id) REFERENCES knowledge_items(id) ON DELETE CASCADE,
   UNIQUE (item_id, version_number)
-);
-
--- Git repository tracking (for code-reader mode)
-CREATE TABLE IF NOT EXISTS git_repositories (
-  id TEXT PRIMARY KEY,
-  path TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL,
-  remote_url TEXT,
-  current_branch TEXT,
-  last_commit_hash TEXT,
-  last_synced_at TEXT,
-  is_active INTEGER NOT NULL DEFAULT 1,
-  settings TEXT, -- JSON for repo-specific settings
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Git commits cache (for displaying history)
-CREATE TABLE IF NOT EXISTS git_commits (
-  id TEXT PRIMARY KEY,
-  repo_id TEXT NOT NULL,
-  commit_hash TEXT NOT NULL,
-  parent_hash TEXT,
-  author_name TEXT,
-  author_email TEXT,
-  author_date TEXT,
-  committer_name TEXT,
-  committer_email TEXT,
-  commit_date TEXT,
-  message TEXT,
-  message_body TEXT,
-  files_changed INTEGER,
-  insertions INTEGER,
-  deletions INTEGER,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (repo_id) REFERENCES git_repositories(id) ON DELETE CASCADE,
-  UNIQUE (repo_id, commit_hash)
-);
-
--- Git file changes in commits
-CREATE TABLE IF NOT EXISTS git_file_changes (
-  id TEXT PRIMARY KEY,
-  commit_id TEXT NOT NULL,
-  file_path TEXT NOT NULL,
-  change_type TEXT NOT NULL CHECK (change_type IN ('add', 'modify', 'delete', 'rename', 'copy')),
-  old_path TEXT, -- For renames
-  additions INTEGER DEFAULT 0,
-  deletions INTEGER DEFAULT 0,
-  is_binary INTEGER DEFAULT 0,
-  FOREIGN KEY (commit_id) REFERENCES git_commits(id) ON DELETE CASCADE
 );
 
 -- Schema version tracking
@@ -337,14 +483,8 @@ CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_id);
 CREATE INDEX IF NOT EXISTS idx_links_type ON links(type);
 
 -- Tasks indexes
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON agent_tasks(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_type ON agent_tasks(type);
-CREATE INDEX IF NOT EXISTS idx_tasks_target ON agent_tasks(target_item_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_priority ON agent_tasks(priority DESC, created_at ASC);
+${AGENT_TASKS_INDEXES_SQL}
 
--- Embeddings indexes
-CREATE INDEX IF NOT EXISTS idx_embeddings_item ON embeddings(item_id);
-CREATE INDEX IF NOT EXISTS idx_embeddings_model ON embeddings(model);
 
 -- Document versions indexes
 CREATE INDEX IF NOT EXISTS idx_versions_item ON document_versions(item_id);
@@ -353,52 +493,195 @@ CREATE INDEX IF NOT EXISTS idx_versions_created ON document_versions(created_at 
 CREATE INDEX IF NOT EXISTS idx_versions_change_type ON document_versions(change_type);
 
 -- Git indexes
-CREATE INDEX IF NOT EXISTS idx_git_repos_path ON git_repositories(path);
-CREATE INDEX IF NOT EXISTS idx_git_commits_repo ON git_commits(repo_id);
-CREATE INDEX IF NOT EXISTS idx_git_commits_hash ON git_commits(commit_hash);
-CREATE INDEX IF NOT EXISTS idx_git_commits_date ON git_commits(commit_date DESC);
-CREATE INDEX IF NOT EXISTS idx_git_file_changes_commit ON git_file_changes(commit_id);
-CREATE INDEX IF NOT EXISTS idx_git_file_changes_path ON git_file_changes(file_path);
 `;
 
+// 全文检索：外部内容表映射 knowledge_items，trigram 分词以支持中文等无空格语言的子串匹配
 const CREATE_FTS_SQL = `
--- Full-text search virtual table
 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
   id UNINDEXED,
   title,
   content,
   summary,
   transcript,
-  tags,
   content='knowledge_items',
   content_rowid='rowid',
-  tokenize='unicode61 remove_diacritics 2'
+  tokenize='trigram'
 );
 
--- Triggers to keep FTS in sync
 CREATE TRIGGER IF NOT EXISTS items_fts_insert AFTER INSERT ON knowledge_items BEGIN
-  INSERT INTO items_fts(rowid, id, title, content, summary, transcript, tags)
-  SELECT NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript,
-    (SELECT GROUP_CONCAT(t.name, ' ') FROM tags t
-     INNER JOIN item_tags it ON t.id = it.tag_id
-     WHERE it.item_id = NEW.id);
+  INSERT INTO items_fts(rowid, id, title, content, summary, transcript)
+  VALUES (NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript);
 END;
 
 CREATE TRIGGER IF NOT EXISTS items_fts_delete AFTER DELETE ON knowledge_items BEGIN
-  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript, tags)
-  VALUES('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript, NULL);
+  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript)
+  VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript);
 END;
 
-CREATE TRIGGER IF NOT EXISTS items_fts_update AFTER UPDATE ON knowledge_items BEGIN
-  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript, tags)
-  VALUES('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript, NULL);
-  INSERT INTO items_fts(rowid, id, title, content, summary, transcript, tags)
-  SELECT NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript,
-    (SELECT GROUP_CONCAT(t.name, ' ') FROM tags t
-     INNER JOIN item_tags it ON t.id = it.tag_id
-     WHERE it.item_id = NEW.id);
+-- 仅在被索引的列变化时重建该行索引，避免 status/view_count 等更新带来无谓开销
+CREATE TRIGGER IF NOT EXISTS items_fts_update
+AFTER UPDATE OF title, content, summary, transcript ON knowledge_items BEGIN
+  INSERT INTO items_fts(items_fts, rowid, id, title, content, summary, transcript)
+  VALUES ('delete', OLD.rowid, OLD.id, OLD.title, OLD.content, OLD.summary, OLD.transcript);
+  INSERT INTO items_fts(rowid, id, title, content, summary, transcript)
+  VALUES (NEW.rowid, NEW.id, NEW.title, NEW.content, NEW.summary, NEW.transcript);
 END;
 `;
+
+const REBUILD_FTS_SQL = "INSERT INTO items_fts(items_fts) VALUES('rebuild')";
+
+// trigram 分词器只能匹配长度 >= 3 个字符的检索词
+const TRIGRAM_MIN_TERM_LENGTH = 3;
+
+// LIKE 回退检索时，片段中命中词前后保留的字符数
+const LIKE_SNIPPET_CONTEXT_CHARS = 32;
+
+// ================================
+// Migrations
+// ================================
+
+interface Migration {
+  version: number;
+  description: string;
+  up: (db: Database.Database) => void;
+}
+
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string
+): void {
+  const columns = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
+  if (!columns.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${definition}`);
+  }
+}
+
+/**
+ * 增量迁移，按 version 升序执行。全新数据库直接按 CREATE_TABLES_SQL / CREATE_FTS_SQL 建出最新结构，不执行迁移。
+ */
+export const MIGRATIONS: Migration[] = [
+  {
+    version: 3,
+    description: 'agent_tasks 新增 batch_id/next_attempt_at；items_fts 去掉不存在的 tags 列并改用 trigram 分词',
+    up: (db) => {
+      addColumnIfMissing(db, 'agent_tasks', 'batch_id', 'TEXT');
+      addColumnIfMissing(db, 'agent_tasks', 'next_attempt_at', 'TEXT');
+
+      db.exec(`
+        DROP TRIGGER IF EXISTS items_fts_insert;
+        DROP TRIGGER IF EXISTS items_fts_delete;
+        DROP TRIGGER IF EXISTS items_fts_update;
+        DROP TABLE IF EXISTS items_fts;
+      `);
+      db.exec(CREATE_FTS_SQL);
+      db.exec(REBUILD_FTS_SQL);
+    },
+  },
+  {
+    version: 4,
+    description: 'agent_tasks 重建：类型约束去掉已移除的 categorize / extract-entities',
+    // SQLite 不支持修改 CHECK 约束，只能建新表、复制、替换；已移除类型的任务与孤儿任务不再保留
+    up: (db) => {
+      db.exec(rebuildAgentTasksSql(V4_TASK_TYPES_SQL));
+    },
+  },
+  {
+    version: 5,
+    description: 'agent_tasks 重建：新增 categorize / extract-entities 类型，target_item_id 允许为空；新增实体图谱表',
+    up: (db) => {
+      db.exec(rebuildAgentTasksSql(AGENT_TASK_TYPES_SQL));
+      db.exec(ENTITY_TABLES_SQL);
+    },
+  },
+  {
+    version: 6,
+    description: '语义索引改为分段存储：embeddings 迁入 item_embedding_chunks（作为第 0 段）后删除',
+    // 旧版每个条目只有一条向量（由截断后的文本生成），保留为第 0 段，条目重新生成语义索引时整体替换；
+    // 此前各版本的建表语句都包含 embeddings，因此这里可以直接读取
+    up: (db) => {
+      db.exec(EMBEDDING_CHUNKS_TABLE_SQL);
+      db.exec(`
+        INSERT OR IGNORE INTO item_embedding_chunks (item_id, chunk_index, model, dimensions, vector, created_at)
+          SELECT item_id, 0, model, dimensions, vector, created_at FROM embeddings
+          WHERE item_id IN (SELECT id FROM knowledge_items);
+        DROP TABLE embeddings;
+      `);
+    },
+  },
+  {
+    version: 7,
+    description: '新增实体关系表 entity_relations 与自动归类待审阅提议表 categorization_proposals',
+    up: (db) => {
+      db.exec(ENTITY_RELATIONS_TABLE_SQL);
+      db.exec(CATEGORIZATION_PROPOSALS_TABLE_SQL);
+    },
+  },
+  {
+    version: 8,
+    description: '新增多设备同步状态表 sync_records / sync_cursors / sync_file_hashes',
+    up: (db) => {
+      db.exec(SYNC_TABLES_SQL);
+    },
+  },
+];
+
+// ================================
+// Search Helpers
+// ================================
+
+/**
+ * 将用户输入拆分为检索词（按空白分隔）
+ */
+function splitSearchTerms(query: string): string[] {
+  return query.trim().split(/\s+/).filter((term) => term.length > 0);
+}
+
+/**
+ * 构造 FTS5 MATCH 表达式：每个词作为短语用双引号包裹（内部双引号转义为两个），词之间为隐式 AND
+ */
+function buildFtsMatchExpression(terms: string[]): string {
+  return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' ');
+}
+
+/**
+ * 转义 LIKE 通配符（% _ 以及转义符自身），配合 SQL 中的 ESCAPE '\' 使用
+ */
+function toLikePattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 为 LIKE 回退检索生成与 FTS snippet 风格一致的片段：取首个命中字段中第一个命中位置附近的文本并高亮所有检索词
+ */
+function buildLikeSnippet(fields: Array<string | null>, terms: string[]): string {
+  const pattern = terms.map(escapeRegExp).join('|');
+
+  for (const field of fields) {
+    if (!field) continue;
+
+    const firstHit = new RegExp(pattern, 'iu').exec(field);
+    if (!firstHit) continue;
+
+    const start = Math.max(0, firstHit.index - LIKE_SNIPPET_CONTEXT_CHARS);
+    const end = Math.min(
+      field.length,
+      firstHit.index + firstHit[0].length + LIKE_SNIPPET_CONTEXT_CHARS
+    );
+    const highlighted = field
+      .slice(start, end)
+      .replace(new RegExp(pattern, 'giu'), (match) => highlight(match));
+
+    return `${start > 0 ? '...' : ''}${highlighted}${end < field.length ? '...' : ''}`;
+  }
+
+  return '';
+}
 
 // ================================
 // SQLite Service Class
@@ -406,27 +689,29 @@ END;
 
 export class SQLiteService {
   private db: Database.Database | null = null;
-  private dbPath: string;
+  /** 当前知识库的数据库文件，由 open() 指定（见 main/workspace） */
+  private dbPath: string | null = null;
   private isInitialized = false;
 
-  constructor(config?: Partial<DatabaseConfig>) {
-    const userDataPath = app.getPath('userData');
-    const dbDir = join(userDataPath, 'data');
-
-    // Ensure data directory exists
-    if (!existsSync(dbDir)) {
-      mkdirSync(dbDir, { recursive: true });
-    }
-
-    this.dbPath = config?.path || join(dbDir, 'knowledge.db');
+  /**
+   * 关闭当前连接并打开指定的数据库文件（切换知识库），与启动时走同一条建表 + 迁移路径
+   */
+  open(dbPath: string): void {
+    this.close();
+    mkdirSync(dirname(dbPath), { recursive: true });
+    this.dbPath = dbPath;
+    this.initialize();
   }
 
   /**
-   * Initialize the database
+   * 打开 dbPath 指向的数据库（已打开时为空操作）
    */
   initialize(): void {
     if (this.isInitialized && this.db) {
       return;
+    }
+    if (!this.dbPath) {
+      throw new Error('Database path not set. Call open() first.');
     }
 
     try {
@@ -465,28 +750,50 @@ export class SQLiteService {
   }
 
   /**
-   * Create database tables
+   * Create database tables and apply pending migrations
    */
   private createTables(): void {
-    if (!this.db) throw new Error('Database not connected');
+    const db = this.db;
+    if (!db) throw new Error('Database not connected');
 
     try {
-      // Create main tables
-      this.db.exec(CREATE_TABLES_SQL);
+      // 必须在建表之前判断：已存在的数据库需要从其记录的版本开始迁移，全新数据库直接就是最新结构
+      const isExistingDatabase = db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'knowledge_items'`)
+        .get() !== undefined;
+      const hasVersionTable = db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'`)
+        .get() !== undefined;
+      const currentVersion = !isExistingDatabase
+        ? SCHEMA_VERSION
+        : hasVersionTable
+          ? ((db.prepare('SELECT MAX(version) as version FROM schema_version').get() as {
+              version: number | null;
+            }).version ?? 0)
+          : 0;
 
-      // Create FTS tables and triggers
-      this.db.exec(CREATE_FTS_SQL);
+      db.transaction(() => {
+        db.exec(CREATE_TABLES_SQL);
 
-      // Record schema version
-      const versionStmt = this.db.prepare(`
-        INSERT OR REPLACE INTO schema_version (version, applied_at)
-        VALUES (?, datetime('now'))
-      `);
-      versionStmt.run(SCHEMA_VERSION);
+        const recordVersion = db.prepare(`
+          INSERT OR REPLACE INTO schema_version (version, applied_at)
+          VALUES (?, datetime('now'))
+        `);
 
-      console.log('[SQLite] Tables created successfully');
+        for (const migration of MIGRATIONS) {
+          if (migration.version <= currentVersion) continue;
+          console.log(`[SQLite] Applying migration v${migration.version}: ${migration.description}`);
+          migration.up(db);
+          recordVersion.run(migration.version);
+        }
+
+        db.exec(CREATE_FTS_SQL);
+        recordVersion.run(SCHEMA_VERSION);
+      })();
+
+      console.log(`[SQLite] Schema ready (v${currentVersion} -> v${SCHEMA_VERSION})`);
     } catch (error) {
-      console.error('[SQLite] Failed to create tables:', error);
+      console.error('[SQLite] Failed to create tables or migrate schema:', error);
       throw error;
     }
   }
@@ -572,7 +879,10 @@ export class SQLiteService {
   }
 
   /**
-   * Full-text search
+   * 全文检索。
+   * - 所有检索词长度 >= 3：走 trigram FTS5，按 bm25 排序（rank 越小越相关）
+   * - 存在更短的词（如两字中文词）：trigram 无法匹配，回退为 LIKE 扫描，标题命中优先、其次按更新时间排序，rank 固定为 0
+   * 多个词之间为 AND 关系。
    */
   search(
     query: string,
@@ -584,43 +894,94 @@ export class SQLiteService {
   ): FTSResult[] {
     this.ensureInitialized();
 
-    const limit = options?.limit || 50;
-    const offset = options?.offset || 0;
-    const types = options?.types;
+    const terms = splitSearchTerms(query);
+    if (terms.length === 0) return [];
+
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
+    const types = options?.types ?? [];
+    const useFts = terms.every((term) => [...term].length >= TRIGRAM_MIN_TERM_LENGTH);
 
     try {
-      // Escape special FTS5 characters
-      const escapedQuery = query.replace(/['"]/g, '');
-
-      let sql = `
-        SELECT
-          items_fts.id,
-          bm25(items_fts) as rank,
-          snippet(items_fts, 2, '<mark>', '</mark>', '...', 64) as snippet,
-          ki.title,
-          ki.type
-        FROM items_fts
-        LEFT JOIN knowledge_items ki ON items_fts.id = ki.id
-        WHERE items_fts MATCH ?
-      `;
-
-      const params: unknown[] = [escapedQuery];
-
-      if (types && types.length > 0) {
-        sql += ` AND ki.type IN (${types.map(() => '?').join(', ')})`;
-        params.push(...types);
-      }
-
-      sql += ` AND ki.is_deleted = 0`;
-      sql += ` ORDER BY rank`;
-      sql += ` LIMIT ? OFFSET ?`;
-      params.push(limit, offset);
-
-      return this.all<FTSResult>(sql, params);
+      return useFts
+        ? this.searchFts(terms, types, limit, offset)
+        : this.searchLike(terms, types, limit, offset);
     } catch (error) {
-      console.error('[SQLite] Search error:', error);
-      return [];
+      console.error(
+        `[SQLite] Search error (mode=${useFts ? 'fts' : 'like'}, query=${JSON.stringify(query)}, types=${JSON.stringify(types)}, limit=${limit}, offset=${offset}):`,
+        error
+      );
+      throw error;
     }
+  }
+
+  private searchFts(terms: string[], types: string[], limit: number, offset: number): FTSResult[] {
+    let sql = `
+      SELECT
+        ki.id,
+        bm25(items_fts) AS rank,
+        -- 高亮边界用私用区字符 U+E000 / U+E001（shared/search-highlight.ts），正文里的 <mark> 等按文字显示
+        snippet(items_fts, -1, char(57344), char(57345), '...', 32) AS snippet,
+        ki.title,
+        ki.type
+      FROM items_fts
+      INNER JOIN knowledge_items ki ON ki.rowid = items_fts.rowid
+      WHERE items_fts MATCH ? AND ki.is_deleted = 0
+    `;
+    const params: unknown[] = [buildFtsMatchExpression(terms)];
+
+    if (types.length > 0) {
+      sql += ` AND ki.type IN (${types.map(() => '?').join(', ')})`;
+      params.push(...types);
+    }
+
+    sql += ` ORDER BY rank LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    return this.all<FTSResult>(sql, params);
+  }
+
+  private searchLike(terms: string[], types: string[], limit: number, offset: number): FTSResult[] {
+    const patterns = terms.map(toLikePattern);
+    let sql = `
+      SELECT ki.id, ki.title, ki.type, ki.content, ki.summary, ki.transcript
+      FROM knowledge_items ki
+      WHERE ki.is_deleted = 0
+    `;
+    const params: unknown[] = [];
+
+    for (const pattern of patterns) {
+      sql += ` AND (ki.title LIKE ? ESCAPE '\\' OR ki.content LIKE ? ESCAPE '\\'
+                OR ki.summary LIKE ? ESCAPE '\\' OR ki.transcript LIKE ? ESCAPE '\\')`;
+      params.push(pattern, pattern, pattern, pattern);
+    }
+
+    if (types.length > 0) {
+      sql += ` AND ki.type IN (${types.map(() => '?').join(', ')})`;
+      params.push(...types);
+    }
+
+    sql += ` ORDER BY (${patterns.map(() => `ki.title LIKE ? ESCAPE '\\'`).join(' OR ')}) DESC, ki.updated_at DESC`;
+    params.push(...patterns);
+    sql += ` LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const rows = this.all<{
+      id: string;
+      title: string;
+      type: string;
+      content: string | null;
+      summary: string | null;
+      transcript: string | null;
+    }>(sql, params);
+
+    return rows.map((row) => ({
+      id: row.id,
+      rank: 0,
+      snippet: buildLikeSnippet([row.content, row.summary, row.transcript, row.title], terms),
+      title: row.title,
+      type: row.type,
+    }));
   }
 
   /**
@@ -629,7 +990,7 @@ export class SQLiteService {
   rebuildFTSIndex(): void {
     this.ensureInitialized();
     try {
-      this.db!.exec("INSERT INTO items_fts(items_fts) VALUES('rebuild')");
+      this.db!.exec(REBUILD_FTS_SQL);
       console.log('[SQLite] FTS index rebuilt');
     } catch (error) {
       console.error('[SQLite] FTS rebuild error:', error);
@@ -702,11 +1063,7 @@ export class SQLiteService {
       this.db!.pragma('foreign_keys = ON');
 
       // Rebuild FTS index
-      try {
-        this.db!.exec("INSERT INTO items_fts(items_fts) VALUES('rebuild')");
-      } catch {
-        // FTS might not exist or be empty, ignore
-      }
+      this.rebuildFTSIndex();
 
       // Vacuum to reclaim space
       this.db!.exec('VACUUM');

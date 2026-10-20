@@ -1,20 +1,17 @@
 // ================================
 // Layout 组件样式
-// CSS Modules 版本
+// 应用外框：标题栏、Ribbon、侧栏与状态栏都放在应用底色（--bg-canvas）上，
+// 主内容以卡片形式浮在底色之上（见 App.scss 的 .main-content）
 // ================================
 
 @use '../../styles/variables' as *;
-
-// ================================
-// 主布局容器
-// ================================
 
 .layout {
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-primary);
+  background-color: var(--bg-canvas);
   color: var(--text-primary);
   overflow: hidden;
   transition:
@@ -22,320 +19,19 @@
     color 0.3s ease;
 }
 
-// ================================
-// 标题栏
-// ================================
-
-.titlebar {
-  display: flex;
-  align-items: center;
-  height: $titlebar-height;
-  background-color: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-primary);
-  padding: 0 var(--spacing-4);
-  -webkit-app-region: drag;
-  flex-shrink: 0;
-  transition:
-    background-color 0.3s ease,
-    border-color 0.3s ease;
-}
-
-.titlebarContent {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.titlebarTitle {
-  font-size: var(--font-size-sm);
-  font-weight: $font-weight-medium;
-  color: var(--text-secondary);
-  @include truncate;
-  max-width: 300px;
-}
-
-.titlebarActions {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  -webkit-app-region: no-drag;
-}
-
-.titlebarButton {
-  @include button-reset;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  background-color: var(--bg-quaternary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  transition: $transition-colors;
-
-  &:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-    border-color: var(--border-secondary);
-  }
-
-  &:active {
-    background-color: var(--bg-active);
-  }
-}
-
-.titlebarTrafficLights {
-  width: 70px;
-  flex-shrink: 0;
-}
-
-.titlebarControls {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  -webkit-app-region: no-drag;
-
-  button {
-    @include button-reset;
-    @include flex-center;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    transition: $transition-colors;
-
-    &:hover {
-      background-color: var(--bg-hover);
-      color: var(--text-primary);
-    }
-
-    &.close:hover {
-      background-color: var(--color-error);
-      color: var(--text-on-accent);
-    }
-  }
-}
-
-// ================================
-// 头部区域
-// ================================
-
-.header {
-  display: flex;
-  align-items: center;
-  height: $header-height;
-  background-color: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-primary);
-  padding: 0 var(--spacing-4);
-  gap: var(--spacing-3);
-  flex-shrink: 0;
-  transition:
-    background-color 0.3s ease,
-    border-color 0.3s ease;
-}
-
-.headerLogo {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  font-size: var(--font-size-lg);
-  font-weight: $font-weight-semibold;
-  color: var(--text-primary);
-}
-
-.logoIcon {
-  width: 24px;
-  height: 24px;
-  color: var(--accent-primary);
-}
-
-.headerBreadcrumb {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  @include truncate;
-}
-
-.separator {
-  color: var(--text-muted);
-}
-
-.pathSegment {
-  padding: var(--spacing-1) var(--spacing-2);
-  border-radius: var(--radius-sm);
-  @include truncate;
-  max-width: 200px;
-  transition: $transition-colors;
-
-  &:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-  }
-
-  &:last-child {
-    color: var(--text-primary);
-    font-weight: $font-weight-medium;
-  }
-}
-
-.headerNav {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-}
-
-.headerActions {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-}
-
-// ================================
-// 主容器（Ribbon + 内容）
-// ================================
-
+// Ribbon + 内容
 .mainContainer {
   flex: 1;
   display: flex;
   overflow: hidden;
 }
 
-// ================================
-// 内容包装器（侧边栏 + 主内容）
-// ================================
-
+// 侧栏 + 主内容卡片
 .contentWrapper {
   flex: 1;
   display: flex;
+  min-width: 0;
   overflow: hidden;
-}
-
-// ================================
-// 主内容区域
-// ================================
-
-.main {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
-
-// ================================
-// 侧边栏
-// ================================
-
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  width: $sidebar-width;
-  min-width: $sidebar-min-width;
-  max-width: $sidebar-max-width;
-  height: 100%;
-  background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border-primary);
-  overflow: hidden;
-  flex-shrink: 0;
-  position: relative;
-  // 确保侧边栏在编辑器之上，可以正常接收点击事件
-  z-index: 10;
-  // 创建独立层叠上下文，防止子元素层级溢出
-  isolation: isolate;
-  transition:
-    background-color 0.3s ease,
-    border-color 0.3s ease;
-
-  &.collapsed {
-    width: 0;
-    min-width: 0;
-    border-right: none;
-    overflow: hidden;
-  }
-}
-
-.sidebarHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 36px;
-  padding: 0 var(--spacing-3);
-  border-bottom: 1px solid var(--border-subtle);
-  flex-shrink: 0;
-}
-
-.sidebarTitle {
-  font-size: var(--font-size-xs);
-  font-weight: $font-weight-semibold;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-}
-
-.sidebarActions {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
-}
-
-.sidebarContent {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  @include scrollbar;
-}
-
-.sidebarResizer {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 4px;
-  height: 100%;
-  cursor: col-resize;
-  background-color: transparent;
-  transition: background-color $transition-fast;
-  z-index: $z-sticky;
-
-  &:hover,
-  &.resizing {
-    background-color: var(--accent-primary);
-  }
-}
-
-// ================================
-// 内容区域
-// ================================
-
-.content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background-color: var(--bg-primary);
-  transition: background-color 0.3s ease;
-}
-
-.contentTabs {
-  display: flex;
-  align-items: center;
-  height: $tab-height;
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  overflow-x: auto;
-  flex-shrink: 0;
-
-  &::-webkit-scrollbar {
-    height: 0;
-  }
-}
-
-.contentMain {
-  flex: 1;
-  overflow: hidden;
-  position: relative;
 }
 
 // ================================
@@ -345,175 +41,35 @@
 .statusbar {
   display: flex;
   align-items: center;
+  gap: var(--spacing-3);
   height: $statusbar-height;
-  background-color: var(--bg-tertiary);
-  border-top: 1px solid var(--border-primary);
   padding: 0 var(--spacing-3);
   font-size: var(--font-size-xs);
   color: var(--text-muted);
   flex-shrink: 0;
-  transition:
-    background-color 0.3s ease,
-    border-color 0.3s ease;
 }
 
-.statusbarLeft {
-  flex: 1;
+.modeIndicator {
   display: flex;
   align-items: center;
-  gap: var(--spacing-3);
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-2);
+  color: var(--accent-secondary);
+  flex-shrink: 0;
+}
+
+// 当前页面的状态，占满模式指示与插件项之间的空间
+.statusbarContent {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
 .statusbarRight {
   display: flex;
   align-items: center;
   gap: var(--spacing-3);
-}
-
-.statusbarItem {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-2);
-  border-radius: var(--radius-sm);
-  transition: $transition-colors;
-
-  &:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-secondary);
-  }
-
-  svg {
-    width: 12px;
-    height: 12px;
-  }
-}
-
-.modeIndicator {
-  color: var(--accent-secondary);
-}
-
-.statusbarDivider {
-  width: 1px;
-  height: 12px;
-  background-color: var(--border-primary);
-}
-
-// ================================
-// 按钮样式
-// ================================
-
-.btn {
-  @include button-reset;
-  @include flex-center;
-  padding: var(--spacing-2) var(--spacing-3);
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-sm);
-  font-weight: $font-weight-medium;
-  transition: $transition-colors;
-  gap: var(--spacing-2);
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-}
-
-.btnPrimary {
-  background-color: var(--accent-primary);
-  color: var(--text-on-accent);
-
-  &:hover:not(:disabled) {
-    background-color: var(--accent-primary-hover);
-  }
-
-  &:active:not(:disabled) {
-    background-color: var(--accent-primary-active);
-  }
-}
-
-.btnSecondary {
-  background-color: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-primary);
-
-  &:hover:not(:disabled) {
-    background-color: var(--bg-hover);
-    border-color: var(--border-secondary);
-  }
-}
-
-.btnGhost {
-  color: var(--text-secondary);
-  padding: var(--spacing-2);
-
-  &:hover:not(:disabled) {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-  }
-}
-
-.btnSm {
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-}
-
-// ================================
-// 图标按钮
-// ================================
-
-.iconBtn {
-  @include button-reset;
-  @include flex-center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  transition: $transition-colors;
-
-  svg {
-    width: 16px;
-    height: 16px;
-  }
-
-  &:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-  }
-
-  &:active {
-    background-color: var(--bg-active);
-  }
-
-  &.active {
-    color: var(--accent-secondary);
-    background-color: var(--bg-active);
-  }
-
-  &:focus-visible {
-    @include focus-ring;
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-}
-
-// ================================
-// 亮色主题调整
-// ================================
-
-:global([data-theme='light']) {
-  .layout {
-    background-color: var(--bg-primary);
-  }
-
-  .sidebar {
-    background-color: var(--bg-secondary);
-  }
-
-  .statusbar {
-    background-color: var(--bg-secondary);
-  }
+  flex-shrink: 0;
 }

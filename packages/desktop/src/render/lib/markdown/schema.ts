@@ -1,0 +1,408 @@
+// ================================
+// Markdown 文档 Schema
+// 写作编辑器的唯一文档模型：节点与 Markdown 语法一一对应，
+// 保证 Markdown ⇄ ProseMirror 文档往返无损
+// ================================
+
+import { Schema, type NodeSpec, type MarkSpec } from 'prosemirror-model';
+import { schema as basicSchema } from 'prosemirror-schema-basic';
+import { addListNodes } from 'prosemirror-schema-list';
+import { formatWikiLink, wikiLinkRef, type WikiLinkParts } from './wiki-link';
+import { MEDIA_SRC_ATTR, isDirectMediaUrl, mediaKindOfPath } from './media';
+
+/** 表格单元格对齐方式 */
+export type CellAlign = 'left' | 'center' | 'right' | null;
+
+/** 从单元格 DOM 读取对齐方式 */
+function readCellAlign(dom: HTMLElement): CellAlign {
+  const align = dom.style.textAlign || dom.getAttribute('align');
+  return align === 'left' || align === 'center' || align === 'right' ? align : null;
+}
+
+/** 表格单元格节点定义（表头与普通单元格共用） */
+function tableCellSpec(tag: 'th' | 'td'): NodeSpec {
+  return {
+    content: 'inline*',
+    attrs: { align: { default: null } },
+    tableRole: tag === 'th' ? 'header_cell' : 'cell',
+    isolating: true,
+    parseDOM: [{ tag, getAttrs: (dom: HTMLElement) => ({ align: readCellAlign(dom) }) }],
+    toDOM(node) {
+      const align = node.attrs.align as CellAlign;
+      return [tag, align ? { style: `text-align: ${align}` } : {}, 0];
+    },
+  };
+}
+
+/** 文档节点扩展 */
+const EXTRA_NODES: Record<string, NodeSpec> = {
+  // 文档开头的 YAML 头部（---…---，Obsidian 的“属性”）：只能是文档的第一个块，内容按纯文本编辑
+  front_matter: {
+    content: 'text*',
+    marks: '',
+    code: true,
+    defining: true,
+    isolating: true,
+    parseDOM: [{ tag: 'pre[data-front-matter]', preserveWhitespace: 'full' }],
+    toDOM() {
+      return ['pre', { 'data-front-matter': '', class: 'front-matter' }, ['code', 0]];
+    },
+  },
+
+  table: {
+    content: 'table_row+',
+    group: 'block',
+    tableRole: 'table',
+    isolating: true,
+    parseDOM: [{ tag: 'table' }],
+    toDOM() {
+      return ['table', ['tbody', 0]];
+    },
+  },
+  table_row: {
+    content: '(table_header | table_cell)+',
+    tableRole: 'row',
+    parseDOM: [{ tag: 'tr' }],
+    toDOM() {
+      return ['tr', 0];
+    },
+  },
+  table_header: tableCellSpec('th'),
+  table_cell: tableCellSpec('td'),
+
+  math_inline: {
+    group: 'inline',
+    inline: true,
+    atom: true,
+    attrs: { latex: { default: '' } },
+    parseDOM: [
+      {
+        tag: 'span[data-math-inline]',
+        getAttrs: (dom: HTMLElement) => ({ latex: dom.getAttribute('data-math-inline') || '' }),
+      },
+    ],
+    toDOM(node) {
+      return ['span', { 'data-math-inline': node.attrs.latex, class: 'math-node-inline' }];
+    },
+  },
+
+  math_block: {
+    group: 'block',
+    atom: true,
+    attrs: { latex: { default: '' } },
+    parseDOM: [
+      {
+        tag: 'div[data-math-block]',
+        getAttrs: (dom: HTMLElement) => ({ latex: dom.getAttribute('data-math-block') || '' }),
+      },
+    ],
+    toDOM(node) {
+      return ['div', { 'data-math-block': node.attrs.latex, class: 'math-node-block' }];
+    },
+  },
+
+  // 双向链接 [[目标#标题|别名]]
+  wiki_link: {
+    group: 'inline',
+    inline: true,
+    atom: true,
+    attrs: { target: { default: '' }, heading: { default: null }, alias: { default: null } },
+    parseDOM: [
+      {
+        tag: 'a[data-wiki-target]',
+        getAttrs: (dom: HTMLElement) => ({
+          target: dom.getAttribute('data-wiki-target') || '',
+          heading: dom.getAttribute('data-wiki-heading'),
+          alias: dom.getAttribute('data-wiki-alias'),
+        }),
+      },
+    ],
+    toDOM(node) {
+      const { target, heading, alias } = node.attrs as WikiLinkParts;
+      const attrs: Record<string, string> = { class: 'wiki-link', 'data-wiki-target': target };
+      if (heading) attrs['data-wiki-heading'] = heading;
+      // 别名遮住了链接目标，悬停时显示
+      if (alias) Object.assign(attrs, { 'data-wiki-alias': alias, title: wikiLinkRef(target, heading) });
+      return ['a', attrs, alias || wikiLinkRef(target, heading)];
+    },
+  },
+
+  // 块级嵌入 ![[目标#标题]]：文档中只保存引用，内容在渲染时解析
+  wiki_embed: {
+    group: 'block',
+    atom: true,
+    attrs: { target: { default: '' }, heading: { default: null }, alias: { default: null } },
+    parseDOM: [
+      {
+        tag: 'div[data-wiki-embed]',
+        getAttrs: (dom: HTMLElement) => ({
+          target: dom.getAttribute('data-wiki-embed') || '',
+          heading: dom.getAttribute('data-wiki-heading'),
+          alias: dom.getAttribute('data-wiki-alias'),
+        }),
+      },
+    ],
+    toDOM(node) {
+      const parts = node.attrs as WikiLinkParts;
+      const attrs: Record<string, string> = { class: 'wiki-embed', 'data-wiki-embed': parts.target };
+      if (parts.heading) attrs['data-wiki-heading'] = parts.heading;
+      if (parts.alias) attrs['data-wiki-alias'] = parts.alias;
+      return ['div', attrs, formatWikiLink(parts, true)];
+    },
+  },
+
+  // 脚注引用 [^标签]：显示为上标标签
+  footnote_ref: {
+    group: 'inline',
+    inline: true,
+    atom: true,
+    attrs: { label: { default: '' } },
+    parseDOM: [{ tag: 'sup[data-footnote-ref]', getAttrs: (dom: HTMLElement) => ({ label: dom.getAttribute('data-footnote-ref') || '' }) }],
+    toDOM(node) {
+      const label = node.attrs.label as string;
+      return ['sup', { class: 'footnote-ref', 'data-footnote-ref': label }, label];
+    },
+  },
+
+  // 行内脚注 ^[内容]：保存方括号内的原文，显示为小字注释
+  footnote_inline: {
+    group: 'inline',
+    inline: true,
+    atom: true,
+    attrs: { content: { default: '' } },
+    parseDOM: [{ tag: 'span[data-footnote-inline]', getAttrs: (dom: HTMLElement) => ({ content: dom.getAttribute('data-footnote-inline') || '' }) }],
+    toDOM(node) {
+      const content = node.attrs.content as string;
+      return ['span', { class: 'footnote-inline', 'data-footnote-inline': content }, content];
+    },
+  },
+
+  // 脚注定义 [^标签]: 内容（可以有多段，续行缩进 4 格）
+  footnote_def: {
+    group: 'block',
+    content: 'block+',
+    defining: true,
+    attrs: { label: { default: '' } },
+    parseDOM: [{ tag: 'div[data-footnote-def]', getAttrs: (dom: HTMLElement) => ({ label: dom.getAttribute('data-footnote-def') || '' }) }],
+    toDOM(node) {
+      const label = node.attrs.label as string;
+      return ['div', { class: 'footnote-def', 'data-footnote-def': label, id: `footnote-${label}` }, 0];
+    },
+  },
+
+  // 定义列表：术语一行，下一行以 : 开头的说明
+  definition_list: {
+    group: 'block',
+    content: '(definition_term definition_description+)+',
+    parseDOM: [{ tag: 'dl' }],
+    toDOM() {
+      return ['dl', { class: 'definition-list' }, 0];
+    },
+  },
+  // tight：术语与第一条说明之间不空行（按术语计，该术语的各条说明共用）
+  definition_term: {
+    content: 'inline*',
+    defining: true,
+    attrs: { tight: { default: true } },
+    parseDOM: [{ tag: 'dt' }],
+    toDOM() {
+      return ['dt', 0];
+    },
+  },
+  definition_description: {
+    content: 'block+',
+    defining: true,
+    parseDOM: [{ tag: 'dd' }],
+    toDOM() {
+      return ['dd', 0];
+    },
+  },
+
+  // 自定义容器 ::: 名称 参数 … :::（提示块）；info 为 ::: 之后的整行，保存时原样写回
+  container: {
+    group: 'block',
+    content: 'block+',
+    defining: true,
+    attrs: { name: { default: 'note' }, info: { default: ' note' } },
+    parseDOM: [
+      {
+        tag: 'div[data-container]',
+        getAttrs: (dom: HTMLElement) => ({
+          name: dom.getAttribute('data-container') || 'note',
+          info: ` ${dom.getAttribute('data-container-info') || dom.getAttribute('data-container') || 'note'}`,
+        }),
+      },
+    ],
+    toDOM(node) {
+      const name = node.attrs.name as string;
+      const info = (node.attrs.info as string).trim();
+      return ['div', { class: `markdown-container markdown-container-${name}`, 'data-container': name, 'data-container-info': info }, 0];
+    },
+  },
+
+  // 缩写定义 *[缩写]: 全称：整行按纯文本编辑；正文中的缩写以装饰显示全称（见 abbreviations.ts）
+  abbreviation_def: {
+    group: 'block',
+    content: 'text*',
+    marks: '',
+    code: true,
+    defining: true,
+    parseDOM: [{ tag: 'div[data-abbreviation-def]', preserveWhitespace: 'full' }],
+    toDOM() {
+      return ['div', { class: 'abbreviation-def', 'data-abbreviation-def': '' }, 0];
+    },
+  },
+};
+
+/** 标记扩展 */
+const EXTRA_MARKS: Record<string, MarkSpec> = {
+  strike: {
+    parseDOM: [
+      { tag: 's' },
+      { tag: 'del' },
+      { tag: 'strike' },
+      { style: 'text-decoration=line-through' },
+    ],
+    toDOM() {
+      return ['s', 0];
+    },
+  },
+  // ==高亮==
+  highlight: {
+    parseDOM: [{ tag: 'mark' }],
+    toDOM() {
+      return ['mark', 0];
+    },
+  },
+  // ++插入++
+  insert: {
+    parseDOM: [{ tag: 'ins' }],
+    toDOM() {
+      return ['ins', 0];
+    },
+  },
+  // H~2~O 下标与 2^10^ 上标：互斥（内容只能是纯文本）
+  subscript: {
+    excludes: 'subscript superscript',
+    parseDOM: [{ tag: 'sub' }],
+    toDOM() {
+      return ['sub', 0];
+    },
+  },
+  superscript: {
+    excludes: 'subscript superscript',
+    parseDOM: [{ tag: 'sup:not([data-footnote-ref])' }],
+    toDOM() {
+      return ['sup', 0];
+    },
+  },
+};
+
+/**
+ * 创建 Markdown 文档 Schema
+ */
+export function createMarkdownSchema(): Schema {
+  let nodes = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block');
+
+  // 文档：可选的 YAML 头部在最前面
+  nodes = nodes.update('doc', { ...nodes.get('doc')!, content: 'front_matter? block+' });
+
+  // 代码块：记录语言（对应 ```lang）
+  nodes = nodes.update('code_block', {
+    content: 'text*',
+    marks: '',
+    group: 'block',
+    code: true,
+    defining: true,
+    isolating: true,
+    attrs: { language: { default: '' } },
+    parseDOM: [
+      {
+        tag: 'pre',
+        preserveWhitespace: 'full',
+        getAttrs: (dom: HTMLElement) => ({ language: dom.getAttribute('data-language') || '' }),
+      },
+    ],
+    toDOM(node) {
+      return ['pre', { 'data-language': node.attrs.language }, ['code', 0]];
+    },
+  });
+
+  // 列表：记录紧凑/松散与标记符，保证往返时格式不变
+  const bullet = nodes.get('bullet_list')!;
+  nodes = nodes.update('bullet_list', {
+    ...bullet,
+    attrs: { tight: { default: true }, bullet: { default: '-' } },
+  });
+  const ordered = nodes.get('ordered_list')!;
+  nodes = nodes.update('ordered_list', {
+    ...ordered,
+    attrs: { order: { default: 1 }, tight: { default: true }, delimiter: { default: '.' } },
+  });
+
+  // 列表项：checked 为 null 表示普通项，布尔值表示任务项
+  const listItem = nodes.get('list_item')!;
+  nodes = nodes.update('list_item', {
+    ...listItem,
+    attrs: { checked: { default: null } },
+    parseDOM: [
+      {
+        tag: 'li',
+        getAttrs: (dom: HTMLElement) => {
+          const checked = dom.getAttribute('data-checked');
+          return { checked: checked === null ? null : checked === 'true' };
+        },
+      },
+    ],
+    toDOM(node) {
+      const checked = node.attrs.checked as boolean | null;
+      if (checked === null) return ['li', 0];
+      return ['li', { 'data-checked': String(checked), class: 'task-item' }, 0];
+    },
+  });
+
+  // 图片语法 ![](地址)：视频、音频文件渲染为播放器；本地文件不直接加载，记在 data-media-src 上由渲染层经知识库解析。
+  // Markdown 原文不变（仍是 image 节点），往返无损
+  const image = nodes.get('image')!;
+  const mediaAttrs = (dom: HTMLElement) => ({
+    src: dom.getAttribute(MEDIA_SRC_ATTR),
+    alt: dom.getAttribute('aria-label') ?? dom.getAttribute('alt'),
+    title: dom.getAttribute('title'),
+  });
+  nodes = nodes.update('image', {
+    ...image,
+    parseDOM: [
+      ...['img', 'video', 'audio'].map((tag) => ({ tag: `${tag}[${MEDIA_SRC_ATTR}]`, getAttrs: mediaAttrs })),
+      ...(image.parseDOM ?? []),
+    ],
+    toDOM(node) {
+      const { src, alt, title } = node.attrs as { src: string; alt: string | null; title: string | null };
+      const kind = mediaKindOfPath(src);
+      const direct = isDirectMediaUrl(src);
+      if (kind === 'image' && direct) return ['img', { src, alt, title }];
+      const attrs: Record<string, string> = { [MEDIA_SRC_ATTR]: src };
+      if (direct) attrs.src = src;
+      if (title) attrs.title = title;
+      if (kind === 'image') return ['img', { ...attrs, alt: alt ?? '' }];
+      if (alt) attrs['aria-label'] = alt;
+      return [kind, { ...attrs, class: `markdown-media markdown-${kind}`, controls: '', preload: 'metadata' }];
+    },
+  });
+
+  for (const [name, spec] of Object.entries(EXTRA_NODES)) {
+    nodes = nodes.addToEnd(name, spec);
+  }
+
+  let marks = basicSchema.spec.marks;
+  // 链接：linkify 表示源码中是裸写的网址或邮箱（保存时保持裸写）
+  const link = marks.get('link')!;
+  marks = marks.update('link', { ...link, attrs: { ...link.attrs, linkify: { default: false } } });
+  for (const [name, spec] of Object.entries(EXTRA_MARKS)) {
+    marks = marks.addToEnd(name, spec);
+  }
+
+  return new Schema({ nodes, marks });
+}
+
+/** 全局共享的 Schema 实例（节点类型需要在解析器、序列化器与编辑器之间保持一致） */
+export const markdownSchema = createMarkdownSchema();

@@ -1,10 +1,10 @@
 // ================================
 // VersionHistory 组件
-// 显示文档版本历史并支持恢复功能
+// 显示文档版本历史，支持预览、与当前内容 / 上一版本对比、恢复
 // 使用 lib/documents/versions 模块进行状态管理
 // ================================
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   History,
   RotateCcw,
@@ -17,6 +17,7 @@ import {
   Eye,
   X,
   AlertCircle,
+  GitCompare,
 } from 'lucide-react';
 import {
   useVersions,
@@ -26,7 +27,10 @@ import {
   getChangeTypeLabel,
   getAuthorTypeLabel,
   formatContentSize,
+  versionService,
 } from '../../lib/documents/versions';
+import { DiffViewer } from '../../lib/writing/components/DiffViewer';
+import { resolveVersionDiff, type VersionDiff, type VersionDiffMode } from './diff-target';
 import styles from './VersionHistory.module.scss';
 
 // ================================
@@ -36,6 +40,8 @@ import styles from './VersionHistory.module.scss';
 export interface VersionHistoryProps {
   itemId: string;
   isOpen: boolean;
+  /** 当前编辑中的内容，用于“对比当前” */
+  currentContent: string;
   onClose: () => void;
   onRestore?: (version: DocumentVersion) => void;
   className?: string;
@@ -119,13 +125,77 @@ function VersionPreviewModal({
 }
 
 // ================================
+// 版本对比模态框
+// ================================
+
+interface VersionDiffModalProps {
+  diff: VersionDiff;
+  onClose: () => void;
+  onRestore: () => void;
+  restoring: boolean;
+}
+
+function VersionDiffModal({
+  diff,
+  onClose,
+  onRestore,
+  restoring,
+}: VersionDiffModalProps): React.ReactElement {
+  return (
+    <div className={styles.versionPreviewOverlay} onClick={onClose}>
+      <div
+        className={`${styles.versionPreview} ${styles.versionDiff}`}
+        role="dialog"
+        aria-label="版本对比"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className={styles.previewHeader}>
+          <div className={styles.previewTitle}>
+            <GitCompare size={16} />
+            <span>
+              {diff.sourceTitle} → {diff.targetTitle}
+            </span>
+          </div>
+          <button className={styles.closeBtn} onClick={onClose} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className={styles.diffBody}>
+          <DiffViewer
+            className={styles.diffViewer}
+            source={diff.source}
+            target={diff.target}
+            sourceTitle={diff.sourceTitle}
+            targetTitle={diff.targetTitle}
+          />
+        </div>
+
+        <div className={styles.previewFooter}>
+          <button className={styles.cancelBtn} onClick={onClose}>
+            关闭
+          </button>
+          <button className={styles.restoreBtn} onClick={onRestore} disabled={restoring}>
+            <RotateCcw size={14} />
+            {restoring ? '恢复中...' : `恢复到版本 ${diff.version.versionNumber}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ================================
 // 版本条目组件
 // ================================
 
 interface VersionItemProps {
   version: DocumentVersion;
   isFirst: boolean;
+  /** 存在上一版本（已加载，或列表后面还有未加载的更旧版本），可以对比 */
+  hasPrevious: boolean;
   onPreview: () => void;
+  onCompare: (mode: VersionDiffMode) => void;
   onRestore: () => void;
   restoring: boolean;
 }
@@ -133,7 +203,9 @@ interface VersionItemProps {
 function VersionItem({
   version,
   isFirst,
+  hasPrevious,
   onPreview,
+  onCompare,
   onRestore,
   restoring,
 }: VersionItemProps): React.ReactElement {
@@ -209,6 +281,22 @@ function VersionItem({
                 <Eye size={14} />
                 预览
               </button>
+              <button
+                className={`${styles.actionBtn} ${styles.actionBtnPreview}`}
+                onClick={() => onCompare('current')}
+              >
+                <GitCompare size={14} />
+                对比当前
+              </button>
+              {hasPrevious && (
+                <button
+                  className={`${styles.actionBtn} ${styles.actionBtnPreview}`}
+                  onClick={() => onCompare('previous')}
+                >
+                  <GitCompare size={14} />
+                  对比上一版
+                </button>
+              )}
               {!isFirst && (
                 <button
                   className={`${styles.actionBtn} ${styles.actionBtnRestore}`}
@@ -234,6 +322,7 @@ function VersionItem({
 export function VersionHistory({
   itemId,
   isOpen,
+  currentContent,
   onClose,
   onRestore,
   className,
@@ -274,6 +363,11 @@ export function VersionHistory({
 
   // 本地状态 - 预览模态框
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  // 本地状态 - 对比模态框（内容在打开时确定，不随后续编辑变化）
+  const [activeDiff, setActiveDiff] = useState<VersionDiff | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  /** 对比请求序号：按需读取上一版本期间又发起对比或关闭面板时，丢弃过时的结果 */
+  const compareSeq = useRef(0);
 
   // 面板打开时加载版本
   useEffect(() => {
@@ -281,9 +375,30 @@ export function VersionHistory({
       openPanel(itemId);
       loadVersions(itemId);
     } else if (!isOpen) {
+      compareSeq.current++;
       closePanel();
     }
   }, [isOpen, itemId, openPanel, closePanel, loadVersions]);
+
+  // 处理对比：上一版本未分页加载时从版本服务按需读取
+  const handleCompare = useCallback(
+    async (index: number, mode: VersionDiffMode) => {
+      const seq = ++compareSeq.current;
+      setCompareError(null);
+      try {
+        const diff = await resolveVersionDiff(versions, index, mode, currentContent, (version) =>
+          versionService.getVersionBefore(version)
+        );
+        if (seq !== compareSeq.current) return;
+        if (diff) setActiveDiff(diff);
+        else setCompareError('上一版本已不存在（可能已被自动清理）');
+      } catch (error) {
+        if (seq !== compareSeq.current) return;
+        setCompareError(`读取上一版本失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [versions, currentContent]
+  );
 
   // 处理预览点击
   const handlePreview = useCallback(
@@ -318,6 +433,16 @@ export function VersionHistory({
     [restoreVersion]
   );
 
+  // 处理从对比模态框恢复
+  const handleRestoreFromDiff = useCallback(async () => {
+    if (!activeDiff) return;
+
+    const restored = await restoreVersion(activeDiff.version.id);
+    if (restored) {
+      setActiveDiff(null);
+    }
+  }, [activeDiff, restoreVersion]);
+
   // 处理关闭面板
   const handleClose = useCallback(() => {
     closePanel();
@@ -325,7 +450,7 @@ export function VersionHistory({
   }, [closePanel, onClose]);
 
   // 合并错误信息
-  const errorMessage = listError || restoreError;
+  const errorMessage = listError || restoreError || compareError;
 
   if (!isOpen) return null;
 
@@ -368,7 +493,9 @@ export function VersionHistory({
                 key={version.id}
                 version={version}
                 isFirst={index === 0}
+                hasPrevious={index + 1 < versions.length || hasMore}
                 onPreview={() => handlePreview(version.id)}
+                onCompare={(mode) => void handleCompare(index, mode)}
                 onRestore={() => handleRestoreFromList(version.id)}
                 restoring={restoring}
               />
@@ -393,6 +520,16 @@ export function VersionHistory({
           version={previewVersionData}
           onClose={handleClosePreview}
           onRestore={handleRestoreFromPreview}
+          restoring={restoring}
+        />
+      )}
+
+      {/* 版本对比模态框 */}
+      {activeDiff && (
+        <VersionDiffModal
+          diff={activeDiff}
+          onClose={() => setActiveDiff(null)}
+          onRestore={handleRestoreFromDiff}
           restoring={restoring}
         />
       )}

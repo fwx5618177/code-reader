@@ -17,8 +17,7 @@
   min-width: $ribbon-width;
   max-width: $ribbon-width;
   height: 100%;
-  background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border-primary);
+  background-color: var(--bg-canvas);
   flex-shrink: 0;
   user-select: none;
   transition:
@@ -84,22 +83,22 @@
 
 .modeButton {
   position: relative;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 
   svg {
     transition: all $transition-fast;
   }
 
   &:hover {
-    color: var(--button-color, var(--text-primary));
-    background-color: color-mix(in srgb, var(--button-color, var(--bg-hover)) 10%, transparent);
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
   }
 
   &.active {
-    color: var(--button-color, var(--accent-primary));
+    color: var(--accent-primary);
     background-color: color-mix(
       in srgb,
-      var(--button-color, var(--accent-primary)) 15%,
+      var(--accent-primary) 15%,
       transparent
     );
 
@@ -112,12 +111,12 @@
       transform: translateY(-50%);
       width: 3px;
       height: 20px;
-      background-color: var(--button-color, var(--accent-primary));
+      background-color: var(--accent-primary);
       border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     }
 
     svg {
-      filter: drop-shadow(0 0 4px color-mix(in srgb, var(--button-color) 50%, transparent));
+      filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent-primary) 50%, transparent));
     }
   }
 }

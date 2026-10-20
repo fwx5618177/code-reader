@@ -117,7 +117,6 @@ if (decision.useIncremental) {
 ```typescript
 import {
   createLevenshteinEngine,
-  createSpellCheckEngine,
   quickLevenshteinDistance,
   quickSimilarity,
   quickFindMostSimilar,
@@ -201,43 +200,13 @@ const result = engine.diff(source, target, {
 const shouldIncremental = engine.shouldUseIncremental(oldContent, newContent);
 ```
 
-### 高级算法
+### 行级差分（Histogram Diff）
 
-#### Rsync 同步
-
-```typescript
-import { createRsyncEngine, quickRsync } from '@code-reader/diff-algorithm';
-
-const engine = createRsyncEngine({ blockSize: 4096 });
-
-// 生成签名
-const signature = engine.generateSignature(sourceData);
-
-// 计算增量
-const delta = engine.computeDelta(targetData, signature);
-
-// 应用增量
-const reconstructed = engine.applyDelta(sourceData, delta);
-```
-
-#### Patience Diff
+版本对比按行对齐使用的算法（与 `git diff --histogram` 相同）。rsync、Patience、LCS、VCDIFF / BSDiff、CRDT 接口与流式处理已移到
+[`@code-reader/diff-algorithm-extras`](../diff-algorithm-extras/README.md)，需要时单独引入。
 
 ```typescript
-import { createPatienceDiffEngine, quickPatienceDiff } from '@code-reader/diff-algorithm';
-
-const result = quickPatienceDiff(oldCode, newCode);
-
-// 输出 unified diff 格式
-const unified = engine.formatUnified(result, 3);
-
-// 输出 HTML 格式
-const html = engine.formatHtml(result);
-```
-
-#### Histogram Diff
-
-```typescript
-import { createHistogramDiffEngine, quickHistogramDiff } from '@code-reader/diff-algorithm';
+import { createHistogramDiffEngine, quickHistogramDiff } from '@code-reader/diff-algorithm/algorithms';
 
 // Git 默认使用的算法
 const engine = createHistogramDiffEngine();
@@ -266,23 +235,6 @@ const value = cache.get('key');
 // Diff 结果缓存
 const diffCache = createDiffCache({ maxSize: 100, ttl: 60000 });
 const cached = cachedTextDiff(source, target, diffCache);
-```
-
-### 流式处理
-
-```typescript
-import {
-  createStreamingHasher,
-  createStreamingDiffEngine,
-  quickFileHash,
-} from '@code-reader/diff-algorithm/streaming';
-
-// 流式哈希（适用于大文件）
-const hash = await quickFileHash(filePath);
-
-// 流式差分
-const streamingEngine = createStreamingDiffEngine({ chunkSize: 64 * 1024 });
-const result = await streamingEngine.diff(sourceStream, targetStream);
 ```
 
 ### Worker 支持

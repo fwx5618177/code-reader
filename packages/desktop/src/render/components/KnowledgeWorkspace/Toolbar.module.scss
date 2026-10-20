@@ -1,0 +1,374 @@
+// ================================
+// 知识库工作区工具栏样式（含标签筛选弹出层）
+// ================================
+
+@use '../../styles/variables' as *;
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4) var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--bg-primary);
+  flex-shrink: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-width: 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+// ================================
+// 范围
+// ================================
+
+.scope {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+  min-width: 0;
+  margin-right: var(--spacing-2);
+}
+
+.scopeLabel {
+  @include truncate;
+  max-width: 240px;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+  font-weight: $font-weight-semibold;
+}
+
+.scopeCount {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+// ================================
+// 分段按钮（视图 / 布局）
+// ================================
+
+.segmented {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+}
+
+.segment {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &[aria-pressed='true'],
+  &[aria-selected='true'] {
+    background-color: var(--accent-primary-alpha);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 搜索
+// ================================
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex: 0 1 300px;
+  min-width: 160px;
+  height: 30px;
+  padding: 0 var(--spacing-2);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  transition: $transition-colors;
+
+  &:focus-within {
+    border-color: var(--accent-primary);
+  }
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+
+  &::placeholder {
+    color: var(--text-muted);
+  }
+}
+
+.clearSearch {
+  @include button-reset;
+  @include flex-center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 按钮
+// ================================
+
+.primaryButton {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 30px;
+  padding: 0 var(--spacing-3);
+  background-color: var(--accent-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-medium;
+  transition: opacity $transition-fast;
+
+  &:hover {
+    opacity: 0.9;
+  }
+}
+
+.iconButton {
+  @include button-reset;
+  @include flex-center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// ================================
+// 类型筛选
+// ================================
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+}
+
+.chip {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &[aria-pressed='true'] {
+    background-color: var(--accent-primary-alpha);
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+  }
+}
+
+.chipCount {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+// ================================
+// 标签筛选
+// ================================
+
+.popoverAnchor {
+  position: relative;
+}
+
+.control {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 24px;
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  transition: $transition-colors;
+
+  &:hover,
+  &[aria-expanded='true'] {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &[data-active='true'] {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+  }
+}
+
+.controlBadge {
+  @include flex-center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background-color: var(--accent-primary);
+  border-radius: var(--radius-full);
+  color: var(--text-on-accent);
+  font-size: 10px;
+}
+
+.popover {
+  @include card;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  width: 240px;
+  padding: var(--spacing-2);
+}
+
+.popoverSearch {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 28px;
+  padding: 0 var(--spacing-2);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+
+  &:focus-within {
+    border-color: var(--accent-primary);
+  }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+
+    &::placeholder {
+      color: var(--text-muted);
+    }
+  }
+}
+
+.popoverFooter {
+  @include button-reset;
+  height: 26px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
+.tagChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 4px 0 var(--spacing-2);
+  background-color: var(--accent-primary-alpha);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+
+  button {
+    @include button-reset;
+    @include flex-center;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--radius-full);
+    color: var(--text-muted);
+
+    &:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-primary);
+    }
+  }
+}
+
+// ================================
+// 排序 / 分组
+// ================================
+
+.selectLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.select {
+  @include input-base;
+  height: 24px;
+  padding: 0 var(--spacing-1);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}

@@ -1,0 +1,15 @@
+// 通过链接定位到标题或块后的短暂高亮（编辑器与阅读视图共用；时长与 reveal-highlight.ts 中的 REVEAL_HIGHLIGHT_MS 一致）
+.revealFlash {
+  border-radius: var(--radius-sm);
+  animation: revealFlash 1.6s ease-out;
+}
+
+@keyframes revealFlash {
+  0%,
+  30% {
+    background-color: var(--accent-primary-alpha);
+  }
+  100% {
+    background-color: transparent;
+  }
+}

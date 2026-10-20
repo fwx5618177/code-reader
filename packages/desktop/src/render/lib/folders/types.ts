@@ -144,6 +144,65 @@ export function buildFolderTree(
 }
 
 /**
+ * 按树顺序列出文件夹及其完整路径（如「工作 / 项目」），用于下拉选择
+ * 不同父级下的同名子文件夹在列表中可以区分
+ */
+export function listFolderPaths(folders: Folder[]): { id: string; path: string }[] {
+  const result: { id: string; path: string }[] = [];
+  const visit = (nodes: FolderTreeNode[], prefix: string): void => {
+    for (const node of nodes) {
+      const path = prefix ? `${prefix} / ${node.name}` : node.name;
+      result.push({ id: node.id, path });
+      visit(node.children, path);
+    }
+  };
+  visit(buildFolderTree(folders), '');
+  return result;
+}
+
+/**
+ * 收集某文件夹的全部后代 ID（不含自身）
+ * 即使数据中已存在环也能正常结束
+ */
+export function collectDescendantIds(
+  folders: Pick<Folder, 'id' | 'parentId'>[],
+  id: string
+): string[] {
+  const childrenByParent = new Map<string, string[]>();
+  for (const folder of folders) {
+    if (!folder.parentId) continue;
+    const siblings = childrenByParent.get(folder.parentId);
+    if (siblings) siblings.push(folder.id);
+    else childrenByParent.set(folder.parentId, [folder.id]);
+  }
+
+  const result: string[] = [];
+  const visited = new Set<string>([id]);
+  const pending = [...(childrenByParent.get(id) ?? [])];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    result.push(current);
+    pending.push(...(childrenByParent.get(current) ?? []));
+  }
+  return result;
+}
+
+/**
+ * 把文件夹移到 newParentId 下是否会形成环（移到自身或自己的后代中）
+ * newParentId 为 null 表示移到根级，永远不会形成环
+ */
+export function wouldCreateCycle(
+  folders: Pick<Folder, 'id' | 'parentId'>[],
+  id: string,
+  newParentId: string | null
+): boolean {
+  if (newParentId === null) return false;
+  return newParentId === id || collectDescendantIds(folders, id).includes(newParentId);
+}
+
+/**
  * Flatten a folder tree back to a list (depth-first)
  * Useful for rendering with indentation
  */

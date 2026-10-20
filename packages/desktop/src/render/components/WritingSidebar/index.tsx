@@ -42,6 +42,7 @@ import { useFolders } from '../../lib/folders';
 import { useDocumentSearch } from '../../lib/writing/useWritingService';
 import type { DocumentSearchResult } from '../../lib/writing/types';
 import InputDialog, { ConfirmDialog } from '../InputDialog';
+import { Snippet } from '../SearchPanel/Snippet';
 import { VirtualizedTreeView, NodeWithMeta } from './components';
 import styles from './WritingSidebar.module.scss';
 
@@ -769,8 +770,8 @@ const WritingSidebar: React.FC<WritingSidebarProps> = ({
             }}
             title={
               activeFolderId
-                ? '在当前文件夹中新建文档 (⌘N)\n右键快速创建 Markdown'
-                : '新建文档 (⌘N)\n右键快速创建 Markdown'
+                ? '在当前文件夹中新建文档\n右键快速创建 Markdown'
+                : '新建文档\n右键快速创建 Markdown'
             }
           >
             <Plus size={14} />
@@ -787,7 +788,7 @@ const WritingSidebar: React.FC<WritingSidebarProps> = ({
           <button
             className={`${styles.headerActionBtn} ${styles.helpBtn}`}
             onClick={onOpenHelp}
-            title="使用帮助"
+            title="从这里开始"
           >
             <HelpCircle size={14} />
           </button>
@@ -891,15 +892,7 @@ const WritingSidebar: React.FC<WritingSidebarProps> = ({
                     }}
                   >
                     <div className={styles.resultTitle}>{result.title || '无标题'}</div>
-                    {result.snippet && (
-                      <div
-                        className={styles.resultSnippet}
-                        dangerouslySetInnerHTML={{ __html: result.snippet }}
-                      />
-                    )}
-                    <div className={styles.resultScore}>
-                      匹配度: {Math.round(result.score * 100)}%
-                    </div>
+                    {result.snippet && <Snippet snippet={result.snippet} className={styles.resultSnippet} />}
                   </div>
                 ))
               ) : (

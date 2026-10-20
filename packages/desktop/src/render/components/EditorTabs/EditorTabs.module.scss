@@ -1,0 +1,138 @@
+// ================================
+// EditorTabs 标签栏样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.tabBar {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  min-height: 32px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tabStrip {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  flex-shrink: 0;
+  max-width: 200px;
+  padding: 0 var(--spacing-1) 0 var(--spacing-3);
+  border-right: 1px solid var(--border-subtle);
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-secondary);
+  }
+
+  &.active {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+
+  // 拖放插入位置
+  &.dropBefore {
+    box-shadow: inset 2px 0 0 var(--accent-primary);
+  }
+
+  &.dropAfter {
+    box-shadow: inset -2px 0 0 var(--accent-primary);
+  }
+}
+
+// 分栏时聚焦窗格的活动标签用强调色标出
+.focused .tab.active {
+  box-shadow: inset 0 -2px 0 var(--accent-primary);
+}
+
+.title {
+  @include truncate;
+}
+
+.close {
+  @include button-reset;
+  @include flex-center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  visibility: hidden;
+
+  &:hover {
+    background-color: var(--bg-active);
+    color: var(--text-primary);
+  }
+
+  .tab:hover &,
+  .tab.active &,
+  .tab.dirty & {
+    visibility: visible;
+  }
+}
+
+// 未保存圆点：悬停时让位给关闭图标
+.dirtyDot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--text-secondary);
+}
+
+.tab.dirty:not(:hover) .close {
+  .dirtyDot {
+    display: block;
+  }
+
+  svg {
+    display: none;
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-2);
+  flex-shrink: 0;
+}
+
+.actionButton {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}

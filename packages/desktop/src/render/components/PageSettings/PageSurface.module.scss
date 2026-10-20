@@ -1,0 +1,20 @@
+// ================================
+// PageSurface 样式：页面设置的派生变量
+// --page-font-size / --page-line / --page-rule-opacity / --page-content-width 由内联样式写入
+// ================================
+
+@use '../../styles/variables' as *;
+
+.pageSurface {
+  --page-font-family: var(--font-sans);
+  // 纸张背景线条：主题弱化文字色按浓度与透明混合
+  --page-rule-color: color-mix(
+    in srgb,
+    var(--text-muted) calc(var(--page-rule-opacity) * 100%),
+    transparent
+  );
+
+  &[data-page-font='serif'] {
+    --page-font-family: #{$font-serif};
+  }
+}

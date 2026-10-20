@@ -1,0 +1,22 @@
+// ================================
+// 录音管理面板样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.summary {
+  padding: var(--spacing-2) var(--spacing-3);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.list {
+  @include scrollbar;
+}

@@ -14,7 +14,7 @@ import {
   DEFAULT_SORT_CONFIG,
 } from './file-tree-model';
 import { Folder } from '../folders';
-import { DocumentListItem } from '../documents';
+import { DocumentListItem, fileTypeRegistry } from '../documents';
 
 // ================================
 // Types
@@ -120,94 +120,36 @@ export interface UseWritingFileTreeReturn {
 // Constants
 // ================================
 
-// 默认扩展名，实际扩展名根据文档内容推断
+// 默认扩展名：标题无法识别类型时使用 Markdown
 const DEFAULT_EXTENSION = '.md';
 const SCHEME = 'writing';
 
+/** 无扩展名时按 LaTeX 处理的示例文档基础名 */
+const LATEX_SAMPLE_BASENAMES = new Set(['sample', 'large-document', 'huge-document']);
+
 /**
  * 根据文档标题推断文件扩展名
+ * 列表项不包含正文内容，类型只能由标题决定，与编辑器侧 getFileTypeId 的判定保持一致
  * @param title 文档标题
- * @param content 文档内容（可选，用于根据内容推断类型）
  * @returns 推断的扩展名
  */
-function inferFileExtension(title: string | undefined, content?: string): string {
-  // 如果标题已有扩展名，使用标题中的扩展名
-  if (title) {
-    const lowerTitle = title.toLowerCase();
-    // LaTeX 扩展名
-    if (
-      lowerTitle.endsWith('.tex') ||
-      lowerTitle.endsWith('.latex') ||
-      lowerTitle.endsWith('.ltx')
-    ) {
-      return '.tex';
-    }
-    // 纯文本扩展名
-    if (lowerTitle.endsWith('.txt') || lowerTitle.endsWith('.text')) {
-      return '.txt';
-    }
-    // Markdown 扩展名
-    if (
-      lowerTitle.endsWith('.md') ||
-      lowerTitle.endsWith('.markdown') ||
-      lowerTitle.endsWith('.mdown')
-    ) {
-      return '.md';
-    }
-
-    // 检查标题中是否包含 LaTeX 相关关键词（用于没有扩展名但名称暗示类型的情况）
-    if (
-      lowerTitle.includes('latex') ||
-      lowerTitle.includes('sample') ||
-      lowerTitle.includes('document') ||
-      lowerTitle.includes('large-document') ||
-      lowerTitle.includes('huge-document')
-    ) {
-      // 标题暗示可能是 LaTeX，但需要进一步验证
-      // 这里不直接返回，继续检查内容
-    }
+function inferFileExtension(title: string | undefined): string {
+  if (!title) {
+    return DEFAULT_EXTENSION;
   }
 
-  // 根据内容推断文件类型
-  if (content) {
-    // 检查是否为 LaTeX 文件（包含 LaTeX 特征标记）
-    const latexPatterns = [
-      /\\documentclass\s*[{[]/,
-      /\\begin\s*\{document\}/,
-      /\\usepackage\s*[{[]/,
-      /\\section\s*\{/,
-      /\\maketitle/,
-      /\\title\s*\{/,
-      /\\author\s*\{/,
-      /\\chapter\s*\{/,
-      /\\subsection\s*\{/,
-      /\\begin\s*\{equation\}/,
-      /\\begin\s*\{align\}/,
-      /\$\$[\s\S]+?\$\$/,
-      /\\\[[\s\S]+?\\\]/,
-    ];
-
-    for (const pattern of latexPatterns) {
-      if (pattern.test(content)) {
-        return '.tex';
-      }
-    }
+  // 标题已带可识别扩展名：使用文件类型注册表中的默认扩展名
+  const config = fileTypeRegistry.getByFilename(title);
+  if (config) {
+    return config.defaultExtension;
   }
 
-  // 如果标题以常见 LaTeX 示例名称结尾（无扩展名情况的回退）
-  if (title) {
-    const baseName = title.toLowerCase().replace(/\.[^.]+$/, '');
-    if (
-      baseName === 'sample' ||
-      baseName === 'large-document' ||
-      baseName === 'huge-document' ||
-      baseName.includes('latex')
-    ) {
-      return '.tex';
-    }
+  // 无扩展名的 LaTeX 示例文档回退
+  const baseName = title.toLowerCase();
+  if (LATEX_SAMPLE_BASENAMES.has(baseName) || baseName.includes('latex')) {
+    return '.tex';
   }
 
-  // 默认返回 Markdown
   return DEFAULT_EXTENSION;
 }
 
@@ -322,10 +264,10 @@ function buildTree(
     documentNodeIdMap.set(doc.id, nodeId);
 
     const displayName = doc.title || '无标题';
-    // 推断文件扩展名（根据标题和内容）
-    const extension = inferFileExtension(doc.title, doc.content);
-    // 检查标题是否已有扩展名
-    const hasExtension = /\.(md|markdown|mdown|tex|latex|ltx|txt|text)$/i.test(displayName);
+    // 推断文件扩展名（仅依据标题）
+    const extension = inferFileExtension(doc.title);
+    // 检查标题是否已有可识别的扩展名
+    const hasExtension = fileTypeRegistry.getByFilename(displayName) !== undefined;
     const fileName = hasExtension ? displayName : `${displayName}${extension}`;
 
     const node: FileTreeNode = {

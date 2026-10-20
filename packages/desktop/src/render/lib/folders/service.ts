@@ -13,6 +13,7 @@ import {
   CreateFolderInput,
   buildFolderTree,
   folderToListItem,
+  wouldCreateCycle,
 } from './types';
 
 // ================================
@@ -73,14 +74,14 @@ class FolderService {
 
     // Validate name
     if (!input.name.trim()) {
-      throw new Error('Folder name cannot be empty');
+      throw new Error('文件夹名称不能为空');
     }
 
     // Check for duplicate name at the same level
     const exists = await folderRepository.existsByName(input.name.trim(), input.parentId ?? null);
 
     if (exists) {
-      throw new Error('A folder with this name already exists at this level');
+      throw new Error('同一层级已存在同名文件夹');
     }
 
     const folder = await folderRepository.create({
@@ -100,18 +101,18 @@ class FolderService {
     await this.initialize();
 
     if (!newName.trim()) {
-      throw new Error('Folder name cannot be empty');
+      throw new Error('文件夹名称不能为空');
     }
 
     const folder = await folderRepository.getById(id);
     if (!folder) {
-      throw new Error('Folder not found');
+      throw new Error('文件夹不存在');
     }
 
     // Check for duplicate name at the same level (excluding self)
     const exists = await folderRepository.existsByName(newName.trim(), folder.parentId);
     if (exists && folder.name !== newName.trim()) {
-      throw new Error('A folder with this name already exists at this level');
+      throw new Error('同一层级已存在同名文件夹');
     }
 
     const success = await folderRepository.update(id, { name: newName.trim() });
@@ -125,16 +126,28 @@ class FolderService {
 
   /**
    * Move a folder to a new parent
+   * 校验：文件夹与目标存在、不移到自身或后代中（成环）、目标层级没有同名文件夹
+   * 父级未变化时不写数据库
    */
   async moveFolder(id: string, newParentId: string | null): Promise<boolean> {
     await this.initialize();
 
-    // Validate parent exists (if provided)
-    if (newParentId) {
-      const parent = await folderRepository.getById(newParentId);
-      if (!parent) {
-        throw new Error('Target parent folder not found');
-      }
+    const folders = await folderRepository.getAll();
+    const folder = folders.find((candidate) => candidate.id === id);
+    if (!folder) {
+      throw new Error('文件夹不存在');
+    }
+    if (folder.parentId === newParentId) {
+      return true;
+    }
+    if (newParentId && !folders.some((candidate) => candidate.id === newParentId)) {
+      throw new Error('目标文件夹不存在');
+    }
+    if (wouldCreateCycle(folders, id, newParentId)) {
+      throw new Error('不能把文件夹移动到自身或其子文件夹中');
+    }
+    if (await folderRepository.existsByName(folder.name, newParentId)) {
+      throw new Error('目标位置已存在同名文件夹');
     }
 
     const success = await folderRepository.move(id, newParentId);
@@ -147,7 +160,7 @@ class FolderService {
   }
 
   /**
-   * Delete a folder (documents become unfiled)
+   * Delete a folder (documents become unfiled, subfolders move up one level)
    */
   async deleteFolder(id: string): Promise<boolean> {
     await this.initialize();

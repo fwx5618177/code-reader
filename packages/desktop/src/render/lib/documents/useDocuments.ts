@@ -12,7 +12,7 @@
 // - WritingIntegration: 搜索索引、差分缓存、性能监控
 // ================================
 
-import { useReducer, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useReducer, useCallback, useMemo, useRef, useEffect, useState } from 'react';
 import { documentReducer } from './reducer';
 import { documentService } from './service';
 import { initialDocumentState } from './state';
@@ -24,8 +24,10 @@ import {
   createSuccessResult,
   createFailedResult,
   ContentSnapshot,
+  type ISaveExecutor,
 } from '../core';
 import { WritingIntegration, getWritingIntegration } from './writing-integration';
+import { stripMarkup } from '../markdown/extract';
 
 // ================================
 // 配置
@@ -40,6 +42,8 @@ export interface UseDocumentsConfig {
   autoSaveEnabled?: boolean;
   /** 版本创建时的回调 */
   onVersionCreated?: (version: DocumentVersion) => void;
+  /** 任一文档保存成功后的回调（分栏时保存的不一定是当前文档） */
+  onDocumentSaved?: (document: { id: string; title: string; content: string }) => void;
   /** 是否启用调试日志 */
   debug?: boolean;
 }
@@ -55,6 +59,7 @@ export interface UseDocumentsReturn {
   listError: string | null;
 
   // 编辑器状态
+  /** 当前（聚焦栏）文档；标题与内容取自托管模型，任何写入方的修改都会反映 */
   currentDocument: Document | null;
   selectedId: string | null;
   editorLoading: boolean;
@@ -67,7 +72,6 @@ export interface UseDocumentsReturn {
 
   // 全局状态
   isInitialized: boolean;
-  isFirstTime: boolean;
 
   // 计算值
   title: string;
@@ -93,34 +97,76 @@ export interface UseDocumentsReturn {
   // 版本历史
   lastVersionCreatedAt: Date | null;
   createVersion: (changeDescription?: string) => Promise<DocumentVersion | null>;
+
+  /** 文档保存执行器：其他编辑窗格为文档创建托管实例时使用，保存后同样更新列表、索引与版本 */
+  saveExecutor: ISaveExecutor;
 }
 
 // ================================
 // 辅助函数
 // ================================
 
-function calculateWordCount(content: string): number {
-  if (!content) return 0;
-  const text = content.replace(/<[^>]*>/g, '');
-  const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-  const englishWords = text
-    .replace(/[\u4e00-\u9fa5]/g, ' ')
-    .split(/\s+/)
-    .filter((word) => word.length > 0).length;
-  return chineseChars + englishWords;
+export interface DocumentStats {
+  wordCount: number;
+  charCount: number;
 }
 
-function calculateCharCount(content: string): number {
-  if (!content) return 0;
-  return content.replace(/<[^>]*>/g, '').replace(/\s/g, '').length;
+/** 字数（中文按字、其他按空白分隔的词）与字符数（不含空白），去掉 Markdown 标记后统计 */
+export function calculateStats(content: string): DocumentStats {
+  if (!content) return { wordCount: 0, charCount: 0 };
+  const text = stripMarkup(content);
+  let chinese = 0;
+  let words = 0;
+  let chars = 0;
+  let inWord = false;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    const space = code === 32 || (code >= 9 && code <= 13) || code === 0xa0 || code === 0x3000 || code === 0xfeff ||
+      (code >= 0x2000 && code <= 0x200a) || code === 0x2028 || code === 0x2029 || code === 0x202f || code === 0x205f || code === 0x1680;
+    if (space) {
+      inWord = false;
+      continue;
+    }
+    chars++;
+    if (code >= 0x4e00 && code <= 0x9fa5) {
+      chinese++;
+      inWord = false;
+    } else if (!inWord) {
+      words++;
+      inWord = true;
+    }
+  }
+  return { wordCount: chinese + words, charCount: chars };
+}
+
+/** 超过这个长度的文档，字数统计在停止输入后再计算，不占用按键响应时间 */
+const DEFERRED_STATS_LENGTH = 50_000;
+const STATS_DELAY_MS = 400;
+
+/**
+ * 文档统计：小文档随内容同步计算；大文档在内容停止变化 STATS_DELAY_MS 后计算
+ */
+function useDocumentStats(content: string): DocumentStats {
+  const deferred = content.length > DEFERRED_STATS_LENGTH;
+  const immediate = useMemo(() => (deferred ? null : calculateStats(content)), [deferred, content]);
+  const [delayed, setDelayed] = useState<DocumentStats | null>(null);
+
+  useEffect(() => {
+    if (!deferred) return;
+    const timer = setTimeout(() => setDelayed(calculateStats(content)), STATS_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [deferred, content]);
+
+  return immediate ?? delayed ?? { wordCount: 0, charCount: 0 };
 }
 
 // ================================
 // 默认配置
 // ================================
 
-const DEFAULT_CONFIG: Required<Omit<UseDocumentsConfig, 'onVersionCreated'>> & {
+const DEFAULT_CONFIG: Required<Omit<UseDocumentsConfig, 'onVersionCreated' | 'onDocumentSaved'>> & {
   onVersionCreated?: UseDocumentsConfig['onVersionCreated'];
+  onDocumentSaved?: UseDocumentsConfig['onDocumentSaved'];
 } = {
   debounceMs: 1500,
   maxIntervalMs: 30000,
@@ -191,6 +237,11 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
             const listItem = documentService.toListItem(saved);
             dispatch(actions.listUpdateItem(listItem));
           }
+          configRef.current.onDocumentSaved?.({
+            id: snapshot.documentId,
+            title: snapshot.title,
+            content: snapshot.content,
+          });
 
           // Maybe create version
           const now = Date.now();
@@ -238,7 +289,9 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
   // ================================
 
   const editor = useManagedEditor({
-    documentId: state.editor.documentId,
+    // 文档内容加载完成前不获取托管实例：否则会以空内容创建实例，编辑窗格把它当作正在编辑的内容显示，
+    // 之后 switchDocument 也会沿用这个空实例（打开文档显示为空白的“无标题”）
+    documentId: state.editor.document ? state.editor.documentId : null,
     initialTitle: state.editor.document?.title ?? '',
     initialContent: state.editor.document?.content ?? '',
     executor: saveExecutor,
@@ -527,20 +580,10 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
 
         dispatch(actions.listRemoveItem(id));
 
+        // 删除当前文档只清空编辑会话，接下来编辑哪个文档由写作模式的标签页决定（激活相邻标签）
         if (state.editor.documentId === id) {
           editor.clear();
           dispatch(actions.editorClear());
-
-          // Select next document if available
-          const remaining = state.list.items.filter((item) => item.id !== id);
-          if (remaining.length > 0) {
-            // Use queueMicrotask to ensure state is updated before selecting
-            queueMicrotask(() => {
-              if (isMountedRef.current) {
-                selectDocument(remaining[0].id);
-              }
-            });
-          }
         }
 
         return success;
@@ -549,7 +592,7 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
         return false;
       }
     },
-    [state.editor.documentId, state.list.items, editor, selectDocument]
+    [state.editor.documentId, editor]
   );
 
   // ================================
@@ -635,10 +678,16 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
 
   const title = editor.isReady ? editor.title : (state.editor.document?.title ?? '');
   const content = editor.isReady ? editor.content : (state.editor.document?.content ?? '');
-  const wordCount = useMemo(() => calculateWordCount(content), [content]);
-  const charCount = useMemo(() => calculateCharCount(content), [content]);
+  const { wordCount, charCount } = useDocumentStats(content);
+  const loadedDocument = state.editor.document;
+  const currentDocument = useMemo(
+    () =>
+      loadedDocument && (loadedDocument.title !== title || loadedDocument.content !== content)
+        ? { ...loadedDocument, title, content }
+        : loadedDocument,
+    [loadedDocument, title, content]
+  );
 
-  const isFirstTime = state.initialized && state.list.items.length === 0;
   // 修复：只使用 editor.isSaving 作为唯一来源，避免状态不同步
   // 之前使用 OR 逻辑会导致 state.editor.saving 卡在 true 不重置
   const isSaving = editor.isSaving;
@@ -658,7 +707,7 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       listError: state.list.error,
 
       // Editor state
-      currentDocument: state.editor.document,
+      currentDocument,
       selectedId: state.editor.documentId,
       editorLoading: state.editor.loading,
       editorError: state.editor.error,
@@ -670,7 +719,6 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
 
       // Global state
       isInitialized: state.initialized,
-      isFirstTime,
 
       // Computed values
       title,
@@ -696,12 +744,14 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       // Version history
       lastVersionCreatedAt,
       createVersion,
+
+      saveExecutor,
     }),
     [
       state.list.items,
       state.list.loading,
       state.list.error,
-      state.editor.document,
+      currentDocument,
       state.editor.documentId,
       state.editor.loading,
       state.editor.error,
@@ -709,7 +759,6 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       isSaving,
       lastSavedAt,
       state.initialized,
-      isFirstTime,
       title,
       content,
       wordCount,
@@ -727,6 +776,7 @@ export function useDocuments(config: UseDocumentsConfig = {}): UseDocumentsRetur
       editor.isAutoSaveEnabled,
       lastVersionCreatedAt,
       createVersion,
+      saveExecutor,
     ]
   );
 }

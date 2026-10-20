@@ -1,0 +1,180 @@
+// ================================
+// 反向链接面板样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+// 宽度由外层 ResizablePanel 控制（可拖动左边缘调整）
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border-left: 1px solid var(--border-primary);
+  background-color: var(--bg-secondary);
+}
+
+// 嵌入应用侧栏时填满侧栏
+.embedded {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  border-left: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tabs {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+  overflow-x: auto;
+
+  // 面板较窄时标签条可横向滚动，但不显示滚动条（否则会压在标签下面）
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.tab {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--spacing-1) var(--spacing-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.tabActive {
+  background-color: var(--bg-selected);
+  color: var(--text-primary);
+}
+
+.count {
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.close {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--spacing-2);
+
+  @include scrollbar;
+}
+
+.empty {
+  margin: var(--spacing-4) var(--spacing-2);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry {
+  @include button-reset;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--spacing-2);
+  border-radius: var(--radius-md);
+  text-align: left;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.entryTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--accent-primary);
+}
+
+.entryContext {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.unresolved .entryTitle {
+  color: var(--text-muted);
+}
+
+// 块引用 [[笔记#^id]]：被引用的块 ID 与块文本
+.blockRef {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-1);
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.blockId {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  color: var(--accent-primary);
+  background-color: var(--accent-primary-alpha);
+}
+
+.blockText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph {
+  height: 100%;
+  min-height: 360px;
+}

@@ -4,13 +4,13 @@
 //
 // 提供写作相关的核心功能：
 // - 全文搜索索引（自动持久化）
-// - 文档差分计算（带缓存）
+// - 文档差分计算（带缓存，差分算法与 Worker 来自 @code-reader/diff-algorithm）
 // - 搜索建议
-// - Worker 后台计算
 // - React Hooks 集成
 // - 性能监控
 // - UI 组件
 // - 基准测试工具
+// 原独立的 diff-match-patch Worker 实现已移到 @code-reader/diff-algorithm-extras 的 dmp-standalone
 // ================================
 
 // ================================
@@ -125,107 +125,3 @@ export {
 } from './benchmark';
 
 export type { BenchmarkConfig, BenchmarkResult, BenchmarkReport } from './benchmark';
-
-// ================================
-// UI Components
-// ================================
-
-export { SearchBox } from './components/SearchBox';
-export type { SearchBoxProps, SearchBoxHandle } from './components/SearchBox';
-
-export { DiffViewer } from './components/DiffViewer';
-export type { DiffViewerProps, DiffViewerHandle, DiffViewMode } from './components/DiffViewer';
-
-// ================================
-// Hooks
-// ================================
-
-export { useSearchHighlight, SEARCH_HIGHLIGHT_STYLES } from './hooks/useSearchHighlight';
-export type {
-  HighlightRange,
-  SearchHighlightOptions,
-  UseSearchHighlightReturn,
-} from './hooks/useSearchHighlight';
-
-export { useEditorSearch } from './hooks/useEditorSearch';
-export type {
-  EditorSearchMode,
-  EditorSearchMatch,
-  GlobalSearchResult,
-  UseEditorSearchConfig,
-  UseEditorSearchReturn,
-} from './hooks/useEditorSearch';
-
-// ================================
-// Worker (Complete Implementation)
-// ================================
-
-export {
-  // Diff functions
-  diffMain,
-  diffCleanupSemantic,
-  diffCleanupEfficiency,
-  diffCleanupMerge,
-  diffApply,
-  computeDiffStats,
-
-  // Hash functions
-  fnv1aHash,
-  xxHash32,
-  adler32Hash,
-
-  // Similarity
-  levenshteinDistance,
-
-  // Message handler
-  handleMessage,
-
-  // Constants
-  DIFF_DELETE,
-  DIFF_EQUAL,
-  DIFF_INSERT,
-} from './diff-worker-complete';
-
-export type {
-  WorkerMessageType,
-  WorkerRequest,
-  WorkerResponse,
-  Diff,
-  DiffOp,
-} from './diff-worker-complete';
-
-// ================================
-// Worker Script Generator
-// ================================
-
-export {
-  generateCompleteWorkerScript,
-  createWorkerBlobUrl,
-  revokeWorkerBlobUrl,
-} from './worker-script-generator';
-
-// ================================
-// Enhanced Worker Pool
-// ================================
-
-export {
-  EnhancedWorkerPool,
-  createEnhancedWorkerPool,
-  createHighPerformanceEnhancedPool,
-  createLightweightEnhancedPool,
-  getDefaultEnhancedWorkerPool,
-  closeDefaultEnhancedWorkerPool,
-} from './enhanced-worker-pool';
-
-export type {
-  EnhancedWorkerPoolConfig,
-  TextDiffPayload,
-  ApplyDiffPayload,
-  HashPayload,
-  SimilarityPayload,
-  CleanupPayload,
-  TextDiffResult,
-  HashResult,
-  SimilarityResult,
-  PoolStats,
-} from './enhanced-worker-pool';

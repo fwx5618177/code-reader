@@ -13,7 +13,7 @@ import {
   UpdateDocumentInput,
   documentToListItem,
 } from './types';
-import { WELCOME_DOCUMENT_TITLE, WELCOME_DOCUMENT_CONTENT } from './constants';
+import { getEditorManager } from '../core';
 
 // ================================
 // Service Class
@@ -32,31 +32,6 @@ class DocumentService {
     this.initialized = true;
 
     console.log('[DocumentService] Initialized');
-  }
-
-  /**
-   * Ensure welcome document exists, create if not
-   * Returns the welcome document if it was just created
-   */
-  async ensureWelcomeDocument(): Promise<Document | null> {
-    await this.initialize();
-
-    const exists = await documentRepository.existsByTitle(WELCOME_DOCUMENT_TITLE);
-
-    if (exists) {
-      return null;
-    }
-
-    console.log('[DocumentService] Creating welcome document...');
-
-    const welcomeDoc = await documentRepository.create({
-      title: WELCOME_DOCUMENT_TITLE,
-      content: WELCOME_DOCUMENT_CONTENT,
-    });
-
-    console.log('[DocumentService] Welcome document created:', welcomeDoc.id);
-
-    return welcomeDoc;
   }
 
   /**
@@ -117,6 +92,8 @@ class DocumentService {
   async deleteDocument(id: string): Promise<boolean> {
     await this.initialize();
 
+    // 先销毁托管编辑实例：取消排队中的自动保存，仍挂着该文档的编辑栏不再写入
+    getEditorManager().forceDestroy(id);
     const success = await documentRepository.delete(id);
 
     if (success) {

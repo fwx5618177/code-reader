@@ -6,6 +6,7 @@
 // ================================
 
 import { databaseService, now } from '../../services/database';
+import type { SqlStatement } from '../../types/electron';
 import { generateUUID } from '../utils';
 import {
   Folder,
@@ -15,6 +16,7 @@ import {
   UpdateFolderInput,
   rowToFolder,
   folderToListItem,
+  collectDescendantIds,
 } from './types';
 
 // ================================
@@ -209,131 +211,103 @@ class FolderRepository {
 
   /**
    * Soft delete a folder
-   * Note: This doesn't delete documents in the folder, they become "unfiled"
+   * 文件夹内的条目不删除，变为未归档；子文件夹上移一级（挂到被删文件夹的父级下）
+   * 三步在同一个事务中执行，中途失败不会留下指向已删除文件夹的数据
    */
   async delete(id: string): Promise<boolean> {
+    const folder = await this.getById(id);
+    if (!folder) return false;
+
     const timestamp = now();
+    const [, , deleted] = await databaseService.transaction([
+      {
+        sql: `UPDATE knowledge_items SET folder_id = NULL, updated_at = ?
+              WHERE folder_id = ? AND is_deleted = 0`,
+        params: [timestamp, id],
+      },
+      {
+        sql: `UPDATE folders SET parent_id = ?, updated_at = ?
+              WHERE parent_id = ? AND is_deleted = 0`,
+        params: [folder.parentId, timestamp, id],
+      },
+      {
+        sql: `UPDATE folders SET is_deleted = 1, deleted_at = ?, updated_at = ?
+              WHERE id = ?`,
+        params: [timestamp, timestamp, id],
+      },
+    ]);
 
-    // First, set folder_id to null for all documents in this folder
-    await databaseService.run(
-      `UPDATE knowledge_items SET folder_id = NULL, updated_at = ?
-       WHERE folder_id = ? AND is_deleted = 0`,
-      [timestamp, id]
-    );
-
-    // Then soft delete the folder
-    const result = await databaseService.run(
-      `UPDATE folders SET is_deleted = 1, deleted_at = ?, updated_at = ?
-       WHERE id = ?`,
-      [timestamp, timestamp, id]
-    );
-
-    return result.changes > 0;
+    return deleted.changes > 0;
   }
 
   /**
-   * Delete a folder and all its descendants (recursive)
+   * Delete a folder and all its descendants
+   * 条目解除归档与文件夹软删除在同一个事务中执行
    */
   async deleteWithDescendants(id: string): Promise<boolean> {
     const timestamp = now();
+    const allFolderIds = [id, ...collectDescendantIds(await this.getAll(), id)];
+    const placeholders = allFolderIds.map(() => '?').join(',');
 
-    // Get all descendant folder IDs
-    const descendants = await this.getAllDescendantIds(id);
-    const allFolderIds = [id, ...descendants];
-
-    // Set folder_id to null for all documents in these folders
-    for (const folderId of allFolderIds) {
-      await databaseService.run(
-        `UPDATE knowledge_items SET folder_id = NULL, updated_at = ?
-         WHERE folder_id = ? AND is_deleted = 0`,
-        [timestamp, folderId]
-      );
-    }
-
-    // Soft delete all folders
-    for (const folderId of allFolderIds) {
-      await databaseService.run(
-        `UPDATE folders SET is_deleted = 1, deleted_at = ?, updated_at = ?
-         WHERE id = ?`,
-        [timestamp, timestamp, folderId]
-      );
-    }
+    await databaseService.transaction([
+      {
+        sql: `UPDATE knowledge_items SET folder_id = NULL, updated_at = ?
+              WHERE folder_id IN (${placeholders}) AND is_deleted = 0`,
+        params: [timestamp, ...allFolderIds],
+      },
+      {
+        sql: `UPDATE folders SET is_deleted = 1, deleted_at = ?, updated_at = ?
+              WHERE id IN (${placeholders})`,
+        params: [timestamp, timestamp, ...allFolderIds],
+      },
+    ]);
 
     return true;
   }
 
   /**
-   * Get all descendant folder IDs (recursive)
-   */
-  private async getAllDescendantIds(parentId: string): Promise<string[]> {
-    const children = await this.getChildren(parentId);
-    const descendantIds: string[] = [];
-
-    for (const child of children) {
-      descendantIds.push(child.id);
-      const childDescendants = await this.getAllDescendantIds(child.id);
-      descendantIds.push(...childDescendants);
-    }
-
-    return descendantIds;
-  }
-
-  /**
    * Move a folder to a new parent
+   * 只负责写入；目标是否存在、是否成环等校验由 folderService.moveFolder 完成
    */
   async move(id: string, newParentId: string | null): Promise<boolean> {
-    // Prevent moving a folder into itself or its descendants
-    if (newParentId) {
-      const descendants = await this.getAllDescendantIds(id);
-      if (descendants.includes(newParentId) || id === newParentId) {
-        console.error('[FolderRepository] Cannot move folder into itself or its descendants');
-        return false;
-      }
-    }
-
     const order = await this.getNextOrder(newParentId);
     return this.update(id, { parentId: newParentId, order });
   }
 
   /**
    * Reorder folders at the same level
+   * 兄弟文件夹的顺序调整与自身顺序在同一个事务中写入
    */
   async reorder(folderId: string, newOrder: number): Promise<boolean> {
     const folder = await this.getById(folderId);
     if (!folder) return false;
 
     const timestamp = now();
-
-    // Get siblings at the same level
+    const movingDown = folder.order < newOrder;
     const siblings = await this.getChildren(folder.parentId);
+    const statements: SqlStatement[] = siblings
+      .filter(
+        (sibling) =>
+          sibling.id !== folderId &&
+          (movingDown
+            ? // 下移：旧位置与新位置之间的兄弟各上移一位
+              sibling.order > folder.order && sibling.order <= newOrder
+            : // 上移：新位置与旧位置之间的兄弟各下移一位
+              sibling.order >= newOrder && sibling.order < folder.order)
+      )
+      .map((sibling) => ({
+        sql: `UPDATE folders SET sort_order = sort_order ${movingDown ? '-' : '+'} 1, updated_at = ?
+              WHERE id = ?`,
+        params: [timestamp, sibling.id],
+      }));
 
-    // Update order for affected siblings
-    for (const sibling of siblings) {
-      if (sibling.id === folderId) continue;
+    statements.push({
+      sql: `UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ? AND is_deleted = 0`,
+      params: [newOrder, timestamp, folderId],
+    });
 
-      if (folder.order < newOrder) {
-        // Moving down: decrement order for items between old and new position
-        if (sibling.order > folder.order && sibling.order <= newOrder) {
-          await databaseService.run(
-            `UPDATE folders SET sort_order = sort_order - 1, updated_at = ?
-             WHERE id = ?`,
-            [timestamp, sibling.id]
-          );
-        }
-      } else {
-        // Moving up: increment order for items between new and old position
-        if (sibling.order >= newOrder && sibling.order < folder.order) {
-          await databaseService.run(
-            `UPDATE folders SET sort_order = sort_order + 1, updated_at = ?
-             WHERE id = ?`,
-            [timestamp, sibling.id]
-          );
-        }
-      }
-    }
-
-    // Update the folder's order
-    return this.update(folderId, { order: newOrder });
+    const results = await databaseService.transaction(statements);
+    return results[results.length - 1].changes > 0;
   }
 }
 

@@ -674,6 +674,23 @@ class LanguageRegistryImpl {
   }
 
   /**
+   * 移除语言（插件贡献的语言在插件停用时移除）：重建索引，被它覆盖的别名恢复原有指向
+   */
+  unregister(id: string): void {
+    const remaining = this.definitions.filter((definition) => definition.id !== id);
+    if (remaining.length === this.definitions.length) return;
+    this.definitions = [];
+    for (const map of [this.byId, this.byNormalizedId, this.byExtension, this.byAlias, this.byNormalizedAlias]) map.clear();
+    this.registerAll(remaining);
+  }
+
+  /** 名称是否已被某个语言占用（ID、别名或扩展名的精确匹配，不含模糊匹配） */
+  isNameTaken(name: string): boolean {
+    const lower = name.toLowerCase();
+    return this.byAlias.has(lower) || this.byExtension.has(lower.replace(/^\./, ''));
+  }
+
+  /**
    * Get language definition by identifier with Typora-style fuzzy matching
    * Tries exact match first, then aliases, then extensions, then fuzzy
    */

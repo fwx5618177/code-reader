@@ -1,0 +1,59 @@
+// ================================
+// 录音播放条样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-1);
+  margin: var(--spacing-2);
+  padding: var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-tertiary);
+}
+
+.playerHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+
+.playerTitle {
+  @include truncate;
+  flex: 1;
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+  color: var(--text-primary);
+}
+
+.close {
+  @include button-reset;
+  @include flex-center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.audio {
+  width: 100%;
+  height: 32px;
+}
+
+.playerLoading,
+.playerError {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.playerError {
+  color: var(--color-error);
+}

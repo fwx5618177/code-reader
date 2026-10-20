@@ -1,0 +1,127 @@
+// ================================
+// 编辑器浮层样式：块手柄、块菜单 / 拼写建议菜单、拼写错误波浪线
+// 浮层挂在 document.body 上，使用固定定位
+// ================================
+
+@use '../../styles/variables' as *;
+
+// ================================
+// 块手柄
+// ================================
+
+.blockHandle {
+  position: fixed;
+  z-index: $z-dropdown;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--spacing-5);
+  height: var(--spacing-6);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  letter-spacing: -0.2em;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+  transition: background-color $transition-fast, color $transition-fast;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.blockHandleVisible {
+  display: flex;
+}
+
+// ================================
+// 弹出菜单
+// ================================
+
+.menu {
+  position: fixed;
+  z-index: $z-popover;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--spacing-1) 0;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-size-sm);
+
+  @include scrollbar;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+  width: 100%;
+  padding: var(--spacing-1) var(--spacing-3);
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+  }
+
+  &:disabled {
+    color: var(--text-faint);
+    cursor: default;
+  }
+}
+
+.menuItemActive {
+  background-color: var(--bg-hover);
+}
+
+// 当前块类型
+.menuItemCurrent {
+  color: var(--accent-primary);
+
+  &:disabled {
+    color: var(--accent-primary);
+  }
+}
+
+.menuHeading {
+  padding: var(--spacing-1) var(--spacing-3);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  user-select: none;
+}
+
+.menuSeparator {
+  height: 1px;
+  margin: var(--spacing-1) 0;
+  background-color: var(--border-subtle);
+}
+
+.menuHint {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+// ================================
+// 拼写错误
+// ================================
+
+.spellError {
+  text-decoration: underline wavy var(--color-error);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
+}

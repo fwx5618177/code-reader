@@ -1,332 +1,316 @@
 // ================================
 // LaTeX 渲染器
-// 支持缓存和可视区域优先渲染
-// 将 AST 转换为 HTML
+// 将 AST 转换为 HTML（主线程与渲染 Worker 共用）
 // ================================
 
 import type {
   LatexNode,
-  RootNode,
   PreambleNode,
-  DocumentNode,
   CommandNode,
   EnvironmentNode,
   GroupNode,
   TextNode,
   MathInlineNode,
   MathBlockNode,
-  CommentNode,
   ParagraphNode,
   SectionNode,
   ListNode,
   ListItemNode,
   ErrorNode,
   LatexRenderOptions,
-  LatexRenderResult,
-  RenderBlock,
-  RenderCacheEntry,
-  CacheConfig,
   MacroDefinition,
+  LatexBlockKind,
+  TocEntry,
 } from './types';
 import { renderMath } from '../math';
 import {
   processMathContent,
   extractMathContent,
   extractEnvName,
-  getEnvInfo,
   getEnvCssClass,
   getEnvHtmlAttributes,
   formatHtmlAttributes,
   isMathEnv,
 } from './math-env-handler';
+import { LatexParser } from './parser';
+import {
+  ACCENTS,
+  CONTROL_SYMBOLS,
+  PASSTHROUGH_COMMANDS,
+  SILENT_COMMANDS,
+  TEXT_SYMBOLS,
+  applyAccent,
+  applyTextLigatures,
+  findClosingBrace,
+  latexToPlainText,
+  todayText,
+} from './text-symbols';
 
 // ================================
 // 默认配置
 // ================================
 
+/**
+ * 正文中直接出现时按行内公式渲染的数学命令（文本模式下 \alpha、\frac{a}{b}、\sum_{i} 等）
+ * \underline、\ldots 等同时是文本命令的不在此列，由文本符号表与 renderCommand 处理
+ */
+const TEXT_MATH_COMMANDS: ReadonlySet<string> = new Set([
+  // 极限类运算符
+  'lim',
+  'limsup',
+  'liminf',
+  'sup',
+  'inf',
+  'max',
+  'min',
+  // 大型运算符
+  'sum',
+  'prod',
+  'coprod',
+  'int',
+  'iint',
+  'iiint',
+  'oint',
+  'bigcap',
+  'bigcup',
+  'bigvee',
+  'bigwedge',
+  'bigoplus',
+  'bigotimes',
+  // 分数和根号
+  'frac',
+  'dfrac',
+  'tfrac',
+  'sqrt',
+  'binom',
+  // 三角函数
+  'sin',
+  'cos',
+  'tan',
+  'cot',
+  'sec',
+  'csc',
+  'arcsin',
+  'arccos',
+  'arctan',
+  'sinh',
+  'cosh',
+  'tanh',
+  // 其他函数
+  'log',
+  'ln',
+  'lg',
+  'exp',
+  'det',
+  'dim',
+  'gcd',
+  'hom',
+  'ker',
+  'deg',
+  'Pr',
+  'arg',
+  // 希腊字母
+  'alpha',
+  'beta',
+  'gamma',
+  'delta',
+  'epsilon',
+  'varepsilon',
+  'zeta',
+  'eta',
+  'theta',
+  'vartheta',
+  'iota',
+  'kappa',
+  'lambda',
+  'mu',
+  'nu',
+  'xi',
+  'pi',
+  'varpi',
+  'rho',
+  'varrho',
+  'sigma',
+  'varsigma',
+  'tau',
+  'upsilon',
+  'phi',
+  'varphi',
+  'chi',
+  'psi',
+  'omega',
+  'Gamma',
+  'Delta',
+  'Theta',
+  'Lambda',
+  'Xi',
+  'Pi',
+  'Sigma',
+  'Upsilon',
+  'Phi',
+  'Psi',
+  'Omega',
+  // 数学符号
+  'infty',
+  'nabla',
+  'partial',
+  'forall',
+  'exists',
+  'nexists',
+  'emptyset',
+  'neg',
+  'lnot',
+  'angle',
+  'triangle',
+  'square',
+  'diamond',
+  'pm',
+  'mp',
+  'times',
+  'div',
+  'cdot',
+  'ast',
+  'star',
+  'circ',
+  'bullet',
+  'oplus',
+  'ominus',
+  'otimes',
+  'odot',
+  'cap',
+  'cup',
+  'vee',
+  'wedge',
+  'ne',
+  'neq',
+  'le',
+  'leq',
+  'ge',
+  'geq',
+  'lt',
+  'gt',
+  'approx',
+  'equiv',
+  'sim',
+  'simeq',
+  'cong',
+  'propto',
+  'll',
+  'gg',
+  'subset',
+  'supset',
+  'subseteq',
+  'supseteq',
+  'in',
+  'notin',
+  'ni',
+  'to',
+  'rightarrow',
+  'Rightarrow',
+  'leftarrow',
+  'Leftarrow',
+  'leftrightarrow',
+  'Leftrightarrow',
+  'uparrow',
+  'downarrow',
+  'mapsto',
+  'implies',
+  'iff',
+  'vdots',
+  'cdots',
+  'ddots',
+  'prime',
+  'hbar',
+  'ell',
+  'Re',
+  'Im',
+  'aleph',
+  // 矩阵环境（这些需要特殊处理）
+  'left',
+  'right',
+  // 重音符号
+  'hat',
+  'check',
+  'tilde',
+  'acute',
+  'grave',
+  'dot',
+  'ddot',
+  'breve',
+  'bar',
+  'vec',
+  'overline',
+  'widehat',
+  'widetilde',
+  // 字体命令
+  'mathbb',
+  'mathbf',
+  'mathrm',
+  'mathit',
+  'mathcal',
+  'mathfrak',
+]);
+
+/** 原文片段中需要单独处理的字符（其余为纯文本） */
+const INLINE_SPECIAL: ReadonlySet<string> = new Set(['\\', '$', '\n']);
+
+/** 宏展开的最大嵌套层数（防止自引用的 \newcommand 无限展开） */
+const MAX_MACRO_DEPTH = 32;
+
+/** 正文中识别为普通单词（结束公式）的例外：这些字母串是函数名 */
+const MATH_FUNCTION_WORD = /^(sin|cos|tan|log|lim|max|min|sup|inf|exp|det|dim|gcd|arg|deg)/;
+
+/**
+ * 从数学命令之后继续扫描，把跟随的参数、上下标、其他数学命令与符号并入同一个行内公式；
+ * 遇到空白、普通单词或非数学命令时结束。返回公式的结束位置
+ */
+function scanTextMathExpression(text: string, from: number): number {
+  let pos = from;
+  let depth = 0;
+  while (pos < text.length) {
+    const char = text[pos];
+    if (char === '{') {
+      depth++;
+      pos++;
+    } else if (char === '}') {
+      if (depth === 0) break;
+      depth--;
+      pos++;
+    } else if (depth > 0) {
+      // 花括号内整体并入（转义字符连同反斜杠一起跳过）
+      pos += char === '\\' ? 2 : 1;
+    } else if (char === '_' || char === '^') {
+      pos++;
+      if (text[pos] === '{') {
+        const close = findClosingBrace(text, pos + 1);
+        pos = close === -1 ? text.length : close + 1;
+      } else if (text[pos] === '\\') {
+        pos += /^\\[a-zA-Z]*/.exec(text.slice(pos))![0].length;
+      } else if (/[a-zA-Z0-9]/.test(text[pos] ?? '')) {
+        pos++;
+      }
+    } else if (char === '\\') {
+      const next = /^\\([a-zA-Z]+|[,;:! ])/.exec(text.slice(pos));
+      if (!next || !(TEXT_MATH_COMMANDS.has(next[1]) || /^[,;:! ]$/.test(next[1]))) break;
+      pos += next[0].length;
+    } else if (/\s/.test(char)) {
+      break;
+    } else if (/[a-zA-Z0-9+\-=<>()[\]|.,']/.test(char)) {
+      const lookAhead = text.slice(pos, pos + 10);
+      if (/^[a-zA-Z]{3,}/.test(lookAhead) && !MATH_FUNCTION_WORD.test(lookAhead)) break;
+      pos++;
+    } else {
+      break;
+    }
+  }
+  return pos;
+}
+
 /** 默认渲染选项 */
 const DEFAULT_RENDER_OPTIONS: Required<LatexRenderOptions> = {
-  baseFontSize: 1,
   showErrors: true,
-  showLineNumbers: false,
   classPrefix: 'latex',
 };
-
-/** 默认缓存配置 */
-const DEFAULT_CACHE_CONFIG: CacheConfig = {
-  maxEntries: 500,
-  ttl: 5 * 60 * 1000, // 5 分钟
-  useLRU: true,
-};
-
-// ================================
-// 渲染缓存
-// ================================
-
-/**
- * 渲染缓存管理器
- * 使用 LRU 策略管理缓存
- */
-class RenderCache {
-  private cache: Map<string, RenderCacheEntry>;
-  private config: CacheConfig;
-
-  constructor(config?: Partial<CacheConfig>) {
-    this.cache = new Map();
-    this.config = { ...DEFAULT_CACHE_CONFIG, ...config };
-  }
-
-  /**
-   * 获取缓存
-   */
-  get(hash: string): string | null {
-    const entry = this.cache.get(hash);
-    if (!entry) return null;
-
-    // 检查是否过期
-    if (Date.now() - entry.timestamp > this.config.ttl) {
-      this.cache.delete(hash);
-      return null;
-    }
-
-    // 更新访问计数
-    entry.accessCount++;
-    return entry.html;
-  }
-
-  /**
-   * 设置缓存
-   */
-  set(hash: string, html: string): void {
-    // 检查是否需要淘汰
-    if (this.cache.size >= this.config.maxEntries) {
-      this.evict();
-    }
-
-    this.cache.set(hash, {
-      nodeHash: hash,
-      html,
-      timestamp: Date.now(),
-      accessCount: 1,
-    });
-  }
-
-  /**
-   * 淘汰缓存（LRU 策略）
-   */
-  private evict(): void {
-    if (!this.config.useLRU) {
-      // 简单策略：删除最旧的
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey) {
-        this.cache.delete(firstKey);
-      }
-      return;
-    }
-
-    // LRU 策略：删除访问次数最少的
-    let minAccess = Infinity;
-    let minKey: string | null = null;
-
-    for (const [key, entry] of this.cache) {
-      if (entry.accessCount < minAccess) {
-        minAccess = entry.accessCount;
-        minKey = key;
-      }
-    }
-
-    if (minKey) {
-      this.cache.delete(minKey);
-    }
-  }
-
-  /**
-   * 清除缓存
-   */
-  clear(): void {
-    this.cache.clear();
-  }
-
-  /**
-   * 获取缓存大小
-   */
-  get size(): number {
-    return this.cache.size;
-  }
-}
-
-// ================================
-// 可视区域优先渲染管理器
-// ================================
-
-/**
- * 可视区域优先渲染管理器
- * 优先渲染可视区域内的内容
- */
-export class VisibilityPriorityRenderer {
-  private blocks: Map<string, RenderBlock>;
-  private visibleIds: Set<string>;
-  private renderer: LatexRenderer;
-  private renderQueue: string[];
-  private isRendering: boolean;
-  private onBlockRendered?: (blockId: string, html: string) => void;
-  /** 完整的 AST（用于 TOC 预收集） */
-  private fullAst: RootNode | null = null;
-
-  constructor(renderer: LatexRenderer) {
-    this.blocks = new Map();
-    this.visibleIds = new Set();
-    this.renderer = renderer;
-    this.renderQueue = [];
-    this.isRendering = false;
-    this.fullAst = null;
-  }
-
-  /**
-   * 设置完整 AST 并预收集 TOC
-   * 必须在 setBlocks 之前调用，以确保 TOC 能正确渲染
-   */
-  setFullAst(ast: RootNode): void {
-    this.fullAst = ast;
-    // 预收集 TOC 条目
-    this.renderer.preCollectToc(ast);
-  }
-
-  /**
-   * 设置渲染块
-   */
-  setBlocks(nodes: LatexNode[]): void {
-    this.blocks.clear();
-    for (const node of nodes) {
-      this.blocks.set(node.id, {
-        id: node.id,
-        node,
-        html: null,
-        estimatedHeight: this.estimateHeight(node),
-        isVisible: false,
-        priority: 0,
-      });
-    }
-  }
-
-  /**
-   * 更新可视区域
-   */
-  updateVisibility(visibleIds: string[]): void {
-    this.visibleIds = new Set(visibleIds);
-
-    // 更新优先级
-    for (const [id, block] of this.blocks) {
-      block.isVisible = this.visibleIds.has(id);
-      block.priority = block.isVisible ? 0 : 1;
-    }
-
-    // 重新排序渲染队列
-    this.updateRenderQueue();
-  }
-
-  /**
-   * 开始渲染
-   */
-  async startRendering(callback?: (blockId: string, html: string) => void): Promise<void> {
-    this.onBlockRendered = callback;
-    this.updateRenderQueue();
-    await this.processQueue();
-  }
-
-  /**
-   * 更新渲染队列
-   */
-  private updateRenderQueue(): void {
-    // 获取未渲染的块
-    const unrendered: RenderBlock[] = [];
-    for (const block of this.blocks.values()) {
-      if (block.html === null) {
-        unrendered.push(block);
-      }
-    }
-
-    // 按优先级排序（可视区域优先）
-    unrendered.sort((a, b) => a.priority - b.priority);
-
-    this.renderQueue = unrendered.map((b) => b.id);
-  }
-
-  /**
-   * 处理渲染队列
-   */
-  private async processQueue(): Promise<void> {
-    if (this.isRendering) return;
-    this.isRendering = true;
-
-    while (this.renderQueue.length > 0) {
-      const blockId = this.renderQueue.shift();
-      if (!blockId) continue;
-
-      const block = this.blocks.get(blockId);
-      if (!block || block.html !== null) continue;
-
-      // 渲染块
-      const result = this.renderer.renderNode(block.node);
-      block.html = result;
-
-      // 通知回调
-      if (this.onBlockRendered) {
-        this.onBlockRendered(blockId, result);
-      }
-
-      // 让出控制权，避免阻塞 UI
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    this.isRendering = false;
-  }
-
-  /**
-   * 获取块的渲染结果
-   */
-  getBlockHtml(blockId: string): string | null {
-    const block = this.blocks.get(blockId);
-    return block?.html ?? null;
-  }
-
-  /**
-   * 获取完整 AST
-   */
-  getFullAst(): RootNode | null {
-    return this.fullAst;
-  }
-
-  /**
-   * 清理资源
-   */
-  cleanup(): void {
-    this.fullAst = null;
-    this.blocks.clear();
-    this.renderQueue = [];
-    this.renderer.clearPreCollectedToc();
-  }
-
-  /**
-   * 估算节点高度
-   */
-  private estimateHeight(node: LatexNode): number {
-    switch (node.type) {
-      case 'section':
-        return 60;
-      case 'paragraph':
-        return 40 + (node.raw.length / 50) * 20;
-      case 'math_block':
-        return 80;
-      case 'list':
-        return 30 * ((node as ListNode).children?.length || 1);
-      case 'environment':
-        return 100;
-      default:
-        return 30;
-    }
-  }
-}
 
 // ================================
 // LaTeX 渲染器类
@@ -334,420 +318,127 @@ export class VisibilityPriorityRenderer {
 
 /**
  * LaTeX 渲染器
- * 将 AST 转换为 HTML
+ * 将 AST 转换为 HTML。增量链路按块调用：前言只产出标题块，正文块各自独立渲染，
+ * 因此宏定义与全局 section 索引需要由调用方（引擎/Worker）先注入
  */
-/** TOC 条目类型 */
-interface TocEntry {
-  id: string;
-  title: string;
-  level: string;
-  depth: number;
-}
-
 export class LatexRenderer {
   private options: Required<LatexRenderOptions>;
-  private cache: RenderCache;
   private macros: Map<string, MacroDefinition>;
   private prefix: string;
-  /** 收集的 TOC 条目 */
-  private tocEntries: TocEntry[];
-  /** 是否需要生成 TOC */
-  private hasToc: boolean;
-  /** 预先收集的 TOC 条目（用于分块渲染） */
-  private preCollectedTocEntries: TocEntry[] | null = null;
-  /** 是否已预先收集 TOC */
-  private tocPreCollected: boolean = false;
-  /** 外部注入的 section 索引（来自 IncrementalLatexEngine） */
-  private externalSectionIndex: TocEntry[] | null = null;
+  /** 全文 section 索引（\tableofcontents 渲染依据） */
+  private sectionIndex: TocEntry[] = [];
+  /** 当前宏展开嵌套层数 */
+  private macroDepth = 0;
 
-  constructor(options?: LatexRenderOptions, cacheConfig?: Partial<CacheConfig>) {
+  constructor(options?: LatexRenderOptions) {
     this.options = { ...DEFAULT_RENDER_OPTIONS, ...options };
-    this.cache = new RenderCache(cacheConfig);
     this.macros = new Map();
     this.prefix = this.options.classPrefix;
-    this.tocEntries = [];
-    this.hasToc = false;
-    this.preCollectedTocEntries = null;
-    this.tocPreCollected = false;
-    this.externalSectionIndex = null;
   }
 
   /**
-   * 设置外部 section 索引（来自 IncrementalLatexEngine）
-   * 这是最可靠的 TOC 数据源，因为它在解析阶段就被收集
+   * 注入前言：重新注册 \newcommand 宏定义
    */
-  setSectionIndex(
-    entries: Array<{
-      id: string;
-      title: string;
-      level: string;
-      depth: number;
-      startOffset?: number;
-      endOffset?: number;
-    }>
-  ): void {
-    this.externalSectionIndex = entries.map((e) => ({
-      id: e.id,
-      title: e.title,
-      level: e.level,
-      depth: e.depth,
-    }));
-    console.log(
-      `[LatexRenderer] 外部 section 索引已设置: ${this.externalSectionIndex.length} 个条目`
-    );
-  }
-
-  /**
-   * 获取外部 section 索引
-   */
-  getExternalSectionIndex(): TocEntry[] | null {
-    return this.externalSectionIndex;
-  }
-
-  /**
-   * 清除外部 section 索引
-   */
-  clearExternalSectionIndex(): void {
-    this.externalSectionIndex = null;
-  }
-
-  /**
-   * 预先从完整 AST 收集 TOC 条目
-   * 用于分块渲染场景：在渲染之前调用此方法收集所有 section
-   * 这样即使分块渲染也能正确生成 TOC
-   */
-  preCollectToc(ast: RootNode): void {
-    this.preCollectedTocEntries = [];
-    this.tocPreCollected = true;
-
-    if (!ast.document) return;
-
-    const levelDepthMap: Record<string, number> = {
-      part: 0,
-      chapter: 1,
-      section: 2,
-      subsection: 3,
-      subsubsection: 4,
-      paragraph: 5,
-      subparagraph: 6,
-    };
-
-    const traverse = (node: LatexNode) => {
-      // 收集 section 节点
-      if (node.type === 'section') {
-        const sectionNode = node as SectionNode;
-        // 只收集编号的 section（非星号版本）
-        if (sectionNode.numbered !== false) {
-          const titleText = this.getChildrenText(sectionNode.title);
-          const id = `section-${sectionNode.id}`;
-          this.preCollectedTocEntries!.push({
-            id,
-            title: titleText,
-            level: sectionNode.level,
-            depth: levelDepthMap[sectionNode.level] ?? 2,
-          });
-        }
-      }
-
-      // 递归遍历子节点
-      if ('children' in node && Array.isArray(node.children)) {
-        for (const child of node.children as LatexNode[]) {
-          traverse(child);
-        }
-      }
-
-      // 处理 args
-      const anyNode = node as AnyLatexNode;
-      if ('args' in anyNode && Array.isArray(anyNode.args)) {
-        for (const argList of anyNode.args) {
-          for (const argNode of argList) {
-            traverse(argNode);
-          }
-        }
-      }
-    };
-
-    // 遍历文档
-    if ('children' in ast.document && Array.isArray(ast.document.children)) {
-      for (const child of ast.document.children as LatexNode[]) {
-        traverse(child);
-      }
-    }
-  }
-
-  /**
-   * 获取预先收集的 TOC 条目
-   */
-  getPreCollectedTocEntries(): TocEntry[] | null {
-    return this.preCollectedTocEntries;
-  }
-
-  /**
-   * 检查是否已预先收集 TOC
-   */
-  isTocPreCollected(): boolean {
-    return this.tocPreCollected;
-  }
-
-  /**
-   * 清除预先收集的 TOC 数据
-   */
-  clearPreCollectedToc(): void {
-    this.preCollectedTocEntries = null;
-    this.tocPreCollected = false;
-  }
-
-  /**
-   * 手动生成 TOC HTML（用于分块渲染场景）
-   * 优先使用外部 section 索引，其次是预收集的数据，最后是渲染时收集的数据
-   */
-  generateToc(): string {
-    // 优先级：外部索引 > 预收集 > 渲染时收集
-    const entries =
-      this.externalSectionIndex ??
-      (this.tocPreCollected ? this.preCollectedTocEntries : null) ??
-      this.tocEntries;
-
-    if (!entries || entries.length === 0) {
-      return `<nav class="${this.prefix}-toc"><div class="${this.prefix}-toc-empty"><em>No sections found</em></div></nav>`;
-    }
-
-    let html = `<nav class="${this.prefix}-toc">`;
-    html += `<h2 class="${this.prefix}-toc-title">Contents</h2>`;
-    html += `<ul class="${this.prefix}-toc-list">`;
-
-    for (const entry of entries) {
-      const indent = entry.depth * 1; // 每级缩进 1em
-      html += `<li class="${this.prefix}-toc-item ${this.prefix}-toc-${entry.level}" style="margin-left: ${indent}em;">`;
-      html += `<a href="#${this.escapeHtml(entry.id)}">${this.escapeHtml(entry.title)}</a>`;
-      html += `</li>`;
-    }
-
-    html += `</ul>`;
-    html += `</nav>`;
-
-    return html;
-  }
-
-  /**
-   * 渲染完整文档
-   *
-   * 两阶段渲染：
-   * 1. 第一阶段：收集所有 section 标题用于 TOC 生成
-   * 2. 第二阶段：实际渲染，用收集到的 TOC 数据替换占位符
-   */
-  render(ast: RootNode): LatexRenderResult {
-    const startTime = performance.now();
-
-    // 重置 TOC 状态
-    this.tocEntries = [];
-    this.hasToc = false;
-
-    try {
-      // 第一阶段：预扫描收集 TOC 条目
-      this.collectTocEntries(ast);
-
-      // 处理 preamble 中的宏定义
-      if (ast.preamble) {
-        this.processPreamble(ast.preamble);
-      }
-
-      // 渲染文档
-      let html = `<div class="${this.prefix}-document">`;
-
-      // 渲染标题块
-      if (ast.preamble?.title || ast.preamble?.author || ast.preamble?.date) {
-        html += this.renderTitleBlock(ast.preamble);
-      }
-
-      // 渲染正文
-      if (ast.document) {
-        html += this.renderDocumentNode(ast.document);
-      }
-
-      html += '</div>';
-
-      // 如果有 TOC 占位符，替换为实际的 TOC HTML
-      if (this.hasToc && this.tocEntries.length > 0) {
-        const tocHtml = this.generateTocHtml();
-        html = html.replace(
-          new RegExp(`<div class="${this.prefix}-toc-placeholder">.*?</div>`, 'g'),
-          tocHtml
-        );
-      }
-
-      return {
-        html,
-        success: true,
-        renderTime: performance.now() - startTime,
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        html: this.renderError(message),
-        success: false,
-        error: message,
-        renderTime: performance.now() - startTime,
-      };
-    }
-  }
-
-  /**
-   * 渲染单个节点（用于增量渲染）
-   * 对于 tableofcontents 命令，优先使用外部索引，其次使用预收集的数据
-   */
-  renderNode(node: LatexNode): string {
-    // 特殊处理 tableofcontents 命令
-    if (node.type === 'command' && (node as CommandNode).name === 'tableofcontents') {
-      // 优先使用外部 section 索引
-      if (this.externalSectionIndex && this.externalSectionIndex.length > 0) {
-        return this.generateToc();
-      }
-      // 其次使用预收集的 TOC
-      if (
-        this.tocPreCollected &&
-        this.preCollectedTocEntries &&
-        this.preCollectedTocEntries.length > 0
-      ) {
-        return this.generateToc();
-      }
-      // 否则返回占位符
-      return `<div class="${this.prefix}-toc-placeholder">[Table of Contents]</div>`;
-    }
-
-    // 检查缓存
-    const cached = this.cache.get(node.hash);
-    if (cached) {
-      return cached;
-    }
-
-    // 渲染节点
-    const html = this.renderNodeInternal(node);
-
-    // 存入缓存
-    this.cache.set(node.hash, html);
-
-    return html;
-  }
-
-  /**
-   * 处理 preamble
-   */
-  /**
-   * 预扫描 AST，收集所有 section 条目用于 TOC 生成
-   */
-  private collectTocEntries(ast: RootNode): void {
-    if (!ast.document) return;
-
-    const levelDepthMap: Record<string, number> = {
-      part: 0,
-      chapter: 1,
-      section: 2,
-      subsection: 3,
-      subsubsection: 4,
-      paragraph: 5,
-      subparagraph: 6,
-    };
-
-    const traverse = (node: LatexNode) => {
-      // 检查是否是 tableofcontents 命令
-      if (node.type === 'command' && (node as CommandNode).name === 'tableofcontents') {
-        this.hasToc = true;
-      }
-
-      // 收集 section 节点
-      if (node.type === 'section') {
-        const sectionNode = node as SectionNode;
-        // 只收集编号的 section（非星号版本）
-        if (sectionNode.numbered !== false) {
-          const titleText = this.getChildrenText(sectionNode.title);
-          const id = `section-${sectionNode.id}`;
-          this.tocEntries.push({
-            id,
-            title: titleText,
-            level: sectionNode.level,
-            depth: levelDepthMap[sectionNode.level] ?? 2,
-          });
-        }
-      }
-
-      // 递归遍历子节点
-      if ('children' in node && Array.isArray(node.children)) {
-        for (const child of node.children as LatexNode[]) {
-          traverse(child);
-        }
-      }
-
-      // 处理 section 的 title 和 args
-      const anyNode = node as AnyLatexNode;
-      if ('title' in anyNode && Array.isArray(anyNode.title)) {
-        // title 已在上面处理
-      }
-      if ('args' in anyNode && Array.isArray(anyNode.args)) {
-        for (const argList of anyNode.args) {
-          for (const argNode of argList) {
-            traverse(argNode);
-          }
-        }
-      }
-    };
-
-    // 遍历文档
-    if ('children' in ast.document && Array.isArray(ast.document.children)) {
-      for (const child of ast.document.children as LatexNode[]) {
-        traverse(child);
-      }
-    }
-  }
-
-  /**
-   * 生成 TOC HTML
-   */
-  private generateTocHtml(): string {
-    if (this.tocEntries.length === 0) {
-      return `<div class="${this.prefix}-toc"><em>No sections found</em></div>`;
-    }
-
-    let html = `<nav class="${this.prefix}-toc">`;
-    html += `<h2 class="${this.prefix}-toc-title">Contents</h2>`;
-    html += `<ul class="${this.prefix}-toc-list">`;
-
-    for (const entry of this.tocEntries) {
-      const indent = entry.depth * 1; // 每级缩进 1em
-      html += `<li class="${this.prefix}-toc-item ${this.prefix}-toc-${entry.level}" style="margin-left: ${indent}em;">`;
-      html += `<a href="#${this.escapeHtml(entry.id)}">${this.escapeHtml(entry.title)}</a>`;
-      html += `</li>`;
-    }
-
-    html += `</ul>`;
-    html += `</nav>`;
-
-    return html;
-  }
-
-  private processPreamble(preamble: PreambleNode): void {
-    // 注册自定义命令
-    for (const cmd of preamble.commands) {
+  setPreamble(preamble: PreambleNode | null): void {
+    this.macros.clear();
+    for (const cmd of preamble?.commands ?? []) {
       this.macros.set(cmd.name, cmd);
     }
   }
 
   /**
-   * 渲染标题块
+   * 注入全文 section 索引
+   */
+  setSectionIndex(entries: readonly TocEntry[]): void {
+    this.sectionIndex = [...entries];
+  }
+
+  /**
+   * 生成目录 HTML；没有 section 时输出占位
+   */
+  private generateToc(): string {
+    if (this.sectionIndex.length === 0) {
+      return `<div class="${this.prefix}-toc-placeholder"><em>[Table of Contents]</em></div>`;
+    }
+
+    let html = `<nav class="${this.prefix}-toc">`;
+    html += `<h2 class="${this.prefix}-toc-title">Contents</h2>`;
+    html += `<ul class="${this.prefix}-toc-list">`;
+
+    for (const entry of this.sectionIndex) {
+      const indent = entry.depth * 1; // 每级缩进 1em
+      html += `<li class="${this.prefix}-toc-item ${this.prefix}-toc-${entry.level}" style="margin-left: ${indent}em;">`;
+      html += `<a href="#${this.escapeHtml(entry.id)}">${this.escapeHtml(entry.title)}</a>`;
+      html += `</li>`;
+    }
+
+    html += `</ul>`;
+    html += `</nav>`;
+
+    return html;
+  }
+
+  /**
+   * 渲染增量链路中的一个块：前言块输出标题块，正文块依次渲染顶层节点；
+   * 任何异常都转为块内错误提示，保证调用方总能拿到可提交的 HTML
+   */
+  renderLatexBlock(
+    block: { kind: LatexBlockKind; nodes: readonly LatexNode[] },
+    preamble: PreambleNode | null
+  ): string {
+    try {
+      if (block.kind === 'preamble') {
+        return preamble ? this.renderTitleBlock(preamble) : '';
+      }
+      let html = '';
+      for (const node of block.nodes) {
+        html += this.renderNode(node);
+      }
+      return html;
+    } catch (error) {
+      return this.renderError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /**
+   * 渲染单个节点
+   */
+  private renderNode(node: LatexNode): string {
+    if (node.type === 'command' && (node as CommandNode).name === 'tableofcontents') {
+      return this.generateToc();
+    }
+    return this.renderNodeInternal(node);
+  }
+
+  /**
+   * 渲染标题块（\title / \author / \date），三者都缺省时为空
    */
   private renderTitleBlock(preamble: PreambleNode): string {
+    if (!preamble.title && !preamble.author && !preamble.date) {
+      return '';
+    }
+
     let html = `<div class="${this.prefix}-title-block">`;
 
     if (preamble.title) {
-      html += `<h1 class="${this.prefix}-title">${this.escapeHtml(preamble.title)}</h1>`;
+      html += `<h1 class="${this.prefix}-title">${this.renderTitleText(preamble.title)}</h1>`;
     }
 
-    if (preamble.author) {
-      html += `<p class="${this.prefix}-author">${this.escapeHtml(preamble.author)}</p>`;
+    // \and 分隔多位作者，各自渲染为并列的作者单元（单元内 \\ 换行写单位等信息）
+    const authors = (preamble.author ?? '')
+      .split(/\\and(?![a-zA-Z])/)
+      .map((part) => this.renderTitleText(part))
+      .filter((part) => part.length > 0);
+    if (authors.length > 0) {
+      html += `<div class="${this.prefix}-authors">`;
+      for (const author of authors) {
+        html += `<span class="${this.prefix}-author">${author}</span>`;
+      }
+      html += '</div>';
     }
 
     if (preamble.date) {
-      html += `<p class="${this.prefix}-date">${this.escapeHtml(preamble.date)}</p>`;
+      html += `<p class="${this.prefix}-date">${this.renderTitleText(preamble.date)}</p>`;
     }
 
     html += '</div>';
@@ -755,48 +446,23 @@ export class LatexRenderer {
   }
 
   /**
-   * 渲染文档节点
+   * 标题块文字：去掉 \thanks{..} 脚注后按行内内容渲染（支持 \textbf、\\、行内公式等）
    */
-  private renderDocumentNode(node: DocumentNode): string {
-    const logPrefix = '[LatexRenderer]';
-
-    // 调试日志：显示文档节点信息
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`${logPrefix} 渲染文档节点: children=${node.children?.length ?? 0}`);
-      if (node.children && node.children.length > 0) {
-        console.log(`${logPrefix} 子节点类型: ${node.children.map((c) => c.type).join(', ')}`);
-      }
+  private renderTitleText(text: string): string {
+    let plain = '';
+    let pos = 0;
+    const thanks = /\\thanks\s*\{/g;
+    let match: RegExpExecArray | null;
+    while ((match = thanks.exec(text)) !== null) {
+      plain += text.slice(pos, match.index);
+      const close = findClosingBrace(text, match.index + match[0].length);
+      pos = close === -1 ? text.length : close + 1;
+      thanks.lastIndex = pos;
     }
-
-    let html = `<div class="${this.prefix}-body">`;
-
-    for (const child of node.children) {
-      const childHtml = this.renderNodeInternal(child);
-      // 空段落（只有换行符）和某些命令返回空是正常的，不需要警告
-      // 只在调试时记录非段落、非命令的空渲染
-      if (
-        process.env.NODE_ENV === 'development' &&
-        !childHtml &&
-        child.raw &&
-        child.type !== 'paragraph' &&
-        child.type !== 'command' &&
-        child.type !== 'comment'
-      ) {
-        console.debug(
-          `${logPrefix} 子节点渲染为空: type=${child.type}, raw="${child.raw.slice(0, 50)}..."`
-        );
-      }
-      html += childHtml;
-    }
-
-    html += '</div>';
-
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`${logPrefix} 文档渲染完成，HTML长度: ${html.length}`);
-    }
-
-    return html;
+    plain += text.slice(pos);
+    return this.processInlineContent(plain.trim()).replace(/^(\s|<br \/>)+|(\s|<br \/>)+$/g, '');
   }
+
 
   /**
    * 内部节点渲染
@@ -831,8 +497,6 @@ export class LatexRenderer {
         return ''; // 注释不渲染
       case 'error':
         return this.renderErrorNode(node as ErrorNode);
-      case 'newline':
-        return '<br/>';
       default:
         // 尝试渲染未知节点类型的内容
         // 1. 如果有 children，递归渲染子节点
@@ -902,549 +566,100 @@ export class LatexRenderer {
   }
 
   /**
-   * 处理行内内容，包括行内公式、命令和换行
+   * 处理原文片段（列表项、标题、环境内容等）：行内/块级公式、\\ 换行、文本连字，
+   * 其余命令交给 LatexParser 解析成节点后走 renderCommand，与正文 AST 渲染保持一致
    */
   private processInlineContent(text: string): string {
     let result = '';
     let pos = 0;
 
     while (pos < text.length) {
-      const remaining = text.slice(pos);
+      const char = text[pos];
 
-      // 检查块级数学 $$...$$ (优先于行内公式)
-      if (remaining.startsWith('$$')) {
-        const endMatch = remaining.slice(2).indexOf('$$');
-        if (endMatch !== -1) {
-          const mathContent = remaining.slice(2, endMatch + 2);
-          const mathResult = renderMath(mathContent, { displayMode: true });
-          result += `<div class="${this.prefix}-math-block">${mathResult.html}</div>`;
-          pos += endMatch + 4;
-          continue;
-        }
-      }
-
-      // 检查行内公式 $...$
-      if (text[pos] === '$' && (pos === 0 || text[pos - 1] !== '\\')) {
-        // 确保不是 $$
-        if (text[pos + 1] !== '$') {
-          // 查找结束的 $（不能包含换行）
-          let end = pos + 1;
-          while (end < text.length && text[end] !== '\n') {
-            if (text[end] === '$' && text[end - 1] !== '\\') {
-              break;
-            }
-            end++;
-          }
-          if (end < text.length && text[end] === '$') {
-            const mathContent = text.slice(pos + 1, end);
-            if (mathContent.trim().length > 0) {
-              const mathResult = renderMath(mathContent, { displayMode: false });
-              result += `<span class="${this.prefix}-math-inline">${mathResult.html}</span>`;
-              pos = end + 1;
-              continue;
-            }
-          }
-        }
-      }
-
-      // 检查行内公式 \(...\)
-      if (remaining.startsWith('\\(')) {
-        const end = text.indexOf('\\)', pos + 2);
+      // 块级数学 $$...$$（优先于行内公式）
+      if (text.startsWith('$$', pos)) {
+        const end = text.indexOf('$$', pos + 2);
         if (end !== -1) {
-          const mathContent = text.slice(pos + 2, end);
-          const mathResult = renderMath(mathContent, { displayMode: false });
-          result += `<span class="${this.prefix}-math-inline">${mathResult.html}</span>`;
+          result += `<div class="${this.prefix}-math-block">${renderMath(text.slice(pos + 2, end), { displayMode: true }).html}</div>`;
           pos = end + 2;
           continue;
         }
       }
 
-      // 检查块级数学 \[...\]
-      if (remaining.startsWith('\\[')) {
-        const end = text.indexOf('\\]', pos + 2);
-        if (end !== -1) {
-          const mathContent = text.slice(pos + 2, end);
-          const mathResult = renderMath(mathContent, { displayMode: true });
-          result += `<div class="${this.prefix}-math-block">${mathResult.html}</div>`;
-          pos = end + 2;
+      // 行内公式 $...$（不跨行）
+      if (char === '$' && text[pos + 1] !== '$') {
+        let end = pos + 1;
+        while (end < text.length && text[end] !== '\n' && !(text[end] === '$' && text[end - 1] !== '\\')) end++;
+        if (text[end] === '$' && text.slice(pos + 1, end).trim()) {
+          result += `<span class="${this.prefix}-math-inline">${renderMath(text.slice(pos + 1, end), { displayMode: false }).html}</span>`;
+          pos = end + 1;
           continue;
         }
       }
 
-      // 检查 \tableofcontents
-      if (remaining.startsWith('\\tableofcontents')) {
-        // 使用外部 section 索引生成 TOC（如果可用）
-        if (this.externalSectionIndex && this.externalSectionIndex.length > 0) {
-          result += this.generateToc();
-        } else if (
-          this.tocPreCollected &&
-          this.preCollectedTocEntries &&
-          this.preCollectedTocEntries.length > 0
-        ) {
-          result += this.generateToc();
-        } else {
-          // 没有可用的 section 数据，显示占位符
-          result += `<div class="${this.prefix}-toc-placeholder"><em>[Table of Contents]</em></div>`;
-        }
-        pos += 16;
-        continue;
-      }
-
-      // 检查 \newpage
-      if (remaining.startsWith('\\newpage')) {
-        result += `<hr class="${this.prefix}-page-break" />`;
-        pos += 8;
-        continue;
-      }
-
-      // 检查 \clearpage
-      if (remaining.startsWith('\\clearpage')) {
-        result += `<hr class="${this.prefix}-page-break" />`;
-        pos += 10;
-        continue;
-      }
-
-      // 检查 \maketitle
-      if (remaining.startsWith('\\maketitle')) {
-        result += `<div class="${this.prefix}-maketitle-placeholder"></div>`;
-        pos += 10;
-        continue;
-      }
-
-      // 检查换行命令 \\
-      if (remaining.startsWith('\\\\')) {
-        result += '<br />';
-        pos += 2;
-        // 跳过可选的换行参数 [...]
-        if (pos < text.length && text[pos] === '[') {
-          const bracketEnd = text.indexOf(']', pos);
-          if (bracketEnd !== -1) {
-            pos = bracketEnd + 1;
+      if (char === '\\') {
+        // 行内公式 \(...\) 与块级公式 \[...\]
+        const delimiter = text[pos + 1];
+        if (delimiter === '(' || delimiter === '[') {
+          const end = text.indexOf(delimiter === '(' ? '\\)' : '\\]', pos + 2);
+          if (end !== -1) {
+            const display = delimiter === '[';
+            const html = renderMath(text.slice(pos + 2, end), { displayMode: display }).html;
+            result += display
+              ? `<div class="${this.prefix}-math-block">${html}</div>`
+              : `<span class="${this.prefix}-math-inline">${html}</span>`;
+            pos = end + 2;
+            continue;
           }
         }
+
+        // 换行 \\（跳过可选的间距参数 [..]）
+        if (delimiter === '\\') {
+          result += '<br />';
+          pos += 2;
+          if (text[pos] === '[') {
+            const bracketEnd = text.indexOf(']', pos);
+            if (bracketEnd !== -1) pos = bracketEnd + 1;
+          }
+          continue;
+        }
+
+        // 文本中直接出现的数学命令（\alpha、\frac{a}{b}、\sum_{i}^{n}）：连同上下标按行内公式渲染
+        const name = /^[a-zA-Z]+/.exec(text.slice(pos + 1))?.[0];
+        if (name && TEXT_MATH_COMMANDS.has(name) && !this.macros.has(name)) {
+          const end = scanTextMathExpression(text, pos + 1 + name.length);
+          result += `<span class="${this.prefix}-math-inline">${renderMath(text.slice(pos, end), { displayMode: false }).html}</span>`;
+          pos = end;
+          continue;
+        }
+
+        // 其余命令：解析为节点，与正文同一套渲染（符号、重音、格式、宏、未识别标记）
+        const { node, end } = LatexParser.parseCommandAt(text, pos);
+        result += node ? this.renderNodeInternal(node) : this.escapeHtml(text.slice(pos, end));
+        pos = end;
         continue;
       }
 
-      // 检查 \newline
-      if (remaining.startsWith('\\newline')) {
-        result += '<br />';
-        pos += 8;
-        continue;
-      }
-
-      // 检查 \linebreak
-      if (remaining.startsWith('\\linebreak')) {
-        result += '<br />';
-        pos += 10;
-        continue;
-      }
-
-      // 检查 \noindent
-      if (remaining.startsWith('\\noindent')) {
-        pos += 9;
-        continue;
-      }
-
-      // 检查 \par (段落分隔)
-      if (remaining.startsWith('\\par')) {
-        result += '</p><p class="' + this.prefix + '-paragraph">';
-        pos += 4;
-        continue;
-      }
-
-      // 检查文本格式命令 \textbf{...}
-      const textbfMatch = remaining.match(/^\\textbf\{([^}]*)\}/);
-      if (textbfMatch) {
-        result += `<strong>${this.processInlineContent(textbfMatch[1])}</strong>`;
-        pos += textbfMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \textit{...}
-      const textitMatch = remaining.match(/^\\textit\{([^}]*)\}/);
-      if (textitMatch) {
-        result += `<em>${this.processInlineContent(textitMatch[1])}</em>`;
-        pos += textitMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \emph{...}
-      const emphMatch = remaining.match(/^\\emph\{([^}]*)\}/);
-      if (emphMatch) {
-        result += `<em>${this.processInlineContent(emphMatch[1])}</em>`;
-        pos += emphMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \underline{...}
-      const underlineMatch = remaining.match(/^\\underline\{([^}]*)\}/);
-      if (underlineMatch) {
-        result += `<u>${this.processInlineContent(underlineMatch[1])}</u>`;
-        pos += underlineMatch[0].length;
-        continue;
-      }
-
-      // 检查文本格式命令 \texttt{...}
-      const textttMatch = remaining.match(/^\\texttt\{([^}]*)\}/);
-      if (textttMatch) {
-        result += `<code>${this.processInlineContent(textttMatch[1])}</code>`;
-        pos += textttMatch[0].length;
-        continue;
-      }
-
-      // 检查普通换行符
-      if (text[pos] === '\n') {
-        // 单个换行符转为空格（LaTeX 行为）
+      // 单个换行转为空格（LaTeX 行为）
+      if (char === '\n') {
         result += ' ';
         pos++;
         continue;
       }
 
-      // 检查反斜杠后跟命令
-      if (text[pos] === '\\') {
-        // 匹配命令名
-        const cmdMatch = remaining.match(/^\\([a-zA-Z]+)/);
-        if (cmdMatch) {
-          const cmdName = cmdMatch[1];
-
-          // 常见的数学命令列表 - 这些命令应该作为数学公式渲染
-          const mathCommands = new Set([
-            // 极限类运算符
-            'lim',
-            'limsup',
-            'liminf',
-            'sup',
-            'inf',
-            'max',
-            'min',
-            // 大型运算符
-            'sum',
-            'prod',
-            'coprod',
-            'int',
-            'iint',
-            'iiint',
-            'oint',
-            'bigcap',
-            'bigcup',
-            'bigvee',
-            'bigwedge',
-            'bigoplus',
-            'bigotimes',
-            // 分数和根号
-            'frac',
-            'dfrac',
-            'tfrac',
-            'sqrt',
-            'binom',
-            // 三角函数
-            'sin',
-            'cos',
-            'tan',
-            'cot',
-            'sec',
-            'csc',
-            'arcsin',
-            'arccos',
-            'arctan',
-            'sinh',
-            'cosh',
-            'tanh',
-            // 其他函数
-            'log',
-            'ln',
-            'lg',
-            'exp',
-            'det',
-            'dim',
-            'gcd',
-            'hom',
-            'ker',
-            'deg',
-            'Pr',
-            'arg',
-            // 希腊字母
-            'alpha',
-            'beta',
-            'gamma',
-            'delta',
-            'epsilon',
-            'varepsilon',
-            'zeta',
-            'eta',
-            'theta',
-            'vartheta',
-            'iota',
-            'kappa',
-            'lambda',
-            'mu',
-            'nu',
-            'xi',
-            'pi',
-            'varpi',
-            'rho',
-            'varrho',
-            'sigma',
-            'varsigma',
-            'tau',
-            'upsilon',
-            'phi',
-            'varphi',
-            'chi',
-            'psi',
-            'omega',
-            'Gamma',
-            'Delta',
-            'Theta',
-            'Lambda',
-            'Xi',
-            'Pi',
-            'Sigma',
-            'Upsilon',
-            'Phi',
-            'Psi',
-            'Omega',
-            // 数学符号
-            'infty',
-            'nabla',
-            'partial',
-            'forall',
-            'exists',
-            'nexists',
-            'emptyset',
-            'neg',
-            'lnot',
-            'angle',
-            'triangle',
-            'square',
-            'diamond',
-            'pm',
-            'mp',
-            'times',
-            'div',
-            'cdot',
-            'ast',
-            'star',
-            'circ',
-            'bullet',
-            'oplus',
-            'ominus',
-            'otimes',
-            'odot',
-            'cap',
-            'cup',
-            'vee',
-            'wedge',
-            'ne',
-            'neq',
-            'le',
-            'leq',
-            'ge',
-            'geq',
-            'lt',
-            'gt',
-            'approx',
-            'equiv',
-            'sim',
-            'simeq',
-            'cong',
-            'propto',
-            'll',
-            'gg',
-            'subset',
-            'supset',
-            'subseteq',
-            'supseteq',
-            'in',
-            'notin',
-            'ni',
-            'to',
-            'rightarrow',
-            'Rightarrow',
-            'leftarrow',
-            'Leftarrow',
-            'leftrightarrow',
-            'Leftrightarrow',
-            'uparrow',
-            'downarrow',
-            'mapsto',
-            'implies',
-            'iff',
-            'vdots',
-            'cdots',
-            'ddots',
-            'ldots',
-            'dots',
-            'prime',
-            'hbar',
-            'ell',
-            'Re',
-            'Im',
-            'aleph',
-            // 矩阵环境（这些需要特殊处理）
-            'left',
-            'right',
-            // 重音符号
-            'hat',
-            'check',
-            'tilde',
-            'acute',
-            'grave',
-            'dot',
-            'ddot',
-            'breve',
-            'bar',
-            'vec',
-            'overline',
-            'underline',
-            'widehat',
-            'widetilde',
-            // 字体命令
-            'mathbb',
-            'mathbf',
-            'mathrm',
-            'mathit',
-            'mathcal',
-            'mathfrak',
-          ]);
-
-          // 检查是否是数学命令
-          if (mathCommands.has(cmdName)) {
-            // 提取完整的数学表达式（包括下标、上标和参数）
-            let mathExpr = cmdMatch[0];
-            let scanPos = pos + mathExpr.length;
-
-            // 持续扫描以捕获完整的数学表达式
-            let depth = 0;
-            let inMathExpr = true;
-
-            while (scanPos < text.length && inMathExpr) {
-              const char = text[scanPos];
-
-              // 跟踪花括号深度
-              if (char === '{') {
-                depth++;
-                mathExpr += char;
-                scanPos++;
-              } else if (char === '}') {
-                if (depth > 0) {
-                  depth--;
-                  mathExpr += char;
-                  scanPos++;
-                } else {
-                  inMathExpr = false;
-                }
-              } else if (char === '_' || char === '^') {
-                // 下标或上标
-                mathExpr += char;
-                scanPos++;
-                // 检查是否有花括号组
-                if (scanPos < text.length && text[scanPos] === '{') {
-                  // 扫描到匹配的 }
-                  let braceDepth = 1;
-                  mathExpr += text[scanPos];
-                  scanPos++;
-                  while (scanPos < text.length && braceDepth > 0) {
-                    if (text[scanPos] === '{') braceDepth++;
-                    if (text[scanPos] === '}') braceDepth--;
-                    mathExpr += text[scanPos];
-                    scanPos++;
-                  }
-                } else if (scanPos < text.length && text[scanPos] === '\\') {
-                  // 下标/上标是另一个命令
-                  const subCmdMatch = text.slice(scanPos).match(/^\\[a-zA-Z]+/);
-                  if (subCmdMatch) {
-                    mathExpr += subCmdMatch[0];
-                    scanPos += subCmdMatch[0].length;
-                  }
-                } else if (scanPos < text.length && /[a-zA-Z0-9]/.test(text[scanPos])) {
-                  // 单个字符的下标/上标
-                  mathExpr += text[scanPos];
-                  scanPos++;
-                }
-              } else if (char === '\\') {
-                // 可能是另一个数学命令或空格
-                const nextCmdMatch = text.slice(scanPos).match(/^\\([a-zA-Z]+|[,;:!]|\s)/);
-                if (nextCmdMatch) {
-                  const nextCmd = nextCmdMatch[1];
-                  // 只有数学相关的命令才继续
-                  if (
-                    mathCommands.has(nextCmd) ||
-                    /^[,;:!]$/.test(nextCmd) ||
-                    nextCmd === ' ' ||
-                    nextCmd === 'to'
-                  ) {
-                    mathExpr += nextCmdMatch[0];
-                    scanPos += nextCmdMatch[0].length;
-                  } else {
-                    inMathExpr = false;
-                  }
-                } else {
-                  inMathExpr = false;
-                }
-              } else if (/[\s]/.test(char) && depth === 0) {
-                // 遇到空格且不在花括号内，结束数学表达式
-                inMathExpr = false;
-              } else if (/[a-zA-Z0-9+\-=<>()[\]|.,']/.test(char) && depth === 0) {
-                // 可能是数学表达式的一部分，但要小心
-                // 检查是否看起来像普通文本
-                const lookAhead = text.slice(scanPos, scanPos + 10);
-                if (
-                  /^[a-zA-Z]{3,}/.test(lookAhead) &&
-                  !/^(sin|cos|tan|log|lim|max|min|sup|inf|exp|det|dim|gcd|arg|deg)/.test(lookAhead)
-                ) {
-                  // 看起来像普通单词，结束数学表达式
-                  inMathExpr = false;
-                } else {
-                  mathExpr += char;
-                  scanPos++;
-                }
-              } else if (depth > 0) {
-                // 在花括号内，继续添加
-                mathExpr += char;
-                scanPos++;
-              } else {
-                // 其他字符，结束
-                inMathExpr = false;
-              }
-            }
-
-            // 渲染数学表达式
-            if (mathExpr.trim()) {
-              const mathResult = renderMath(mathExpr, { displayMode: false });
-              result += `<span class="${this.prefix}-math-inline">${mathResult.html}</span>`;
-              pos = scanPos;
-              continue;
-            }
-          }
-
-          // 非数学命令，尝试跳过参数
-          let cmdEnd = cmdMatch[0].length;
-          // 跳过可选参数 [...]
-          if (pos + cmdEnd < text.length && text[pos + cmdEnd] === '[') {
-            const bracketEnd = text.indexOf(']', pos + cmdEnd);
-            if (bracketEnd !== -1) {
-              cmdEnd = bracketEnd - pos + 1;
-            }
-          }
-          // 跳过必选参数 {...}
-          if (pos + cmdEnd < text.length && text[pos + cmdEnd] === '{') {
-            const braceEnd = text.indexOf('}', pos + cmdEnd);
-            if (braceEnd !== -1) {
-              cmdEnd = braceEnd - pos + 1;
-            }
-          }
-          pos += cmdEnd;
-          continue;
-        }
-      }
-
-      // 普通字符
-      result += this.escapeHtml(text[pos]);
-      pos++;
+      // 纯文本：到下一个特殊字符为止；分组花括号不可见，连字与引号转换
+      let end = pos + 1;
+      while (end < text.length && !INLINE_SPECIAL.has(text[end])) end++;
+      result += this.renderPlainText(text.slice(pos, end).replace(/[{}]/g, ''));
+      pos = end;
     }
 
     return result;
+  }
+
+  /** 纯文本片段：TeX 连字、引号、~ 转为对应字符后转义 */
+  private renderPlainText(text: string): string {
+    return this.escapeHtml(applyTextLigatures(text));
   }
 
   /**
@@ -1490,99 +705,126 @@ export class LatexRenderer {
   }
 
   /**
-   * 渲染文本
+   * 渲染文本：含命令、公式或分组花括号时按原文片段处理，否则做连字与引号转换
    */
   private renderText(node: TextNode): string {
-    // 防护：确保 content 存在
     if (!node || node.content === undefined || node.content === null) {
       return '';
     }
     const content = String(node.content);
-    // 如果文本中包含公式标记、换行命令或反斜杠命令，使用行内内容处理
-    // 添加对 \lim, \sum, \int, \frac 等数学命令的检测
-    if (/\$[^$]+\$|\\\(|\\\)|\\\\|\\newline|\\linebreak|\\[a-zA-Z]+/.test(content)) {
-      return this.processInlineContent(content);
-    }
-    return this.escapeHtml(content);
+    return /[\\${}]/.test(content) ? this.processInlineContent(content) : this.renderPlainText(content);
   }
 
   /**
-   * 渲染命令
+   * 渲染命令。查找顺序：用户宏 → 文本中的数学命令 → 重音 → 转义字符 → 符号表 → 静默命令 → 格式/结构命令 → 未识别
    */
   private renderCommand(node: CommandNode): string {
     const name = node.name;
 
-    // 检查是否为自定义宏
     const macro = this.macros.get(name);
     if (macro) {
-      return this.expandMacro(macro, node.args);
+      return this.expandMacro(macro, node);
     }
 
-    // 处理常见命令
+    if (TEXT_MATH_COMMANDS.has(name)) {
+      const html = renderMath(node.raw.trim(), { displayMode: false }).html;
+      return `<span class="${this.prefix}-math-inline">${html}</span>`;
+    }
+
+    if (ACCENTS.has(name)) {
+      const accented = applyAccent(name, latexToPlainText(this.argSource(node.args[0])));
+      return accented === null ? this.renderUnknownCommand(node) : this.escapeHtml(accented);
+    }
+
+    const control = CONTROL_SYMBOLS.get(name);
+    if (control !== undefined) {
+      return this.escapeHtml(control);
+    }
+
+    // 符号命令之后的 {}（\LaTeX{}）或分组照常渲染
+    const symbol = TEXT_SYMBOLS.get(name);
+    if (symbol !== undefined) {
+      return this.escapeHtml(symbol) + this.renderArgs(node.args);
+    }
+
+    if (SILENT_COMMANDS.has(name)) {
+      return '';
+    }
+
+    if (PASSTHROUGH_COMMANDS.has(name)) {
+      return this.renderArgs(node.args);
+    }
+
     switch (name) {
       case 'textbf':
         return `<strong>${this.renderArgs(node.args)}</strong>`;
       case 'textit':
+      case 'textsl':
       case 'emph':
         return `<em>${this.renderArgs(node.args)}</em>`;
       case 'underline':
         return `<u>${this.renderArgs(node.args)}</u>`;
       case 'texttt':
         return `<code>${this.renderArgs(node.args)}</code>`;
+      case 'textsc':
+        return `<span class="${this.prefix}-smallcaps">${this.renderArgs(node.args)}</span>`;
+      case 'textsf':
+        return `<span class="${this.prefix}-sans">${this.renderArgs(node.args)}</span>`;
+      case 'fbox':
+      case 'framebox':
+        return `<span class="${this.prefix}-fbox">${this.renderArgs(node.args)}</span>`;
       case 'textsuperscript':
         return `<sup>${this.renderArgs(node.args)}</sup>`;
       case 'textsubscript':
         return `<sub>${this.renderArgs(node.args)}</sub>`;
+      case 'today':
+        return this.escapeHtml(todayText());
       case 'href':
         if (node.args.length >= 2) {
           const url = this.getTextContent(node.args[0]);
           const text = this.renderNodes(node.args[1]);
           return `<a href="${this.escapeHtml(url)}" target="_blank" rel="noopener">${text}</a>`;
         }
-        return '';
+        return this.renderUnknownCommand(node);
       case 'url':
         if (node.args.length >= 1) {
           const url = this.getTextContent(node.args[0]);
           return `<a href="${this.escapeHtml(url)}" target="_blank" rel="noopener">${this.escapeHtml(url)}</a>`;
         }
-        return '';
+        return this.renderUnknownCommand(node);
       case 'footnote':
         return `<span class="${this.prefix}-footnote">${this.renderArgs(node.args)}</span>`;
+      case 'caption':
+        return `<div class="${this.prefix}-caption">${this.renderArgs(node.args)}</div>`;
+      case 'includegraphics': {
+        // 预览不读取图片文件：显示文件名占位
+        const file = this.getTextContent(node.args[0] ?? []);
+        return `<span class="${this.prefix}-graphics" title="${this.escapeHtml(file)}">[图片：${this.escapeHtml(file)}]</span>`;
+      }
       case 'cite':
         if (node.args.length >= 1) {
           const key = this.getTextContent(node.args[0]);
           return `<cite class="${this.prefix}-cite">[${this.escapeHtml(key)}]</cite>`;
         }
-        return '';
+        return this.renderUnknownCommand(node);
       case 'ref':
       case 'eqref':
         if (node.args.length >= 1) {
           const label = this.getTextContent(node.args[0]);
           return `<a href="#${this.escapeHtml(label)}" class="${this.prefix}-ref">${this.escapeHtml(label)}</a>`;
         }
-        return '';
-      case 'label':
-        return ''; // 标签不可见
+        return this.renderUnknownCommand(node);
       case 'par':
         return '</p><p class="' + this.prefix + '-paragraph">';
       case 'hspace':
-      case 'hspace*':
         return '<span style="display: inline-block; width: 1em;"></span>';
       case 'vspace':
-      case 'vspace*':
         return '<div style="height: 1em;"></div>';
-      case 'noindent':
-        return ''; // 忽略
-      case 'centering':
-        return ''; // 通过环境处理
       case 'maketitle':
-        // maketitle 通常由 preamble 中的 title/author/date 信息渲染
-        // 如果标题块已经渲染，这里返回空；否则返回占位提示
+        // 标题块由前言中的 \title / \author / \date 渲染，这里只留占位
         return `<div class="${this.prefix}-maketitle-placeholder"></div>`;
       case 'tableofcontents':
-        // 目录命令，返回占位符（将在 render() 方法中被实际 TOC 替换）
-        this.hasToc = true;
-        return `<div class="${this.prefix}-toc-placeholder"><em>[Table of Contents]</em></div>`;
+        return this.generateToc();
       case 'listoffigures':
         return `<div class="${this.prefix}-lof-placeholder"><em>[List of Figures]</em></div>`;
       case 'listoftables':
@@ -1590,8 +832,6 @@ export class LatexRenderer {
       case 'newpage':
       case 'clearpage':
       case 'cleardoublepage':
-        // 分页命令，返回分隔线
-        return `<hr class="${this.prefix}-page-break" />`;
       case 'pagebreak':
         return `<hr class="${this.prefix}-page-break" />`;
       case 'linebreak':
@@ -1604,10 +844,6 @@ export class LatexRenderer {
         return `<div class="${this.prefix}-vspace" style="height: 1em;"></div>`;
       case 'smallskip':
         return `<div class="${this.prefix}-vspace" style="height: 0.5em;"></div>`;
-      case 'quad':
-        return '<span style="display: inline-block; width: 1em;"></span>';
-      case 'qquad':
-        return '<span style="display: inline-block; width: 2em;"></span>';
       case 'hfill':
         return '<span style="flex: 1;"></span>';
       case 'vfill':
@@ -1615,16 +851,33 @@ export class LatexRenderer {
       case 'appendix':
         return `<div class="${this.prefix}-appendix-marker"><strong>Appendix</strong></div>`;
       case 'bibliography':
-        return `<div class="${this.prefix}-bibliography-placeholder"><em>[Bibliography]</em></div>`;
       case 'printbibliography':
         return `<div class="${this.prefix}-bibliography-placeholder"><em>[Bibliography]</em></div>`;
       default:
-        // 未知命令，显示原始内容
-        if (this.options.showErrors) {
-          return `<span class="${this.prefix}-unknown-cmd">\\${this.escapeHtml(name)}</span>`;
-        }
-        return '';
+        return this.renderUnknownCommand(node);
     }
+  }
+
+  /**
+   * 未识别的命令：原样保留（含参数），以特殊样式标出，不吞掉内容。
+   * 控制词之后被吞掉的空白补回一个空格，让原文与后续文字不粘连
+   */
+  private renderUnknownCommand(node: CommandNode): string {
+    const raw = node.raw.trimEnd();
+    const trailing = raw.length < node.raw.length ? ' ' : '';
+    if (!this.options.showErrors) {
+      return this.escapeHtml(raw) + trailing;
+    }
+    const command = node.name.length === 1 && !/[a-zA-Z]/.test(node.name) ? `\\${node.name}` : `\\${node.name}${node.star ? '*' : ''}`;
+    return (
+      `<span class="${this.prefix}-unknown-command" title="未识别的命令 ${this.escapeHtml(command)}">${this.escapeHtml(raw)}</span>` +
+      trailing
+    );
+  }
+
+  /** 参数的原始 LaTeX 源码 */
+  private argSource(arg: readonly LatexNode[] | undefined): string {
+    return (arg ?? []).map((node) => node.raw).join('');
   }
 
   /**
@@ -1636,86 +889,46 @@ export class LatexRenderer {
 
     const name = node.name;
 
-    // 检查是否为数学环境 - 与 types.ts 中的 MATH_ENVIRONMENTS 保持一致
-    const mathEnvironments = [
-      // 基本公式环境
-      'equation',
-      'equation*',
-      // 对齐公式环境
-      'align',
-      'align*',
-      'alignat',
-      'alignat*',
-      'flalign',
-      'flalign*',
-      'eqnarray',
-      'eqnarray*',
-      // 居中多行公式环境
-      'gather',
-      'gather*',
-      'multline',
-      'multline*',
-      // 嵌套/子环境
-      'split',
-      'aligned',
-      'gathered',
-      'alignedat',
-      // 矩阵环境
-      'array',
-      'matrix',
-      'pmatrix',
-      'bmatrix',
-      'vmatrix',
-      'Vmatrix',
-      'Bmatrix',
-      'smallmatrix',
-      // 分段函数环境
-      'cases',
-      'dcases',
-      'rcases',
-      // 子公式环境
-      'subequations',
-    ];
-
-    if (mathEnvironments.includes(name)) {
+    // 检查是否为数学环境（统一使用 math-env-handler 的环境集合；subequations 作为公式组同样按数学环境渲染）
+    if (isMathEnv(name) || name === 'subequations') {
       return this.renderMathEnvironment(node);
     }
 
     switch (name) {
       case 'center':
-        return `<div class="${this.prefix}-center">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-center" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'flushleft':
-        return `<div class="${this.prefix}-left">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-left" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'flushright':
-        return `<div class="${this.prefix}-right">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-right" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'quote':
       case 'quotation':
-        return `<blockquote class="${this.prefix}-quote">${this.renderChildren(node.children)}</blockquote>`;
+        return `<blockquote class="${this.prefix}-quote" ${blockAttrs}>${this.renderChildren(node.children)}</blockquote>`;
       case 'verbatim':
-        return `<pre class="${this.prefix}-verbatim"><code>${this.escapeHtml(this.getChildrenText(node.children))}</code></pre>`;
+        return `<pre class="${this.prefix}-verbatim" ${blockAttrs}><code>${this.escapeHtml(this.getChildrenText(node.children))}</code></pre>`;
       case 'figure':
-        return `<figure class="${this.prefix}-figure">${this.renderChildren(node.children)}</figure>`;
+        return `<figure class="${this.prefix}-figure" ${blockAttrs}>${this.renderChildren(node.children)}</figure>`;
       case 'table':
-        return `<div class="${this.prefix}-table-container">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-table-container" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
       case 'tabular':
-        return this.renderTabular(node);
+        return this.renderTabular(node, blockAttrs);
       case 'abstract':
-        return `<div class="${this.prefix}-abstract"><h3>摘要</h3>${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-abstract" ${blockAttrs}><h3>摘要</h3>${this.renderChildren(node.children)}</div>`;
       case 'theorem':
-        return `<div class="${this.prefix}-theorem"><strong>定理</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-theorem" ${blockAttrs}><strong>定理</strong> ${this.renderChildren(node.children)}</div>`;
       case 'lemma':
-        return `<div class="${this.prefix}-lemma"><strong>引理</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-lemma" ${blockAttrs}><strong>引理</strong> ${this.renderChildren(node.children)}</div>`;
       case 'proof':
-        return `<div class="${this.prefix}-proof"><em>证明：</em>${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-proof" ${blockAttrs}><em>证明：</em>${this.renderChildren(node.children)}</div>`;
       case 'definition':
-        return `<div class="${this.prefix}-definition"><strong>定义</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-definition" ${blockAttrs}><strong>定义</strong> ${this.renderChildren(node.children)}</div>`;
       case 'example':
-        return `<div class="${this.prefix}-example"><strong>例</strong> ${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-example" ${blockAttrs}><strong>例</strong> ${this.renderChildren(node.children)}</div>`;
       case 'remark':
-        return `<div class="${this.prefix}-remark"><em>注：</em>${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-remark" ${blockAttrs}><em>注：</em>${this.renderChildren(node.children)}</div>`;
       default:
         // 通用环境
-        return `<div class="${this.prefix}-env-${this.escapeHtml(name)}">${this.renderChildren(node.children)}</div>`;
+        return `<div class="${this.prefix}-env-${this.escapeHtml(name)}" ${blockAttrs}>${this.renderChildren(node.children)}</div>`;
     }
   }
 
@@ -1790,11 +1003,11 @@ export class LatexRenderer {
   /**
    * 渲染表格环境
    */
-  private renderTabular(node: EnvironmentNode): string {
+  private renderTabular(node: EnvironmentNode, blockAttrs: string): string {
     const content = this.getChildrenText(node.children);
     const rows = content.split('\\\\').filter((r) => r.trim());
 
-    let html = `<table class="${this.prefix}-tabular"><tbody>`;
+    let html = `<table class="${this.prefix}-tabular" ${blockAttrs}><tbody>`;
 
     for (const row of rows) {
       if (row.includes('\\hline')) continue;
@@ -2050,32 +1263,36 @@ export class LatexRenderer {
   }
 
   /**
-   * 展开宏
+   * 展开 \newcommand 宏：#n 替换为参数的 LaTeX 源码（带可选参数的宏，#1 取 [..] 或默认值），
+   * 展开结果再按 LaTeX 渲染；多余的花括号参数按分组接在后面（与 TeX 一致）。
+   * 自引用导致嵌套过深时停止展开，按未识别命令标出
    */
-  private expandMacro(macro: MacroDefinition, args: LatexNode[][]): string {
-    let expansion = macro.expansion;
-
-    // 替换参数
-    for (let i = 0; i < args.length && i < macro.numArgs; i++) {
-      const argContent = this.renderNodes(args[i]);
-      expansion = expansion.replace(new RegExp(`#${i + 1}`, 'g'), argContent);
+  private expandMacro(macro: MacroDefinition, node: CommandNode): string {
+    if (this.macroDepth >= MAX_MACRO_DEPTH) {
+      return this.renderUnknownCommand(node);
     }
+    const optional = macro.defaultArgs.length > 0;
+    const required = optional ? macro.numArgs - 1 : macro.numArgs;
+    const params = [
+      ...(optional ? [node.options[0] ?? macro.defaultArgs[0]] : []),
+      ...node.args.slice(0, required).map((arg) => this.argSource(arg)),
+    ];
+    const expansion = macro.expansion.replace(/#([1-9])/g, (match, digit: string) => {
+      const index = Number(digit) - 1;
+      return index < macro.numArgs ? (params[index] ?? '') : match;
+    });
 
-    // 处理默认参数
-    for (let i = args.length; i < macro.numArgs; i++) {
-      const defaultArg = macro.defaultArgs[i - args.length] || '';
-      expansion = expansion.replace(new RegExp(`#${i + 1}`, 'g'), defaultArg);
+    this.macroDepth++;
+    try {
+      const rest = node.args.slice(required).map((arg) => this.renderNodes(arg)).join('');
+      return this.processInlineContent(expansion) + rest;
+    } finally {
+      this.macroDepth--;
     }
-
-    return expansion;
   }
 
   /**
-   * HTML 转义
-   */
-  /**
-   * 生成块级元素的 data-block-id 和位置属性
-   * 用于 DOM 测量和滚动同步
+   * 生成块级元素的 data-block-id 和位置属性（位置为所属渲染块内的相对偏移）
    */
   private getBlockAttributes(node: LatexNode): string {
     const attrs: string[] = [];
@@ -2115,48 +1332,4 @@ export class LatexRenderer {
       .replace(/'/g, '&#039;');
   }
 
-  /**
-   * 清除缓存
-   */
-  clearCache(): void {
-    this.cache.clear();
-  }
-
-  /**
-   * 获取缓存大小
-   */
-  getCacheSize(): number {
-    return this.cache.size;
-  }
 }
-
-// ================================
-// 导出
-// ================================
-
-/**
- * 渲染 LaTeX AST 为 HTML
- * @param ast 解析后的 AST
- * @param options 渲染选项
- */
-export function renderLatexAST(ast: RootNode, options?: LatexRenderOptions): LatexRenderResult {
-  const renderer = new LatexRenderer(options);
-  return renderer.render(ast);
-}
-
-/**
- * 创建可视区域优先渲染器
- * @param options 渲染选项
- */
-export function createVisibilityRenderer(options?: LatexRenderOptions): VisibilityPriorityRenderer {
-  const renderer = new LatexRenderer(options);
-  return new VisibilityPriorityRenderer(renderer);
-}
-
-export default {
-  LatexRenderer,
-  VisibilityPriorityRenderer,
-  RenderCache,
-  renderLatexAST,
-  createVisibilityRenderer,
-};

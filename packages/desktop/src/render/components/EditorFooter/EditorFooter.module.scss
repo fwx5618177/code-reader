@@ -7,6 +7,16 @@
 
 .editorFooter {
   @include editor-footer;
+
+  // 并入应用底部状态栏：随状态栏的高度与配色，不再淡化
+  &.inStatusBar {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    opacity: 1;
+  }
 }
 
 .stats {

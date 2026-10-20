@@ -1,0 +1,48 @@
+{
+  "name": "@code-reader/plugin-system-extras",
+  "version": "0.1.0",
+  "description": "插件系统扩展：同进程插件管理器（加载、激活、停用、卸载、依赖排序、事件）与插件沙箱（权限代理、超时执行）。桌面端用的是基于 Worker 的插件服务，这两部分与 @code-reader/plugin-system 分开，按需引入",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./manager": {
+      "import": "./dist/manager/index.js",
+      "types": "./dist/manager/index.d.ts"
+    },
+    "./sandbox": {
+      "import": "./dist/sandbox/index.js",
+      "types": "./dist/sandbox/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "plugin",
+    "plugin-manager",
+    "sandbox"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@code-reader/plugin-system": "workspace:*"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.3",
+    "vitest": "^1.3.0"
+  }
+}

@@ -4,16 +4,14 @@
 // Mode switching is handled by TitleBar
 // ================================
 
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import {
   Files,
-  GitBranch,
   Tag,
   Settings,
   PlusCircle,
   Mic,
   Calendar,
-  FolderOpen,
   Network,
   Search,
   Clock,
@@ -21,8 +19,11 @@ import {
   Bookmark,
   BookMarked,
   Link2,
+  Puzzle,
+  BookOpen,
 } from 'lucide-react';
-import { AppMode } from '../../types/app-modes';
+import { AppMode, MODE_SIDEBAR_PANELS, SidebarPanel } from '../../types/app-modes';
+import { pluginService } from '../../services/pluginService';
 import Tooltip from '../Tooltip';
 import styles from './Ribbon.module.scss';
 
@@ -31,13 +32,13 @@ import styles from './Ribbon.module.scss';
 // ================================
 
 interface RibbonProps {
-  activePanel: string;
-  onPanelChange: (panel: string) => void;
+  activePanel: SidebarPanel | null;
+  onPanelChange: (panel: SidebarPanel) => void;
   onQuickNote?: () => void;
   onStartRecording?: () => void;
-  onOpenFolder?: () => void;
   currentMode?: AppMode;
   onOpenSettings?: () => void;
+  onOpenGuide?: () => void;
   onOpenSearch?: () => void;
 }
 
@@ -77,7 +78,7 @@ const RibbonButton: React.FC<RibbonButtonProps> = ({
 
   return (
     <Tooltip content={label} shortcut={shortcut} position="right" delay={300}>
-      <button className={buttonClasses} onClick={onClick} disabled={disabled}>
+      <button className={buttonClasses} onClick={onClick} disabled={disabled} aria-label={label}>
         {icon}
         {badge !== undefined && <span className={styles.badge}>{badge}</span>}
       </button>
@@ -86,56 +87,25 @@ const RibbonButton: React.FC<RibbonButtonProps> = ({
 };
 
 // ================================
-// 导航按钮定义
+// 导航按钮图标（面板列表与文案见 MODE_SIDEBAR_PANELS）
 // ================================
 
-interface NavButton {
-  id: string;
-  icon: React.ReactNode;
-  label: string;
-  shortcut?: string;
-}
-
-const getNavigationButtons = (mode: AppMode): NavButton[] => {
-  switch (mode) {
-    case 'code-reader':
-      return [
-        { id: 'files', icon: <Files size={20} />, label: '文件' },
-        { id: 'search', icon: <Search size={20} />, label: '搜索', shortcut: '⌘⇧F' },
-        { id: 'git', icon: <GitBranch size={20} />, label: 'Git' },
-        { id: 'outline', icon: <List size={20} />, label: '大纲' },
-        { id: 'bookmarks', icon: <Bookmark size={20} />, label: '书签' },
-      ];
-    case 'reading':
-      return [
-        { id: 'chapters', icon: <BookMarked size={20} />, label: '章节' },
-        { id: 'bookmarks', icon: <Bookmark size={20} />, label: '书签' },
-        { id: 'files', icon: <Files size={20} />, label: '书库' },
-        { id: 'search', icon: <Search size={20} />, label: '搜索' },
-        { id: 'recent', icon: <Clock size={20} />, label: '最近阅读' },
-      ];
-    case 'knowledge':
-      return [
-        { id: 'files', icon: <Files size={20} />, label: '文件夹' },
-        { id: 'search', icon: <Search size={20} />, label: '搜索', shortcut: '⌘⇧F' },
-        { id: 'tags', icon: <Tag size={20} />, label: '标签' },
-        { id: 'recordings', icon: <Mic size={20} />, label: '录音' },
-        { id: 'graph', icon: <Network size={20} />, label: '知识图谱' },
-        { id: 'calendar', icon: <Calendar size={20} />, label: '日历' },
-        { id: 'recent', icon: <Clock size={20} />, label: '最近' },
-      ];
-    case 'writing':
-      return [
-        { id: 'outline', icon: <List size={20} />, label: '大纲' },
-        { id: 'files', icon: <Files size={20} />, label: '文件' },
-        { id: 'references', icon: <Link2 size={20} />, label: '参考' },
-        { id: 'tags', icon: <Tag size={20} />, label: '标签' },
-        { id: 'recent', icon: <Clock size={20} />, label: '最近' },
-      ];
-    default:
-      return [{ id: 'files', icon: <Files size={20} />, label: '文件' }];
-  }
+const PANEL_ICONS: Record<SidebarPanel, React.ReactNode> = {
+  chapters: <BookMarked size={20} />,
+  bookmarks: <Bookmark size={20} />,
+  files: <Files size={20} />,
+  search: <Search size={20} />,
+  recent: <Clock size={20} />,
+  tags: <Tag size={20} />,
+  recordings: <Mic size={20} />,
+  graph: <Network size={20} />,
+  calendar: <Calendar size={20} />,
+  outline: <List size={20} />,
+  references: <Link2 size={20} />,
+  plugins: <Puzzle size={20} />,
 };
+
+const hasPluginViews = () => pluginService.getSnapshot().contributions.views.length > 0;
 
 // ================================
 // Ribbon 组件
@@ -146,11 +116,15 @@ const Ribbon: React.FC<RibbonProps> = ({
   onPanelChange,
   onQuickNote,
   onStartRecording,
-  onOpenFolder,
-  currentMode = 'code-reader',
+  currentMode = 'knowledge',
   onOpenSettings,
+  onOpenGuide,
 }) => {
-  const navigationButtons = getNavigationButtons(currentMode);
+  const showPluginViews = useSyncExternalStore(pluginService.subscribe, hasPluginViews);
+  // 「插件视图」只在有插件贡献视图时显示
+  const navigationButtons = MODE_SIDEBAR_PANELS[currentMode].filter(
+    (button) => button.id !== 'plugins' || showPluginViews
+  );
 
   return (
     <div className={styles.ribbon}>
@@ -172,14 +146,6 @@ const Ribbon: React.FC<RibbonProps> = ({
               onClick={onStartRecording || (() => {})}
             />
           )}
-          {currentMode === 'code-reader' && onOpenFolder && (
-            <RibbonButton
-              icon={<FolderOpen size={20} />}
-              label="打开文件夹"
-              shortcut="⌘O"
-              onClick={onOpenFolder}
-            />
-          )}
         </div>
 
         <div className={styles.divider} />
@@ -189,9 +155,8 @@ const Ribbon: React.FC<RibbonProps> = ({
           {navigationButtons.map((button) => (
             <RibbonButton
               key={button.id}
-              icon={button.icon}
+              icon={PANEL_ICONS[button.id]}
               label={button.label}
-              shortcut={button.shortcut}
               isActive={activePanel === button.id}
               onClick={() => onPanelChange(button.id)}
             />
@@ -199,8 +164,14 @@ const Ribbon: React.FC<RibbonProps> = ({
         </div>
       </div>
 
-      {/* 底部区域 - 设置 */}
+      {/* 底部区域 - 使用指南与设置 */}
       <div className={styles.bottom}>
+        <RibbonButton
+          icon={<BookOpen size={20} />}
+          label="使用指南"
+          shortcut="F1"
+          onClick={() => onOpenGuide?.()}
+        />
         <RibbonButton
           icon={<Settings size={20} />}
           label="设置"

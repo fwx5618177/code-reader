@@ -1,7 +1,24 @@
 import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { rm } from 'fs/promises';
 import { build } from 'esbuild';
+import { ocrAssetsPlugin } from './scripts/ocr-assets';
+
+/**
+ * 构建前清空渲染进程的输出目录。
+ * 主进程与预加载脚本也写在 dist 下，整体的 emptyOutDir 只能关闭；否则每次构建的带哈希 chunk 都会留在 dist/render/chunks，
+ * 越积越多，并被 electron-builder（files: dist/**）一并打进安装包
+ */
+function cleanRenderOutputPlugin(): Plugin {
+  return {
+    name: 'clean-render-output',
+    apply: 'build',
+    async buildStart() {
+      await rm(resolve(__dirname, 'dist/render'), { recursive: true, force: true });
+    },
+  };
+}
 
 /**
  * Vite plugin to build Electron main process and preload script using esbuild
@@ -51,7 +68,7 @@ function electronMainPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [electronMainPlugin(), react()],
+  plugins: [cleanRenderOutputPlugin(), electronMainPlugin(), ocrAssetsPlugin(__dirname), react()],
   server: {
     port: 5173,
     strictPort: true,
@@ -112,6 +129,11 @@ export default defineConfig({
           // React Window - virtualization
           if (id.includes('node_modules/react-window/')) {
             return 'virtualization-vendor';
+          }
+
+          // pdf.js 仅在打开 PDF 时动态加载，不并入启动即加载的 vendor（含 Worker 与按需加载的 CMap/字体）
+          if (id.includes('node_modules/pdfjs-dist/')) {
+            return undefined;
           }
 
           // Other node_modules go to common vendor

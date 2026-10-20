@@ -6,13 +6,21 @@
 import { ipcMain } from 'electron';
 import {
   getAIService,
-  type AIProviderConfig,
   type ChatCompletionRequest,
   type EmbeddingRequest,
   type SummarizeRequest,
   type ExtractTagsRequest,
   type TranscribeRequest,
 } from './ai-service';
+import type { AIProviderInput, AIProviderUpdate } from './provider-config';
+
+/**
+ * 进行中的流式对话，用于停止生成
+ * streamId 只在发起窗口内唯一，因此以「窗口 id + streamId」作为键
+ */
+const activeStreams = new Map<string, AbortController>();
+
+const streamKey = (senderId: number, streamId: string) => `${senderId}:${streamId}`;
 
 /**
  * Register all AI-related IPC handlers
@@ -25,48 +33,23 @@ export function registerAIHandlers(): void {
   // ================================
 
   /**
-   * Get all configured providers
+   * 获取配置快照：服务商列表（不含密钥）与生效的默认服务商
    */
-  ipcMain.handle('ai:getProviders', async () => {
+  ipcMain.handle('ai:getConfig', async () => {
     try {
-      const providers = aiService.getProviders();
-      // Remove API keys from response for security
-      return providers.map((p) => ({
-        ...p,
-        apiKey: p.apiKey ? '••••••••' : undefined,
-      }));
+      return aiService.getConfigSnapshot();
     } catch (error) {
-      console.error('[AI:IPC] Get providers error:', error);
+      console.error('[AI:IPC] Get config error:', error);
       throw error;
     }
   });
 
   /**
-   * Get a specific provider
+   * 新增服务商，返回不含密钥的视图
    */
-  ipcMain.handle('ai:getProvider', async (_event, id: string) => {
+  ipcMain.handle('ai:addProvider', async (_event, input: AIProviderInput) => {
     try {
-      const provider = aiService.getProvider(id);
-      if (provider) {
-        return {
-          ...provider,
-          apiKey: provider.apiKey ? '••••••••' : undefined,
-        };
-      }
-      return undefined;
-    } catch (error) {
-      console.error('[AI:IPC] Get provider error:', error);
-      throw error;
-    }
-  });
-
-  /**
-   * Add or update a provider
-   */
-  ipcMain.handle('ai:addProvider', async (_event, provider: AIProviderConfig) => {
-    try {
-      aiService.addProvider(provider);
-      return { success: true };
+      return aiService.addProvider(input);
     } catch (error) {
       console.error('[AI:IPC] Add provider error:', error);
       throw error;
@@ -74,14 +57,13 @@ export function registerAIHandlers(): void {
   });
 
   /**
-   * Update a provider
+   * 更新服务商；apiKey 缺省或为空时保留已存储的密钥
    */
   ipcMain.handle(
     'ai:updateProvider',
-    async (_event, id: string, updates: Partial<AIProviderConfig>) => {
+    async (_event, id: string, updates: AIProviderUpdate) => {
       try {
-        aiService.updateProvider(id, updates);
-        return { success: true };
+        return aiService.updateProvider(id, updates);
       } catch (error) {
         console.error('[AI:IPC] Update provider error:', error);
         throw error;
@@ -129,6 +111,19 @@ export function registerAIHandlers(): void {
   });
 
   /**
+   * 设置默认转写服务商（须已配置转写模型）
+   */
+  ipcMain.handle('ai:setDefaultTranscriptionProvider', async (_event, id: string) => {
+    try {
+      aiService.setDefaultTranscriptionProvider(id);
+      return { success: true };
+    } catch (error) {
+      console.error('[AI:IPC] Set default transcription provider error:', error);
+      throw error;
+    }
+  });
+
+  /**
    * Test provider connection
    */
   ipcMain.handle('ai:testConnection', async (_event, providerId: string) => {
@@ -157,6 +152,44 @@ export function registerAIHandlers(): void {
       console.error('[AI:IPC] Chat completion error:', error);
       throw error;
     }
+  });
+
+  /**
+   * 流式对话：增量文本通过 ai:chatChunk 事件（带 streamId）推送给发起请求的窗口，
+   * invoke 本身在生成结束后返回完整结果，失败时以 invoke 拒绝的形式传回错误；
+   * 被 ai:chatStreamCancel 停止时正常返回已生成的部分（aborted 为 true）
+   */
+  ipcMain.handle(
+    'ai:chatStream',
+    async (event, streamId: string, request: ChatCompletionRequest) => {
+      const key = streamKey(event.sender.id, streamId);
+      const controller = new AbortController();
+      activeStreams.set(key, controller);
+      try {
+        return await aiService.chatCompletionStream(
+          request,
+          (delta) => {
+            // 窗口在生成中途关闭时不再推送
+            if (!event.sender.isDestroyed()) {
+              event.sender.send('ai:chatChunk', { streamId, delta });
+            }
+          },
+          controller.signal
+        );
+      } catch (error) {
+        console.error('[AI:IPC] Chat stream error:', error);
+        throw error;
+      } finally {
+        activeStreams.delete(key);
+      }
+    }
+  );
+
+  /**
+   * 停止流式对话；对话已结束时无作用
+   */
+  ipcMain.handle('ai:chatStreamCancel', (event, streamId: string) => {
+    activeStreams.get(streamKey(event.sender.id, streamId))?.abort();
   });
 
   /**
@@ -215,15 +248,17 @@ export function registerAIHandlers(): void {
  */
 export function cleanupAIHandlers(): void {
   const handlers = [
-    'ai:getProviders',
-    'ai:getProvider',
+    'ai:getConfig',
     'ai:addProvider',
     'ai:updateProvider',
     'ai:removeProvider',
     'ai:setDefaultProvider',
     'ai:setDefaultEmbeddingProvider',
+    'ai:setDefaultTranscriptionProvider',
     'ai:testConnection',
     'ai:chatCompletion',
+    'ai:chatStream',
+    'ai:chatStreamCancel',
     'ai:createEmbeddings',
     'ai:summarize',
     'ai:extractTags',

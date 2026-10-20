@@ -111,20 +111,10 @@ export {
 
 // ================================
 // Delta
-// 生产级增量差分、内容哈希、版本化快照和撤销/重做
+// 内容哈希、版本化快照和撤销/重做（差分算法直接使用 @code-reader/diff-algorithm）
 // ================================
 
 export type {
-  // 统一差分引擎
-  DiffAlgorithm,
-  DiffOpType,
-  TextDiff,
-  TextDiffResult,
-  BinaryDelta,
-  Patch,
-  PatchResult,
-  DiffStats,
-  DiffEngineConfig,
   // 历史管理器（生产级撤销/重做）
   SelectionState,
   EditorState,
@@ -150,21 +140,6 @@ export type {
 } from './delta';
 
 export {
-  // 统一差分引擎
-  DIFF_DELETE,
-  DIFF_EQUAL,
-  DIFF_INSERT,
-  DiffEngine,
-  createDiffEngine,
-  createCodeDiffEngine,
-  createFastDiffEngine,
-  quickDiff,
-  quickApplyDiff,
-  quickCreatePatch,
-  quickApplyPatch,
-  quickBinaryDiff,
-  quickApplyBinaryDiff,
-  resetDefaultDiffEngine,
   // 历史管理器（生产级撤销/重做）
   createSelection,
   createEditorState,

@@ -169,6 +169,40 @@
   animation: fadeIn 0.15s ease-out;
 }
 
+.settingsLoading {
+  @include flex-center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-8);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.loadingSpinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-secondary);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-3);
+  margin-bottom: var(--spacing-4);
+  background: var(--color-error-bg);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-error);
+  word-break: break-word;
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
 // ================================
 // 区块
 // ================================
@@ -324,6 +358,13 @@
   gap: var(--spacing-1);
 }
 
+.defaultBadge {
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+  color: var(--accent-primary);
+}
+
 // ================================
 // 提供者状态
 // ================================
@@ -453,6 +494,7 @@
 
 .detailActions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--spacing-2);
   margin-top: var(--spacing-4);
   padding-top: var(--spacing-3);
@@ -469,6 +511,20 @@
   font-size: var(--font-size-sm);
   font-weight: $font-weight-medium;
   transition: all $transition-fast;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.saveBtn {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+
+  &:hover:not(:disabled) {
+    background: var(--accent-primary-hover);
+  }
 }
 
 .testBtn {
@@ -542,6 +598,32 @@
 .settingDescription {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
+}
+
+// ================================
+// 知识库
+// ================================
+
+.workspaceName {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-sm);
+}
+
+.workspacePath {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  word-break: break-all;
+  user-select: text;
+}
+
+.workspaceActions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  flex-shrink: 0;
 }
 
 // ================================
@@ -650,22 +732,26 @@
   }
 }
 
-.inputAction {
-  @include button-reset;
-  @include flex-center;
-  width: 32px;
-  height: 32px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  color: var(--text-secondary);
-  transition: all $transition-fast;
-
-  &:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
+// 版本保留：数字输入、单位与操作行
+.settingNumberInput {
+  width: 88px;
+  text-align: right;
 }
+
+.settingUnit {
+  min-width: 2.5em;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.retentionActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-3);
+}
+
 
 // ================================
 // 滑块
@@ -862,7 +948,7 @@
 }
 
 .themeIcon {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .themeName {
@@ -943,8 +1029,15 @@
 }
 
 .shortcutAction {
+  display: flex;
+  flex-direction: column;
   font-size: var(--font-size-sm);
   color: var(--text-primary);
+}
+
+.shortcutConflict {
+  font-size: var(--font-size-xs);
+  color: var(--color-warning);
 }
 
 .shortcutKey {
@@ -1159,7 +1252,7 @@
   transition: all $transition-fast;
 
   svg {
-    color: var(--text-tertiary);
+    color: var(--text-muted);
   }
 
   &:hover {
@@ -1191,6 +1284,25 @@
   font-size: var(--font-size-xs);
   color: var(--text-muted);
   text-align: center;
+}
+
+// ================================
+// 个人词典
+// ================================
+
+.userWordSearch {
+  margin-bottom: var(--spacing-3);
+}
+
+// 单词较多时列表内部滚动，不撑高设置页
+.userWordList {
+  max-height: 320px;
+  overflow-y: auto;
+  @include scrollbar;
+
+  .settingLabel {
+    word-break: break-all;
+  }
 }
 
 // ================================

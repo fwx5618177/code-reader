@@ -576,39 +576,7 @@ export class DiffEngine implements IDiffEngine {
    * @returns HTML 字符串
    */
   highlightMatch(pattern: string, text: string): string {
-    const result = this.fuzzyEngine.match(pattern, text, { includeMatches: true });
-    if (!result.matched) return text;
-
-    // 获取匹配位置
-    let p = pattern.toLowerCase();
-    let t = text.toLowerCase();
-
-    const highlights: { start: number; end: number }[] = [];
-    let patternIdx = 0;
-    let currentStart = -1;
-    let currentEnd = -1;
-
-    for (let i = 0; i < t.length && patternIdx < p.length; i++) {
-      if (t[i] === p[patternIdx]) {
-        if (currentStart === -1) {
-          currentStart = i;
-          currentEnd = i + 1;
-        } else if (i === currentEnd) {
-          currentEnd = i + 1;
-        } else {
-          highlights.push({ start: currentStart, end: currentEnd });
-          currentStart = i;
-          currentEnd = i + 1;
-        }
-        patternIdx++;
-      }
-    }
-
-    if (currentStart !== -1) {
-      highlights.push({ start: currentStart, end: currentEnd });
-    }
-
-    return this.fuzzyEngine.highlightHtml(text, highlights);
+    return this.fuzzyEngine.highlight(pattern, text).html;
   }
 
   // ================================

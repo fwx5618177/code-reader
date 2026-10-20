@@ -99,6 +99,12 @@ export class LevenshteinEngine implements ILevenshteinAlgorithm {
     const m = s.length;
     const n = t.length;
 
+    // 需要编辑步骤时必须走完整矩阵版本：
+    // 边界快速路径不产生 steps，若放在其后会导致相同串 / 空串时 steps 缺失
+    if (cfg.computeSteps) {
+      return this.distanceWithSteps(s, t, cfg, startTime);
+    }
+
     // 边界情况
     if (m === 0) {
       const endTime = performance.now();
@@ -111,11 +117,6 @@ export class LevenshteinEngine implements ILevenshteinAlgorithm {
     if (s === t) {
       const endTime = performance.now();
       return this.createResult(0, m, n, endTime - startTime);
-    }
-
-    // 如果需要计算编辑步骤，使用完整矩阵版本
-    if (cfg.computeSteps) {
-      return this.distanceWithSteps(s, t, cfg, startTime);
     }
 
     // 空间优化版本：只保留两行
@@ -601,18 +602,6 @@ export function createLevenshteinEngine(config?: LevenshteinConfig): Levenshtein
   return new LevenshteinEngine(config);
 }
 
-/**
- * 创建用于拼写检查的引擎
- *
- * @returns 拼写检查引擎
- */
-export function createSpellCheckEngine(): LevenshteinEngine {
-  return new LevenshteinEngine({
-    caseSensitive: false,
-    maxDistance: 2,
-  });
-}
-
 // ================================
 // 便捷函数
 // ================================
@@ -668,13 +657,15 @@ export function quickFindMostSimilar(query: string, items: readonly string[]): s
  *
  * @param word 拼写错误的单词
  * @param dictionary 词典
+ * @param maxSuggestions 最大建议数
  * @returns 拼写建议列表
  */
 export function quickSpellingSuggestions(
   word: string,
-  dictionary: readonly string[]
+  dictionary: readonly string[],
+  maxSuggestions?: number
 ): SpellingSuggestion[] {
-  return getDefaultEngine().suggestSpelling(word, dictionary);
+  return getDefaultEngine().suggestSpelling(word, dictionary, maxSuggestions);
 }
 
 /**

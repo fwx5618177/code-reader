@@ -1,123 +1,79 @@
-# 📚 Code Reader 文档中心
+# 文档中心
 
-> 从代码阅读器到智能知识库的演进之路
+## 文档索引
 
----
-
-## 📁 文档结构
-
-| 文档 | 描述 |
+| 文档 | 内容 |
 |------|------|
-| [01-project-analysis.md](./01-project-analysis.md) | 当前项目分析报告，包括技术栈、模块状态和现有问题 |
-| [02-requirements-todo.md](./02-requirements-todo.md) | 新需求分析与 TODO 清单，智能知识库的完整规划 |
-| [03-ui-refactor-plan.md](./03-ui-refactor-plan.md) | UI 重构计划，参考 Obsidian 的设计规范 |
+| [USER_GUIDE.md](./USER_GUIDE.md) | 使用指南（应用内按 F1 打开同一份）：从这里开始（安装与启动、认识界面、第一天跟着做、按任务查找章节）、界面布局与侧栏面板、支持的文件格式与条目类型、Markdown 写作（标签页与两栏编辑、页面设置、版本保留）与公式、知识库与 AI 配置（归类审阅、日历日记）、双向链接与块级引用、图谱与实体关系、阅读模式（扫描版 PDF 识别、跨页高亮）、多知识库与数据位置、快捷键、插件的使用与编写 |
+| [PRODUCT.md](./PRODUCT.md) | 产品定位、核心理念、三大模式、不做什么、路线图、产品演进 |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构、存储与版本、UI 架构、LaTeX 与 Markdown 链路、子包接入对照、关键问题与根因记录 |
+| [MARKDOWN_PARSER.md](./MARKDOWN_PARSER.md) | Markdown 解析：设计、编辑器管线、增量解析、回归基准与性能 |
 
----
+模块级说明就近放在代码旁：
 
-## 🎯 项目愿景
+- 子包说明：`packages/*/README.md`
+- 桌面端模块说明：`packages/desktop/src/render/lib/*/README.md`
+- 算法总览：`packages/desktop/src/render/lib/ALGORITHMS_README.md`
+- 样式规范：`packages/desktop/src/render/styles/DESIGN_SYSTEM.md`
 
-### 原始目标：代码阅读器
-- 分析代码依赖关系
-- 生成依赖图和流程图
-- 支持代码笔记
+## 产品定位
 
-### 新目标：智能知识库（Second Brain）
-- **无脑输入** - 直接往里塞信息，不需要整理
-- **AI 整理** - 自动打标签、分类、建文件夹
-- **智能检索** - 语义搜索、RAG 问答
-- **多端打通** - 桌面、移动、眼镜等设备
+个人知识库 + 写作编辑器，类似 Obsidian 与印象笔记结合的个人文档工具：
 
----
+- **知识库**：AI 数据湖。高频写入、低频读取，随手丢入录音、文章、网页、文件，由 AI 自动整理、打标签、按虚拟文件夹归类、转写与总结；原始文件永久保留，总结只作为索引。
+- **写作**：ProseMirror + CodeMirror 富文本编辑器，支持 Markdown，重点是在线编写并实时渲染 LaTeX。
+- **阅读**：文章、电子书的阅读管理。
 
-## 💡 核心理念
+应用模式只有三个：knowledge（⌘1）/ writing（⌘2）/ reading（⌘3）。不再做代码阅读器，详见 [PRODUCT.md](./PRODUCT.md)。
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Data Lake 模式                        │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│   📥 输入（高频）          🤖 AI 处理          📤 输出（低频）│
-│   ──────────────        ──────────        ──────────── │
-│   • 录音                 • 转写            • 搜索查询    │
-│   • 文章                 • 总结            • 智能问答    │
-│   • 笔记碎片             • 打标签          • 知识图谱    │
-│   • 网页剪藏             • 分类整理        • 关联推荐    │
-│                                                         │
-│   ✅ 保留原始数据          ✅ 总结只是索引                  │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
-```
+## 仓库结构
 
----
+pnpm workspace monorepo，所有子包位于 `packages/`：
 
-## 🚀 开发路线图
-
-### Phase 1: 基础 ✅ 进行中
-- [x] 项目架构搭建 (monorepo)
-- [x] 基础 UI 框架 (Electron + React)
-- [x] 文件树浏览
-- [x] 代码查看器
-- [ ] **UI 样式重构** (Obsidian 风格) ← 当前
-
-### Phase 2: 知识库基础
-- [ ] 数据存储层设计
-- [ ] 快速输入入口
-- [ ] 虚拟文件系统
-- [ ] 全文搜索
-
-### Phase 3: AI Agent
-- [ ] Agent 框架
-- [ ] 语音转写 Agent
-- [ ] 自动标签 Agent
-- [ ] 内容总结 Agent
-
-### Phase 4: 高级功能
-- [ ] 语义搜索
-- [ ] RAG 问答
-- [ ] 知识图谱
-- [ ] 多端同步
-
----
-
-## 🛠️ 技术栈
-
-| 层级 | 技术 |
+| 子包 | 职责 |
 |------|------|
-| 框架 | Electron + React 18 |
-| 语言 | TypeScript |
-| 构建 | Vite |
-| 样式 | SCSS + Design System |
-| 包管理 | pnpm workspace (monorepo) |
-| 图标 | lucide-react |
-| 代码高亮 | Prism.js |
+| `desktop` | Electron + React + Vite 桌面应用，主进程（多知识库、SQLite、AI、Agent、OCR 资源、插件目录、托盘）与渲染进程（UI、编辑器、LaTeX 渲染、插件运行时） |
+| `diff-algorithm` | 文本/二进制差分、编辑距离、模糊匹配、Histogram 行差分，含差分缓存与 Worker 支持 |
+| `diff-algorithm-extras` | desktop 未使用的差分算法：rsync / 滚动哈希、Patience、LCS、VCDIFF / BSDiff、CRDT 接口、流式哈希与差分、独立的 diff-match-patch Worker（与核心库解耦，按需引入） |
+| `syntax-parser` | 零依赖的手写 LaTeX 解析器与 LaTeX 语言配置（desktop 用于语法诊断、折叠、大纲，以及源码编辑器的注释、自动配对与环境缩进） |
+| `syntax-parser-extras` | desktop 未使用的语言注册表与高亮引擎、Lezer 增量解析封装、AST 缓存、正则 LaTeX 块扫描器（按需引入） |
+| `format-parser` | LaTeX 解析（交叉引用索引、文档元数据）与按内容识别格式（desktop 用其做交叉引用检查与无扩展名文档的格式判断） |
+| `markdown-parser` | 零依赖的 CommonMark / GFM 解析器（规范 100% 通过、常用扩展语法与 `{…}` 属性、IDN 链接规范化、语法扩展、源码绝对位置、token 流与保留源码模式）、HTML 渲染器与增量解析；编辑器的 Markdown 分词、大纲与链接同步都由它完成 |
+| `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）与 CodeMirror 适配器（desktop 用于代码块片段补全与 Markdown 编辑器的 Emoji 补全） |
+| `autocomplete-service-extras` | ProseMirror 补全插件（desktop 的 Markdown 编辑器使用：斜杠命令、`[[` 双链与别名、Emoji、LaTeX 命令）、文本框补全（desktop 的公式源码框使用）、基于它的补全服务适配器与补全预设（后两者按需引入） |
+| `fuzzy-match-algorithm` | 补全与拼写建议的核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
+| `plugin-system` | 插件基础库：贡献点类型、生命周期编排（版本范围、依赖解析、激活事件）、扩展点注册表（desktop 全部使用，运行时为 `desktop/src/render/lib/plugins` 的 Worker 沙箱） |
+| `plugin-system-extras` | desktop 未使用的同进程插件管理器与插件沙箱（按需引入） |
+| `search-service` | 全文搜索倒排索引、文件内容搜索、模糊匹配 |
+| `text-buffer` | 文本存储数据结构：Piece Table、Rope、Gap Buffer |
+| `test-support` | 只供测试使用的共用工具：性能断言的耗时预算 `perfBudget`（CI 上按 `PERF_BUDGET_SCALE` 统一放宽），不需要构建 |
 
----
-
-## 📋 快速开始
+## 常用命令
 
 ```bash
-# 安装依赖
-pnpm install
+pnpm install                 # 安装依赖（desktop 的 postinstall 会为 Electron 重编译 better-sqlite3）
+pnpm dev:desktop             # 启动桌面端开发模式
+pnpm build:desktop           # 构建桌面端
+pnpm build:libs              # 构建除 desktop 外的全部子包
 
-# 开发模式
-pnpm dev:desktop
+pnpm typecheck               # 全部子包类型检查
+pnpm test                    # 运行所有带 test 脚本的子包测试
+pnpm test:<子包名>            # 单个子包测试，例如 pnpm test:text-buffer
+pnpm --filter @code-reader/desktop test:writing   # 写作服务模块测试
 
-# 构建
-pnpm build:desktop
+pnpm --filter @code-reader/desktop e2e           # 构建后在真实应用上跑端到端回归测试（见 packages/desktop/e2e/README.md）
+
+pnpm benchmark               # 运行所有带 benchmark 脚本的子包基准测试
+pnpm benchmark:diff-algorithm                     # 单独运行差分基准
+
+# 本地打包（先 pnpm build:libs）：构建 → scripts/stage-app.mjs 整理 .app-stage（只含 dist 与 better-sqlite3）→ electron-builder
+pnpm --filter @code-reader/desktop pack           # 只生成未压缩的应用目录，用于自测
+pnpm --filter @code-reader/desktop dist:mac       # dmg / zip（x64 + arm64）；dist:win 为 nsis + portable，dist:linux 为 AppImage + deb
 ```
 
----
+## 持续集成与发布
 
-## 📝 贡献指南
-
-1. 阅读 [项目分析报告](./01-project-analysis.md) 了解现状
-2. 查看 [TODO 清单](./02-requirements-todo.md) 选择任务
-3. 参考 [UI 设计规范](./03-ui-refactor-plan.md) 保持风格统一
-
----
-
-## 🔗 相关资源
-
-- [Obsidian](https://obsidian.md/) - UI 设计参考
-- [Electron](https://www.electronjs.org/) - 桌面应用框架
-- [lucide](https://lucide.dev/) - 图标库
+- `.github/workflows/ci.yml`：push main 与 PR 时运行类型检查、单元测试与基准测试。GitHub 运行器比开发机慢约 10 倍，单元测试里的耗时预算由 `PERF_BUDGET_SCALE` 统一放宽（见 `packages/test-support`）。
+- `.github/workflows/e2e.yml`：push main 与 PR 时在 macOS 运行器上构建并运行端到端测试，失败时上传截图。
+- `.github/workflows/release.yml`：推送 `v*` 标签（如 `git tag v0.2.0 && git push origin v0.2.0`）或在 Actions 页手动触发。先做类型检查与测试，再在 macOS / Windows / Linux 三个运行器上分别打包；标签触发时把全部安装包与 `SHA256SUMS.txt` 上传到 GitHub Release **草稿**，人工确认后发布；手动触发只保留为构建产物（Artifacts）。版本号取自标签。
+- 代码签名可选：在仓库 Secrets 中配置 `CSC_LINK` / `CSC_KEY_PASSWORD`（macOS 证书）、`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`（公证）、`WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD`（Windows 证书）；未配置时产出未签名安装包（macOS 首次打开需右键→打开）。

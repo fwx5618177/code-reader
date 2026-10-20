@@ -1,35 +1,21 @@
 // ================================
-// WelcomeGuide 组件
-// 首次使用用户的欢迎引导模态框
-// 可关闭且不再显示
+// “从这里开始”卡片
+// 第一次启动时显示一次（任意模式），之后从写作侧栏的 ?、菜单栏 帮助 → 从这里开始 打开。
+// 只讲三种模式、前四步与常用快捷键，细节交给完整的使用指南
 // ================================
 
-import React, { useEffect, useCallback } from 'react';
-import { X, PenTool, Keyboard, Focus, Save, FileText, HelpCircle } from 'lucide-react';
+import React, { useCallback, useEffect } from 'react';
+import { BookOpen, Compass, Inbox, PenLine, BookOpenText, X } from 'lucide-react';
 import styles from './WelcomeGuide.module.scss';
-
-// ================================
-// 本地存储键
-// ================================
 
 const STORAGE_KEY = 'welcomeGuideDismissed';
 
-// ================================
-// 属性接口
-// ================================
-
 export interface WelcomeGuideProps {
-  /** 模态框是否打开 */
   isOpen: boolean;
-  /** 关闭时的回调 */
   onClose: () => void;
-  /** 是否持久化关闭状态（默认: true） */
-  persistDismissal?: boolean;
+  /** 打开完整的使用指南 */
+  onOpenGuide: () => void;
 }
-
-// ================================
-// 辅助函数：检查引导是否已关闭
-// ================================
 
 export function wasWelcomeGuideDismissed(): boolean {
   try {
@@ -39,201 +25,146 @@ export function wasWelcomeGuideDismissed(): boolean {
   }
 }
 
-// ================================
-// 辅助函数：标记引导为已关闭
-// ================================
-
-export function dismissWelcomeGuide(): void {
+function dismissWelcomeGuide(): void {
   try {
     localStorage.setItem(STORAGE_KEY, 'true');
   } catch {
-    console.warn('[WelcomeGuide] 无法持久化关闭状态');
+    console.warn('[WelcomeGuide] 无法记住已关闭');
   }
 }
 
-// ================================
-// 辅助函数：重置引导关闭状态
-// ================================
+const MODES = [
+  {
+    icon: <Inbox size={18} />,
+    name: '知识库',
+    key: '⌘1',
+    text: '随手收集想法、录音、图片、文件、网页，AI 自动写摘要、打标签、找关联',
+  },
+  {
+    icon: <PenLine size={18} />,
+    name: '写作',
+    key: '⌘2',
+    text: '写 Markdown 笔记（输入即渲染）与 LaTeX 论文，[[ ]] 链接其他笔记',
+  },
+  { icon: <BookOpenText size={18} />, name: '阅读', key: '⌘3', text: '读网页剪藏、PDF、EPUB，高亮后摘录回知识库' },
+];
 
-export function resetWelcomeGuide(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    console.warn('[WelcomeGuide] 无法重置关闭状态');
-  }
-}
+const FIRST_STEPS: React.ReactNode[] = [
+  <>
+    按 <kbd>⌘,</kbd> 打开设置 → <strong>AI 服务</strong>，添加服务商并填写 API Key（可以跳过，只是没有自动整理）
+  </>,
+  <>
+    按 <kbd>⌘N</kbd> 写下一句话，<kbd>⌘↵</kbd> 保存：它进入知识库，几秒后出现摘要和标签
+  </>,
+  <>
+    按 <kbd>⌘2</kbd> 到写作，在左侧新建 Markdown 文档，输入 <code># 标题</code>、<code>**粗体**</code>、
+    <code>$E=mc^2$</code>
+  </>,
+  <>
+    在文档里输入 <code>[[</code> 选择另一篇笔记，右侧“参考”面板会出现双向链接
+  </>,
+];
 
-// ================================
-// 组件
-// ================================
+const SHORTCUTS: Array<[string, string]> = [
+  ['⌘N', '快速记录'],
+  ['⌘P', '全局搜索'],
+  ['⌘1 / 2 / 3', '切换模式'],
+  ['⌘,', '设置'],
+  ['⌃空格', '补全'],
+  ['⌘/', '编辑 ↔ 预览'],
+  ['⌘⇧P', '命令面板'],
+  ['F1', '使用指南'],
+];
 
-const WelcomeGuide: React.FC<WelcomeGuideProps> = ({
-  isOpen,
-  onClose,
-  persistDismissal = true,
-}) => {
-  // 处理关闭并可选持久化
+const WelcomeGuide: React.FC<WelcomeGuideProps> = ({ isOpen, onClose, onOpenGuide }) => {
   const handleClose = useCallback(() => {
-    if (persistDismissal) {
-      dismissWelcomeGuide();
-    }
+    dismissWelcomeGuide();
     onClose();
-  }, [onClose, persistDismissal]);
+  }, [onClose]);
 
-  // 处理 ESC 键关闭
+  const handleOpenGuide = useCallback(() => {
+    handleClose();
+    onOpenGuide();
+  }, [handleClose, onOpenGuide]);
+
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && isOpen) {
-        handleClose();
-      }
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handleClose();
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, handleClose]);
 
-  // 未打开时不渲染
   if (!isOpen) return null;
 
   return (
     <div className={styles.welcomeGuideOverlay} onClick={handleClose}>
-      <div className={styles.welcomeGuideModal} onClick={(e) => e.stopPropagation()}>
-        {/* 头部 */}
+      <div
+        className={styles.welcomeGuideModal}
+        role="dialog"
+        aria-modal="true"
+        aria-label="从这里开始"
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className={styles.welcomeGuideHeader}>
           <div className={styles.headerTitle}>
-            <PenTool size={20} />
-            <h2>欢迎使用写作模式</h2>
+            <Compass size={20} />
+            <h2>从这里开始</h2>
           </div>
-          <button className={styles.closeButton} onClick={handleClose} title="关闭 (Esc)">
+          <button className={styles.closeButton} onClick={handleClose} title="关闭 (Esc)" aria-label="关闭">
             <X size={18} />
           </button>
         </div>
 
-        {/* 内容区 */}
         <div className={styles.welcomeGuideContent}>
-          <p className={styles.intro}>这是一个简洁、专注的写作环境，帮助你捕捉灵感、整理思绪。</p>
+          <p className={styles.intro}>一个应用里有三种模式，用顶部标签或快捷键切换。所有内容只保存在本机。</p>
 
-          {/* 快速开始 */}
           <section className={styles.guideSection}>
-            <h3>
-              <FileText size={16} />
-              快速开始
-            </h3>
-            <ul className={styles.guideList}>
-              <li>
-                <kbd>⌘N</kbd>
-                <span>新建文档</span>
-              </li>
-              <li>
-                <kbd>⌘S</kbd>
-                <span>保存文档</span>
-              </li>
-              <li>
-                <kbd>⌘⇧F</kbd>
-                <span>进入专注模式</span>
-              </li>
+            <ul className={styles.modeList}>
+              {MODES.map((mode) => (
+                <li key={mode.name} className={styles.modeItem}>
+                  <span className={styles.modeIcon}>{mode.icon}</span>
+                  <div>
+                    <div className={styles.modeName}>
+                      {mode.name} <kbd className={styles.kbd}>{mode.key}</kbd>
+                    </div>
+                    <p className={styles.guideSectionText}>{mode.text}</p>
+                  </div>
+                </li>
+              ))}
             </ul>
           </section>
 
-          {/* Markdown 快捷输入 */}
           <section className={styles.guideSection}>
-            <h3>
-              <Keyboard size={16} />
-              Markdown 快捷输入
-            </h3>
-            <div className={styles.shortcutGrid}>
-              <div className={styles.shortcutItem}>
-                <code># </code>
-                <span>一级标题</span>
-              </div>
-              <div className={styles.shortcutItem}>
-                <code>## </code>
-                <span>二级标题</span>
-              </div>
-              <div className={styles.shortcutItem}>
-                <code>### </code>
-                <span>三级标题</span>
-              </div>
-              <div className={styles.shortcutItem}>
-                <code>&gt; </code>
-                <span>引用块</span>
-              </div>
-              <div className={styles.shortcutItem}>
-                <code>- </code>
-                <span>无序列表</span>
-              </div>
-              <div className={styles.shortcutItem}>
-                <code>1. </code>
-                <span>有序列表</span>
-              </div>
-              <div className={styles.shortcutItem}>
-                <code>```</code>
-                <span>代码块</span>
-              </div>
-              <div className={styles.shortcutItem}>
-                <code>---</code>
-                <span>分割线</span>
-              </div>
-            </div>
+            <h3 className={styles.guideSectionTitle}>前四步</h3>
+            <ol className={styles.stepList}>
+              {FIRST_STEPS.map((step, index) => (
+                <li key={index}>{step}</li>
+              ))}
+            </ol>
           </section>
 
-          {/* 编辑快捷键 */}
           <section className={styles.guideSection}>
-            <h3>
-              <Save size={16} />
-              编辑快捷键
-            </h3>
-            <ul className={`${styles.guideList} ${styles.guideListCompact}`}>
-              <li>
-                <kbd>⌘B</kbd>
-                <span>加粗</span>
-              </li>
-              <li>
-                <kbd>⌘I</kbd>
-                <span>斜体</span>
-              </li>
-              <li>
-                <kbd>⌘E</kbd>
-                <span>行内代码</span>
-              </li>
-              <li>
-                <kbd>⌘K</kbd>
-                <span>插入链接</span>
-              </li>
-              <li>
-                <kbd>⌘Z</kbd>
-                <span>撤销</span>
-              </li>
-              <li>
-                <kbd>⌘⇧Z</kbd>
-                <span>重做</span>
-              </li>
+            <h3 className={styles.guideSectionTitle}>常用快捷键（Windows / Linux 上 ⌘ 换成 Ctrl）</h3>
+            <ul className={styles.shortcutGrid}>
+              {SHORTCUTS.map(([key, text]) => (
+                <li key={key} className={styles.shortcutItem}>
+                  <kbd className={styles.shortcutCode}>{key}</kbd>
+                  <span className={styles.shortcutText}>{text}</span>
+                </li>
+              ))}
             </ul>
-          </section>
-
-          {/* 专注模式 */}
-          <section className={`${styles.guideSection} ${styles.guideSectionHighlight}`}>
-            <h3>
-              <Focus size={16} />
-              专注模式
-            </h3>
-            <p>
-              按 <kbd>⌘⇧F</kbd> 进入专注模式，界面会自动隐藏所有干扰元素，让你沉浸在写作中。 按{' '}
-              <kbd>Esc</kbd> 键随时退出。
-            </p>
           </section>
         </div>
 
-        {/* 底部 */}
         <div className={styles.welcomeGuideFooter}>
-          <div className={styles.footerHint}>
-            <HelpCircle size={14} />
-            <span>
-              随时点击侧边栏的 <strong>?</strong> 按钮查看此指南
-            </span>
-          </div>
+          <button className={styles.secondaryButton} onClick={handleOpenGuide}>
+            <BookOpen size={14} />
+            打开完整使用指南
+          </button>
           <button className={styles.startButton} onClick={handleClose}>
-            开始写作
+            开始使用
           </button>
         </div>
       </div>

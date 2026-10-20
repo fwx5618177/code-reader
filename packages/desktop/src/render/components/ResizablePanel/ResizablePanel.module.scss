@@ -1,0 +1,62 @@
+// ================================
+// 可调整宽度的面板与拖拽把手
+// ================================
+
+@use '../../styles/variables' as *;
+
+// 宽度由组件按保存的尺寸设置；唯一的内容子元素填满面板
+.panel {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  min-height: 0;
+
+  > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+// 把手骑在边线上：热区 8px，悬停、聚焦或拖动时显示 2px 强调色细线
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: $z-sticky;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 2px;
+    border-radius: var(--radius-full);
+    background-color: transparent;
+    transition: background-color $transition-fast;
+  }
+
+  // 悬停稍作停顿再显示，鼠标划过时不闪烁
+  &:hover::after {
+    background-color: var(--accent-primary);
+    transition-delay: 0.15s;
+  }
+
+  &:focus-visible::after,
+  &.dragging::after {
+    background-color: var(--accent-primary);
+    transition-delay: 0s;
+  }
+}
+
+.edgeLeft {
+  left: -4px;
+}
+
+.edgeRight {
+  right: -4px;
+}

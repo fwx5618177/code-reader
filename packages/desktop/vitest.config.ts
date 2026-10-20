@@ -15,11 +15,8 @@ export default defineConfig({
     // Setup files to run before each test file
     setupFiles: ['./src/test/setup.ts'],
 
-    // Include patterns
-    include: [
-      'src/**/*.{test,spec}.{ts,tsx}',
-      'src/**/__tests__/**/*.{ts,tsx}',
-    ],
+    // 测试文件匹配：仅 *.test / *.spec 文件；__tests__ 下的 setup.ts 等辅助模块由测试按需导入，不作为测试执行
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
 
     // Exclude patterns
     exclude: [

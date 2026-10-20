@@ -1,1304 +1,325 @@
 // ================================
-// 插件沙箱系统 (Plugin Sandbox)
-// 提供权限控制、安全隔离和资源限制
+// 插件权限与沙箱化上下文
+// 隔离分两层：
+// 1. 代码隔离：插件代码只在 Worker 中运行（见 plugin-runtime.worker.ts），拿不到 DOM、
+//    window.electron 与网络 API，只能通过消息调用宿主 API；
+// 2. 能力隔离：宿主侧的每个 API 都在这里按“manifest 已声明 ∩ 用户已授予”的权限检查，
+//    未授权、未声明的命令、超频的界面调用一律抛错。
 // ================================
 
-import {
-  PluginId,
-  Plugin,
+import type {
+  ConfigurationAPI,
+  Disposable,
   PluginContext,
   PluginManifest,
-  Disposable,
+  StatusBarItem,
   EditorAPI,
   UIAPI,
   StorageAPI,
-  CommandAPI,
-  Logger,
+  ViewItem,
 } from './types';
 
-// ================================
-// 权限类型定义
-// ================================
+/** 插件可申请的权限 */
+export type Permission =
+  | 'editor:read'
+  | 'editor:write'
+  | 'ui:message'
+  | 'ui:dialog'
+  | 'ui:statusbar'
+  | 'ui:view'
+  | 'storage';
 
-/**
- * 权限类别
- */
-export const enum PermissionCategory {
-  /** 编辑器操作权限 */
-  Editor = 'editor',
-  /** UI 操作权限 */
-  UI = 'ui',
-  /** 存储操作权限 */
-  Storage = 'storage',
-  /** 命令操作权限 */
-  Command = 'command',
-  /** 网络访问权限 */
-  Network = 'network',
-  /** 文件系统权限 */
-  FileSystem = 'filesystem',
-  /** 剪贴板权限 */
-  Clipboard = 'clipboard',
-  /** 系统信息权限 */
-  System = 'system',
+export type PermissionCategory = 'editor' | 'ui' | 'storage';
+
+export type PermissionRisk = 'low' | 'medium' | 'high';
+
+export interface PermissionInfo {
+  category: PermissionCategory;
+  description: string;
+  risk: PermissionRisk;
 }
 
-/**
- * 具体权限定义
- */
-export const enum Permission {
-  // 编辑器权限
-  EditorRead = 'editor:read',
-  EditorWrite = 'editor:write',
-  EditorSelection = 'editor:selection',
-  EditorCursor = 'editor:cursor',
-  EditorExtension = 'editor:extension',
-
-  // UI 权限
-  UIMessage = 'ui:message',
-  UIInput = 'ui:input',
-  UIDialog = 'ui:dialog',
-  UISidebar = 'ui:sidebar',
-  UIToolbar = 'ui:toolbar',
-  UINotification = 'ui:notification',
-
-  // 存储权限
-  StorageRead = 'storage:read',
-  StorageWrite = 'storage:write',
-  StorageDelete = 'storage:delete',
-  StorageGlobal = 'storage:global',
-
-  // 命令权限
-  CommandRegister = 'command:register',
-  CommandExecute = 'command:execute',
-  CommandList = 'command:list',
-
-  // 网络权限
-  NetworkFetch = 'network:fetch',
-  NetworkWebSocket = 'network:websocket',
-
-  // 文件系统权限
-  FileRead = 'filesystem:read',
-  FileWrite = 'filesystem:write',
-  FileDelete = 'filesystem:delete',
-
-  // 剪贴板权限
-  ClipboardRead = 'clipboard:read',
-  ClipboardWrite = 'clipboard:write',
-
-  // 系统权限
-  SystemInfo = 'system:info',
-  SystemNotify = 'system:notify',
-}
-
-/**
- * 权限请求结果
- */
-export interface PermissionRequestResult {
-  /** 是否授权 */
-  granted: boolean;
-  /** 权限 */
-  permission: Permission;
-  /** 是否永久授权 */
-  persistent: boolean;
-  /** 授权时间 */
-  grantedAt?: number;
-  /** 过期时间 */
-  expiresAt?: number;
-}
-
-/**
- * 权限策略
- */
-export interface PermissionPolicy {
-  /** 默认授权的权限列表 */
-  defaultGranted: Permission[];
-  /** 需要用户确认的权限列表 */
-  requireConfirmation: Permission[];
-  /** 禁止的权限列表 */
-  forbidden: Permission[];
-  /** 自动过期时间（毫秒，0 表示永不过期） */
-  expirationMs: number;
-}
-
-/**
- * 沙箱配置
- */
-export interface SandboxConfig {
-  /** 是否启用沙箱 */
-  enabled: boolean;
-  /** 权限策略 */
-  permissionPolicy: PermissionPolicy;
-  /** 资源限制 */
-  resourceLimits: ResourceLimits;
-  /** 是否启用严格模式 */
-  strictMode: boolean;
-  /** 是否允许 eval */
-  allowEval: boolean;
-  /** 允许访问的全局对象 */
-  allowedGlobals: string[];
-  /** 超时时间（毫秒） */
-  timeout: number;
-}
-
-/**
- * 资源限制
- */
-export interface ResourceLimits {
-  /** 最大内存使用量（字节） */
-  maxMemory: number;
-  /** 最大 CPU 时间（毫秒） */
-  maxCpuTime: number;
-  /** 最大存储大小（字节） */
-  maxStorageSize: number;
-  /** 最大网络请求数/分钟 */
-  maxNetworkRequestsPerMinute: number;
-  /** 最大 DOM 操作数/秒 */
-  maxDomOperationsPerSecond: number;
-}
-
-/**
- * 沙箱状态
- */
-export interface SandboxState {
-  /** 插件 ID */
-  pluginId: PluginId;
-  /** 是否活跃 */
-  isActive: boolean;
-  /** 已授权的权限 */
-  grantedPermissions: Map<Permission, PermissionRequestResult>;
-  /** 资源使用统计 */
-  resourceUsage: ResourceUsage;
-  /** 创建时间 */
-  createdAt: number;
-  /** 最后活动时间 */
-  lastActiveAt: number;
-  /** 违规记录 */
-  violations: SecurityViolation[];
-}
-
-/**
- * 资源使用统计
- */
-export interface ResourceUsage {
-  /** 内存使用量（字节） */
-  memoryUsage: number;
-  /** CPU 时间（毫秒） */
-  cpuTime: number;
-  /** 存储使用量（字节） */
-  storageUsage: number;
-  /** 网络请求计数 */
-  networkRequestCount: number;
-  /** DOM 操作计数 */
-  domOperationCount: number;
-  /** 最后重置时间 */
-  lastResetAt: number;
-}
-
-/**
- * 安全违规记录
- */
-export interface SecurityViolation {
-  /** 违规类型 */
-  type: 'permission_denied' | 'resource_exceeded' | 'timeout' | 'forbidden_operation';
-  /** 违规详情 */
-  details: string;
-  /** 违规时间 */
-  timestamp: number;
-  /** 相关权限 */
-  permission?: Permission;
-}
-
-// ================================
-// 默认配置
-// ================================
-
-const DEFAULT_PERMISSION_POLICY: PermissionPolicy = {
-  defaultGranted: [
-    Permission.EditorRead,
-    Permission.EditorSelection,
-    Permission.EditorCursor,
-    Permission.StorageRead,
-    Permission.StorageWrite,
-    Permission.CommandList,
-    Permission.UIMessage,
-  ],
-  requireConfirmation: [
-    Permission.EditorWrite,
-    Permission.EditorExtension,
-    Permission.UIInput,
-    Permission.UIDialog,
-    Permission.UISidebar,
-    Permission.UIToolbar,
-    Permission.CommandRegister,
-    Permission.CommandExecute,
-    Permission.NetworkFetch,
-    Permission.ClipboardRead,
-    Permission.ClipboardWrite,
-  ],
-  forbidden: [
-    Permission.FileWrite,
-    Permission.FileDelete,
-    Permission.NetworkWebSocket,
-    Permission.StorageGlobal,
-  ],
-  expirationMs: 0, // 永不过期
+export const PERMISSION_INFO: Record<Permission, PermissionInfo> = {
+  'editor:read': { category: 'editor', description: '读取当前文档的内容、选中文本与光标位置', risk: 'medium' },
+  'editor:write': { category: 'editor', description: '修改当前文档（插入、替换文本，移动光标）', risk: 'high' },
+  'ui:message': { category: 'ui', description: '显示提示消息', risk: 'low' },
+  'ui:dialog': { category: 'ui', description: '弹出输入框、选择列表与确认框', risk: 'low' },
+  'ui:statusbar': { category: 'ui', description: '在状态栏显示一项信息', risk: 'low' },
+  'ui:view': { category: 'ui', description: '在侧栏「插件视图」中显示列表', risk: 'low' },
+  storage: { category: 'storage', description: '在本机保存插件自己的数据', risk: 'low' },
 };
 
-const DEFAULT_RESOURCE_LIMITS: ResourceLimits = {
-  maxMemory: 50 * 1024 * 1024, // 50MB
-  maxCpuTime: 10000, // 10 秒
-  maxStorageSize: 5 * 1024 * 1024, // 5MB
-  maxNetworkRequestsPerMinute: 60,
-  maxDomOperationsPerSecond: 100,
+export const PERMISSION_CATEGORY_NAMES: Record<PermissionCategory, string> = {
+  editor: '编辑器',
+  ui: '界面',
+  storage: '数据存储',
 };
 
-const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
-  enabled: true,
-  permissionPolicy: DEFAULT_PERMISSION_POLICY,
-  resourceLimits: DEFAULT_RESOURCE_LIMITS,
-  strictMode: true,
-  allowEval: false,
-  allowedGlobals: [
-    'console',
-    'setTimeout',
-    'clearTimeout',
-    'setInterval',
-    'clearInterval',
-    'Promise',
-    'Array',
-    'Object',
-    'String',
-    'Number',
-    'Boolean',
-    'Date',
-    'Math',
-    'JSON',
-    'Map',
-    'Set',
-    'WeakMap',
-    'WeakSet',
-    'Symbol',
-    'Proxy',
-    'Reflect',
-    'Error',
-    'TypeError',
-    'RangeError',
-    'SyntaxError',
-    'RegExp',
-    'URL',
-    'URLSearchParams',
-    'TextEncoder',
-    'TextDecoder',
-    'crypto',
-    'atob',
-    'btoa',
-  ],
-  timeout: 30000, // 30 秒
-};
-
-// ================================
-// 权限管理器
-// ================================
-
-export class PermissionManager {
-  private policy: PermissionPolicy;
-  private grants: Map<PluginId, Map<Permission, PermissionRequestResult>> = new Map();
-  private confirmHandler: ((pluginId: PluginId, permission: Permission) => Promise<boolean>) | null = null;
-
-  constructor(policy?: Partial<PermissionPolicy>) {
-    this.policy = { ...DEFAULT_PERMISSION_POLICY, ...policy };
-  }
-
-  /**
-   * 设置确认处理器
-   */
-  setConfirmHandler(
-    handler: (pluginId: PluginId, permission: Permission) => Promise<boolean>
-  ): void {
-    this.confirmHandler = handler;
-  }
-
-  /**
-   * 检查权限
-   */
-  hasPermission(pluginId: PluginId, permission: Permission): boolean {
-    // 检查是否被禁止
-    if (this.policy.forbidden.includes(permission)) {
-      return false;
-    }
-
-    // 检查默认授权
-    if (this.policy.defaultGranted.includes(permission)) {
-      return true;
-    }
-
-    // 检查已授权列表
-    const pluginGrants = this.grants.get(pluginId);
-    if (pluginGrants) {
-      const grant = pluginGrants.get(permission);
-      if (grant && grant.granted) {
-        // 检查是否过期
-        if (grant.expiresAt && Date.now() > grant.expiresAt) {
-          pluginGrants.delete(permission);
-          return false;
-        }
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * 请求权限
-   */
-  async requestPermission(
-    pluginId: PluginId,
-    permission: Permission
-  ): Promise<PermissionRequestResult> {
-    // 检查是否被禁止
-    if (this.policy.forbidden.includes(permission)) {
-      return {
-        granted: false,
-        permission,
-        persistent: false,
-      };
-    }
-
-    // 检查默认授权
-    if (this.policy.defaultGranted.includes(permission)) {
-      return {
-        granted: true,
-        permission,
-        persistent: true,
-        grantedAt: Date.now(),
-      };
-    }
-
-    // 检查已授权
-    const pluginGrants = this.grants.get(pluginId);
-    if (pluginGrants) {
-      const existing = pluginGrants.get(permission);
-      if (existing && existing.granted) {
-        if (!existing.expiresAt || Date.now() <= existing.expiresAt) {
-          return existing;
-        }
-      }
-    }
-
-    // 需要用户确认
-    if (this.policy.requireConfirmation.includes(permission)) {
-      if (this.confirmHandler) {
-        const confirmed = await this.confirmHandler(pluginId, permission);
-        const result: PermissionRequestResult = {
-          granted: confirmed,
-          permission,
-          persistent: true,
-          grantedAt: confirmed ? Date.now() : undefined,
-          expiresAt: this.policy.expirationMs > 0
-            ? Date.now() + this.policy.expirationMs
-            : undefined,
-        };
-
-        if (confirmed) {
-          this.grantPermission(pluginId, result);
-        }
-
-        return result;
-      }
-    }
-
-    // 默认拒绝
-    return {
-      granted: false,
-      permission,
-      persistent: false,
-    };
-  }
-
-  /**
-   * 授予权限
-   */
-  grantPermission(pluginId: PluginId, result: PermissionRequestResult): void {
-    let pluginGrants = this.grants.get(pluginId);
-    if (!pluginGrants) {
-      pluginGrants = new Map();
-      this.grants.set(pluginId, pluginGrants);
-    }
-    pluginGrants.set(result.permission, result);
-  }
-
-  /**
-   * 撤销权限
-   */
-  revokePermission(pluginId: PluginId, permission: Permission): void {
-    const pluginGrants = this.grants.get(pluginId);
-    if (pluginGrants) {
-      pluginGrants.delete(permission);
-    }
-  }
-
-  /**
-   * 撤销插件所有权限
-   */
-  revokeAllPermissions(pluginId: PluginId): void {
-    this.grants.delete(pluginId);
-  }
-
-  /**
-   * 获取插件已授权的权限列表
-   */
-  getGrantedPermissions(pluginId: PluginId): Permission[] {
-    const pluginGrants = this.grants.get(pluginId);
-    if (!pluginGrants) return [...this.policy.defaultGranted];
-
-    const granted = [...this.policy.defaultGranted];
-    for (const [permission, result] of pluginGrants) {
-      if (result.granted && !granted.includes(permission)) {
-        granted.push(permission);
-      }
-    }
-    return granted;
-  }
-
-  /**
-   * 更新权限策略
-   */
-  updatePolicy(policy: Partial<PermissionPolicy>): void {
-    this.policy = { ...this.policy, ...policy };
-  }
-
-  /**
-   * 获取当前策略
-   */
-  getPolicy(): PermissionPolicy {
-    return { ...this.policy };
-  }
+export function isPermission(value: unknown): value is Permission {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(PERMISSION_INFO, value);
 }
 
-// ================================
-// 资源监控器
-// ================================
-
-export class ResourceMonitor {
-  private limits: ResourceLimits;
-  private usage: Map<PluginId, ResourceUsage> = new Map();
-  private violationHandler: ((pluginId: PluginId, violation: SecurityViolation) => void) | null = null;
-
-  constructor(limits?: Partial<ResourceLimits>) {
-    this.limits = { ...DEFAULT_RESOURCE_LIMITS, ...limits };
-  }
-
-  /**
-   * 设置违规处理器
-   */
-  setViolationHandler(
-    handler: (pluginId: PluginId, violation: SecurityViolation) => void
-  ): void {
-    this.violationHandler = handler;
-  }
-
-  /**
-   * 初始化插件资源监控
-   */
-  initPlugin(pluginId: PluginId): void {
-    this.usage.set(pluginId, {
-      memoryUsage: 0,
-      cpuTime: 0,
-      storageUsage: 0,
-      networkRequestCount: 0,
-      domOperationCount: 0,
-      lastResetAt: Date.now(),
-    });
-  }
-
-  /**
-   * 移除插件资源监控
-   */
-  removePlugin(pluginId: PluginId): void {
-    this.usage.delete(pluginId);
-  }
-
-  /**
-   * 记录内存使用
-   */
-  recordMemoryUsage(pluginId: PluginId, bytes: number): boolean {
-    const usage = this.getUsage(pluginId);
-    usage.memoryUsage += bytes;
-
-    if (usage.memoryUsage > this.limits.maxMemory) {
-      this.reportViolation(pluginId, {
-        type: 'resource_exceeded',
-        details: `内存使用超出限制: ${usage.memoryUsage} / ${this.limits.maxMemory} 字节`,
-        timestamp: Date.now(),
-      });
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * 记录 CPU 时间
-   */
-  recordCpuTime(pluginId: PluginId, ms: number): boolean {
-    const usage = this.getUsage(pluginId);
-    usage.cpuTime += ms;
-
-    if (usage.cpuTime > this.limits.maxCpuTime) {
-      this.reportViolation(pluginId, {
-        type: 'resource_exceeded',
-        details: `CPU 时间超出限制: ${usage.cpuTime} / ${this.limits.maxCpuTime} 毫秒`,
-        timestamp: Date.now(),
-      });
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * 记录存储使用
-   */
-  recordStorageUsage(pluginId: PluginId, bytes: number): boolean {
-    const usage = this.getUsage(pluginId);
-    usage.storageUsage += bytes;
-
-    if (usage.storageUsage > this.limits.maxStorageSize) {
-      this.reportViolation(pluginId, {
-        type: 'resource_exceeded',
-        details: `存储使用超出限制: ${usage.storageUsage} / ${this.limits.maxStorageSize} 字节`,
-        timestamp: Date.now(),
-      });
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * 记录网络请求
-   */
-  recordNetworkRequest(pluginId: PluginId): boolean {
-    const usage = this.getUsage(pluginId);
-
-    // 检查是否需要重置计数（每分钟）
-    const now = Date.now();
-    if (now - usage.lastResetAt > 60000) {
-      usage.networkRequestCount = 0;
-      usage.domOperationCount = 0;
-      usage.lastResetAt = now;
-    }
-
-    usage.networkRequestCount++;
-
-    if (usage.networkRequestCount > this.limits.maxNetworkRequestsPerMinute) {
-      this.reportViolation(pluginId, {
-        type: 'resource_exceeded',
-        details: `网络请求超出限制: ${usage.networkRequestCount} / ${this.limits.maxNetworkRequestsPerMinute} 次/分钟`,
-        timestamp: Date.now(),
-      });
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * 记录 DOM 操作
-   */
-  recordDomOperation(pluginId: PluginId): boolean {
-    const usage = this.getUsage(pluginId);
-
-    // 检查是否需要重置计数（每秒）
-    const now = Date.now();
-    if (now - usage.lastResetAt > 1000) {
-      usage.domOperationCount = 0;
-      usage.lastResetAt = now;
-    }
-
-    usage.domOperationCount++;
-
-    if (usage.domOperationCount > this.limits.maxDomOperationsPerSecond) {
-      this.reportViolation(pluginId, {
-        type: 'resource_exceeded',
-        details: `DOM 操作超出限制: ${usage.domOperationCount} / ${this.limits.maxDomOperationsPerSecond} 次/秒`,
-        timestamp: Date.now(),
-      });
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * 获取资源使用情况
-   */
-  getResourceUsage(pluginId: PluginId): ResourceUsage | null {
-    return this.usage.get(pluginId) || null;
-  }
-
-  /**
-   * 重置资源计数
-   */
-  resetUsage(pluginId: PluginId): void {
-    const usage = this.usage.get(pluginId);
-    if (usage) {
-      usage.memoryUsage = 0;
-      usage.cpuTime = 0;
-      usage.storageUsage = 0;
-      usage.networkRequestCount = 0;
-      usage.domOperationCount = 0;
-      usage.lastResetAt = Date.now();
-    }
-  }
-
-  /**
-   * 更新资源限制
-   */
-  updateLimits(limits: Partial<ResourceLimits>): void {
-    this.limits = { ...this.limits, ...limits };
-  }
-
-  /**
-   * 获取资源限制
-   */
-  getLimits(): ResourceLimits {
-    return { ...this.limits };
-  }
-
-  /**
-   * 获取或创建使用记录
-   */
-  private getUsage(pluginId: PluginId): ResourceUsage {
-    let usage = this.usage.get(pluginId);
-    if (!usage) {
-      usage = {
-        memoryUsage: 0,
-        cpuTime: 0,
-        storageUsage: 0,
-        networkRequestCount: 0,
-        domOperationCount: 0,
-        lastResetAt: Date.now(),
-      };
-      this.usage.set(pluginId, usage);
-    }
-    return usage;
-  }
-
-  /**
-   * 报告违规
-   */
-  private reportViolation(pluginId: PluginId, violation: SecurityViolation): void {
-    if (this.violationHandler) {
-      this.violationHandler(pluginId, violation);
-    }
-  }
-}
-
-// ================================
-// 安全代理工厂
-// ================================
-
-export class SecureProxyFactory {
-  private permissionManager: PermissionManager;
-  private resourceMonitor: ResourceMonitor;
-
+export class PermissionDeniedError extends Error {
   constructor(
-    permissionManager: PermissionManager,
-    resourceMonitor: ResourceMonitor
+    readonly pluginId: string,
+    readonly permission: Permission
   ) {
-    this.permissionManager = permissionManager;
-    this.resourceMonitor = resourceMonitor;
-  }
-
-  /**
-   * 创建安全的编辑器 API 代理
-   */
-  createEditorAPIProxy(pluginId: PluginId, editor: EditorAPI): EditorAPI {
-    const pm = this.permissionManager;
-    const rm = this.resourceMonitor;
-
-    return {
-      getContent: () => {
-        if (!pm.hasPermission(pluginId, Permission.EditorRead)) {
-          throw new SecurityError(pluginId, Permission.EditorRead, '无编辑器读取权限');
-        }
-        return editor.getContent();
-      },
-
-      setContent: (content: string) => {
-        if (!pm.hasPermission(pluginId, Permission.EditorWrite)) {
-          throw new SecurityError(pluginId, Permission.EditorWrite, '无编辑器写入权限');
-        }
-        rm.recordMemoryUsage(pluginId, content.length * 2);
-        editor.setContent(content);
-      },
-
-      getSelection: () => {
-        if (!pm.hasPermission(pluginId, Permission.EditorSelection)) {
-          throw new SecurityError(pluginId, Permission.EditorSelection, '无选区读取权限');
-        }
-        return editor.getSelection();
-      },
-
-      replaceSelection: (text: string) => {
-        if (!pm.hasPermission(pluginId, Permission.EditorWrite)) {
-          throw new SecurityError(pluginId, Permission.EditorWrite, '无编辑器写入权限');
-        }
-        rm.recordMemoryUsage(pluginId, text.length * 2);
-        editor.replaceSelection(text);
-      },
-
-      insertText: (text: string, position?: number) => {
-        if (!pm.hasPermission(pluginId, Permission.EditorWrite)) {
-          throw new SecurityError(pluginId, Permission.EditorWrite, '无编辑器写入权限');
-        }
-        rm.recordMemoryUsage(pluginId, text.length * 2);
-        editor.insertText(text, position);
-      },
-
-      getCursorPosition: () => {
-        if (!pm.hasPermission(pluginId, Permission.EditorCursor)) {
-          throw new SecurityError(pluginId, Permission.EditorCursor, '无光标位置读取权限');
-        }
-        return editor.getCursorPosition();
-      },
-
-      setCursorPosition: (line: number, column: number) => {
-        if (!pm.hasPermission(pluginId, Permission.EditorCursor)) {
-          throw new SecurityError(pluginId, Permission.EditorCursor, '无光标位置设置权限');
-        }
-        editor.setCursorPosition(line, column);
-      },
-
-      registerExtension: (extension: unknown): Disposable => {
-        if (!pm.hasPermission(pluginId, Permission.EditorExtension)) {
-          throw new SecurityError(pluginId, Permission.EditorExtension, '无编辑器扩展权限');
-        }
-        return editor.registerExtension(extension);
-      },
-    };
-  }
-
-  /**
-   * 创建安全的 UI API 代理
-   */
-  createUIAPIProxy(pluginId: PluginId, ui: UIAPI): UIAPI {
-    const pm = this.permissionManager;
-    const rm = this.resourceMonitor;
-
-    return {
-      showMessage: (message: string, type?: 'info' | 'warning' | 'error') => {
-        if (!pm.hasPermission(pluginId, Permission.UIMessage)) {
-          throw new SecurityError(pluginId, Permission.UIMessage, '无消息显示权限');
-        }
-        rm.recordDomOperation(pluginId);
-        ui.showMessage(message, type);
-      },
-
-      showInput: async (options) => {
-        if (!pm.hasPermission(pluginId, Permission.UIInput)) {
-          throw new SecurityError(pluginId, Permission.UIInput, '无输入框显示权限');
-        }
-        rm.recordDomOperation(pluginId);
-        return ui.showInput(options);
-      },
-
-      showQuickPick: async (items, options?) => {
-        if (!pm.hasPermission(pluginId, Permission.UIDialog)) {
-          throw new SecurityError(pluginId, Permission.UIDialog, '无对话框显示权限');
-        }
-        rm.recordDomOperation(pluginId);
-        return ui.showQuickPick(items, options);
-      },
-
-      showConfirm: async (message: string) => {
-        if (!pm.hasPermission(pluginId, Permission.UIDialog)) {
-          throw new SecurityError(pluginId, Permission.UIDialog, '无对话框显示权限');
-        }
-        rm.recordDomOperation(pluginId);
-        return ui.showConfirm(message);
-      },
-
-      registerSidebarView: (id: string, component: unknown): Disposable => {
-        if (!pm.hasPermission(pluginId, Permission.UISidebar)) {
-          throw new SecurityError(pluginId, Permission.UISidebar, '无侧边栏注册权限');
-        }
-        rm.recordDomOperation(pluginId);
-        return ui.registerSidebarView(id, component);
-      },
-
-      registerToolbarButton: (button, handler): Disposable => {
-        if (!pm.hasPermission(pluginId, Permission.UIToolbar)) {
-          throw new SecurityError(pluginId, Permission.UIToolbar, '无工具栏注册权限');
-        }
-        rm.recordDomOperation(pluginId);
-        return ui.registerToolbarButton(button, handler);
-      },
-    };
-  }
-
-  /**
-   * 创建安全的存储 API 代理
-   */
-  createStorageAPIProxy(pluginId: PluginId, storage: StorageAPI): StorageAPI {
-    const pm = this.permissionManager;
-    const rm = this.resourceMonitor;
-
-    return {
-      get: <T>(key: string, defaultValue?: T): T | undefined => {
-        if (!pm.hasPermission(pluginId, Permission.StorageRead)) {
-          throw new SecurityError(pluginId, Permission.StorageRead, '无存储读取权限');
-        }
-        return storage.get(key, defaultValue);
-      },
-
-      set: async <T>(key: string, value: T): Promise<void> => {
-        if (!pm.hasPermission(pluginId, Permission.StorageWrite)) {
-          throw new SecurityError(pluginId, Permission.StorageWrite, '无存储写入权限');
-        }
-        const size = JSON.stringify(value).length;
-        if (!rm.recordStorageUsage(pluginId, size)) {
-          throw new SecurityError(pluginId, Permission.StorageWrite, '存储空间超出限制');
-        }
-        await storage.set(key, value);
-      },
-
-      delete: async (key: string): Promise<void> => {
-        if (!pm.hasPermission(pluginId, Permission.StorageDelete)) {
-          throw new SecurityError(pluginId, Permission.StorageDelete, '无存储删除权限');
-        }
-        await storage.delete(key);
-      },
-
-      clear: async (): Promise<void> => {
-        if (!pm.hasPermission(pluginId, Permission.StorageDelete)) {
-          throw new SecurityError(pluginId, Permission.StorageDelete, '无存储清空权限');
-        }
-        await storage.clear();
-      },
-
-      keys: (): string[] => {
-        if (!pm.hasPermission(pluginId, Permission.StorageRead)) {
-          throw new SecurityError(pluginId, Permission.StorageRead, '无存储读取权限');
-        }
-        return storage.keys();
-      },
-    };
-  }
-
-  /**
-   * 创建安全的命令 API 代理
-   */
-  createCommandAPIProxy(pluginId: PluginId, commands: CommandAPI): CommandAPI {
-    const pm = this.permissionManager;
-
-    return {
-      registerCommand: (id: string, handler): Disposable => {
-        if (!pm.hasPermission(pluginId, Permission.CommandRegister)) {
-          throw new SecurityError(pluginId, Permission.CommandRegister, '无命令注册权限');
-        }
-        return commands.registerCommand(id, handler);
-      },
-
-      executeCommand: async <T>(id: string, ...args: unknown[]): Promise<T> => {
-        if (!pm.hasPermission(pluginId, Permission.CommandExecute)) {
-          throw new SecurityError(pluginId, Permission.CommandExecute, '无命令执行权限');
-        }
-        return commands.executeCommand(id, ...args);
-      },
-
-      getCommands: (): string[] => {
-        if (!pm.hasPermission(pluginId, Permission.CommandList)) {
-          throw new SecurityError(pluginId, Permission.CommandList, '无命令列表访问权限');
-        }
-        return commands.getCommands();
-      },
-    };
+    super(`插件 ${pluginId} 没有“${PERMISSION_INFO[permission].description}”权限（${permission}）`);
+    this.name = 'PermissionDeniedError';
   }
 }
 
-// ================================
-// 安全错误
-// ================================
-
-export class SecurityError extends Error {
-  readonly pluginId: PluginId;
-  readonly permission: Permission;
-  readonly isSecurityError = true;
-
-  constructor(pluginId: PluginId, permission: Permission, message: string) {
-    super(`[安全错误] 插件 ${pluginId}: ${message}`);
-    this.name = 'SecurityError';
-    this.pluginId = pluginId;
-    this.permission = permission;
-  }
+/** 宿主提供的原始能力（未做权限检查） */
+export interface SandboxHost {
+  editor: EditorAPI;
+  ui: UIAPI;
+  storage: StorageAPI;
+  statusBar: { set(item: StatusBarItem): void; clear(): void };
+  views: { set(viewId: string, items: ViewItem[]): void };
+  configuration: ConfigurationAPI;
+  /** 以插件内命令 ID 注册命令处理器 */
+  registerCommand(id: string, handler: (...args: unknown[]) => unknown): Disposable;
+  /** 执行某个插件的命令（必要时先激活该插件） */
+  executeCommand(pluginId: string, commandId: string, args: unknown[]): Promise<unknown>;
 }
 
-// ================================
-// 插件沙箱
-// ================================
-
-export class PluginSandbox {
-  private config: SandboxConfig;
-  private permissionManager: PermissionManager;
-  private resourceMonitor: ResourceMonitor;
-  private proxyFactory: SecureProxyFactory;
-  private states: Map<PluginId, SandboxState> = new Map();
-
-  constructor(config?: Partial<SandboxConfig>) {
-    this.config = { ...DEFAULT_SANDBOX_CONFIG, ...config };
-
-    this.permissionManager = new PermissionManager(this.config.permissionPolicy);
-    this.resourceMonitor = new ResourceMonitor(this.config.resourceLimits);
-    this.proxyFactory = new SecureProxyFactory(
-      this.permissionManager,
-      this.resourceMonitor
-    );
-
-    // 设置违规处理
-    this.resourceMonitor.setViolationHandler((pluginId, violation) => {
-      this.recordViolation(pluginId, violation);
-    });
-  }
-
-  /**
-   * 创建沙箱化的插件上下文
-   */
-  createSandboxedContext(
-    pluginId: PluginId,
-    manifest: PluginManifest,
-    originalContext: PluginContext
-  ): PluginContext {
-    if (!this.config.enabled) {
-      return originalContext;
-    }
-
-    // 初始化沙箱状态
-    this.initState(pluginId);
-
-    // 创建安全代理
-    const secureEditor = this.proxyFactory.createEditorAPIProxy(
-      pluginId,
-      originalContext.editor
-    );
-
-    const secureUI = this.proxyFactory.createUIAPIProxy(
-      pluginId,
-      originalContext.ui
-    );
-
-    const secureStorage = this.proxyFactory.createStorageAPIProxy(
-      pluginId,
-      originalContext.storage
-    );
-
-    const secureGlobalStorage = this.proxyFactory.createStorageAPIProxy(
-      pluginId,
-      originalContext.globalStorage
-    );
-
-    const secureCommands = this.proxyFactory.createCommandAPIProxy(
-      pluginId,
-      originalContext.commands
-    );
-
-    // 返回沙箱化的上下文
-    return {
-      ...originalContext,
-      editor: secureEditor,
-      ui: secureUI,
-      storage: secureStorage,
-      globalStorage: secureGlobalStorage,
-      commands: secureCommands,
-    };
-  }
-
-  /**
-   * 在沙箱中执行代码
-   */
-  async executeInSandbox<T>(
-    pluginId: PluginId,
-    fn: () => Promise<T> | T,
-    timeoutMs?: number
-  ): Promise<T> {
-    const state = this.states.get(pluginId);
-    if (state) {
-      state.lastActiveAt = Date.now();
-    }
-
-    const timeout = timeoutMs ?? this.config.timeout;
-    const startTime = performance.now();
-
-    return new Promise<T>((resolve, reject) => {
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      let isResolved = false;
-
-      if (timeout > 0) {
-        timeoutId = setTimeout(() => {
-          if (!isResolved) {
-            isResolved = true;
-            this.recordViolation(pluginId, {
-              type: 'timeout',
-              details: `执行超时: ${timeout}ms`,
-              timestamp: Date.now(),
-            });
-            reject(new Error(`插件执行超时: ${timeout}ms`));
-          }
-        }, timeout);
-      }
-
-      try {
-        const result = fn();
-
-        if (result instanceof Promise) {
-          result
-            .then((value) => {
-              if (!isResolved) {
-                isResolved = true;
-                if (timeoutId) clearTimeout(timeoutId);
-
-                // 记录 CPU 时间
-                const cpuTime = performance.now() - startTime;
-                this.resourceMonitor.recordCpuTime(pluginId, cpuTime);
-
-                resolve(value);
-              }
-            })
-            .catch((error) => {
-              if (!isResolved) {
-                isResolved = true;
-                if (timeoutId) clearTimeout(timeoutId);
-                reject(error);
-              }
-            });
-        } else {
-          if (!isResolved) {
-            isResolved = true;
-            if (timeoutId) clearTimeout(timeoutId);
-
-            // 记录 CPU 时间
-            const cpuTime = performance.now() - startTime;
-            this.resourceMonitor.recordCpuTime(pluginId, cpuTime);
-
-            resolve(result);
-          }
-        }
-      } catch (error) {
-        if (!isResolved) {
-          isResolved = true;
-          if (timeoutId) clearTimeout(timeoutId);
-          reject(error);
-        }
-      }
-    });
-  }
-
-  /**
-   * 请求权限
-   */
-  async requestPermission(
-    pluginId: PluginId,
-    permission: Permission
-  ): Promise<boolean> {
-    const result = await this.permissionManager.requestPermission(pluginId, permission);
-    return result.granted;
-  }
-
-  /**
-   * 检查权限
-   */
-  hasPermission(pluginId: PluginId, permission: Permission): boolean {
-    return this.permissionManager.hasPermission(pluginId, permission);
-  }
-
-  /**
-   * 获取已授权的权限
-   */
-  getGrantedPermissions(pluginId: PluginId): Permission[] {
-    return this.permissionManager.getGrantedPermissions(pluginId);
-  }
-
-  /**
-   * 撤销权限
-   */
-  revokePermission(pluginId: PluginId, permission: Permission): void {
-    this.permissionManager.revokePermission(pluginId, permission);
-  }
-
-  /**
-   * 获取资源使用情况
-   */
-  getResourceUsage(pluginId: PluginId): ResourceUsage | null {
-    return this.resourceMonitor.getResourceUsage(pluginId);
-  }
-
-  /**
-   * 获取违规记录
-   */
-  getViolations(pluginId: PluginId): SecurityViolation[] {
-    const state = this.states.get(pluginId);
-    return state?.violations || [];
-  }
-
-  /**
-   * 销毁插件沙箱
-   */
-  destroySandbox(pluginId: PluginId): void {
-    this.states.delete(pluginId);
-    this.permissionManager.revokeAllPermissions(pluginId);
-    this.resourceMonitor.removePlugin(pluginId);
-  }
-
-  /**
-   * 设置权限确认处理器
-   */
-  setPermissionConfirmHandler(
-    handler: (pluginId: PluginId, permission: Permission) => Promise<boolean>
-  ): void {
-    this.permissionManager.setConfirmHandler(handler);
-  }
-
-  /**
-   * 获取沙箱状态
-   */
-  getSandboxState(pluginId: PluginId): SandboxState | null {
-    return this.states.get(pluginId) || null;
-  }
-
-  /**
-   * 更新配置
-   */
-  updateConfig(config: Partial<SandboxConfig>): void {
-    this.config = { ...this.config, ...config };
-
-    if (config.permissionPolicy) {
-      this.permissionManager.updatePolicy(config.permissionPolicy);
-    }
-
-    if (config.resourceLimits) {
-      this.resourceMonitor.updateLimits(config.resourceLimits);
-    }
-  }
-
-  /**
-   * 初始化沙箱状态
-   */
-  private initState(pluginId: PluginId): void {
-    if (this.states.has(pluginId)) return;
-
-    this.states.set(pluginId, {
-      pluginId,
-      isActive: true,
-      grantedPermissions: new Map(),
-      resourceUsage: {
-        memoryUsage: 0,
-        cpuTime: 0,
-        storageUsage: 0,
-        networkRequestCount: 0,
-        domOperationCount: 0,
-        lastResetAt: Date.now(),
-      },
-      createdAt: Date.now(),
-      lastActiveAt: Date.now(),
-      violations: [],
-    });
-
-    this.resourceMonitor.initPlugin(pluginId);
-  }
-
-  /**
-   * 记录违规
-   */
-  private recordViolation(pluginId: PluginId, violation: SecurityViolation): void {
-    const state = this.states.get(pluginId);
-    if (state) {
-      state.violations.push(violation);
-
-      // 限制违规记录数量
-      if (state.violations.length > 100) {
-        state.violations = state.violations.slice(-50);
-      }
-    }
-
-    console.warn(`[沙箱违规] 插件 ${pluginId}:`, violation);
-  }
+export interface SandboxLimits {
+  /** 时间窗口内允许的界面调用次数（消息与对话框合计） */
+  uiCalls: number;
+  uiWindowMs: number;
 }
 
-// ================================
-// 工厂函数
-// ================================
+const DEFAULT_LIMITS: SandboxLimits = { uiCalls: 20, uiWindowMs: 10_000 };
+
+const MAX_MESSAGE_LENGTH = 500;
+const MAX_STATUS_TEXT_LENGTH = 60;
+const MAX_TOOLTIP_LENGTH = 200;
+const MAX_QUICK_PICK_ITEMS = 200;
+const MAX_VIEW_ITEMS = 200;
+const MAX_VIEW_LABEL_LENGTH = 120;
+const MAX_VIEW_ARGS_LENGTH = 2000;
 
 /**
- * 创建插件沙箱
+ * 拆分全局命令 ID `<插件 ID>.<命令 ID>`（插件 ID 可含点，命令 ID 不含点）
  */
-export function createPluginSandbox(config?: Partial<SandboxConfig>): PluginSandbox {
-  return new PluginSandbox(config);
+export function splitCommandId(command: string): { pluginId: string; commandId: string } | null {
+  const dot = command.lastIndexOf('.');
+  if (dot <= 0 || dot === command.length - 1) return null;
+  return { pluginId: command.slice(0, dot), commandId: command.slice(dot + 1) };
+}
+
+function assertString(value: unknown, name: string, maxLength = Infinity): string {
+  if (typeof value !== 'string') throw new TypeError(`${name} 必须是字符串`);
+  if (value.length > maxLength) throw new RangeError(`${name} 长度不能超过 ${maxLength}`);
+  return value;
+}
+
+function assertInteger(value: unknown, name: string): number {
+  if (!Number.isInteger(value)) throw new TypeError(`${name} 必须是整数`);
+  return value as number;
 }
 
 /**
- * 创建权限管理器
+ * 创建按权限过滤的插件上下文
+ * @param granted 用户已授予的权限；实际生效的是其与 manifest 声明的交集
  */
-export function createPermissionManager(policy?: Partial<PermissionPolicy>): PermissionManager {
-  return new PermissionManager(policy);
-}
+export function createSandboxedContext(
+  manifest: PluginManifest,
+  granted: readonly Permission[],
+  host: SandboxHost,
+  limits: SandboxLimits = DEFAULT_LIMITS
+): PluginContext {
+  const pluginId = manifest.id;
+  const effective = new Set(manifest.permissions.filter((permission) => granted.includes(permission)));
+  const declaredCommands = new Set(manifest.contributes.commands.map((command) => command.id));
+  const callablePlugins = new Set([pluginId, ...manifest.dependencies.map((dependency) => dependency.id)]);
+  const declaredViews = new Set(manifest.contributes.views.map((view) => view.id));
+  const configurationKeys = new Set(Object.keys(manifest.contributes.configuration?.properties ?? {}));
+  const uiCallTimes: number[] = [];
 
-/**
- * 创建资源监控器
- */
-export function createResourceMonitor(limits?: Partial<ResourceLimits>): ResourceMonitor {
-  return new ResourceMonitor(limits);
-}
-
-/**
- * 获取权限描述
- */
-export function getPermissionDescription(permission: Permission): string {
-  const descriptions: Record<Permission, string> = {
-    [Permission.EditorRead]: '读取编辑器内容',
-    [Permission.EditorWrite]: '修改编辑器内容',
-    [Permission.EditorSelection]: '读取选区信息',
-    [Permission.EditorCursor]: '读取和设置光标位置',
-    [Permission.EditorExtension]: '注册编辑器扩展',
-    [Permission.UIMessage]: '显示消息提示',
-    [Permission.UIInput]: '显示输入对话框',
-    [Permission.UIDialog]: '显示选择对话框',
-    [Permission.UISidebar]: '注册侧边栏视图',
-    [Permission.UIToolbar]: '注册工具栏按钮',
-    [Permission.UINotification]: '显示系统通知',
-    [Permission.StorageRead]: '读取存储数据',
-    [Permission.StorageWrite]: '写入存储数据',
-    [Permission.StorageDelete]: '删除存储数据',
-    [Permission.StorageGlobal]: '访问全局存储',
-    [Permission.CommandRegister]: '注册命令',
-    [Permission.CommandExecute]: '执行命令',
-    [Permission.CommandList]: '获取命令列表',
-    [Permission.NetworkFetch]: '发起网络请求',
-    [Permission.NetworkWebSocket]: '建立 WebSocket 连接',
-    [Permission.FileRead]: '读取文件',
-    [Permission.FileWrite]: '写入文件',
-    [Permission.FileDelete]: '删除文件',
-    [Permission.ClipboardRead]: '读取剪贴板',
-    [Permission.ClipboardWrite]: '写入剪贴板',
-    [Permission.SystemInfo]: '获取系统信息',
-    [Permission.SystemNotify]: '发送系统通知',
+  const checkPermission = (permission: Permission): void => {
+    if (!effective.has(permission)) throw new PermissionDeniedError(pluginId, permission);
   };
 
-  return descriptions[permission] || '未知权限';
-}
+  const checkUIPermission = (permission: Permission): void => {
+    checkPermission(permission);
+    const now = Date.now();
+    while (uiCallTimes.length > 0 && now - uiCallTimes[0] >= limits.uiWindowMs) uiCallTimes.shift();
+    if (uiCallTimes.length >= limits.uiCalls) throw new Error(`插件 ${pluginId} 的界面调用过于频繁`);
+    uiCallTimes.push(now);
+  };
 
-/**
- * 获取权限类别
- */
-export function getPermissionCategory(permission: Permission): PermissionCategory {
-  if (permission.startsWith('editor:')) return PermissionCategory.Editor;
-  if (permission.startsWith('ui:')) return PermissionCategory.UI;
-  if (permission.startsWith('storage:')) return PermissionCategory.Storage;
-  if (permission.startsWith('command:')) return PermissionCategory.Command;
-  if (permission.startsWith('network:')) return PermissionCategory.Network;
-  if (permission.startsWith('filesystem:')) return PermissionCategory.FileSystem;
-  if (permission.startsWith('clipboard:')) return PermissionCategory.Clipboard;
-  if (permission.startsWith('system:')) return PermissionCategory.System;
-  return PermissionCategory.System;
+  const assertDeclaredCommand = (id: unknown): string => {
+    const command = assertString(id, '命令 ID');
+    if (!declaredCommands.has(command)) {
+      throw new Error(`命令 ${command} 未在插件 ${pluginId} 的 manifest.contributes.commands 中声明`);
+    }
+    return command;
+  };
+
+  const toViewItem = (item: unknown, index: number): ViewItem => {
+    if (!item || typeof item !== 'object') throw new TypeError(`视图第 ${index + 1} 项必须是对象`);
+    const { label, description, command, args } = item as Record<string, unknown>;
+    const result: ViewItem = { label: assertString(label, '视图项文字', MAX_VIEW_LABEL_LENGTH) };
+    if (description !== undefined) result.description = assertString(description, '视图项说明', MAX_TOOLTIP_LENGTH);
+    if (command !== undefined) result.command = assertDeclaredCommand(command);
+    if (args !== undefined) {
+      const serialized = Array.isArray(args) ? JSON.stringify(args) : undefined;
+      if (serialized === undefined || serialized.length > MAX_VIEW_ARGS_LENGTH) {
+        throw new TypeError(`视图项的 args 必须是可序列化为 JSON 的数组（不超过 ${MAX_VIEW_ARGS_LENGTH} 个字符）`);
+      }
+      result.args = JSON.parse(serialized) as unknown[];
+    }
+    return result;
+  };
+
+  return {
+    pluginId,
+    subscriptions: [],
+
+    commands: {
+      register(id, handler) {
+        const command = assertDeclaredCommand(id);
+        if (typeof handler !== 'function') throw new TypeError('命令处理器必须是函数');
+        return host.registerCommand(command, handler);
+      },
+      execute(command, args) {
+        const target = splitCommandId(assertString(command, '命令'));
+        if (!target) throw new Error(`命令格式应为 <插件 ID>.<命令 ID>：${String(command)}`);
+        if (!callablePlugins.has(target.pluginId)) {
+          throw new Error(`插件 ${pluginId} 只能调用自己与 manifest.dependencies 中声明的插件的命令（${target.pluginId} 未声明）`);
+        }
+        if (!Array.isArray(args)) throw new TypeError('命令参数必须是数组');
+        return host.executeCommand(target.pluginId, target.commandId, args);
+      },
+    },
+
+    editor: {
+      getContent() {
+        checkPermission('editor:read');
+        return host.editor.getContent();
+      },
+      getSelection() {
+        checkPermission('editor:read');
+        return host.editor.getSelection();
+      },
+      getCursorPosition() {
+        checkPermission('editor:read');
+        return host.editor.getCursorPosition();
+      },
+      getLanguage() {
+        checkPermission('editor:read');
+        return host.editor.getLanguage();
+      },
+      onDidChange(listener) {
+        checkPermission('editor:read');
+        return host.editor.onDidChange(listener);
+      },
+      setContent(content) {
+        checkPermission('editor:write');
+        host.editor.setContent(assertString(content, '内容'));
+      },
+      replaceSelection(text) {
+        checkPermission('editor:write');
+        host.editor.replaceSelection(assertString(text, '文本'));
+      },
+      insertText(text) {
+        checkPermission('editor:write');
+        host.editor.insertText(assertString(text, '文本'));
+      },
+      setCursorPosition(line, column) {
+        checkPermission('editor:write');
+        host.editor.setCursorPosition(assertInteger(line, '行号'), assertInteger(column, '列号'));
+      },
+    },
+
+    ui: {
+      showMessage(message, type = 'info') {
+        checkUIPermission('ui:message');
+        if (type !== 'info' && type !== 'warning' && type !== 'error') throw new TypeError('消息类型无效');
+        host.ui.showMessage(assertString(message, '消息', MAX_MESSAGE_LENGTH), type);
+      },
+      showInput(options) {
+        checkUIPermission('ui:dialog');
+        return host.ui.showInput({
+          prompt: options?.prompt === undefined ? undefined : assertString(options.prompt, '提示', MAX_MESSAGE_LENGTH),
+          placeholder: options?.placeholder === undefined ? undefined : assertString(options.placeholder, '占位文本', MAX_MESSAGE_LENGTH),
+          value: options?.value === undefined ? undefined : assertString(options.value, '默认值'),
+        });
+      },
+      showQuickPick(items, options) {
+        checkUIPermission('ui:dialog');
+        if (!Array.isArray(items) || items.length === 0 || items.length > MAX_QUICK_PICK_ITEMS) {
+          throw new RangeError(`选择项必须是 1～${MAX_QUICK_PICK_ITEMS} 个字符串`);
+        }
+        return host.ui.showQuickPick(
+          items.map((item) => assertString(item, '选择项', MAX_MESSAGE_LENGTH)),
+          { placeholder: options?.placeholder === undefined ? undefined : assertString(options.placeholder, '占位文本', MAX_MESSAGE_LENGTH) }
+        );
+      },
+      showConfirm(message) {
+        checkUIPermission('ui:dialog');
+        return host.ui.showConfirm(assertString(message, '消息', MAX_MESSAGE_LENGTH));
+      },
+    },
+
+    statusBar: {
+      set(item) {
+        checkPermission('ui:statusbar');
+        if (!item || typeof item !== 'object') throw new TypeError('状态栏项必须是对象');
+        host.statusBar.set({
+          text: assertString(item.text, '状态栏文本', MAX_STATUS_TEXT_LENGTH),
+          tooltip: item.tooltip === undefined ? undefined : assertString(item.tooltip, '状态栏提示', MAX_TOOLTIP_LENGTH),
+          command: item.command === undefined ? undefined : assertDeclaredCommand(item.command),
+        });
+      },
+      clear() {
+        checkPermission('ui:statusbar');
+        host.statusBar.clear();
+      },
+    },
+
+    views: {
+      set(viewId, items) {
+        checkPermission('ui:view');
+        const view = assertString(viewId, '视图 ID');
+        if (!declaredViews.has(view)) throw new Error(`视图 ${view} 未在插件 ${pluginId} 的 manifest.contributes.views 中声明`);
+        if (!Array.isArray(items) || items.length > MAX_VIEW_ITEMS) {
+          throw new RangeError(`视图内容必须是不超过 ${MAX_VIEW_ITEMS} 项的数组`);
+        }
+        host.views.set(view, items.map(toViewItem));
+      },
+    },
+
+    configuration: {
+      get(key) {
+        const name = assertString(key, '配置项');
+        if (!configurationKeys.has(name)) throw new Error(`配置项 ${name} 未在插件 ${pluginId} 的 manifest.contributes.configuration 中声明`);
+        return host.configuration.get(name);
+      },
+      onDidChange(listener) {
+        if (typeof listener !== 'function') throw new TypeError('监听器必须是函数');
+        return host.configuration.onDidChange(listener);
+      },
+    },
+
+    storage: {
+      get(key) {
+        checkPermission('storage');
+        return host.storage.get(assertString(key, '键'));
+      },
+      set(key, value) {
+        checkPermission('storage');
+        host.storage.set(assertString(key, '键'), value);
+      },
+      delete(key) {
+        checkPermission('storage');
+        host.storage.delete(assertString(key, '键'));
+      },
+      keys() {
+        checkPermission('storage');
+        return host.storage.keys();
+      },
+    },
+  };
 }

@@ -4,7 +4,12 @@
 // ================================
 
 import { ipcMain, BrowserWindow } from 'electron';
-import { getAgentExecutor, type TaskType, type AgentTask } from './agent-executor';
+import {
+  getAgentExecutor,
+  type AgentTask,
+  type ProcessItemOptions,
+} from './agent-executor';
+import type { TaskType } from './task-types';
 
 /**
  * Register all agent-related IPC handlers
@@ -132,52 +137,51 @@ export function registerAgentHandlers(mainWindow: BrowserWindow | null): void {
    */
   ipcMain.handle(
     'agent:processItem',
-    async (
-      _event,
-      targetItemId: string,
-      options?: {
-        transcribe?: boolean;
-        summarize?: boolean;
-        extractTags?: boolean;
-        generateEmbedding?: boolean;
-        findRelated?: boolean;
-      }
-    ): Promise<string[]> => {
+    async (_event, targetItemId: string, options?: ProcessItemOptions): Promise<string[]> => {
       try {
-        const taskIds: string[] = [];
-
-        if (options?.transcribe) {
-          const id = await executor.createTask('transcribe', targetItemId, { priority: 10 });
-          taskIds.push(id);
-        }
-
-        if (options?.summarize) {
-          const id = await executor.createTask('summarize', targetItemId, { priority: 8 });
-          taskIds.push(id);
-        }
-
-        if (options?.extractTags) {
-          const id = await executor.createTask('extract-tags', targetItemId, { priority: 7 });
-          taskIds.push(id);
-        }
-
-        if (options?.generateEmbedding) {
-          const id = await executor.createTask('generate-embedding', targetItemId, { priority: 6 });
-          taskIds.push(id);
-        }
-
-        if (options?.findRelated) {
-          const id = await executor.createTask('find-related', targetItemId, { priority: 5 });
-          taskIds.push(id);
-        }
-
-        return taskIds;
+        return executor.processItem(targetItemId, options);
       } catch (error) {
         console.error('[Agent:IPC] Process item error:', error);
         throw error;
       }
     }
   );
+
+  /**
+   * 整库自动归类，返回任务 ID
+   */
+  ipcMain.handle('agent:categorizeLibrary', async (): Promise<string> => {
+    try {
+      return executor.categorizeLibrary();
+    } catch (error) {
+      console.error('[Agent:IPC] Categorize library error:', error);
+      throw error;
+    }
+  });
+
+  /**
+   * 为所有条目抽取实体，返回新提交的条目数
+   */
+  ipcMain.handle('agent:extractAllEntities', async (): Promise<number> => {
+    try {
+      return executor.extractAllEntities();
+    } catch (error) {
+      console.error('[Agent:IPC] Extract all entities error:', error);
+      throw error;
+    }
+  });
+
+  /**
+   * 为语义索引过期的条目重建分段向量，返回新提交的条目数
+   */
+  ipcMain.handle('agent:reindexEmbeddings', async (): Promise<number> => {
+    try {
+      return executor.reindexEmbeddings();
+    } catch (error) {
+      console.error('[Agent:IPC] Reindex embeddings error:', error);
+      throw error;
+    }
+  });
 
   console.log('[Agent:IPC] Agent handlers registered');
 }
@@ -207,6 +211,9 @@ export async function cleanupAgentHandlers(): Promise<void> {
     'agent:getPendingCount',
     'agent:getTasksForItem',
     'agent:processItem',
+    'agent:categorizeLibrary',
+    'agent:extractAllEntities',
+    'agent:reindexEmbeddings',
   ];
 
   handlers.forEach((channel) => {

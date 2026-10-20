@@ -1,0 +1,68 @@
+// ================================
+// LaTeX 编辑器预览样式（渲染管线块结构）
+// ================================
+
+// 管线为每个渲染块创建的包裹元素：没有 padding/border，块内元素的外边距照常折叠，
+// 布局与整篇渲染一致；包裹元素本身是 DOM 测量与滚动映射的单位
+.previewBlock {
+  // 尚未提交内容的块保留最小高度，使可视区判定与测量有真实的几何位置
+  &.pendingBlock {
+    min-height: 1.5em;
+  }
+}
+
+// 块内首个隐藏锚点：避免每个块的首元素都命中 :first-child 样式
+.blockAnchor {
+  display: none;
+}
+
+// 整篇渲染时，文档首元素与正文首元素命中 :first-child（标题上外边距为 0）；
+// 块包裹后由这两条规则还原相同的语义
+.previewBlock:first-child > .blockAnchor + :is(h1, h2, h3, h4, h5, h6),
+.previewBlock[data-latex-kind='preamble'] + .previewBlock > .blockAnchor + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: 0;
+}
+
+// ================================
+// 头部诊断计数（点击打开诊断面板）
+// ================================
+
+.diagnosticSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 1px;
+  }
+
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+}
+
+.diagnosticError {
+  color: var(--color-error);
+}
+
+.diagnosticWarning {
+  color: var(--color-warning);
+}
+
+.diagnosticInfo {
+  color: var(--color-info);
+}

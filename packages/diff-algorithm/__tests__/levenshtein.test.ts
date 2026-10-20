@@ -6,15 +6,29 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   LevenshteinEngine,
   createLevenshteinEngine,
-  createSpellCheckEngine,
   quickLevenshteinDistance,
   quickSimilarity,
   quickFindMostSimilar,
   quickSpellingSuggestions,
 } from '../src';
+import { perfBudget } from '@code-reader/test-support';
+
+/** 恒等键提取函数（候选项本身就是字符串） */
+const identity = (value: string): string => value;
+
+/** 计算编辑步骤中的非匹配操作（即真正的编辑操作） */
+function editOperations(engine: LevenshteinEngine, source: string, target: string) {
+  const result = engine.distance(source, target, { computeSteps: true });
+  return {
+    distance: result.distance,
+    operations: (result.steps ?? []).filter((step) => step.operation !== 'match'),
+  };
+}
 
 describe('LevenshteinEngine', () => {
   let engine: LevenshteinEngine;
+  /** 取编辑距离数值 */
+  const dist = (source: string, target: string): number => engine.distance(source, target).distance;
 
   beforeEach(() => {
     engine = createLevenshteinEngine();
@@ -22,40 +36,40 @@ describe('LevenshteinEngine', () => {
 
   describe('distance', () => {
     it('应该正确计算相同字符串的距离为 0', () => {
-      expect(engine.distance('hello', 'hello')).toBe(0);
-      expect(engine.distance('', '')).toBe(0);
-      expect(engine.distance('测试', '测试')).toBe(0);
+      expect(dist('hello', 'hello')).toBe(0);
+      expect(dist('', '')).toBe(0);
+      expect(dist('测试', '测试')).toBe(0);
     });
 
     it('应该正确计算空字符串的距离', () => {
-      expect(engine.distance('', 'abc')).toBe(3);
-      expect(engine.distance('abc', '')).toBe(3);
+      expect(dist('', 'abc')).toBe(3);
+      expect(dist('abc', '')).toBe(3);
     });
 
     it('应该正确计算单字符操作的距离', () => {
       // 插入
-      expect(engine.distance('ab', 'abc')).toBe(1);
+      expect(dist('ab', 'abc')).toBe(1);
       // 删除
-      expect(engine.distance('abc', 'ab')).toBe(1);
+      expect(dist('abc', 'ab')).toBe(1);
       // 替换
-      expect(engine.distance('abc', 'axc')).toBe(1);
+      expect(dist('abc', 'axc')).toBe(1);
     });
 
     it('应该正确计算多操作的距离', () => {
-      expect(engine.distance('kitten', 'sitting')).toBe(3);
-      expect(engine.distance('saturday', 'sunday')).toBe(3);
-      expect(engine.distance('intention', 'execution')).toBe(5);
+      expect(dist('kitten', 'sitting')).toBe(3);
+      expect(dist('saturday', 'sunday')).toBe(3);
+      expect(dist('intention', 'execution')).toBe(5);
     });
 
     it('应该正确处理中文字符', () => {
-      expect(engine.distance('你好', '你好世界')).toBe(2);
-      expect(engine.distance('中国', '中华')).toBe(1);
+      expect(dist('你好', '你好世界')).toBe(2);
+      expect(dist('中国', '中华')).toBe(1);
     });
 
     it('距离应该满足对称性', () => {
-      expect(engine.distance('abc', 'xyz')).toBe(engine.distance('xyz', 'abc'));
-      expect(engine.distance('hello', 'world')).toBe(
-        engine.distance('world', 'hello')
+      expect(dist('abc', 'xyz')).toBe(dist('xyz', 'abc'));
+      expect(dist('hello', 'world')).toBe(
+        dist('world', 'hello')
       );
     });
 
@@ -64,9 +78,9 @@ describe('LevenshteinEngine', () => {
       const b = 'abd';
       const c = 'acd';
 
-      const ab = engine.distance(a, b);
-      const bc = engine.distance(b, c);
-      const ac = engine.distance(a, c);
+      const ab = dist(a, b);
+      const bc = dist(b, c);
+      const ac = dist(a, c);
 
       expect(ac).toBeLessThanOrEqual(ab + bc);
     });
@@ -109,32 +123,40 @@ describe('LevenshteinEngine', () => {
     });
   });
 
-  describe('getOperations', () => {
+  describe('编辑步骤 (computeSteps)', () => {
     it('应该返回空数组当字符串相同时', () => {
-      const result = engine.getOperations('hello', 'hello');
-      expect(result.operations).toHaveLength(0);
+      const result = engine.distance('hello', 'hello', { computeSteps: true });
+      expect(result.steps).toBeDefined();
+      expect(result.steps!.every((step) => step.operation === 'match')).toBe(true);
+      expect(editOperations(engine, 'hello', 'hello').operations).toHaveLength(0);
     });
 
     it('应该正确识别插入操作', () => {
-      const result = engine.getOperations('ab', 'abc');
+      const result = editOperations(engine, 'ab', 'abc');
       expect(result.distance).toBe(1);
-      expect(result.operations.some((op) => op.type === 'insert')).toBe(true);
+      expect(result.operations).toEqual([
+        { operation: 'insert', sourceIndex: 2, targetIndex: 2, char: 'c' },
+      ]);
     });
 
     it('应该正确识别删除操作', () => {
-      const result = engine.getOperations('abc', 'ab');
+      const result = editOperations(engine, 'abc', 'ab');
       expect(result.distance).toBe(1);
-      expect(result.operations.some((op) => op.type === 'delete')).toBe(true);
+      expect(result.operations).toEqual([
+        { operation: 'delete', sourceIndex: 2, targetIndex: 2, char: 'c' },
+      ]);
     });
 
     it('应该正确识别替换操作', () => {
-      const result = engine.getOperations('abc', 'axc');
+      const result = editOperations(engine, 'abc', 'axc');
       expect(result.distance).toBe(1);
-      expect(result.operations.some((op) => op.type === 'replace')).toBe(true);
+      expect(result.operations).toEqual([
+        { operation: 'substitute', sourceIndex: 1, targetIndex: 1, char: 'x', originalChar: 'b' },
+      ]);
     });
 
     it('应该返回最小操作序列', () => {
-      const result = engine.getOperations('kitten', 'sitting');
+      const result = editOperations(engine, 'kitten', 'sitting');
       expect(result.distance).toBe(3);
       expect(result.operations.length).toBe(3);
     });
@@ -143,42 +165,46 @@ describe('LevenshteinEngine', () => {
   describe('findMostSimilar', () => {
     it('应该找到最相似的字符串', () => {
       const candidates = ['hello', 'hallo', 'world', 'help'];
-      const result = engine.findMostSimilar('hell', candidates);
+      const result = engine.findMostSimilar('hell', candidates, identity);
 
-      expect(result).toBeDefined();
-      expect(result!.item).toBe('hello');
+      // hello 与 help 距离均为 1，取先出现的 hello
+      expect(result).toBe('hello');
     });
 
-    it('应该在空候选列表时返回 undefined', () => {
-      const result = engine.findMostSimilar('hello', []);
-      expect(result).toBeUndefined();
+    it('应该在空候选列表时返回 null', () => {
+      const result = engine.findMostSimilar('hello', [], identity);
+      expect(result).toBeNull();
     });
 
     it('应该正确处理精确匹配', () => {
       const candidates = ['abc', 'abd', 'xyz'];
-      const result = engine.findMostSimilar('abc', candidates);
+      const result = engine.findMostSimilar('abc', candidates, identity);
 
-      expect(result!.item).toBe('abc');
-      expect(result!.distance).toBe(0);
-      expect(result!.similarity).toBe(1);
+      expect(result).toBe('abc');
+      expect(engine.distance('abc', result!).distance).toBe(0);
+      expect(engine.similarity('abc', result!)).toBe(1);
     });
 
-    it('应该按相似度排序', () => {
-      const candidates = ['test', 'testing', 'tester', 'toast'];
-      const result = engine.findMostSimilar('tests', candidates, { limit: 4 });
+    it('应该支持对象候选项与自定义键', () => {
+      const candidates = [
+        { id: 1, word: 'testing' },
+        { id: 2, word: 'test' },
+        { id: 3, word: 'tester' },
+        { id: 4, word: 'toast' },
+      ];
+      const result = engine.findMostSimilar('tests', candidates, (c) => c.word);
 
-      expect(result!.item).toBe('test');
+      expect(result?.id).toBe(2);
     });
   });
 
-  describe('findAllSimilar', () => {
+  describe('findSimilar', () => {
     it('应该返回所有满足阈值的结果', () => {
       const candidates = ['hello', 'hallo', 'world', 'help', 'held'];
-      const results = engine.findAllSimilar('hell', candidates, {
-        minSimilarity: 0.5,
-      });
+      const results = engine.findSimilar('hell', candidates, identity, 0.5);
 
-      expect(results.length).toBeGreaterThan(0);
+      // world 与 hell 相似度为 0.2，应被阈值过滤
+      expect(results.map((r) => r.key).sort()).toEqual(['hallo', 'held', 'hello', 'help']);
       for (const result of results) {
         expect(result.similarity).toBeGreaterThanOrEqual(0.5);
       }
@@ -186,10 +212,9 @@ describe('LevenshteinEngine', () => {
 
     it('应该按相似度降序排序', () => {
       const candidates = ['test', 'testing', 'tester', 'toast', 'best'];
-      const results = engine.findAllSimilar('test', candidates, {
-        minSimilarity: 0.3,
-      });
+      const results = engine.findSimilar('test', candidates, identity, 0.3);
 
+      expect(results[0]!.key).toBe('test');
       for (let i = 1; i < results.length; i++) {
         expect(results[i].similarity).toBeLessThanOrEqual(
           results[i - 1].similarity
@@ -197,23 +222,20 @@ describe('LevenshteinEngine', () => {
       }
     });
 
-    it('应该尊重 limit 参数', () => {
+    it('拼写建议应该尊重 maxSuggestions 上限', () => {
       const candidates = Array.from({ length: 100 }, (_, i) => `item${i}`);
-      const results = engine.findAllSimilar('item50', candidates, { limit: 5 });
+      const suggestions = engine.suggestSpelling('item50', candidates, 5, 2);
 
-      expect(results.length).toBeLessThanOrEqual(5);
+      // 距离 <= 2 的候选远多于 5 个，因此应恰好截断为 5 个，且首位为精确匹配
+      expect(suggestions).toHaveLength(5);
+      expect(suggestions[0]).toMatchObject({ word: 'item50', distance: 0 });
     });
   });
 });
 
-describe('createSpellCheckEngine', () => {
-  it('应该创建拼写检查引擎', () => {
-    const engine = createSpellCheckEngine();
-    expect(engine).toBeDefined();
-  });
-
+describe('大小写不敏感的拼写建议', () => {
   it('应该提供拼写建议', () => {
-    const engine = createSpellCheckEngine();
+    const engine = createLevenshteinEngine({ caseSensitive: false, maxDistance: 2 });
     const dictionary = [
       'apple',
       'application',
@@ -223,9 +245,9 @@ describe('createSpellCheckEngine', () => {
       'grape',
     ];
 
-    const result = engine.findMostSimilar('aple', dictionary);
-    expect(result).toBeDefined();
-    expect(result!.item).toBe('apple');
+    expect(engine.findMostSimilar('aple', dictionary, identity)).toBe('apple');
+    expect(engine.suggestSpelling('aple', dictionary)[0]?.word).toBe('apple');
+    expect(engine.isCorrectSpelling('Apple', dictionary)).toBe(true);
   });
 });
 
@@ -251,10 +273,8 @@ describe('便捷函数', () => {
   describe('quickFindMostSimilar', () => {
     it('应该找到最相似的项', () => {
       const candidates = ['cat', 'car', 'cart', 'bar'];
-      const result = quickFindMostSimilar('cats', candidates);
-
-      expect(result).toBeDefined();
-      expect(result!.item).toBe('cat');
+      expect(quickFindMostSimilar('cats', candidates)).toBe('cat');
+      expect(quickFindMostSimilar('cats', [])).toBeNull();
     });
   });
 
@@ -266,7 +286,7 @@ describe('便捷函数', () => {
       expect(suggestions.length).toBeGreaterThan(0);
       expect(suggestions.length).toBeLessThanOrEqual(3);
       // 第一个建议应该是最相似的
-      expect(suggestions[0].item).toBe('hello');
+      expect(suggestions[0]?.word).toBe('hello');
     });
   });
 });
@@ -283,27 +303,27 @@ describe('边界情况', () => {
     const str2 = 'a'.repeat(95) + 'bbbbb';
 
     const distance = engine.distance(str1, str2);
-    expect(distance).toBe(5);
+    expect(distance.distance).toBe(5);
   });
 
   it('应该处理 Unicode 字符', () => {
     const distance = engine.distance('🎉🎊', '🎉🎈');
-    expect(distance).toBe(1);
+    expect(distance.distance).toBe(1);
   });
 
   it('应该处理混合字符', () => {
     const distance = engine.distance('hello你好', 'hello世界');
-    expect(distance).toBe(2);
+    expect(distance.distance).toBe(2);
   });
 
   it('应该处理空格和特殊字符', () => {
     const distance = engine.distance('hello world', 'hello\tworld');
-    expect(distance).toBe(1);
+    expect(distance.distance).toBe(1);
   });
 
   it('应该处理大小写差异', () => {
     const distance = engine.distance('Hello', 'hello');
-    expect(distance).toBe(1);
+    expect(distance.distance).toBe(1);
   });
 });
 
@@ -317,8 +337,7 @@ describe('性能验证', () => {
     engine.distance(str1, str2);
     const duration = performance.now() - start;
 
-    // 应该在 1 秒内完成
-    expect(duration).toBeLessThan(1000);
+    expect(duration).toBeLessThan(perfBudget(1000));
   });
 
   it('应该能批量处理多个比较', () => {
@@ -326,10 +345,10 @@ describe('性能验证', () => {
     const candidates = Array.from({ length: 1000 }, (_, i) => `word${i}`);
 
     const start = performance.now();
-    engine.findAllSimilar('word500', candidates, { minSimilarity: 0.5 });
+    const results = engine.findSimilar('word500', candidates, identity, 0.5);
     const duration = performance.now() - start;
 
-    // 应该在 500ms 内完成
-    expect(duration).toBeLessThan(500);
+    expect(results[0]?.key).toBe('word500');
+    expect(duration).toBeLessThan(perfBudget(500));
   });
 });

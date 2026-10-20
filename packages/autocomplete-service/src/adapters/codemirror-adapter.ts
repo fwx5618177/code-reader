@@ -14,6 +14,7 @@ import {
   closeCompletion,
   acceptCompletion,
   moveCompletionSelection,
+  snippet,
 } from '@codemirror/autocomplete';
 import { type Extension } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
@@ -25,6 +26,56 @@ import type {
   IconMap,
   DEFAULT_ICON_MAP,
 } from '../types';
+
+// ================================
+// 代码片段
+// ================================
+
+/**
+ * 把 VS Code 风格的片段模板（$1、${1:默认值}、${1|a,b|}、$0）转成 CodeMirror snippet 模板：
+ * 字面的 { } 加反斜杠转义；$0（最终光标位置）排在所有字段之后
+ */
+export function toCodeMirrorSnippet(body: string): string {
+  let result = '';
+  let index = 0;
+  while (index < body.length) {
+    const rest = body.slice(index);
+    const placeholder = /^\$(?:(\d+)|\{(\d+)(?::([^}]*)|\|([^|}]*)\|)?\})/.exec(rest);
+    if (placeholder) {
+      const order = placeholder[1] ?? placeholder[2]!;
+      const text = placeholder[3] ?? placeholder[4]?.split(',')[0] ?? '';
+      const field = order === '0' ? '9999' : order;
+      result += text ? `\${${field}:${text.replace(/[{}]/g, '\\$&')}}` : `\${${field}}`;
+      index += placeholder[0].length;
+      continue;
+    }
+    const char = body[index]!;
+    if (char === '\\' && body[index + 1] === '$') {
+      result += '$';
+      index += 2;
+      continue;
+    }
+    result += char === '{' || char === '}' ? `\\${char}` : char;
+    index += 1;
+  }
+  return result;
+}
+
+/**
+ * CodeMirror 用 label 与输入的词匹配并高亮。补全项的匹配文本（filterText，如片段的触发词 def）
+ * 与显示名称（如“函数定义”）不同时，label 取匹配文本，displayLabel 显示名称；否则显示名称会让所有选项被过滤掉
+ */
+function completionLabels(item: CompletionItem): Pick<Completion, 'label' | 'displayLabel'> {
+  return item.filterText && item.filterText !== item.label
+    ? { label: item.filterText, displayLabel: item.label }
+    : { label: item.label };
+}
+
+/** 补全项的插入方式：含占位符的代码片段按 snippet 插入（Tab 在字段间跳转），其余直接插入文本 */
+function completionApply(item: CompletionItem): Completion['apply'] {
+  const text = item.insertText || item.label;
+  return item.type === 'snippet' && /\$(?:\d|\{\d)/.test(text) ? snippet(toCodeMirrorSnippet(text)) : text;
+}
 
 // ================================
 // 配置类型
@@ -93,7 +144,6 @@ export class CodeMirrorAdapter {
         maxResults: this.options.maxResults,
         fuzzy: this.options.fuzzy,
         minTriggerLength: this.options.minTriggerLength,
-        debounceMs: this.options.debounceMs,
       });
       this.ownsService = true;
     }
@@ -215,8 +265,8 @@ export class CodeMirrorAdapter {
    */
   private convertToCompletion(item: CompletionItem): Completion {
     const completion: Completion = {
-      label: item.label,
-      apply: item.insertText || item.label,
+      ...completionLabels(item),
+      apply: completionApply(item),
       type: item.type,
       boost: this.calculateBoost(item),
     };
@@ -383,8 +433,8 @@ export function createMarkdownCompletionSource(service: AutocompleteService): Co
     return {
       from: context.pos - query.length,
       options: result.items.map((item) => ({
-        label: item.label,
-        apply: item.insertText || item.label,
+        ...completionLabels(item),
+        apply: completionApply(item),
         type: item.type,
         detail: item.detail,
         info: item.documentation,
@@ -437,8 +487,8 @@ export function createEmojiCompletionSource(service: AutocompleteService): Compl
     return {
       from,
       options: emojiItems.map((item) => ({
-        label: item.label,
-        apply: item.insertText || item.label,
+        ...completionLabels(item),
+        apply: completionApply(item),
         type: 'emoji',
         detail: item.detail,
       })),
@@ -490,8 +540,8 @@ export function createSnippetCompletionSource(
     return {
       from: context.pos - query.length,
       options: snippetItems.map((item) => ({
-        label: item.label,
-        apply: item.insertText || item.label,
+        ...completionLabels(item),
+        apply: completionApply(item),
         type: 'snippet',
         detail: item.detail,
         info: item.documentation,
@@ -500,55 +550,6 @@ export function createSnippetCompletionSource(
   };
 }
 
-/**
- * 创建拼写检查补全源
- * @param service AutocompleteService 实例
- */
-export function createSpellCheckCompletionSource(service: AutocompleteService): CompletionSource {
-  return async (context: CMCompletionContext): Promise<CMCompletionResult | null> => {
-    const line = context.state.doc.lineAt(context.pos);
-    const textBefore = line.text.slice(0, context.pos - line.from);
-
-    // 提取当前单词
-    const wordMatch = textBefore.match(/[a-zA-Z]+$/);
-    if (!wordMatch || wordMatch[0].length < 3) {
-      return null;
-    }
-
-    const query = wordMatch[0];
-
-    const serviceContext: CompletionContext = {
-      query,
-      position: { line: line.number, column: context.pos - line.from + 1, offset: context.pos },
-      lineText: line.text,
-      textBefore,
-      textAfter: line.text.slice(context.pos - line.from),
-      editorType: 'codemirror',
-    };
-
-    const result = await service.getCompletions(serviceContext);
-
-    // 过滤只保留拼写建议
-    const spellItems = result.items.filter(
-      (item) => item.type === 'spell' || item.source === 'spell-check'
-    );
-
-    if (spellItems.length === 0) {
-      return null;
-    }
-
-    return {
-      from: context.pos - query.length,
-      options: spellItems.map((item) => ({
-        label: item.label,
-        apply: item.insertText || item.label,
-        type: 'text',
-        detail: item.detail,
-        boost: (item.priority ?? 50) - 50,
-      })),
-    };
-  };
-}
 
 /**
  * 创建混合补全扩展

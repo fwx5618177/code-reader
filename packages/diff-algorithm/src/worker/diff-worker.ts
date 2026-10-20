@@ -857,8 +857,10 @@ function handleMessage(request: WorkerRequest): WorkerResponse {
 // Worker 入口
 // ================================
 
-// 检查是否在 Worker 环境中
-const isWorkerContext = typeof self !== 'undefined' && typeof (self as unknown as { postMessage: unknown }).postMessage === 'function';
+// 只在专用 Worker 中注册消息处理。不能用 self.postMessage 判断：主线程的 self 即 window，同样有 postMessage，
+// 被打包进主线程时会形成 window 消息“收到即回发”的死循环，持续占满主线程、使 requestIdleCallback 永远等不到空闲
+const WorkerScope = (globalThis as { WorkerGlobalScope?: abstract new () => unknown }).WorkerGlobalScope;
+const isWorkerContext = WorkerScope !== undefined && self instanceof WorkerScope;
 
 if (isWorkerContext) {
   self.onmessage = (event: MessageEvent<WorkerRequest>) => {

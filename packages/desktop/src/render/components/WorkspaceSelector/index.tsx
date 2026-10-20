@@ -1,246 +1,175 @@
 // ================================
 // WorkspaceSelector 组件
-// Ribbon 的工作区/模式选择器
+// 标题栏左侧的知识库选择器：显示当前知识库，下拉中切换、新建、编辑、删除
+// 切换成功后主进程会重新加载所有窗口，因此这里不需要自行刷新数据
 // ================================
 
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  Code2,
-  Brain,
-  BookOpen,
-  PenTool,
-  Plus,
-  Check,
-  ExternalLink,
-  ChevronRight,
-} from 'lucide-react';
-import { AppMode } from '../../types/app-modes';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, ChevronDown, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { workspaceService, type WorkspaceInfo } from '../../services/workspaceService';
+import { ipcErrorMessage } from '../../lib/utils/ipc-error';
+import { WorkspaceAvatar, WorkspaceDialog, useWorkspaces, workspaceColorClass } from './workspace-ui';
 import styles from './WorkspaceSelector.module.scss';
 
-// ================================
-// 类型定义
-// ================================
+type DialogState = { mode: 'create' } | { mode: 'edit'; workspace: WorkspaceInfo } | null;
 
-export interface Workspace {
-  id: string;
-  type: AppMode;
-  name: string;
-  icon: React.ReactNode;
-  color: string;
-  shortcut?: string;
-}
+const WorkspaceSelector: React.FC = () => {
+  const workspaces = useWorkspaces();
+  const current = workspaces.find((workspace) => workspace.isCurrent);
 
-interface WorkspaceSelectorProps {
-  /** 当前激活的工作区/模式 */
-  currentMode: AppMode;
-  /** 工作区变更回调 */
-  onModeChange: (mode: AppMode) => void;
-  /** 在新窗口打开工作区回调 */
-  onOpenInNewWindow?: (mode: AppMode) => void;
-  /** 选择器是否折叠（仅显示图标） */
-  collapsed?: boolean;
-}
+  const [isOpen, setIsOpen] = useState(false);
+  const [dialog, setDialog] = useState<DialogState>(null);
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
-// ================================
-// 工作区定义
-// ================================
-
-const WORKSPACE_ICON_SIZE = 18;
-
-const WORKSPACES: Workspace[] = [
-  {
-    id: 'code-reader',
-    type: 'code-reader',
-    name: '代码阅读',
-    icon: <Code2 size={WORKSPACE_ICON_SIZE} />,
-    color: '#3b82f6', // 蓝色
-    shortcut: '⌘1',
-  },
-  {
-    id: 'reading',
-    type: 'reading',
-    name: '阅读',
-    icon: <BookOpen size={WORKSPACE_ICON_SIZE} />,
-    color: '#f59e0b', // 琥珀色
-    shortcut: '⌘2',
-  },
-  {
-    id: 'knowledge',
-    type: 'knowledge',
-    name: '知识库',
-    icon: <Brain size={WORKSPACE_ICON_SIZE} />,
-    color: '#10b981', // 绿色
-    shortcut: '⌘3',
-  },
-  {
-    id: 'writing',
-    type: 'writing',
-    name: '写作',
-    icon: <PenTool size={WORKSPACE_ICON_SIZE} />,
-    color: '#8b5cf6', // 紫色
-    shortcut: '⌘4',
-  },
-];
-
-// ================================
-// WorkspaceSelector 组件
-// ================================
-
-const WorkspaceSelector: React.FC<WorkspaceSelectorProps> = ({
-  currentMode,
-  onModeChange,
-  onOpenInNewWindow,
-  collapsed = false,
-}) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const selectorRef = useRef<HTMLDivElement>(null);
-
-  // 查找当前工作区
-  const currentWorkspace = WORKSPACES.find((w) => w.type === currentMode) || WORKSPACES[0];
-
-  // 点击外部时关闭下拉菜单
+  // 点击外部或按 Esc 关闭下拉
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent): void => {
-      if (selectorRef.current && !selectorRef.current.contains(event.target as Node)) {
-        setIsExpanded(false);
-      }
+    if (!isOpen) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
     };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // ESC 键关闭
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && isExpanded) {
-        setIsExpanded(false);
-      }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsOpen(false);
     };
-
+    document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isExpanded]);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
 
-  // 处理工作区选择
-  const handleSelect = (workspace: Workspace, event: React.MouseEvent): void => {
-    // Cmd/Ctrl + 点击在新窗口打开
-    if (event.metaKey || event.ctrlKey) {
-      onOpenInNewWindow?.(workspace.type);
-      return;
+  const toggle = () => {
+    setError(null);
+    setIsOpen((open) => !open);
+  };
+
+  const switchTo = async (workspace: WorkspaceInfo) => {
+    if (workspace.isCurrent || switchingId) return;
+    setError(null);
+    setSwitchingId(workspace.id);
+    try {
+      await workspaceService.switchTo(workspace.id);
+    } catch (err) {
+      setError(`切换失败：${ipcErrorMessage(err)}`);
+      setSwitchingId(null);
     }
-
-    onModeChange(workspace.type);
-    setIsExpanded(false);
   };
 
-  // 处理新窗口点击
-  const handleNewWindow = (workspace: Workspace, event: React.MouseEvent): void => {
-    event.stopPropagation();
-    onOpenInNewWindow?.(workspace.type);
+  const remove = async (workspace: WorkspaceInfo) => {
+    setError(null);
+    try {
+      await workspaceService.remove(workspace.id);
+    } catch (err) {
+      setError(`删除失败：${ipcErrorMessage(err)}`);
+    }
   };
 
-  // 构建容器类名
-  const containerClassName = [
-    styles.workspaceSelector,
-    collapsed ? styles.collapsed : '',
-    isExpanded ? styles.expanded : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const openDialog = (state: DialogState) => {
+    setIsOpen(false);
+    setDialog(state);
+  };
 
   return (
-    <div ref={selectorRef} className={containerClassName}>
-      {/* 当前工作区按钮 */}
+    <div ref={rootRef} className={`${styles.selector} app-no-drag`}>
       <button
-        className={styles.workspaceCurrent}
-        onClick={() => setIsExpanded(!isExpanded)}
-        title={`${currentWorkspace.name} (点击切换工作区)`}
-        style={{ '--workspace-color': currentWorkspace.color } as React.CSSProperties}
+        className={`${styles.trigger} ${isOpen ? styles.triggerOpen : ''}`}
+        onClick={toggle}
+        title="切换知识库"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
       >
-        <span className={styles.workspaceIcon}>{currentWorkspace.icon}</span>
-        {!collapsed && (
-          <>
-            <span className={styles.workspaceName}>{currentWorkspace.name}</span>
-            <ChevronRight
-              size={12}
-              className={`${styles.workspaceChevron} ${isExpanded ? styles.workspaceChevronRotated : ''}`}
-            />
-          </>
-        )}
+        {current && <WorkspaceAvatar workspace={current} />}
+        <span className={styles.triggerName}>{current?.name ?? '知识库'}</span>
+        <ChevronDown size={12} className={styles.triggerChevron} />
       </button>
 
-      {/* 工作区下拉列表 */}
-      {isExpanded && (
-        <div className={styles.workspaceDropdown}>
-          <div className={styles.workspaceDropdownHeader}>
-            <span>切换工作区</span>
-          </div>
+      {isOpen && (
+        <div className={styles.dropdown} role="menu">
+          <div className={styles.dropdownHeader}>知识库</div>
 
-          <div className={styles.workspaceList}>
-            {WORKSPACES.map((workspace) => (
-              <button
+          <div className={styles.list}>
+            {workspaces.map((workspace) => (
+              <div
                 key={workspace.id}
-                className={`${styles.workspaceItem} ${currentMode === workspace.type ? styles.workspaceItemActive : ''}`}
-                onClick={(e) => handleSelect(workspace, e)}
-                onMouseEnter={() => setHoveredId(workspace.id)}
-                onMouseLeave={() => setHoveredId(null)}
-                style={{ '--workspace-color': workspace.color } as React.CSSProperties}
-                title={`${workspace.name} (${workspace.shortcut})\n⌘+点击在新窗口打开`}
+                className={`${styles.item} ${workspace.isCurrent ? styles.itemCurrent : ''} ${workspaceColorClass(workspace.color)}`}
               >
-                <span className={styles.workspaceItemIcon}>{workspace.icon}</span>
-                <span className={styles.workspaceItemName}>{workspace.name}</span>
+                <button
+                  className={styles.itemMain}
+                  role="menuitemradio"
+                  aria-checked={workspace.isCurrent}
+                  onClick={() => void switchTo(workspace)}
+                  disabled={!!switchingId}
+                  title={workspace.isCurrent ? '当前知识库' : `切换到「${workspace.name}」`}
+                >
+                  <WorkspaceAvatar workspace={workspace} />
+                  <span className={styles.itemName}>{workspace.name}</span>
+                  {workspace.isDefault && <span className={styles.badge}>默认</span>}
+                  {switchingId === workspace.id && <Loader2 size={14} className={styles.spinner} />}
+                  {workspace.isCurrent && <Check size={14} className={styles.check} />}
+                </button>
 
-                <div className={styles.workspaceItemMeta}>
-                  {workspace.shortcut && (
-                    <kbd className={styles.workspaceShortcut}>{workspace.shortcut}</kbd>
-                  )}
-
-                  {currentMode === workspace.type && (
-                    <Check size={14} className={styles.workspaceCheck} />
-                  )}
-
-                  {hoveredId === workspace.id && onOpenInNewWindow && (
+                <div className={styles.itemActions}>
+                  <button
+                    className={styles.iconButton}
+                    onClick={() => openDialog({ mode: 'edit', workspace })}
+                    title="编辑名称与颜色"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  {!workspace.isDefault && !workspace.isCurrent && (
                     <button
-                      className={styles.workspaceNewWindow}
-                      onClick={(e) => handleNewWindow(workspace, e)}
-                      title="在新窗口打开"
+                      className={`${styles.iconButton} ${styles.dangerButton}`}
+                      onClick={() => void remove(workspace)}
+                      title="删除知识库"
                     >
-                      <ExternalLink size={12} />
+                      <Trash2 size={12} />
                     </button>
                   )}
                 </div>
-              </button>
+              </div>
             ))}
           </div>
 
-          <div className={styles.workspaceDropdownFooter}>
-            <button className={styles.workspaceAdd} title="创建新工作区">
+          {switchingId && <p className={styles.hint}>正在切换知识库…</p>}
+          {error && <p className={styles.error}>{error}</p>}
+
+          <div className={styles.dropdownFooter}>
+            <button className={styles.footerButton} onClick={() => openDialog({ mode: 'create' })}>
               <Plus size={14} />
-              <span>新建工作区</span>
+              <span>新建知识库</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* 快速访问图标（未展开时显示） */}
-      {!collapsed && !isExpanded && (
-        <div className={styles.workspaceQuickAccess}>
-          {WORKSPACES.filter((w) => w.type !== currentMode)
-            .slice(0, 3)
-            .map((workspace) => (
-              <button
-                key={workspace.id}
-                className={styles.workspaceQuickBtn}
-                onClick={(e) => handleSelect(workspace, e)}
-                title={`${workspace.name} (${workspace.shortcut})`}
-                style={{ '--workspace-color': workspace.color } as React.CSSProperties}
-              >
-                {React.cloneElement(workspace.icon as React.ReactElement, { size: 14 })}
-              </button>
-            ))}
-        </div>
+      {dialog?.mode === 'create' && (
+        <WorkspaceDialog
+          title="新建知识库"
+          submitText="创建并切换"
+          onClose={() => setDialog(null)}
+          onSubmit={async (input) => {
+            const created = await workspaceService.create(input);
+            // 创建已成功：关闭对话框，切换进度与可能的失败信息在下拉中显示
+            setDialog(null);
+            setIsOpen(true);
+            await switchTo(created);
+          }}
+        />
+      )}
+
+      {dialog?.mode === 'edit' && (
+        <WorkspaceDialog
+          workspace={dialog.workspace}
+          title="编辑知识库"
+          submitText="保存"
+          onClose={() => setDialog(null)}
+          onSubmit={async (input) => {
+            await workspaceService.update(dialog.workspace.id, input);
+            setDialog(null);
+          }}
+        />
       )}
     </div>
   );

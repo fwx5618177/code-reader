@@ -14,6 +14,8 @@ import {
   type DiffOptions,
 } from '../writing';
 import type { TextDiffResult, DiffStats } from '@code-reader/diff-algorithm';
+import { isLegacyHtml } from '../markdown/parser';
+import { markdownToPlainText } from '../markdown/extract';
 
 // ================================
 // 类型定义
@@ -196,7 +198,7 @@ export class WritingIntegration {
       const indexableDoc: IndexableDocument = {
         id: doc.id,
         title: doc.title,
-        content: this.stripHtml(doc.content),
+        content: this.toPlainText(doc.content),
         path: doc.path,
         type: 'document',
       };
@@ -223,7 +225,7 @@ export class WritingIntegration {
       const indexableDocs: IndexableDocument[] = docs.map((doc) => ({
         id: doc.id,
         title: doc.title,
-        content: this.stripHtml(doc.content),
+        content: this.toPlainText(doc.content),
         path: doc.path,
         type: 'document',
       }));
@@ -249,7 +251,7 @@ export class WritingIntegration {
       const indexableDoc: IndexableDocument = {
         id: doc.id,
         title: doc.title,
-        content: this.stripHtml(doc.content),
+        content: this.toPlainText(doc.content),
         path: doc.path,
         type: 'document',
       };
@@ -526,10 +528,12 @@ export class WritingIntegration {
   // ================================
 
   /**
-   * 剥离 HTML 标签
+   * 文档内容转为可索引的纯文本（Markdown 去除语法标记，旧版 HTML 去除标签）
    */
-  private stripHtml(html: string): string {
-    return html.replace(/<[^>]*>/g, '').trim();
+  private toPlainText(content: string): string {
+    return isLegacyHtml(content)
+      ? content.replace(/<[^>]*>/g, '').trim()
+      : markdownToPlainText(content);
   }
 
   /**

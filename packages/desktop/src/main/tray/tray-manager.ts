@@ -1,4 +1,5 @@
-import { Tray, Menu, nativeImage, app, BrowserWindow, nativeTheme, NativeImage } from 'electron';
+import { Tray, Menu, nativeImage, app, BrowserWindow, nativeTheme, NativeImage, ipcMain } from 'electron';
+import { buildRecentSubmenu, normalizeRecentDocuments, type RecentDocument } from './recent-menu';
 
 /**
  * TrayManager - Manages the system tray icon and menu for Code Reader
@@ -14,12 +15,20 @@ export class TrayManager {
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
   private isQuitting = false;
-  private recentItems: Array<{ label: string; path: string }> = [];
+  private unreadCount = 0;
+  /** “最近打开”的文档，由渲染进程在文档列表变化时推送 */
+  private recentDocuments: RecentDocument[] = [];
 
   constructor() {
     // Listen for app quit to clean up
     app.on('before-quit', () => {
       this.isQuitting = true;
+    });
+
+    // 单例构造时注册一次（initialize 可能随窗口重建多次调用）
+    ipcMain.on('tray:set-recent-documents', (_event, payload: unknown) => {
+      this.recentDocuments = normalizeRecentDocuments(payload);
+      this.updateContextMenu();
     });
   }
 
@@ -272,11 +281,13 @@ export class TrayManager {
 
   /**
    * Update the context menu
+   * @param options.unreadCount 不传时保留上次的未读数
    */
   updateContextMenu(options?: { unreadCount?: number }): void {
     if (!this.tray) return;
 
-    const unreadCount = options?.unreadCount || 0;
+    if (options?.unreadCount !== undefined) this.unreadCount = options.unreadCount;
+    const unreadCount = this.unreadCount;
 
     const contextMenu = Menu.buildFromTemplate([
       // App name header
@@ -309,6 +320,17 @@ export class TrayManager {
           this.mainWindow?.webContents.send('tray:open-search');
         },
       },
+      {
+        label: '最近打开',
+        submenu: buildRecentSubmenu(
+          this.recentDocuments,
+          (id) => {
+            this.showAndFocusWindow();
+            this.mainWindow?.webContents.send('tray:open-document', id);
+          },
+          process.platform
+        ),
+      },
       { type: 'separator' },
 
       // Mode switching
@@ -316,46 +338,30 @@ export class TrayManager {
         label: '切换模式',
         submenu: [
           {
-            label: '代码阅读',
-            accelerator: 'CmdOrCtrl+1',
-            click: () => {
-              this.mainWindow?.webContents.send('tray:switch-mode', 'code-reader');
-              this.showAndFocusWindow();
-            },
-          },
-          {
             label: '知识库',
-            accelerator: 'CmdOrCtrl+2',
+            accelerator: 'CmdOrCtrl+1',
             click: () => {
               this.mainWindow?.webContents.send('tray:switch-mode', 'knowledge');
               this.showAndFocusWindow();
             },
           },
           {
-            label: '日记',
+            label: '写作',
+            accelerator: 'CmdOrCtrl+2',
+            click: () => {
+              this.mainWindow?.webContents.send('tray:switch-mode', 'writing');
+              this.showAndFocusWindow();
+            },
+          },
+          {
+            label: '阅读',
             accelerator: 'CmdOrCtrl+3',
             click: () => {
-              this.mainWindow?.webContents.send('tray:switch-mode', 'journal');
+              this.mainWindow?.webContents.send('tray:switch-mode', 'reading');
               this.showAndFocusWindow();
             },
           },
         ],
-      },
-      { type: 'separator' },
-
-      // 最近打开项目
-      {
-        label: '最近打开',
-        submenu:
-          this.recentItems.length > 0
-            ? this.recentItems.map((item) => ({
-                label: item.label,
-                click: () => {
-                  this.showAndFocusWindow();
-                  this.mainWindow?.webContents.send('tray:open-path', item.path);
-                },
-              }))
-            : [{ label: '暂无记录', enabled: false }],
       },
       { type: 'separator' },
 
@@ -411,16 +417,6 @@ export class TrayManager {
         iconType: 'info',
       });
     }
-  }
-
-  /**
-   * 更新最近打开项目列表
-   * @param items 最近打开的项目列表
-   */
-  updateRecentItems(items: Array<{ label: string; path: string }>): void {
-    // 保存最近项目，最多显示10个
-    this.recentItems = items.slice(0, 10);
-    this.updateContextMenu();
   }
 
   /**

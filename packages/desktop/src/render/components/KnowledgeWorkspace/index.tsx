@@ -1,0 +1,311 @@
+// ================================
+// 知识库主工作区：工具栏 + 条目流 / 图谱 / 问答 + 条目详情面板
+// ================================
+
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
+import type { KnowledgeItem } from '../../types/knowledge';
+import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
+import type { LinkIndex, RelatedLink } from '../../lib/links/link-index';
+import { isWritingDocument } from '../../lib/documents/constants';
+import { isReadableItem } from '../../lib/knowledge/open-target';
+import KnowledgeGraph, { type KnowledgeGraphMode } from '../KnowledgeGraph';
+import ResizablePanel from '../ResizablePanel';
+import { PANELS } from '../../lib/layout/panel-sizes';
+import { ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
+import { useActivityByItem, useLibraryTaskRunning } from '../AgentActivity/activity';
+import {
+  EMPTY_FILTERS,
+  applyFilters,
+  buildSearchText,
+  filterByScope,
+  groupItems,
+  hasActiveFilters,
+  sortItems,
+  type ItemFilters,
+  type WorkspaceScope,
+} from './filtering';
+import { loadPrefs, savePrefs, type WorkspacePrefs } from './preferences';
+import { Toolbar, type WorkspaceView } from './Toolbar';
+import { ItemStream } from './ItemStream';
+import { EmptyScope, LoadError, NoMatches, Onboarding, StreamSkeleton } from './StreamStates';
+import { Inspector } from './Inspector';
+import { AskPanel } from './AskPanel';
+import { TagManager } from './TagManager';
+import { CategorizationReview } from './CategorizationReview';
+import { categorizationReview, useCategorizationReview } from '../../lib/categorization/reviewStore';
+import { useAskConversation } from './useAskConversation';
+import styles from './KnowledgeWorkspace.module.scss';
+
+export interface KnowledgeWorkspaceProps {
+  kb: UseKnowledgeBaseReturn;
+  /** 侧边栏选中的范围：文件夹或智能文件夹 */
+  scope: WorkspaceScope;
+  linkIndex: LinkIndex;
+  related: RelatedLink[];
+  /** 打开某条目（按 id），在本工作区内选中并显示详情 */
+  selectedItemId?: string;
+  onSelectItem: (id: string | undefined) => void;
+  /** 在写作模式中打开（仅写作文档） */
+  onOpenInWriting: (itemId: string) => void;
+  /** 在阅读模式中打开（PDF / EPUB / 网页剪藏等可阅读条目） */
+  onOpenInReading: (itemId: string) => void;
+  /** 通过双向链接创建新笔记（目标不存在时） */
+  onCreateNote: (title: string) => void;
+  /** 重命名条目（同时更新其他笔记中指向它的链接） */
+  onRenameItem: (id: string, title: string) => Promise<void>;
+  /** 打开快速输入 */
+  onQuickCapture: () => void;
+  /** 打开设置（用于引导配置 AI 服务商） */
+  onOpenSettings: () => void;
+  /** 条目流筛选（受控：侧栏标签云也会修改） */
+  filters: ItemFilters;
+  onFiltersChange: Dispatch<SetStateAction<ItemFilters>>;
+  /** 外部请求显示某条目详情：选中并打开详情面板（每个请求对象只执行一次） */
+  detailsRequest?: { id: string } | null;
+}
+
+/** 已执行过的详情请求（工作区重新挂载时不重复打开已被用户关闭的详情面板） */
+const handledDetailsRequests = new WeakSet<object>();
+
+const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
+  kb,
+  scope,
+  linkIndex,
+  related,
+  selectedItemId,
+  onSelectItem,
+  onOpenInWriting,
+  onOpenInReading,
+  onCreateNote,
+  onRenameItem,
+  onQuickCapture,
+  onOpenSettings,
+  filters,
+  onFiltersChange: setFilters,
+  detailsRequest,
+}) => {
+  const [view, setView] = useState<WorkspaceView>('items');
+  const [prefs, setPrefs] = useState<WorkspacePrefs>(loadPrefs);
+  const [graphMode, setGraphMode] = useState<KnowledgeGraphMode>('global');
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const conversation = useAskConversation();
+  const activityByItem = useActivityByItem();
+  const categorizing = useLibraryTaskRunning();
+  const review = useCategorizationReview();
+
+  useEffect(() => savePrefs(prefs), [prefs]);
+  const updatePrefs = useCallback(
+    (patch: Partial<WorkspacePrefs>) => setPrefs((prev) => ({ ...prev, ...patch })),
+    []
+  );
+
+  // ---------- 数据管线：范围 → 筛选 → 排序 → 分组 ----------
+
+  const tagById = useMemo(() => new Map(kb.tags.map((tag) => [tag.id, tag])), [kb.tags]);
+  const tagNameById = useMemo(() => new Map(kb.tags.map((tag) => [tag.id, tag.name])), [kb.tags]);
+  const itemsById = useMemo(() => new Map(kb.items.map((item) => [item.id, item])), [kb.items]);
+
+  // 标签被合并后，已不存在的标签从筛选中移除
+  useEffect(() => {
+    setFilters((prev) => {
+      const tagIds = prev.tagIds.filter((id) => tagById.has(id));
+      return tagIds.length === prev.tagIds.length ? prev : { ...prev, tagIds };
+    });
+  }, [tagById]);
+
+  // 可搜索文本按条目对象缓存；标签名变化时整体失效
+  const searchText = useMemo(() => {
+    const cache = new WeakMap<KnowledgeItem, string>();
+    return (item: KnowledgeItem) => {
+      let text = cache.get(item);
+      if (text === undefined) {
+        text = buildSearchText(item, tagNameById);
+        cache.set(item, text);
+      }
+      return text;
+    };
+  }, [tagNameById]);
+
+  const { folderId, rules } = scope;
+  const scoped = useMemo(
+    () => filterByScope(kb.items, { folderId, rules }),
+    [kb.items, folderId, rules]
+  );
+
+  // 搜索词延迟应用，输入时不被大列表的重新筛选阻塞
+  const query = useDeferredValue(filters.query);
+  const result = useMemo(
+    () => applyFilters(scoped, { ...filters, query }, searchText, kb.tags),
+    [scoped, filters.types, filters.tagIds, query, searchText, kb.tags]
+  );
+  const sorted = useMemo(() => sortItems(result.items, prefs.sort), [result.items, prefs.sort]);
+  const groups = useMemo(
+    () =>
+      groupItems(sorted, prefs.groupBy, {
+        sort: prefs.sort,
+        tags: kb.tags,
+        typeLabels: ITEM_TYPE_LABELS,
+        now: new Date(),
+      }),
+    [sorted, prefs.groupBy, prefs.sort, kb.tags]
+  );
+
+  const selectedItem = selectedItemId ? itemsById.get(selectedItemId) : undefined;
+
+  // ---------- 交互 ----------
+
+  /** Enter / 双击打开条目：写作文档进入写作，可阅读条目进入阅读 */
+  const handleOpen = useCallback(
+    (item: KnowledgeItem) => {
+      if (isWritingDocument(item)) onOpenInWriting(item.id);
+      else if (isReadableItem(item)) onOpenInReading(item.id);
+    },
+    [onOpenInWriting, onOpenInReading]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (item: KnowledgeItem) => {
+      kb.updateItem(item.id, { isFavorite: !item.isFavorite }).catch((error) =>
+        console.error('[Knowledge] 更新收藏失败:', error)
+      );
+    },
+    [kb]
+  );
+
+  /** 图谱中打开条目：选中并回到条目视图 */
+  const handleGraphOpen = useCallback(
+    (id: string) => {
+      onSelectItem(id);
+      setView('items');
+    },
+    [onSelectItem]
+  );
+
+  /** 选中条目，并确保详情面板可见（问答引用、外部详情请求共用） */
+  const showDetails = useCallback(
+    (id: string) => {
+      onSelectItem(id);
+      updatePrefs({ inspectorOpen: true });
+    },
+    [onSelectItem, updatePrefs]
+  );
+
+  useEffect(() => {
+    if (!detailsRequest || handledDetailsRequests.has(detailsRequest)) return;
+    handledDetailsRequests.add(detailsRequest);
+    showDetails(detailsRequest.id);
+  }, [detailsRequest, showDetails]);
+
+  // ---------- 渲染 ----------
+
+  const renderStream = () => {
+    if (kb.loading && kb.items.length === 0) return <StreamSkeleton />;
+    if (kb.items.length === 0) return kb.error ? null : <Onboarding onQuickCapture={onQuickCapture} />;
+    if (groups.length === 0) {
+      return hasActiveFilters(filters) ? (
+        <NoMatches onClearFilters={() => setFilters(EMPTY_FILTERS)} />
+      ) : (
+        <EmptyScope label={scope.label} onQuickCapture={onQuickCapture} />
+      );
+    }
+    return (
+      <ItemStream
+        groups={groups}
+        layout={prefs.layout}
+        timeField={prefs.sort === 'created' ? 'createdAt' : 'updatedAt'}
+        selectedId={selectedItemId}
+        onSelect={onSelectItem}
+        onOpen={handleOpen}
+        onToggleFavorite={handleToggleFavorite}
+        tagById={tagById}
+        activityByItem={activityByItem}
+      />
+    );
+  };
+
+  return (
+    <div className={styles.workspace}>
+      <Toolbar
+        view={view}
+        onViewChange={setView}
+        scopeLabel={scope.label}
+        scopeCount={scoped.length}
+        resultCount={result.items.length}
+        filters={filters}
+        onFiltersChange={setFilters}
+        typeCounts={result.typeCounts}
+        tags={kb.tags}
+        tagCounts={result.tagCounts}
+        prefs={prefs}
+        onPrefsChange={updatePrefs}
+        onQuickCapture={onQuickCapture}
+        onManageTags={() => setTagManagerOpen(true)}
+        categorizing={categorizing}
+        pendingReviewCount={review.proposals.length}
+        onOpenReview={() => categorizationReview.open()}
+        onOpenSettings={onOpenSettings}
+      />
+
+      <div className={styles.content}>
+        <main className={styles.main}>
+          {kb.error && <LoadError message={kb.error} onRetry={() => void kb.reload()} />}
+          {view === 'items' && renderStream()}
+          {view === 'graph' && (
+            <div className={styles.graph}>
+              <KnowledgeGraph
+                index={linkIndex}
+                related={related}
+                focusId={selectedItemId}
+                mode={graphMode}
+                onModeChange={setGraphMode}
+                onOpenItem={handleGraphOpen}
+                onCreateNote={onCreateNote}
+                onOpenSettings={onOpenSettings}
+              />
+            </div>
+          )}
+          {view === 'ask' && (
+            <AskPanel
+              conversation={conversation}
+              onSelectItem={showDetails}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
+        </main>
+
+        {prefs.inspectorOpen && (
+          <ResizablePanel spec={PANELS.inspector} side="right" label="调整详情面板宽度">
+            <Inspector
+              item={selectedItem}
+              kb={kb}
+              activity={selectedItem ? activityByItem.get(selectedItem.id) : undefined}
+              linkIndex={linkIndex}
+              related={related}
+              itemsById={itemsById}
+              tagNameById={tagNameById}
+              onSelectItem={onSelectItem}
+              onOpenInWriting={onOpenInWriting}
+              onOpenInReading={onOpenInReading}
+              onCreateNote={onCreateNote}
+              onRenameItem={onRenameItem}
+              onOpenSettings={onOpenSettings}
+            />
+          </ResizablePanel>
+        )}
+      </div>
+
+      {tagManagerOpen && <TagManager kb={kb} onClose={() => setTagManagerOpen(false)} />}
+      {review.open && <CategorizationReview kb={kb} onSelectItem={onSelectItem} />}
+    </div>
+  );
+};
+
+export default KnowledgeWorkspace;

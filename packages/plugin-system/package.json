@@ -1,7 +1,7 @@
 {
   "name": "@code-reader/plugin-system",
   "version": "1.0.0",
-  "description": "插件系统核心模块 - 支持插件注册、生命周期管理、沙箱隔离",
+  "description": "插件系统基础：插件清单与贡献点类型、扩展点注册表、版本范围与依赖解析、激活事件。同进程插件管理器与沙箱在 @code-reader/plugin-system-extras",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -15,17 +15,13 @@
       "import": "./dist/types/index.js",
       "types": "./dist/types/index.d.ts"
     },
-    "./core": {
-      "import": "./dist/core/index.js",
-      "types": "./dist/core/index.d.ts"
-    },
-    "./sandbox": {
-      "import": "./dist/sandbox/index.js",
-      "types": "./dist/sandbox/index.d.ts"
-    },
     "./registry": {
       "import": "./dist/registry/index.js",
       "types": "./dist/registry/index.d.ts"
+    },
+    "./lifecycle": {
+      "import": "./dist/lifecycle/index.js",
+      "types": "./dist/lifecycle/index.d.ts"
     }
   },
   "files": [
@@ -33,9 +29,10 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rimraf dist && tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rimraf dist",
     "prepublishOnly": "pnpm run build"
   },
@@ -50,7 +47,8 @@
   "license": "MIT",
   "devDependencies": {
     "rimraf": "^6.0.1",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^1.3.0"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"

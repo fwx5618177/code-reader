@@ -37,6 +37,7 @@ import {
   DEFAULT_DIFF_OPTIONS,
   initialWritingServiceState,
 } from './types';
+import { HIGHLIGHT_END, HIGHLIGHT_START } from '../../../shared/search-highlight';
 
 // ================================
 // Constants
@@ -228,6 +229,14 @@ export class WritingService implements IWritingService {
     this.searchHistory = [];
     this.initPromise = null;
 
+    // 资源已释放：同步重置运行态标记，避免外部读取到“已初始化 / Worker 就绪”的过期状态
+    // 缓存命中统计与最后持久化时间属于历史数据，予以保留
+    this.updateState({
+      isInitialized: false,
+      isWorkerReady: false,
+      indexedDocumentCount: 0,
+    });
+
     this.log('WritingService destroyed');
   }
 
@@ -412,6 +421,9 @@ export class WritingService implements IWritingService {
       fuzzy: opts.fuzzy,
       fuzzyThreshold: opts.fuzzyThreshold,
       highlight: opts.highlight,
+      // 与主进程的全文检索同一种高亮边界：正文里的尖括号按文字显示
+      highlightPrefix: HIGHLIGHT_START,
+      highlightSuffix: HIGHLIGHT_END,
       snippetLength: opts.snippetLength,
       fields: opts.fields as string[],
     };

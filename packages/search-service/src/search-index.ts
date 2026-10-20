@@ -934,11 +934,18 @@ export class SearchIndex {
 
     if (positions.length === 0) return null;
 
-    // 按位置排序
+    // 按位置排序，合并重叠或相邻的命中（多个词、同一词的重叠出现）：
+    // 否则从后往前插入高亮标签时，后插入的标签会切进先插入的标签里（出现 "rk>" 一类残片）
     positions.sort((a, b) => a.start - b.start);
+    const merged: Array<{ start: number; end: number }> = [];
+    for (const position of positions) {
+      const last = merged[merged.length - 1];
+      if (last && position.start <= last.end) last.end = Math.max(last.end, position.end);
+      else merged.push({ ...position });
+    }
 
     // 找到最佳片段位置
-    const firstMatch = positions[0];
+    const firstMatch = merged[0];
     let snippetStart = Math.max(0, firstMatch.start - Math.floor(maxLength / 4));
     let snippetEnd = Math.min(text.length, snippetStart + maxLength);
 
@@ -967,7 +974,7 @@ export class SearchIndex {
 
     // 高亮匹配
     const offset = snippetStart > 0 ? 3 : 0; // 省略号偏移
-    for (const pos of positions) {
+    for (const pos of merged) {
       if (pos.start >= snippetStart && pos.end <= snippetEnd) {
         snippetPositions.push({
           start: pos.start - snippetStart + offset,

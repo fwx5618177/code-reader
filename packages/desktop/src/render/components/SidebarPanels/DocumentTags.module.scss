@@ -1,0 +1,71 @@
+// ================================
+// 写作标签面板样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.chip {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  max-width: 100%;
+  padding: 1px var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  color: var(--tag-color, var(--text-secondary));
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.chipSelected {
+  border-color: var(--accent-primary);
+  background-color: var(--accent-primary-alpha);
+
+  &:hover {
+    background-color: var(--accent-primary-alpha);
+  }
+}
+
+.chipName {
+  @include truncate;
+}
+
+.chipCount {
+  color: var(--text-muted);
+}
+
+.clear {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--spacing-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}

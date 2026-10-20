@@ -5,14 +5,19 @@
 // ================================
 
 import { versionRepository } from './repository';
-import { DocumentVersion, CreateVersionInput, VersionComparison, ChangeType } from './types';
+import {
+  DocumentVersion,
+  CreateVersionInput,
+  VersionComparison,
+  ChangeType,
+  type VersionPruneResult,
+  type VersionRetentionPolicy,
+  type VersionStats,
+} from './types';
 
 // ================================
 // Constants
 // ================================
-
-/** Default number of versions to keep when pruning */
-const DEFAULT_PRUNE_KEEP_COUNT = 50;
 
 /** Default limit for version history queries */
 const DEFAULT_HISTORY_LIMIT = 20;
@@ -36,6 +41,7 @@ class VersionService {
     });
 
     console.log('[VersionService] Version created:', version.id, 'v' + version.versionNumber);
+    await this.pruneAfterCreate(input.itemId);
 
     return version;
   }
@@ -84,6 +90,7 @@ class VersionService {
         version.id,
         'v' + version.versionNumber
       );
+      await this.pruneAfterCreate(itemId);
     }
 
     return version;
@@ -158,6 +165,20 @@ class VersionService {
   }
 
   /**
+   * 获取在指定版本之前仍保留的最近一个版本（不依赖历史列表是否已分页加载到该版本）。
+   * 分层保留策略会删除中间版本，版本号不一定连续；本身已是最早保留的版本时返回 null
+   */
+  async getVersionBefore(version: DocumentVersion): Promise<DocumentVersion | null> {
+    if (version.versionNumber <= 1) return null;
+    const [previous] = await versionRepository.getHistory({
+      itemId: version.itemId,
+      beforeVersionNumber: version.versionNumber,
+      limit: 1,
+    });
+    return previous ?? null;
+  }
+
+  /**
    * Get total version count for a document
    */
   async getVersionCount(itemId: string): Promise<number> {
@@ -177,6 +198,7 @@ class VersionService {
       '-> new version:',
       restoredVersion.id
     );
+    await this.pruneAfterCreate(itemId);
 
     return restoredVersion;
   }
@@ -197,19 +219,46 @@ class VersionService {
   }
 
   /**
-   * Prune old versions, keeping only the most recent N
+   * 按已保存的保留策略（最近全部保留，之后按日/周/月抽样）清理一篇文档的旧版本
    */
-  async pruneVersions(
-    itemId: string,
-    keepCount: number = DEFAULT_PRUNE_KEEP_COUNT
-  ): Promise<number> {
-    const deletedCount = await versionRepository.prune(itemId, keepCount);
+  async pruneVersions(itemId: string): Promise<number> {
+    const deletedCount = await versionRepository.prune(itemId);
 
     if (deletedCount > 0) {
       console.log('[VersionService] Pruned', deletedCount, 'old versions for', itemId);
     }
 
     return deletedCount;
+  }
+
+  /** 按保留策略立即清理全部文档 */
+  async pruneAllVersions(): Promise<VersionPruneResult> {
+    return versionRepository.pruneAll();
+  }
+
+  async getRetentionPolicy(): Promise<VersionRetentionPolicy> {
+    return versionRepository.getRetention();
+  }
+
+  /** 保存保留策略，返回实际生效的值（主进程会规范化不合理的参数） */
+  async setRetentionPolicy(policy: VersionRetentionPolicy): Promise<VersionRetentionPolicy> {
+    return versionRepository.setRetention(policy);
+  }
+
+  async getStats(): Promise<VersionStats> {
+    return versionRepository.getStats();
+  }
+
+  /**
+   * 新增版本后按保留策略清理旧版本
+   * 版本已创建成功，清理失败只记录日志，下次创建时会再次清理
+   */
+  private async pruneAfterCreate(itemId: string): Promise<void> {
+    try {
+      await this.pruneVersions(itemId);
+    } catch (error) {
+      console.error('[VersionService] 清理旧版本失败:', itemId, error);
+    }
   }
 
   /**

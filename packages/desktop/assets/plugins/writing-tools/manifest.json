@@ -1,0 +1,53 @@
+{
+  "id": "writing-tools",
+  "name": "写作助手",
+  "version": "1.1.0",
+  "description": "插入当前日期、统计当前文档字数与预计阅读时间，在状态栏与侧栏「写作统计」视图显示字数目标进度。演示命令、快捷键、斜杠菜单、标签栏按钮、侧栏视图、配置与按需激活。",
+  "author": "Code Reader",
+  "main": "main.js",
+  "permissions": ["editor:read", "editor:write", "ui:message", "ui:dialog", "ui:statusbar", "ui:view", "storage"],
+  "activationEvents": ["onLanguage:markdown", "onLanguage:latex", "onView:stats"],
+  "contributes": {
+    "commands": [
+      { "id": "insert-date", "title": "写作助手：插入当前日期", "description": "按配置的日期格式在光标处插入今天的日期" },
+      { "id": "word-stats", "title": "写作助手：统计字数", "description": "统计当前文档与选中内容的字数、预计阅读时间" },
+      { "id": "set-goal", "title": "写作助手：设置字数目标", "description": "设置后状态栏与侧栏视图显示当前文档的完成进度" }
+    ],
+    "keybindings": [
+      { "command": "insert-date", "key": "Ctrl+Alt+D", "mac": "Cmd+Shift+D", "when": "editorFocus" },
+      { "command": "word-stats", "key": "Ctrl+Alt+K", "mac": "Cmd+Alt+K" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "insert-date", "order": 1 },
+        { "command": "word-stats", "order": 2 }
+      ]
+    },
+    "toolbar": [{ "command": "word-stats", "icon": "chart", "tooltip": "统计字数" }],
+    "views": [{ "id": "stats", "name": "写作统计" }],
+    "configuration": {
+      "title": "写作助手",
+      "properties": {
+        "dateFormat": {
+          "type": "string",
+          "default": "iso-weekday",
+          "enum": ["iso-weekday", "iso", "chinese"],
+          "enumDescriptions": ["2026-01-01 星期四", "2026-01-01", "2026年1月1日"],
+          "description": "插入日期的格式"
+        },
+        "readingSpeed": {
+          "type": "number",
+          "default": 400,
+          "minimum": 100,
+          "maximum": 2000,
+          "description": "每分钟阅读的汉字数（英文按其一半计单词数）"
+        },
+        "showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "在状态栏显示字数与目标进度"
+        }
+      }
+    }
+  }
+}

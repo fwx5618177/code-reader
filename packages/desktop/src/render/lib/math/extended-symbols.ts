@@ -232,6 +232,43 @@ export const EXTENDED_RELATIONS: Record<string, string> = {
   nsucc: '⊁',
   npreceq: '⋠',
   nsucceq: '⋡',
+
+  // amssymb 大小关系的变体（≲ ≳ 等）
+  leqq: '≦',
+  geqq: '≧',
+  lesssim: '≲',
+  gtrsim: '≳',
+  lessapprox: '⪅',
+  gtrapprox: '⪆',
+  lessgtr: '≶',
+  gtrless: '≷',
+  lesseqgtr: '⋚',
+  gtreqless: '⋛',
+  lesseqqgtr: '⪋',
+  gtreqqless: '⪌',
+  lessdot: '⋖',
+  gtrdot: '⋗',
+  eqslantless: '⪕',
+  eqslantgtr: '⪖',
+  lvertneqq: '≨',
+  gvertneqq: '≩',
+  precapprox: '⪷',
+  succapprox: '⪸',
+  eqsim: '≂',
+  backsim: '∽',
+  backsimeq: '⋍',
+  vartriangleleft: '⊲',
+  vartriangleright: '⊳',
+
+  // 推导与模型关系
+  vdash: '⊢',
+  dashv: '⊣',
+  models: '⊨',
+  vDash: '⊨',
+  Vdash: '⊩',
+  Vvdash: '⊪',
+  nvdash: '⊬',
+  nvDash: '⊭',
 };
 
 /** 扩展二元运算符 */
@@ -885,6 +922,11 @@ export const PHYSICS_SYMBOLS: Record<string, string> = {
 // 符号查找函数
 // ================================
 
+/** 仅检查自有属性，避免 \constructor 等命令命中原型链 */
+export function hasOwn(table: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(table, key);
+}
+
 /**
  * 查找符号
  * @param name 符号名称
@@ -892,35 +934,35 @@ export const PHYSICS_SYMBOLS: Record<string, string> = {
  */
 export function lookupSymbol(name: string): string | null {
   // 按优先级查找各个符号表
-  if (name in EXTENDED_GREEK_LETTERS) {
+  if (hasOwn(EXTENDED_GREEK_LETTERS, name)) {
     return EXTENDED_GREEK_LETTERS[name];
   }
 
-  if (name in EXTENDED_RELATIONS) {
+  if (hasOwn(EXTENDED_RELATIONS, name)) {
     return EXTENDED_RELATIONS[name];
   }
 
-  if (name in EXTENDED_BINARY_OPERATORS) {
+  if (hasOwn(EXTENDED_BINARY_OPERATORS, name)) {
     return EXTENDED_BINARY_OPERATORS[name];
   }
 
-  if (name in EXTENDED_LARGE_OPERATORS) {
+  if (hasOwn(EXTENDED_LARGE_OPERATORS, name)) {
     return EXTENDED_LARGE_OPERATORS[name];
   }
 
-  if (name in EXTENDED_ARROWS) {
+  if (hasOwn(EXTENDED_ARROWS, name)) {
     return EXTENDED_ARROWS[name];
   }
 
-  if (name in MISC_SYMBOLS) {
+  if (hasOwn(MISC_SYMBOLS, name)) {
     return MISC_SYMBOLS[name];
   }
 
-  if (name in EXTENDED_DELIMITERS) {
+  if (hasOwn(EXTENDED_DELIMITERS, name)) {
     return EXTENDED_DELIMITERS[name];
   }
 
-  if (name in PHYSICS_SYMBOLS) {
+  if (hasOwn(PHYSICS_SYMBOLS, name)) {
     return PHYSICS_SYMBOLS[name];
   }
 
@@ -987,7 +1029,7 @@ export function getAccent(name: string): string | null {
  * @returns 分隔符字符
  */
 export function getDelimiter(name: string): string | null {
-  return name in EXTENDED_DELIMITERS ? EXTENDED_DELIMITERS[name] : null;
+  return hasOwn(EXTENDED_DELIMITERS, name) ? EXTENDED_DELIMITERS[name] : null;
 }
 
 // ================================

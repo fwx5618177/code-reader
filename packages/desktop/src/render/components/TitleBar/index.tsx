@@ -1,6 +1,6 @@
 // ================================
 // TitleBar 组件
-// 标题栏，包含模式标签、专注模式按钮和窗口控制
+// 标题栏，包含知识库选择器、模式标签、专注模式按钮和窗口控制
 // ================================
 
 import React, { useEffect, useState } from 'react';
@@ -10,7 +10,6 @@ import {
   X,
   Copy,
   Search,
-  Code2,
   BookOpen,
   Brain,
   PenTool,
@@ -18,6 +17,7 @@ import {
 } from 'lucide-react';
 import { AppMode, APP_MODE_CONFIGS } from '../../types/app-modes';
 import Tooltip from '../Tooltip';
+import WorkspaceSelector from '../WorkspaceSelector';
 import styles from './TitleBar.module.scss';
 
 // ================================
@@ -54,28 +54,22 @@ interface ModeTabConfig {
 
 const MODE_TABS: ModeTabConfig[] = [
   {
-    mode: 'code-reader',
-    label: '代码',
-    icon: <Code2 size={14} />,
-    shortcut: '⌘1',
-  },
-  {
-    mode: 'reading',
-    label: '阅读',
-    icon: <BookOpen size={14} />,
-    shortcut: '⌘2',
-  },
-  {
     mode: 'knowledge',
     label: '知识库',
     icon: <Brain size={14} />,
-    shortcut: '⌘3',
+    shortcut: '⌘1',
   },
   {
     mode: 'writing',
     label: '写作',
     icon: <PenTool size={14} />,
-    shortcut: '⌘4',
+    shortcut: '⌘2',
+  },
+  {
+    mode: 'reading',
+    label: '阅读',
+    icon: <BookOpen size={14} />,
+    shortcut: '⌘3',
   },
 ];
 
@@ -87,7 +81,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
   title = 'Code Reader',
   subtitle,
   onOpenSearch,
-  currentMode = 'code-reader',
+  currentMode = 'knowledge',
   onModeChange,
   onEnterFocusMode,
   isInFocusMode = false,
@@ -157,8 +151,9 @@ const TitleBar: React.FC<TitleBarProps> = ({
       {/* macOS 红绿灯占位区域 */}
       {isMac && <div className={styles.trafficLights} />}
 
-      {/* 左侧区域 - 搜索 */}
+      {/* 左侧区域 - 知识库选择与搜索 */}
       <div className={styles.left}>
+        <WorkspaceSelector />
         {onOpenSearch && (
           <Tooltip content="搜索" shortcut="⌘P" position="bottom">
             <button className={`${styles.button} ${styles.searchBtn}`} onClick={onOpenSearch}>

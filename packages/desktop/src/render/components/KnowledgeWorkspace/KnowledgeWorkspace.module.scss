@@ -1,0 +1,37 @@
+// ================================
+// 知识库主工作区布局：顶部工具栏，下方主区域（条目流 / 图谱 / 问答）与右侧详情面板
+// ================================
+
+@use '../../styles/variables' as *;
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+// 子视图（虚拟列表、图谱画布、问答）需要有界高度的弹性列容器
+.main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.graph {
+  flex: 1;
+  min-height: 0;
+}

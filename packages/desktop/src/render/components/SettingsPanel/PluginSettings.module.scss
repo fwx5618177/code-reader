@@ -1,0 +1,264 @@
+// ================================
+// 插件设置专用样式（通用设置项样式见 SettingsPanel.module.scss）
+// ================================
+
+@use '../../styles/variables' as *;
+
+.card {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--spacing-2);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--spacing-4);
+}
+
+.version {
+  margin-left: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  color: var(--text-muted);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+
+  code {
+    font-family: var(--font-mono);
+  }
+}
+
+.badge {
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-full);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.status {
+  &.active {
+    color: var(--color-success);
+  }
+
+  &.loading,
+  &.idle {
+    color: var(--color-info);
+  }
+
+  &.error {
+    color: var(--color-error);
+  }
+}
+
+.description {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: $line-height-relaxed;
+  color: var(--text-secondary);
+}
+
+.group {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-2);
+}
+
+.groupLabel {
+  flex-shrink: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  padding: 0 var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  line-height: 1.8;
+  color: var(--text-secondary);
+
+  &.granted {
+    border-color: var(--color-success);
+  }
+
+  // 与应用或其他插件冲突而未生效的快捷键
+  &.conflict {
+    border-color: var(--color-warning);
+    color: var(--color-warning);
+    text-decoration: line-through;
+  }
+
+  kbd {
+    font-family: var(--font-mono);
+  }
+}
+
+// 插件配置
+.configuration {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.configItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-3);
+}
+
+.configLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+
+  code {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+  }
+}
+
+.resetButton {
+  @include button-reset;
+  display: inline-flex;
+  padding: var(--spacing-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.errors {
+  margin: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  list-style: none;
+  border-radius: var(--radius-md);
+  background-color: var(--color-error-bg);
+  font-size: var(--font-size-xs);
+  line-height: $line-height-relaxed;
+  color: var(--color-error);
+  word-break: break-word;
+}
+
+// 签名状态
+.signature {
+  padding: 0 var(--spacing-2);
+  border-radius: var(--radius-full);
+
+  &.trusted {
+    background-color: var(--color-success-bg);
+    color: var(--color-success);
+  }
+
+  &.untrusted,
+  &.unsigned {
+    background-color: var(--color-warning-bg);
+    color: var(--color-warning);
+  }
+
+  &.invalid {
+    background-color: var(--color-error-bg);
+    color: var(--color-error);
+  }
+}
+
+// 已安装 / 市场 / 信任 分页
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: var(--spacing-3);
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-tertiary);
+  align-self: flex-start;
+  width: fit-content;
+
+  button {
+    @include button-reset;
+    padding: var(--spacing-1) var(--spacing-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+
+    &[aria-selected='true'] {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+    }
+  }
+}
+
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2);
+  align-items: center;
+  margin: var(--spacing-2) 0;
+
+  input {
+    flex: 1;
+    min-width: 200px;
+  }
+}
+
+.keyInput {
+  width: 100%;
+  min-height: 64px;
+  padding: var(--spacing-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  resize: vertical;
+}
+
+.registryList {
+  margin: 0 0 var(--spacing-2);
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2);
+    padding: var(--spacing-1) 0;
+    font-size: var(--font-size-xs);
+    color: var(--text-secondary);
+    word-break: break-all;
+
+    code {
+      flex: 1;
+      font-family: var(--font-mono);
+    }
+  }
+}

@@ -1,7 +1,7 @@
 // ================================
 // LaTeX 解析器
-// 支持增量编译的完整 LaTeX 解析器
 // 采用两阶段解析：1. Preamble 解析 2. 正文解析
+// 增量引擎按块调用：前言块与每个正文块分别独立解析（块内相对坐标）
 // ================================
 
 import type {
@@ -20,16 +20,13 @@ import type {
   SectionNode,
   ListNode,
   ListItemNode,
-  ErrorNode,
   PackageInfo,
   MacroDefinition,
   LatexParserOptions,
   LatexParseResult,
-  ParseError,
-  ParseWarning,
-  DocumentChange,
-  IncrementalParseResult,
 } from './types';
+import { findClosingBrace, isAccentSymbol, isAccentWord } from './text-symbols';
+import { LIST_ENVIRONMENTS as LIST_ENVIRONMENT_NAMES, VERBATIM_ENVIRONMENTS as VERBATIM_ENVIRONMENT_NAMES } from '@code-reader/syntax-parser';
 
 // ================================
 // 常量定义
@@ -45,10 +42,14 @@ const SECTION_LEVELS: Record<string, SectionNode['level']> = {
   subparagraph: 'subparagraph',
 };
 
-/** 列表环境名称 */
-const LIST_ENVIRONMENTS = new Set(['itemize', 'enumerate', 'description']);
+/** 列表环境名称（与诊断用的 syntax-parser 共用名单） */
+const LIST_ENVIRONMENTS = new Set<string>(LIST_ENVIRONMENT_NAMES);
 
-/** 数学环境名称 */
+/**
+ * 解析为独立公式块（math_block）的顶层公式环境。
+ * 只是 syntax-parser 数学环境名单中可以独立成块的那部分；矩阵、aligned 等子环境
+ * 按普通环境节点解析，由渲染器的 renderMathEnvironment 处理
+ */
 const MATH_ENVIRONMENTS = new Set([
   'equation',
   'equation*',
@@ -63,13 +64,11 @@ const MATH_ENVIRONMENTS = new Set([
   'displaymath',
 ]);
 
-/** 需要特殊处理的环境 */
-const VERBATIM_ENVIRONMENTS = new Set(['verbatim', 'lstlisting', 'minted']);
+/** 原样输出环境 */
+const VERBATIM_ENVIRONMENTS = new Set<string>(VERBATIM_ENVIRONMENT_NAMES);
 
 /** 默认解析选项 */
 const DEFAULT_OPTIONS: Required<LatexParserOptions> = {
-  strict: false,
-  parseMathContent: false,
   preserveComments: true,
   preserveWhitespace: false,
   maxDepth: 100,
@@ -85,11 +84,6 @@ function generateNodeId(): string {
   return `node_${++nodeIdCounter}_${Date.now().toString(36)}`;
 }
 
-/** 重置 ID 计数器 */
-export function resetNodeIdCounter(): void {
-  nodeIdCounter = 0;
-}
-
 /** 计算字符串哈希值（快速版本） */
 function hashString(str: string): string {
   let hash = 0;
@@ -101,19 +95,37 @@ function hashString(str: string): string {
   return hash.toString(36);
 }
 
-/** 计算位置对应的行列号 */
-function getLineColumn(content: string, position: number): { line: number; column: number } {
-  let line = 1;
-  let column = 1;
-  for (let i = 0; i < position && i < content.length; i++) {
-    if (content[i] === '\n') {
-      line++;
-      column = 1;
-    } else {
-      column++;
-    }
+/**
+ * 从 from 开始查找与当前环境配对的 \end{name}：同名的 \begin{name} 使深度加一，未找到返回 -1
+ */
+function findEnvironmentEnd(input: string, from: number, name: string): number {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`\\\\(begin|end)\\{${escaped}\\}`, 'g');
+  pattern.lastIndex = from;
+  let depth = 1;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(input)) !== null) {
+    depth += match[1] === 'begin' ? 1 : -1;
+    if (depth === 0) return match.index;
   }
-  return { line, column };
+  return -1;
+}
+
+/**
+ * 读取前言中 `\name[可选]{参数}` 的必选参数（花括号配对，忽略被注释掉的行）；
+ * 未出现时返回 undefined
+ */
+function readCommandArgument(content: string, name: string): string | undefined {
+  const pattern = new RegExp(`\\\\${name}(?![a-zA-Z])\\s*(?:\\[[^\\]]*\\])?\\s*\\{`, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content)) !== null) {
+    const lineStart = content.lastIndexOf('\n', match.index) + 1;
+    if (/(^|[^\\])%/.test(content.slice(lineStart, match.index))) continue;
+    const open = match.index + match[0].length;
+    const close = findClosingBrace(content, open);
+    return content.slice(open, close === -1 ? content.length : close);
+  }
+  return undefined;
 }
 
 // ================================
@@ -129,10 +141,8 @@ export class LatexParser {
   private pos: number;
   private length: number;
   private options: Required<LatexParserOptions>;
-  private errors: ParseError[];
-  private warnings: ParseWarning[];
+  private errors: string[];
   private depth: number;
-  private startTime: number;
 
   constructor(input: string, options?: LatexParserOptions) {
     this.input = input;
@@ -140,46 +150,34 @@ export class LatexParser {
     this.length = input.length;
     this.options = { ...DEFAULT_OPTIONS, ...options };
     this.errors = [];
-    this.warnings = [];
     this.depth = 0;
-    this.startTime = 0;
+  }
+
+  /**
+   * 从 pos（反斜杠处）解析一个命令，返回节点与结束位置。
+   * 渲染器处理原文片段（列表项、标题、环境内容）时用它，保证与正文 AST 走同一套命令解析与渲染
+   */
+  static parseCommandAt(input: string, pos: number): { node: LatexNode | null; end: number } {
+    const parser = new LatexParser(input);
+    parser.pos = pos;
+    const node = parser.parseCommand(0);
+    return { node, end: Math.max(parser.pos, pos + 1) };
   }
 
   /**
    * 解析整个文档
    */
   parse(): LatexParseResult {
-    this.startTime = performance.now();
     this.errors = [];
-    this.warnings = [];
     this.pos = 0;
     this.depth = 0;
 
     try {
-      const ast = this.parseRoot();
-      const parseTime = performance.now() - this.startTime;
-
-      return {
-        ast,
-        success: this.errors.length === 0,
-        errors: this.errors,
-        warnings: this.warnings,
-        parseTime,
-      };
+      return { ast: this.parseRoot(), errors: this.errors };
     } catch (error) {
-      const parseTime = performance.now() - this.startTime;
-      const message = error instanceof Error ? error.message : String(error);
-
-      this.addError(message, this.pos, this.pos + 1);
-
+      this.errors.push(error instanceof Error ? error.message : String(error));
       // 返回一个最小的有效 AST
-      return {
-        ast: this.createRootNode(null, null),
-        success: false,
-        errors: this.errors,
-        warnings: this.warnings,
-        parseTime,
-      };
+      return { ast: this.createRootNode(null, null), errors: this.errors };
     }
   }
 
@@ -279,25 +277,10 @@ export class LatexParser {
       });
     }
 
-    // 解析 \title
-    const titleMatch = content.match(/\\title\{([^}]*)\}/);
-    if (titleMatch) {
-      title = titleMatch[1];
-    }
-
-    // 解析 \author
-    const authorMatch = content.match(/\\author\{([^}]*)\}/);
-    if (authorMatch) {
-      author = authorMatch[1];
-    }
-
-    // 解析 \date
-    const dateMatch = content.match(/\\date\{([^}]*)\}/);
-    if (dateMatch) {
-      date = dateMatch[1] === '\\today'
-        ? new Date().toLocaleDateString('zh-CN')
-        : dateMatch[1];
-    }
+    // \title / \author / \date 的参数常含嵌套命令（\textbf{..}、\thanks{..}），按花括号配对读取
+    title = readCommandArgument(content, 'title');
+    author = readCommandArgument(content, 'author');
+    date = readCommandArgument(content, 'date');
 
     return {
       type: 'preamble',
@@ -330,12 +313,7 @@ export class LatexParser {
     let currentParagraph: LatexNode[] = [];
 
     while (this.pos < this.length) {
-      this.skipWhitespace();
-      if (this.pos >= this.length) break;
-
-      const char = this.peek();
-
-      // 检查段落分隔（双换行）
+      // 段落分隔（空行）先于空白跳过判断，否则空行会被当作普通空白吞掉
       if (this.checkParagraphBreak()) {
         if (currentParagraph.length > 0) {
           children.push(this.createParagraphNode(currentParagraph, offset));
@@ -343,6 +321,12 @@ export class LatexParser {
         }
         this.consumeParagraphBreak();
         continue;
+      }
+
+      // 只跳过段首空白；段内节点之间的空格是正文的一部分（\% \& 之间、\textbf{x} 之后）
+      if (currentParagraph.length === 0) {
+        this.skipWhitespace();
+        if (this.pos >= this.length) break;
       }
 
       // 解析下一个节点
@@ -389,7 +373,6 @@ export class LatexParser {
     if (this.pos >= this.length) return null;
 
     const char = this.peek();
-    const start = this.pos;
 
     // 注释
     if (char === '%') {
@@ -468,7 +451,9 @@ export class LatexParser {
         return this.parseMathInline(offset, start, '\\(');
       }
 
-      const raw = '\\' + charCmd;
+      // 单字符重音（\'e、\"{o}、\^\i）：被修饰的字符作为参数读入，渲染时合成为带重音的字符
+      const args = isAccentSymbol(charCmd) ? [this.parseAccentArgument(offset)] : [];
+      const raw = this.input.slice(start, this.pos);
       return {
         type: 'command',
         id: generateNodeId(),
@@ -478,7 +463,7 @@ export class LatexParser {
         hash: hashString(raw),
         name: charCmd,
         options: [],
-        args: [],
+        args,
         star: false,
       } as CommandNode;
     }
@@ -510,16 +495,21 @@ export class LatexParser {
 
     // 解析可选参数
     const options: string[] = [];
-    this.skipWhitespace();
+    this.skipArgumentWhitespace();
     if (this.peek() === '[') {
       options.push(this.parseOptionalArg());
     }
 
     // 解析必选参数
     const args: LatexNode[][] = [];
-    this.skipWhitespace();
+    this.skipArgumentWhitespace();
     while (this.peek() === '{') {
       args.push(this.parseRequiredArg(offset));
+    }
+
+    // 字母重音的参数也可以不加花括号：\c c、\v s
+    if (isAccentWord(name) && args.length === 0) {
+      args.push(this.parseAccentArgument(offset));
     }
 
     const raw = this.input.slice(start, this.pos);
@@ -538,13 +528,42 @@ export class LatexParser {
   }
 
   /**
+   * 读取重音命令的参数（{x}、\i 等控制词或下一个字符）；参数为单个文本/命令节点，读不到时为空
+   */
+  private parseAccentArgument(offset: number): LatexNode[] {
+    while (this.peek() === ' ') this.pos++;
+    const char = this.peek();
+    if (!char || char === '}' || char === '\n') return [];
+    if (char === '{') return this.parseRequiredArg(offset);
+    if (char === '\\') {
+      const node = this.parseCommand(offset);
+      return node ? [node] : [];
+    }
+    const start = this.pos;
+    const text = String.fromCodePoint(this.input.codePointAt(start)!);
+    this.pos += text.length;
+    return [{
+      type: 'text',
+      id: generateNodeId(),
+      start: offset + start,
+      end: offset + this.pos,
+      raw: text,
+      hash: hashString(text),
+      content: text,
+    } as TextNode];
+  }
+
+  /**
    * 解析环境
    */
-  private parseEnvironment(offset: number, start: number): EnvironmentNode | ListNode | null {
+  private parseEnvironment(
+    offset: number,
+    start: number
+  ): EnvironmentNode | ListNode | MathBlockNode | null {
     // 解析环境名称
     this.skipWhitespace();
     if (this.peek() !== '{') {
-      this.addError('期望 { 开始环境名称', offset + this.pos, offset + this.pos + 1);
+      this.errors.push('期望 { 开始环境名称');
       return null;
     }
     this.pos++; // 跳过 {
@@ -569,12 +588,12 @@ export class LatexParser {
       args.push(this.parseRequiredArg(offset));
     }
 
-    // 查找 \end{envName}
+    // 查找配对的 \end{envName}（同名环境可以嵌套：枚举中的枚举）
     const endPattern = `\\end{${envName}}`;
-    const endIndex = this.input.indexOf(endPattern, this.pos);
+    const endIndex = findEnvironmentEnd(this.input, this.pos, envName);
 
     if (endIndex === -1) {
-      this.addError(`找不到 \\end{${envName}}`, offset + start, offset + this.pos);
+      this.errors.push(`找不到 \\end{${envName}}`);
       // 继续解析，假设环境延续到文档末尾
     }
 
@@ -594,9 +613,9 @@ export class LatexParser {
         raw,
         hash: hashString(raw),
         content: content.trim(),
-        delimiter: envName.replace('*', '') as MathBlockNode['delimiter'],
+        delimiter: envName.replace('*', ''),
         numbered: !envName.endsWith('*'),
-      } as MathBlockNode;
+      };
     }
 
     // 处理列表环境
@@ -687,29 +706,26 @@ export class LatexParser {
     listType: 'itemize' | 'enumerate' | 'description'
   ): ListNode {
     const items: ListItemNode[] = [];
-    const itemRegex = /\\item(?:\[([^\]]*)\])?/g;
+    // 只在本层切分 \item：嵌套环境（子列表）内的 \item 属于子列表；\itemsep 等不是条目
+    const tokenRegex = /\\(begin|end)\s*\{[^}]*\}|\\item(?![a-zA-Z])(?:\s*\[([^\]]*)\])?/g;
     let match: RegExpExecArray | null;
-    let lastEnd = 0;
-    const positions: { start: number; label?: string }[] = [];
+    const positions: { itemStart: number; start: number; label?: string }[] = [];
+    let depth = 0;
 
-    while ((match = itemRegex.exec(content)) !== null) {
-      positions.push({
-        start: match.index + match[0].length,
-        label: match[1],
-      });
+    while ((match = tokenRegex.exec(content)) !== null) {
+      if (match[1] === 'begin') depth++;
+      else if (match[1] === 'end') depth = Math.max(0, depth - 1);
+      else if (depth === 0) {
+        positions.push({ itemStart: match.index, start: match.index + match[0].length, label: match[2] });
+      }
     }
 
     for (let i = 0; i < positions.length; i++) {
       const start = positions[i].start;
-      const end = i + 1 < positions.length
-        ? content.lastIndexOf('\\item', positions[i + 1].start)
-        : content.length;
+      const end = i + 1 < positions.length ? positions[i + 1].itemStart : content.length;
 
       const itemContent = content.slice(start, end).trim();
-      const itemRaw = content.slice(
-        content.lastIndexOf('\\item', start),
-        end
-      );
+      const itemRaw = content.slice(positions[i].itemStart, end);
 
       items.push({
         type: 'list_item',
@@ -801,7 +817,7 @@ export class LatexParser {
 
     this.depth++;
     if (this.depth > this.options.maxDepth) {
-      this.addError('嵌套深度超过限制', offset + start, offset + this.pos);
+      this.errors.push('嵌套深度超过限制');
       this.depth--;
       return {
         type: 'group',
@@ -827,7 +843,7 @@ export class LatexParser {
     if (this.peek() === '}') {
       this.pos++; // 跳过 }
     } else {
-      this.addError('未闭合的分组', offset + start, offset + this.pos);
+      this.errors.push('未闭合的分组');
     }
 
     this.depth--;
@@ -944,6 +960,11 @@ export class LatexParser {
       if (this.checkParagraphBreak()) {
         break;
       }
+      content += this.consume();
+    }
+
+    // 顶层的 } ~ ^ _ 没有专门的解析分支：至少消耗一个字符作为文本，否则调用方会原地死循环
+    if (this.pos === start && this.pos < this.length) {
       content += this.consume();
     }
 
@@ -1092,6 +1113,21 @@ export class LatexParser {
   }
 
   /**
+   * 命令与参数之间的空白：与 TeX 一致，只跳过空格和至多一个换行，不跨过空行（空行是段落分隔）
+   */
+  private skipArgumentWhitespace(): void {
+    const isBlank = (char: string | undefined) => char === ' ' || char === '\t' || char === '\r';
+    let pos = this.pos;
+    while (isBlank(this.input[pos])) pos++;
+    if (this.input[pos] === '\n') {
+      let next = pos + 1;
+      while (isBlank(this.input[next])) next++;
+      if (this.input[next] !== '\n') pos = next;
+    }
+    this.pos = pos;
+  }
+
+  /**
    * 查看当前字符
    */
   private peek(): string {
@@ -1105,235 +1141,4 @@ export class LatexParser {
     return this.input[this.pos++] || '';
   }
 
-  /**
-   * 添加错误
-   */
-  private addError(message: string, start: number, end: number): void {
-    const { line, column } = getLineColumn(this.input, start);
-    this.errors.push({ message, start, end, line, column });
-  }
-
-  /**
-   * 添加警告
-   */
-  private addWarning(message: string, start: number, end: number): void {
-    const { line, column } = getLineColumn(this.input, start);
-    this.warnings.push({ message, start, end, line, column });
-  }
 }
-
-// ================================
-// 增量解析器
-// ================================
-
-/**
- * 增量解析器
- * 基于变更进行局部重新解析
- */
-export class IncrementalLatexParser {
-  private cachedAST: RootNode | null = null;
-  private cachedContent: string = '';
-
-  /**
-   * 增量解析
-   * @param newContent 新的文档内容
-   * @param changes 变更列表
-   * @param options 解析选项
-   */
-  parse(
-    newContent: string,
-    changes: DocumentChange[],
-    options?: LatexParserOptions
-  ): IncrementalParseResult {
-    const startTime = performance.now();
-
-    // 如果没有缓存或变更过大，进行完整解析
-    if (!this.cachedAST || this.shouldFullReparse(changes, newContent)) {
-      const parser = new LatexParser(newContent, options);
-      const result = parser.parse();
-
-      this.cachedAST = result.ast;
-      this.cachedContent = newContent;
-
-      return {
-        ast: result.ast,
-        affectedNodeIds: [],
-        dirtyNodeIds: this.getAllNodeIds(result.ast),
-        fullReparse: true,
-        parseTime: performance.now() - startTime,
-      };
-    }
-
-    // 计算受影响的区域
-    const affectedRange = this.calculateAffectedRange(changes);
-    const affectedNodes = this.findAffectedNodes(this.cachedAST, affectedRange);
-
-    // 重新解析受影响的部分
-    const parser = new LatexParser(newContent, options);
-    const newAST = parser.parse().ast;
-
-    // 合并新旧 AST
-    const mergedAST = this.mergeAST(this.cachedAST, newAST, affectedNodes);
-
-    this.cachedAST = mergedAST;
-    this.cachedContent = newContent;
-
-    return {
-      ast: mergedAST,
-      affectedNodeIds: affectedNodes.map(n => n.id),
-      dirtyNodeIds: affectedNodes.map(n => n.id),
-      fullReparse: false,
-      parseTime: performance.now() - startTime,
-    };
-  }
-
-  /**
-   * 判断是否需要完整重新解析
-   */
-  private shouldFullReparse(changes: DocumentChange[], newContent: string): boolean {
-    // 如果变更影响了 preamble，需要完整重新解析
-    for (const change of changes) {
-      if (change.from < this.getPreambleEnd()) {
-        return true;
-      }
-    }
-
-    // 如果变更太大（超过文档 20%），完整重新解析
-    const totalChangeSize = changes.reduce((sum, c) =>
-      sum + Math.abs(c.insert.length - c.deleted.length), 0);
-    if (totalChangeSize > newContent.length * 0.2) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * 获取 preamble 结束位置
-   */
-  private getPreambleEnd(): number {
-    if (!this.cachedAST || !this.cachedAST.preamble) {
-      return 0;
-    }
-    return this.cachedAST.preamble.end;
-  }
-
-  /**
-   * 计算受影响的范围
-   */
-  private calculateAffectedRange(changes: DocumentChange[]): { start: number; end: number } {
-    let start = Infinity;
-    let end = 0;
-
-    for (const change of changes) {
-      start = Math.min(start, change.from);
-      end = Math.max(end, change.to + change.insert.length);
-    }
-
-    return { start, end };
-  }
-
-  /**
-   * 查找受影响的节点
-   */
-  private findAffectedNodes(
-    ast: RootNode,
-    range: { start: number; end: number }
-  ): LatexNode[] {
-    const affected: LatexNode[] = [];
-
-    const traverse = (node: LatexNode) => {
-      // 检查节点是否与变更范围重叠
-      if (node.end >= range.start && node.start <= range.end) {
-        affected.push(node);
-      }
-
-      // 递归遍历子节点
-      if ('children' in node && Array.isArray(node.children)) {
-        for (const child of node.children) {
-          traverse(child);
-        }
-      }
-    };
-
-    if (ast.document) {
-      traverse(ast.document);
-    }
-
-    return affected;
-  }
-
-  /**
-   * 合并 AST
-   */
-  private mergeAST(
-    oldAST: RootNode,
-    newAST: RootNode,
-    affectedNodes: LatexNode[]
-  ): RootNode {
-    // 简化实现：直接使用新 AST
-    // 完整实现需要精确的节点匹配和更新
-    return {
-      ...newAST,
-      version: oldAST.version + 1,
-    };
-  }
-
-  /**
-   * 获取所有节点 ID
-   */
-  private getAllNodeIds(ast: RootNode): string[] {
-    const ids: string[] = [ast.id];
-
-    const traverse = (node: LatexNode) => {
-      ids.push(node.id);
-      if ('children' in node && Array.isArray(node.children)) {
-        for (const child of node.children) {
-          traverse(child);
-        }
-      }
-    };
-
-    if (ast.preamble) traverse(ast.preamble);
-    if (ast.document) traverse(ast.document);
-
-    return ids;
-  }
-
-  /**
-   * 清除缓存
-   */
-  clearCache(): void {
-    this.cachedAST = null;
-    this.cachedContent = '';
-  }
-}
-
-// ================================
-// 导出
-// ================================
-
-/**
- * 解析 LaTeX 文档
- * @param content LaTeX 源码
- * @param options 解析选项
- */
-export function parseLatex(content: string, options?: LatexParserOptions): LatexParseResult {
-  const parser = new LatexParser(content, options);
-  return parser.parse();
-}
-
-/**
- * 创建增量解析器实例
- */
-export function createIncrementalParser(): IncrementalLatexParser {
-  return new IncrementalLatexParser();
-}
-
-export default {
-  LatexParser,
-  IncrementalLatexParser,
-  parseLatex,
-  createIncrementalParser,
-  resetNodeIdCounter,
-};

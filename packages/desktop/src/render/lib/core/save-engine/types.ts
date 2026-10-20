@@ -76,24 +76,6 @@ export function createFailedResult(
 // 保存负载
 // ================================
 
-/**
- * 保存负载（全量或增量）
- */
-export interface SavePayload {
-  /** 保存类型 */
-  readonly type: 'full' | 'incremental';
-  /** 文档 ID */
-  readonly documentId: string;
-  /** 目标版本 ID */
-  readonly versionId: number;
-  /** 目标内容哈希 */
-  readonly contentHash: string;
-  /** 全量快照（type === 'full' 时存在） */
-  readonly snapshot?: ContentSnapshot;
-  /** 增量数据（type === 'incremental' 时存在） */
-  readonly incremental?: IncrementalSaveData;
-}
-
 // ================================
 // 保存策略
 // ================================
@@ -292,6 +274,12 @@ export interface ISaveEngine {
    * 立即保存（绕过策略）
    */
   saveNow(): Promise<SaveResult>;
+
+  /**
+   * 落盘：等待进行中的保存结束，若仍有未保存的更改则立即保存（不受自动保存开关影响）；
+   * 无需保存时返回 null
+   */
+  flush(): Promise<SaveResult | null>;
 
   /**
    * 取消任何待处理的保存

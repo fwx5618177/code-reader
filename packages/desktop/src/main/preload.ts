@@ -10,13 +10,14 @@ const validChannels = [
   'window-create-child',
 
   // 文件系统操作
-  'open-local-folder',
   'read-file',
+  'read-binary-file',
   'write-file',
   'write-binary-file',
   'get-file-info',
   'create-directory',
   'path-exists',
+  'rename-path',
 
   // 知识库数据操作
   'get-data-path',
@@ -29,27 +30,29 @@ const validChannels = [
   'db:initialize',
   'db:close',
   'db:run',
+  'db:transaction',
   'db:get',
   'db:all',
   'db:exec',
   'db:search',
   'db:rebuildFTS',
   'db:getSchemaVersion',
-  'db:backup',
   'db:vacuum',
   'db:stats',
   'db:clearAllData',
 
   // AI 操作
-  'ai:getProviders',
-  'ai:getProvider',
+  'ai:getConfig',
   'ai:addProvider',
   'ai:updateProvider',
   'ai:removeProvider',
   'ai:setDefaultProvider',
   'ai:setDefaultEmbeddingProvider',
+  'ai:setDefaultTranscriptionProvider',
   'ai:testConnection',
   'ai:chatCompletion',
+  'ai:chatStream',
+  'ai:chatStreamCancel',
   'ai:createEmbeddings',
   'ai:summarize',
   'ai:extractTags',
@@ -65,6 +68,21 @@ const validChannels = [
   'agent:getPendingCount',
   'agent:getTasksForItem',
   'agent:processItem',
+  'agent:categorizeLibrary',
+  'agent:extractAllEntities',
+  'agent:reindexEmbeddings',
+
+  // 实体图谱
+  'entities:getGraph',
+  'entities:getItemRelations',
+
+  // 自动归类待审阅提议
+  'categorization:listPending',
+  'categorization:review',
+
+  // 定期整理建议
+  'organize:getStatus',
+  'organize:update',
 
   // 语义搜索
   'search:semantic',
@@ -81,34 +99,119 @@ const validChannels = [
   'version:restore',
   'version:get-count',
   'version:prune',
+  'version:prune-all',
+  'version:get-retention',
+  'version:set-retention',
+  'version:get-stats',
   'version:auto-save',
   'version:should-auto-save',
 
-  // Git 操作
-  'git:is-in-repository',
-  'git:get-repository',
-  'git:sync-repository',
-  'git:get-current-branch',
-  'git:get-branches',
-  'git:get-remote-url',
-  'git:get-remotes',
-  'git:get-status',
-  'git:get-file-status',
-  'git:has-uncommitted-changes',
-  'git:get-head-commit',
-  'git:get-commit-history',
-  'git:get-commit',
-  'git:get-file-history',
-  'git:get-working-diff',
-  'git:get-staged-diff',
-  'git:get-commit-diff',
-  'git:get-file-at-commit',
-  'git:get-blame',
-  'git:list-stashes',
+  // 网页剪藏
+  'web:fetchHtml',
+  'web:downloadImages',
+
+  // 拼写检查
+  'spellcheck:listDictionaries',
+  'spellcheck:readDictionary',
+  'spellcheck:importDictionary',
+  'spellcheck:removeDictionary',
+  'spellcheck:getUserWords',
+  'spellcheck:addUserWord',
+  'spellcheck:removeUserWord',
+
+  // 插件
+  'plugins:list',
+  'plugins:readEntry',
+  'plugins:openDirectory',
+  'plugins:uninstall',
+  'plugins:getTrust',
+  'plugins:setPolicy',
+  'plugins:addTrustedKey',
+  'plugins:removeTrustedKey',
+  'plugins:marketList',
+  'plugins:marketInstall',
+  'plugins:marketAddRegistry',
+  'plugins:marketRemoveRegistry',
+
+  // 扫描版 PDF 文字识别
+  'ocr:listLanguages',
+  'ocr:importLanguage',
+  'ocr:removeLanguage',
+  'ocr:readResults',
+  'ocr:writePageResult',
+  'ocr:writeIndexedText',
+  'ocr:writeScanResult',
+  'ocr:removeResults',
+
+  // 知识库（多库切换）
+  'workspace:list',
+  'workspace:getCurrent',
+  'workspace:create',
+  'workspace:update',
+  'workspace:remove',
+  'workspace:switch',
+
+  // 备份与恢复
+  'backup:list',
+  'backup:create',
+  'backup:restore',
+  'backup:restoreFromFile',
+  'backup:delete',
+  'backup:openFolder',
+  'backup:exportFull',
+  'backup:restoreFull',
+
+  // 批量导入导出
+  'transfer:pickImportSource',
+  'transfer:copyAttachment',
+  'transfer:writeAttachment',
+  'transfer:finishImport',
+  'transfer:pickExportDirectory',
+  'transfer:writeExportFile',
+  'transfer:copyExportFile',
+  'transfer:finishExport',
+
+  // 多设备同步
+  'sync:getStatus',
+  'sync:chooseFolder',
+  'sync:connect',
+  'sync:providePassphrase',
+  'sync:disconnect',
+  'sync:update',
+  'sync:runNow',
+
 ];
 
 // 用于接收事件的通道
-const eventChannels = ['agent:progress', 'agent:taskCompleted', 'agent:taskFailed'];
+const eventChannels = [
+  'agent:progress',
+  'agent:taskCompleted',
+  'agent:taskFailed',
+  'agent:itemStatusChanged',
+  'ai:chatChunk',
+  'tray:quick-note',
+  'tray:open-search',
+  'tray:switch-mode',
+  'tray:open-settings',
+  'tray:open-document',
+  'sync:applied',
+  'help:open-guide',
+  'help:open-start',
+];
+
+/** 流式对话序号；事件只发往发起请求的窗口，窗口内唯一即可 */
+let chatStreamSeq = 0;
+
+/**
+ * 订阅主进程推送的事件，返回取消订阅函数
+ */
+function subscribe<T>(channel: string, callback: (payload: T) => void): () => void {
+  const subscription = (_event: Electron.IpcRendererEvent, payload: T) => callback(payload);
+  ipcRenderer.on(channel, subscription);
+  return () => {
+    ipcRenderer.removeListener(channel, subscription);
+  };
+}
 
 // 暴露安全的 API 到渲染进程
 contextBridge.exposeInMainWorld('electron', {
@@ -165,6 +268,8 @@ contextBridge.exposeInMainWorld('electron', {
     initialize: () => ipcRenderer.invoke('db:initialize'),
     close: () => ipcRenderer.invoke('db:close'),
     run: (sql: string, params?: unknown[]) => ipcRenderer.invoke('db:run', sql, params),
+    transaction: (statements: Array<{ sql: string; params?: unknown[] }>) =>
+      ipcRenderer.invoke('db:transaction', statements),
     get: <T>(sql: string, params?: unknown[]) =>
       ipcRenderer.invoke('db:get', sql, params) as Promise<T | undefined>,
     all: <T>(sql: string, params?: unknown[]) =>
@@ -172,7 +277,6 @@ contextBridge.exposeInMainWorld('electron', {
     search: (query: string, options?: { types?: string[]; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('db:search', query, options),
     getSchemaVersion: () => ipcRenderer.invoke('db:getSchemaVersion'),
-    backup: (path?: string) => ipcRenderer.invoke('db:backup', path),
     vacuum: () => ipcRenderer.invoke('db:vacuum'),
     stats: () => ipcRenderer.invoke('db:stats'),
     clearAllData: () => ipcRenderer.invoke('db:clearAllData'),
@@ -180,17 +284,32 @@ contextBridge.exposeInMainWorld('electron', {
 
   // AI 便捷方法
   ai: {
-    getProviders: () => ipcRenderer.invoke('ai:getProviders'),
-    getProvider: (id: string) => ipcRenderer.invoke('ai:getProvider', id),
-    addProvider: (provider: unknown) => ipcRenderer.invoke('ai:addProvider', provider),
+    getConfig: () => ipcRenderer.invoke('ai:getConfig'),
+    addProvider: (input: unknown) => ipcRenderer.invoke('ai:addProvider', input),
     updateProvider: (id: string, updates: unknown) =>
       ipcRenderer.invoke('ai:updateProvider', id, updates),
     removeProvider: (id: string) => ipcRenderer.invoke('ai:removeProvider', id),
     setDefaultProvider: (id: string) => ipcRenderer.invoke('ai:setDefaultProvider', id),
     setDefaultEmbeddingProvider: (id: string) =>
       ipcRenderer.invoke('ai:setDefaultEmbeddingProvider', id),
+    setDefaultTranscriptionProvider: (id: string) =>
+      ipcRenderer.invoke('ai:setDefaultTranscriptionProvider', id),
     testConnection: (providerId: string) => ipcRenderer.invoke('ai:testConnection', providerId),
     chatCompletion: (request: unknown) => ipcRenderer.invoke('ai:chatCompletion', request),
+    chatStream: (request: unknown, onDelta: (delta: string) => void) => {
+      const streamId = `chat-${++chatStreamSeq}`;
+      const unsubscribe = subscribe<{ streamId: string; delta: string }>(
+        'ai:chatChunk',
+        (chunk) => {
+          if (chunk.streamId === streamId) onDelta(chunk.delta);
+        }
+      );
+      // 主进程先发送增量事件再返回结果，同一通道保序，返回时增量已全部送达
+      const result = ipcRenderer.invoke('ai:chatStream', streamId, request).finally(unsubscribe);
+      // AbortSignal 无法穿过 contextBridge，改为返回停止函数
+      const cancel = () => ipcRenderer.invoke('ai:chatStreamCancel', streamId);
+      return { result, cancel };
+    },
     createEmbeddings: (request: unknown) => ipcRenderer.invoke('ai:createEmbeddings', request),
     summarize: (request: unknown) => ipcRenderer.invoke('ai:summarize', request),
     extractTags: (request: unknown) => ipcRenderer.invoke('ai:extractTags', request),
@@ -210,14 +329,33 @@ contextBridge.exposeInMainWorld('electron', {
     getTasksForItem: (itemId: string) => ipcRenderer.invoke('agent:getTasksForItem', itemId),
     processItem: (targetItemId: string, options?: unknown) =>
       ipcRenderer.invoke('agent:processItem', targetItemId, options),
-    onProgress: (callback: (progress: unknown) => void) => {
-      const subscription = (_event: Electron.IpcRendererEvent, progress: unknown) =>
-        callback(progress);
-      ipcRenderer.on('agent:progress', subscription);
-      return () => {
-        ipcRenderer.removeListener('agent:progress', subscription);
-      };
-    },
+    categorizeLibrary: () => ipcRenderer.invoke('agent:categorizeLibrary'),
+    extractAllEntities: () => ipcRenderer.invoke('agent:extractAllEntities'),
+    reindexEmbeddings: () => ipcRenderer.invoke('agent:reindexEmbeddings'),
+    onProgress: (callback: (progress: unknown) => void) => subscribe('agent:progress', callback),
+    onTaskCompleted: (callback: (event: unknown) => void) =>
+      subscribe('agent:taskCompleted', callback),
+    onTaskFailed: (callback: (event: unknown) => void) => subscribe('agent:taskFailed', callback),
+    onItemStatusChanged: (callback: (event: unknown) => void) =>
+      subscribe('agent:itemStatusChanged', callback),
+  },
+
+  // 实体图谱便捷方法
+  entities: {
+    getGraph: () => ipcRenderer.invoke('entities:getGraph'),
+    getItemRelations: (itemId: string) => ipcRenderer.invoke('entities:getItemRelations', itemId),
+  },
+
+  // 自动归类待审阅提议便捷方法
+  categorization: {
+    listPending: () => ipcRenderer.invoke('categorization:listPending'),
+    review: (decisions: unknown) => ipcRenderer.invoke('categorization:review', decisions),
+  },
+
+  // 定期整理建议：设置保存在当前知识库，由主进程按间隔提交整库归类
+  organize: {
+    getStatus: () => ipcRenderer.invoke('organize:getStatus'),
+    update: (input: unknown) => ipcRenderer.invoke('organize:update', input),
   },
 
   // 语义搜索便捷方法
@@ -242,46 +380,136 @@ contextBridge.exposeInMainWorld('electron', {
     restore: (itemId: string, versionId: string) =>
       ipcRenderer.invoke('version:restore', itemId, versionId),
     getCount: (itemId: string) => ipcRenderer.invoke('version:get-count', itemId),
-    prune: (itemId: string, keepCount?: number) =>
-      ipcRenderer.invoke('version:prune', itemId, keepCount),
+    prune: (itemId: string) => ipcRenderer.invoke('version:prune', itemId),
+    pruneAll: () => ipcRenderer.invoke('version:prune-all'),
+    getRetention: () => ipcRenderer.invoke('version:get-retention'),
+    setRetention: (policy: unknown) => ipcRenderer.invoke('version:set-retention', policy),
+    getStats: () => ipcRenderer.invoke('version:get-stats'),
     autoSave: (itemId: string, content: string, options?: unknown) =>
       ipcRenderer.invoke('version:auto-save', itemId, content, options),
     shouldAutoSave: (itemId: string, minIntervalMs?: number) =>
       ipcRenderer.invoke('version:should-auto-save', itemId, minIntervalMs),
   },
 
-  // Git 便捷方法
-  git: {
-    isInRepository: (path: string) => ipcRenderer.invoke('git:is-in-repository', path),
-    getRepository: (path: string) => ipcRenderer.invoke('git:get-repository', path),
-    syncRepository: (path: string) => ipcRenderer.invoke('git:sync-repository', path),
-    getCurrentBranch: (repoPath: string) => ipcRenderer.invoke('git:get-current-branch', repoPath),
-    getBranches: (repoPath: string) => ipcRenderer.invoke('git:get-branches', repoPath),
-    getRemoteUrl: (repoPath: string) => ipcRenderer.invoke('git:get-remote-url', repoPath),
-    getRemotes: (repoPath: string) => ipcRenderer.invoke('git:get-remotes', repoPath),
-    getStatus: (repoPath: string) => ipcRenderer.invoke('git:get-status', repoPath),
-    getFileStatus: (repoPath: string, filePath: string) =>
-      ipcRenderer.invoke('git:get-file-status', repoPath, filePath),
-    hasUncommittedChanges: (repoPath: string) =>
-      ipcRenderer.invoke('git:has-uncommitted-changes', repoPath),
-    getHeadCommit: (repoPath: string) => ipcRenderer.invoke('git:get-head-commit', repoPath),
-    getCommitHistory: (repoPath: string, options?: unknown) =>
-      ipcRenderer.invoke('git:get-commit-history', repoPath, options),
-    getCommit: (repoPath: string, commitHash: string) =>
-      ipcRenderer.invoke('git:get-commit', repoPath, commitHash),
-    getFileHistory: (repoPath: string, filePath: string, limit?: number) =>
-      ipcRenderer.invoke('git:get-file-history', repoPath, filePath, limit),
-    getWorkingDiff: (repoPath: string, filePath?: string) =>
-      ipcRenderer.invoke('git:get-working-diff', repoPath, filePath),
-    getStagedDiff: (repoPath: string, filePath?: string) =>
-      ipcRenderer.invoke('git:get-staged-diff', repoPath, filePath),
-    getCommitDiff: (repoPath: string, fromCommit: string, toCommit?: string, filePath?: string) =>
-      ipcRenderer.invoke('git:get-commit-diff', repoPath, fromCommit, toCommit, filePath),
-    getFileAtCommit: (repoPath: string, filePath: string, commitHash: string) =>
-      ipcRenderer.invoke('git:get-file-at-commit', repoPath, filePath, commitHash),
-    getBlame: (repoPath: string, filePath: string) =>
-      ipcRenderer.invoke('git:get-blame', repoPath, filePath),
-    listStashes: (repoPath: string) => ipcRenderer.invoke('git:list-stashes', repoPath),
+  // 网页剪藏：由主进程抓取 HTML、下载正文图片
+  web: {
+    fetchHtml: (url: string) => ipcRenderer.invoke('web:fetchHtml', url),
+    downloadImages: (urls: string[], directory: string) =>
+      ipcRenderer.invoke('web:downloadImages', urls, directory),
+  },
+
+  // 拼写检查：词典文件与用户词表由主进程管理
+  spellcheck: {
+    listDictionaries: () => ipcRenderer.invoke('spellcheck:listDictionaries'),
+    readDictionary: (id: string) => ipcRenderer.invoke('spellcheck:readDictionary', id),
+    importDictionary: () => ipcRenderer.invoke('spellcheck:importDictionary'),
+    removeDictionary: (id: string) => ipcRenderer.invoke('spellcheck:removeDictionary', id),
+    getUserWords: () => ipcRenderer.invoke('spellcheck:getUserWords'),
+    addUserWord: (word: string) => ipcRenderer.invoke('spellcheck:addUserWord', word),
+    removeUserWord: (word: string) => ipcRenderer.invoke('spellcheck:removeUserWord', word),
+  },
+
+  // 插件：插件目录由主进程管理，渲染进程只拿到 manifest 与入口代码文本
+  plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    readEntry: (id: string, main: string) => ipcRenderer.invoke('plugins:readEntry', id, main),
+    openDirectory: () => ipcRenderer.invoke('plugins:openDirectory'),
+    uninstall: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),
+    getTrust: () => ipcRenderer.invoke('plugins:getTrust'),
+    setPolicy: (policy: string) => ipcRenderer.invoke('plugins:setPolicy', policy),
+    addTrustedKey: (name: string, publicKey: string) => ipcRenderer.invoke('plugins:addTrustedKey', name, publicKey),
+    removeTrustedKey: (keyId: string) => ipcRenderer.invoke('plugins:removeTrustedKey', keyId),
+    marketList: () => ipcRenderer.invoke('plugins:marketList'),
+    marketInstall: (registry: string, id: string) => ipcRenderer.invoke('plugins:marketInstall', registry, id),
+    marketAddRegistry: (url: string) => ipcRenderer.invoke('plugins:marketAddRegistry', url),
+    marketRemoveRegistry: (url: string) => ipcRenderer.invoke('plugins:marketRemoveRegistry', url),
+  },
+
+  // 扫描版 PDF 文字识别：语言数据由主进程管理（识别引擎经 ocr-resource:// 协议加载），识别结果按条目保存在当前知识库
+  ocr: {
+    listLanguages: () => ipcRenderer.invoke('ocr:listLanguages'),
+    importLanguage: () => ipcRenderer.invoke('ocr:importLanguage'),
+    removeLanguage: (code: string) => ipcRenderer.invoke('ocr:removeLanguage', code),
+    readResults: (itemId: string) => ipcRenderer.invoke('ocr:readResults', itemId),
+    writePageResult: (itemId: string, page: number, data: string) =>
+      ipcRenderer.invoke('ocr:writePageResult', itemId, page, data),
+    writeIndexedText: (itemId: string, text: string) => ipcRenderer.invoke('ocr:writeIndexedText', itemId, text),
+    writeScanResult: (itemId: string, data: string) => ipcRenderer.invoke('ocr:writeScanResult', itemId, data),
+    removeResults: (itemId: string) => ipcRenderer.invoke('ocr:removeResults', itemId),
+  },
+
+  // 帮助菜单：使用指南与“从这里开始”
+  help: {
+    onOpenGuide: (callback: () => void) => subscribe('help:open-guide', callback),
+    onOpenStart: (callback: () => void) => subscribe('help:open-start', callback),
+  },
+
+  // 托盘菜单：动作由主进程推送；最近文档列表由渲染进程提供
+  tray: {
+    onQuickNote: (callback: () => void) => subscribe('tray:quick-note', callback),
+    onOpenSearch: (callback: () => void) => subscribe('tray:open-search', callback),
+    onSwitchMode: (callback: (mode: string) => void) => subscribe('tray:switch-mode', callback),
+    onOpenSettings: (callback: () => void) => subscribe('tray:open-settings', callback),
+    onOpenDocument: (callback: (id: string) => void) => subscribe('tray:open-document', callback),
+    setRecentDocuments: (documents: Array<{ id: string; title: string }>) =>
+      ipcRenderer.send('tray:set-recent-documents', documents),
+  },
+
+  // 知识库：注册表与数据路径由主进程管理；切换成功后主进程重新加载所有窗口
+  workspace: {
+    list: () => ipcRenderer.invoke('workspace:list'),
+    getCurrent: () => ipcRenderer.invoke('workspace:getCurrent'),
+    create: (input: unknown) => ipcRenderer.invoke('workspace:create', input),
+    update: (id: string, input: unknown) => ipcRenderer.invoke('workspace:update', id, input),
+    remove: (id: string) => ipcRenderer.invoke('workspace:remove', id),
+    switchTo: (id: string) => ipcRenderer.invoke('workspace:switch', id),
+  },
+
+  // 备份与恢复（当前知识库）：恢复前由主进程弹出确认框，恢复后主进程重新加载所有窗口
+  backup: {
+    list: () => ipcRenderer.invoke('backup:list'),
+    create: () => ipcRenderer.invoke('backup:create'),
+    restore: (fileName: string) => ipcRenderer.invoke('backup:restore', fileName),
+    restoreFromFile: () => ipcRenderer.invoke('backup:restoreFromFile'),
+    remove: (fileName: string) => ipcRenderer.invoke('backup:delete', fileName),
+    openFolder: () => ipcRenderer.invoke('backup:openFolder'),
+    exportFull: () => ipcRenderer.invoke('backup:exportFull'),
+    restoreFull: () => ipcRenderer.invoke('backup:restoreFull'),
+  },
+
+  // 批量导入导出：主进程负责选择来源 / 目标与文件读写，格式解析与写入知识库在渲染进程
+  transfer: {
+    pickImportSource: (kind: string) => ipcRenderer.invoke('transfer:pickImportSource', kind),
+    copyAttachment: (sourceId: string, path: string) => ipcRenderer.invoke('transfer:copyAttachment', sourceId, path),
+    writeAttachment: (fileName: string, base64: string) =>
+      ipcRenderer.invoke('transfer:writeAttachment', fileName, base64),
+    finishImport: (sourceId: string) => ipcRenderer.invoke('transfer:finishImport', sourceId),
+    pickExportDirectory: (label: string) => ipcRenderer.invoke('transfer:pickExportDirectory', label),
+    writeExportFile: (exportId: string, path: string, text: string) =>
+      ipcRenderer.invoke('transfer:writeExportFile', exportId, path, text),
+    copyExportFile: (exportId: string, path: string, source: string) =>
+      ipcRenderer.invoke('transfer:copyExportFile', exportId, path, source),
+    finishExport: (exportId: string) => ipcRenderer.invoke('transfer:finishExport', exportId),
+  },
+
+  // 多设备同步：经用户选择的共享文件夹交换变更集；应用了远端修改后推送 sync:applied（被修改的条目 ID）
+  sync: {
+    getStatus: () => ipcRenderer.invoke('sync:getStatus'),
+    chooseFolder: () => ipcRenderer.invoke('sync:chooseFolder'),
+    connect: (input: unknown) => ipcRenderer.invoke('sync:connect', input),
+    providePassphrase: (passphrase: string) => ipcRenderer.invoke('sync:providePassphrase', passphrase),
+    disconnect: () => ipcRenderer.invoke('sync:disconnect'),
+    update: (input: unknown) => ipcRenderer.invoke('sync:update', input),
+    runNow: () => ipcRenderer.invoke('sync:runNow'),
+    onApplied: (callback: (itemIds: string[]) => void) => subscribe('sync:applied', callback),
+  },
+
+  // 落盘：主进程在切换知识库、关闭窗口、退出前请求写回防抖中的数据，handler 完成后自动回 ack
+  lifecycle: {
+    onFlushRequest: (handler: () => Promise<void>) =>
+      subscribe<string>('app:flush-request', (requestId) => {
+        void handler().finally(() => ipcRenderer.send('app:flush-ack', requestId));
+      }),
   },
 });
 

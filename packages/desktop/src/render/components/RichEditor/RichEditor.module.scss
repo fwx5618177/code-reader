@@ -6,7 +6,6 @@
 @use '../../styles/variables' as *;
 
 // 导入数学公式渲染样式（使用 styles 目录下的版本）
-@use '../../styles/math-rendering';
 
 // ================================
 // Main Container
@@ -32,25 +31,14 @@
       opacity: 0.6;
     }
   }
+}
 
-  &.focusMode {
-    .prosemirror > * {
-      opacity: 0.4;
-      transition: opacity 0.2s ease;
-    }
-
-    .prosemirror > *:focus-within,
-    .prosemirror > *:hover {
-      opacity: 1;
-    }
-  }
-
-  &.typewriterMode {
-    .prosemirror {
-      padding-top: 40vh;
-      padding-bottom: 40vh;
-    }
-  }
+// 打字机模式（类名由 typewriter 插件加到编辑区根元素）：
+// 高度随内容增长并在末尾留出半屏空白，使最后几行也能滚动到可视区域中央
+.prosemirror.typewriter {
+  height: auto;
+  min-height: 100%;
+  padding-bottom: 50vh;
 }
 
 // ================================
@@ -102,7 +90,7 @@
   width: 100%;
   font-size: 2rem;
   font-weight: 700;
-  font-family: var(--font-family-sans);
+  font-family: var(--font-sans);
   line-height: 1.3;
   padding: 0 0 var(--spacing-2) 0;
   margin: 0;
@@ -214,12 +202,15 @@
 // ================================
 
 .prosemirror {
+  // 间隙光标等插件装饰以编辑区为定位基准
+  position: relative;
   height: 100%;
   outline: none;
   color: var(--text-primary);
-  font-family: var(--font-family-sans);
-  font-size: var(--font-size-base);
-  line-height: 1.75;
+  // 字体、字号与整数 px 行高由页面设置（PageSurface）提供，行高与纸张背景的线距一致
+  font-family: var(--page-font-family, var(--font-sans));
+  font-size: var(--page-font-size, var(--font-size-md));
+  line-height: var(--page-line, 1.75);
   white-space: pre-wrap; // Required by ProseMirror for proper text handling
   word-wrap: break-word;
 
@@ -256,8 +247,24 @@
     outline: none;
   }
 
-  // Placeholder
-  &.ProseMirror-focused .ProseMirror-gapcursor {
+  // 间隙光标（prosemirror-gapcursor）：在无法放置文本光标的块之间显示横向闪烁光标，类名由插件生成
+  :global(.ProseMirror-gapcursor) {
+    display: none;
+    pointer-events: none;
+    position: absolute;
+
+    &::after {
+      content: '';
+      display: block;
+      position: absolute;
+      top: -2px;
+      width: 20px;
+      border-top: 1px solid var(--text-primary);
+      animation: gapcursor-blink 1.1s steps(2, start) infinite;
+    }
+  }
+
+  &:global(.ProseMirror-focused) :global(.ProseMirror-gapcursor) {
     display: block;
   }
 
@@ -289,8 +296,6 @@
 
   h1 {
     font-size: 2rem;
-    border-bottom: 1px solid var(--border-primary);
-    padding-bottom: var(--spacing-2);
   }
 
   h2 {
@@ -299,6 +304,14 @@
 
   h3 {
     font-size: 1.25rem;
+  }
+
+  @include heading-accents;
+
+  h1,
+  h2,
+  h3 {
+    padding-block: var(--spacing-1);
   }
 
   h4 {
@@ -339,7 +352,7 @@
   // Inline code
   code {
     padding: 2px 6px;
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     font-size: 0.9em;
     background-color: var(--bg-tertiary);
     border-radius: var(--radius-sm);
@@ -430,10 +443,212 @@
     border-radius: var(--radius-md);
     margin: var(--spacing-4) 0;
 
-    &.ProseMirror-selectednode {
+    &:global(.ProseMirror-selectednode) {
       outline: 2px solid var(--accent-primary);
       outline-offset: 2px;
     }
+  }
+
+  // 删除线
+  s {
+    color: var(--text-muted);
+  }
+
+  // Typora 风格：光标所在格式两侧显示的 Markdown 标记
+  :global(.md-syntax) {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-weight: normal;
+    font-style: normal;
+    font-size: 0.85em;
+    opacity: 0.75;
+    user-select: none;
+  }
+
+  :global(.md-syntax-heading) {
+    font-size: 0.6em;
+    vertical-align: middle;
+    margin-right: 0.25em;
+  }
+
+  // 双向链接：高亮小标签，两侧淡显 [[ ]] 提示这是链接语法
+  :global(.wiki-link) {
+    @include wiki-link-chip;
+
+    &::before {
+      content: '[[';
+      color: var(--text-muted);
+      font-size: 0.8em;
+    }
+
+    &::after {
+      content: ']]';
+      color: var(--text-muted);
+      font-size: 0.8em;
+    }
+
+    &:global(.ProseMirror-selectednode) {
+      outline: 2px solid var(--accent-primary);
+    }
+  }
+
+  // 块级嵌入：只读显示被引用的内容，点击正文选中整个嵌入
+  @include front-matter;
+  @include markdown-extensions;
+  @include wiki-embed;
+
+  :global(.wiki-embed-node.ProseMirror-selectednode) > :global(.wiki-embed) {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+  }
+
+  // 任务列表
+  :global(li.task-item) {
+    list-style: none;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-2);
+    margin-left: calc(-1 * var(--spacing-5));
+
+    &[data-checked='true'] > :global(.task-item-content) {
+      color: var(--text-muted);
+      text-decoration: line-through;
+    }
+  }
+
+  :global(.task-item-checkbox) {
+    margin-top: 0.45em;
+    cursor: pointer;
+    accent-color: var(--accent-primary);
+  }
+
+  :global(.task-item-content) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  // 表格
+  table {
+    width: 100%;
+    margin: var(--spacing-4) 0;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  th,
+  td {
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px solid var(--border-primary);
+    vertical-align: top;
+  }
+
+  th {
+    background-color: var(--bg-secondary);
+    font-weight: $font-weight-semibold;
+  }
+}
+
+// 大文档分块渲染：视口外的顶层块跳过布局与绘制，
+// auto 关键字让浏览器记住每个块上次渲染的真实高度，滚动条保持稳定
+.chunkedRendering .prosemirror > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.75em;
+}
+
+// ================================
+// 页面设置：纸张背景（横线 / 方格 / 点阵）
+// PageSurface 提供 data-page-background、--page-line（整数 px 行高）与 --page-rule-color。
+// 背景画在滚动容器 .editorMain 上并随内容滚动（local），
+// 首行起点为 .editorContainer 的上内边距 var(--spacing-6)，线落在每行底边
+// ================================
+
+$page-rule-rows: repeating-linear-gradient(
+  to bottom,
+  transparent var(--spacing-6),
+  transparent calc(var(--spacing-6) + var(--page-line) - 1px),
+  var(--page-rule-color) calc(var(--spacing-6) + var(--page-line) - 1px),
+  var(--page-rule-color) calc(var(--spacing-6) + var(--page-line))
+);
+
+:global([data-page-background='lines']) .editorMain {
+  background-attachment: local;
+  background-image: $page-rule-rows;
+}
+
+:global([data-page-background='grid']) .editorMain {
+  background-attachment: local;
+  background-image:
+    $page-rule-rows,
+    repeating-linear-gradient(
+      to right,
+      var(--page-rule-color) 0,
+      var(--page-rule-color) 1px,
+      transparent 1px,
+      transparent var(--page-line)
+    );
+}
+
+:global([data-page-background='dots']) .editorMain {
+  background-attachment: local;
+  background-image: radial-gradient(circle, var(--page-rule-color) 1.5px, transparent 2px);
+  background-size: var(--page-line) var(--page-line);
+  // 平铺格中心即圆点，偏移半格使圆点落在每行底边
+  background-position: calc(var(--page-line) / -2) calc(var(--spacing-6) + var(--page-line) / 2);
+}
+
+// 有纸张背景时块级元素按整行排布（间距与行高都取 --page-line 的倍数），正文始终落在线格内；
+// 代码块、图片、公式等自有高度的内容不强制对齐
+:global([data-page-background]:not([data-page-background='none'])) .prosemirror {
+  p,
+  ul,
+  ol,
+  blockquote,
+  table {
+    margin: 0 0 var(--page-line);
+  }
+
+  li,
+  li p,
+  li > ul,
+  li > ol,
+  blockquote > :last-child {
+    margin: 0;
+  }
+
+  blockquote {
+    padding-block: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    margin: var(--page-line) 0 0;
+    line-height: var(--page-line);
+
+    &:first-child {
+      margin-top: 0;
+    }
+  }
+
+  // 大号标题占两行
+  h1,
+  h2 {
+    line-height: calc(2 * var(--page-line));
+  }
+
+  // 标题彩条只保留左右内边距，正文仍落在线格内
+  h1,
+  h2,
+  h3 {
+    padding-block: 0;
+  }
+
+  // 2px 分割线连同上下外边距恰好占一行
+  hr {
+    margin: calc((var(--page-line) - 2px) / 2) 0;
   }
 }
 
@@ -443,6 +658,14 @@
 // ================================
 
 :global {
+  // NodeView 用 hidden 属性切换渲染 / 编辑容器；下面各容器的 display 会压过浏览器对 [hidden] 的默认样式，这里保证 hidden 生效
+  .math-node-inline,
+  .math-node-block {
+    [hidden] {
+      display: none !important;
+    }
+  }
+
   // 行内数学公式节点
   // 修复：移除内部边框，使用整行宽度
   .math-node-inline {
@@ -510,6 +733,14 @@
       border: none;
     }
 
+    // 编辑时的实时预览（紧跟源码之后）
+    .math-node-live-preview {
+      display: inline;
+      margin-left: var(--spacing-2);
+      padding-left: var(--spacing-2);
+      border-left: 1px solid var(--border-primary);
+    }
+
     // 错误状态
     &.math-error {
       .math-node-render {
@@ -564,22 +795,31 @@
     .math-node-input {
       display: block;
       width: 100%;
-      min-height: 80px;
+      min-height: 3em;
       padding: var(--spacing-3);
       font-family: var(--font-mono);
       font-size: 0.95em;
       line-height: 1.6;
       color: var(--text-primary);
-      background-color: transparent;
-      border: none;
+      background-color: var(--bg-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-sm);
       outline: none;
       resize: none;
-      text-align: center;
+      overflow: hidden;
 
       &::placeholder {
         color: var(--text-muted);
         font-style: italic;
       }
+    }
+
+    // 编辑时的实时预览
+    .math-node-live-preview {
+      display: block;
+      text-align: center;
+      padding: var(--spacing-3) 0 var(--spacing-1);
+      overflow-x: auto;
     }
 
     // 占位符 - 无边框
@@ -702,53 +942,71 @@
     // 空的，不显示任何内容
     display: none;
   }
-}
 
-// ================================
-// Code Block Styles
-// ================================
-
-.codeBlock {
-  margin: var(--spacing-4) 0;
-  padding: var(--spacing-4);
-  font-family: var(--font-family-mono);
-  font-size: 0.9em;
-  line-height: 1.5;
-  background-color: var(--bg-tertiary);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-  max-width: 100%;
-
-  // 代码折行支持
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  word-break: break-all;
-
-  code {
-    padding: 0;
-    background: none;
-    border-radius: 0;
-    color: inherit;
-    white-space: pre-wrap;
-    word-wrap: break-word;
+  // 标题块：\title / \author（\and 分隔的多位作者并列）/ \date
+  .latex-title-block {
+    margin-bottom: var(--spacing-6);
+    text-align: center;
   }
 
-  // 保留格式的代码块
-  &.preserveWhitespace {
-    white-space: pre;
-    overflow-x: auto;
+  .latex-title {
+    margin: 0 0 var(--spacing-3);
   }
-}
 
-// 行内代码样式
-.inlineCode {
-  font-family: var(--font-family-mono);
-  font-size: 0.9em;
-  padding: 0.15em 0.4em;
-  background-color: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
-  white-space: pre-wrap;
-  word-wrap: break-word;
+  .latex-authors {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--spacing-2) var(--spacing-8);
+    color: var(--text-secondary);
+  }
+
+  .latex-date {
+    margin: var(--spacing-2) 0 0;
+    color: var(--text-muted);
+  }
+
+  // 未识别的命令：原样保留（含参数），等宽字体 + 波浪下划线标出，悬停显示原因
+  .latex-unknown-command {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--color-warning);
+    background-color: var(--color-warning-bg);
+    border-radius: var(--radius-sm);
+    padding: 0 var(--spacing-1);
+    text-decoration: underline wavy var(--color-warning);
+    text-underline-offset: 3px;
+    cursor: help;
+  }
+
+  .latex-smallcaps {
+    font-variant: small-caps;
+  }
+
+  .latex-sans {
+    font-family: var(--font-sans);
+  }
+
+  .latex-fbox {
+    border: 1px solid var(--border-primary);
+    padding: 0 var(--spacing-1);
+  }
+
+  .latex-caption {
+    margin-top: var(--spacing-2);
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.95em;
+  }
+
+  // \includegraphics：预览不读取图片文件，显示文件名占位
+  .latex-graphics {
+    display: inline-block;
+    padding: var(--spacing-2) var(--spacing-3);
+    border: 1px dashed var(--border-primary);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+  }
 }
 
 // ================================
@@ -995,7 +1253,7 @@
   .token.prolog,
   .token.doctype,
   .token.cdata {
-    color: var(--syntax-comment, #6a9955);
+    color: var(--code-comment);
     font-style: italic;
   }
 
@@ -1010,7 +1268,7 @@
   .token.constant,
   .token.symbol,
   .token.deleted {
-    color: var(--syntax-number, #b5cea8);
+    color: var(--code-number);
   }
 
   .token.selector,
@@ -1019,7 +1277,7 @@
   .token.char,
   .token.builtin,
   .token.inserted {
-    color: var(--syntax-string, #ce9178);
+    color: var(--code-string);
   }
 
   .token.operator,
@@ -1027,24 +1285,24 @@
   .token.url,
   .language-css .token.string,
   .style .token.string {
-    color: var(--syntax-operator, #d4d4d4);
+    color: var(--code-operator);
   }
 
   .token.atrule,
   .token.attr-value,
   .token.keyword {
-    color: var(--syntax-keyword, #569cd6);
+    color: var(--code-keyword);
   }
 
   .token.function,
   .token.class-name {
-    color: var(--syntax-function, #dcdcaa);
+    color: var(--code-function);
   }
 
   .token.regex,
   .token.important,
   .token.variable {
-    color: var(--syntax-variable, #d16969);
+    color: var(--code-variable);
   }
 
   .code-block-language-bar {
@@ -1057,7 +1315,7 @@
 
   .code-block-language-select {
     font-size: var(--font-size-xs);
-    font-family: var(--font-family-mono);
+    font-family: var(--font-mono);
     padding: var(--spacing-1) var(--spacing-2);
     background-color: var(--bg-tertiary);
     border: 1px solid var(--border-primary);
@@ -1084,7 +1342,7 @@
 
   .code-block-editor {
     .cm-editor {
-      font-family: var(--font-family-mono);
+      font-family: var(--font-mono);
       font-size: 0.9em;
       line-height: 1.5;
       background-color: transparent;
@@ -1150,40 +1408,40 @@
 
       // Syntax highlighting colors
       .cm-keyword {
-        color: var(--syntax-keyword, #c678dd);
+        color: var(--code-keyword);
       }
 
       .cm-string {
-        color: var(--syntax-string, #98c379);
+        color: var(--code-string);
       }
 
       .cm-comment {
-        color: var(--syntax-comment, #5c6370);
+        color: var(--code-comment);
         font-style: italic;
       }
 
       .cm-number {
-        color: var(--syntax-number, #d19a66);
+        color: var(--code-number);
       }
 
       .cm-operator {
-        color: var(--syntax-operator, #56b6c2);
+        color: var(--code-operator);
       }
 
       .cm-function {
-        color: var(--syntax-function, #61afef);
+        color: var(--code-function);
       }
 
       .cm-variableName {
-        color: var(--syntax-variable, #e06c75);
+        color: var(--code-variable);
       }
 
       .cm-typeName {
-        color: var(--syntax-type, #e5c07b);
+        color: var(--code-class-name);
       }
 
       .cm-propertyName {
-        color: var(--syntax-property, #e06c75);
+        color: var(--code-property);
       }
 
       .cm-punctuation {
@@ -1195,11 +1453,11 @@
       }
 
       .cm-tag {
-        color: var(--syntax-tag, #e06c75);
+        color: var(--code-tag);
       }
 
       .cm-attributeName {
-        color: var(--syntax-attribute, #d19a66);
+        color: var(--code-attr-name);
       }
     }
   }
@@ -1217,215 +1475,7 @@
 }
 
 .previewContent {
-  max-width: var(--editor-content-max-width, 720px);
-  margin: 0 auto;
-  padding: var(--spacing-6);
-  font-family: var(--font-family-sans);
-  font-size: var(--font-size-base);
-  line-height: 1.75;
-  color: var(--text-primary);
-
-  // Copy prose styles for preview
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    margin: var(--spacing-6) 0 var(--spacing-3);
-    font-weight: $font-weight-semibold;
-    line-height: 1.3;
-
-    &:first-child {
-      margin-top: 0;
-    }
-  }
-
-  h1 {
-    font-size: 2rem;
-    border-bottom: 1px solid var(--border-primary);
-    padding-bottom: var(--spacing-2);
-  }
-
-  h2 {
-    font-size: 1.5rem;
-  }
-
-  h3 {
-    font-size: 1.25rem;
-  }
-
-  p {
-    margin: 0 0 var(--spacing-4);
-  }
-
-  strong {
-    font-weight: $font-weight-bold;
-  }
-
-  em {
-    font-style: italic;
-  }
-
-  code {
-    padding: 2px 6px;
-    font-family: var(--font-family-mono);
-    font-size: 0.9em;
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-  }
-
-  pre {
-    margin: var(--spacing-4) 0;
-    padding: var(--spacing-4);
-    font-family: var(--font-family-mono);
-    font-size: 0.9em;
-    line-height: 1.5;
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-md);
-    overflow-x: auto;
-
-    code {
-      padding: 0;
-      background: none;
-    }
-  }
-
-  blockquote {
-    margin: var(--spacing-4) 0;
-    padding: var(--spacing-3) var(--spacing-4);
-    border-left: 3px solid var(--accent-primary);
-    background-color: var(--bg-primary);
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    color: var(--text-secondary);
-    font-style: italic;
-  }
-
-  ul,
-  ol {
-    margin: var(--spacing-4) 0;
-    padding-left: var(--spacing-6);
-  }
-
-  hr {
-    border: none;
-    border-top: 2px solid var(--border-primary);
-    margin: var(--spacing-6) 0;
-  }
-
-  img {
-    max-width: 100%;
-    height: auto;
-    border-radius: var(--radius-md);
-  }
-
-  // ================================
-  // LaTeX 文档预览样式
-  // ================================
-
-  .latex-document {
-    font-family: var(--font-serif, Georgia, 'Times New Roman', serif);
-  }
-
-  .latex-title-block {
-    text-align: center;
-    margin-bottom: var(--spacing-8);
-    padding-bottom: var(--spacing-6);
-    border-bottom: 1px solid var(--border-primary);
-  }
-
-  .latex-title {
-    font-size: 2rem;
-    font-weight: $font-weight-bold;
-    margin-bottom: var(--spacing-2);
-    border-bottom: none;
-    padding-bottom: 0;
-  }
-
-  .latex-author {
-    font-size: var(--font-size-lg);
-    color: var(--text-secondary);
-    margin-bottom: var(--spacing-1);
-  }
-
-  .latex-date {
-    font-size: var(--font-size-md);
-    color: var(--text-muted);
-  }
-
-  .latex-body {
-    p {
-      text-indent: 2em;
-      margin-bottom: var(--spacing-3);
-      text-align: justify;
-
-      &:first-child {
-        text-indent: 0;
-      }
-    }
-  }
-
-  .latex-paragraph {
-    text-indent: 2em;
-    margin-bottom: var(--spacing-3);
-    text-align: justify;
-    line-height: 1.8;
-
-    &:first-child {
-      text-indent: 0;
-    }
-  }
-
-  .latex-paragraph-break {
-    display: block;
-    height: var(--spacing-4);
-  }
-
-  .latex-maketitle-placeholder {
-    // maketitle 占位符，通常不可见
-    // 标题信息应该从 preamble 的 title-block 中渲染
-    display: none;
-  }
-
-  .latex-chapter {
-    font-size: 1.75rem;
-    text-align: center;
-    margin: var(--spacing-8) 0 var(--spacing-6);
-  }
-
-  .latex-section {
-    font-size: 1.5rem;
-    margin: var(--spacing-6) 0 var(--spacing-4);
-  }
-
-  .latex-subsection {
-    font-size: 1.25rem;
-    margin: var(--spacing-5) 0 var(--spacing-3);
-  }
-
-  .latex-subsubsection {
-    font-size: 1.1rem;
-    margin: var(--spacing-4) 0 var(--spacing-2);
-  }
-
-  .latex-list {
-    margin: var(--spacing-4) 0;
-    padding-left: var(--spacing-6);
-
-    li {
-      margin-bottom: var(--spacing-2);
-    }
-  }
-
-  .latex-empty {
-    color: var(--text-muted);
-    font-style: italic;
-    text-align: center;
-    padding: var(--spacing-8);
-  }
-
-  // 数学公式预览样式（使用自主实现的渲染器）
-  // 样式定义在 math-rendering.scss 中
+  @include markdown-preview;
 }
 
 // ================================
@@ -1455,15 +1505,6 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-1);
-}
-
-.statusDirty {
-  color: var(--warning);
-  font-weight: $font-weight-medium;
-}
-
-.statusSaved {
-  color: var(--success);
 }
 
 // ================================
@@ -1574,7 +1615,7 @@
   cursor: pointer;
   font-size: 11px;
   font-weight: $font-weight-medium;
-  font-family: var(--font-family-mono);
+  font-family: var(--font-mono);
   transition: all 0.15s ease;
 
   &:hover {
@@ -1673,160 +1714,15 @@
 // 搜索高亮样式（用于编辑器内的搜索匹配）
 :global {
   .search-highlight {
-    background-color: var(--highlight-bg, rgba(255, 215, 0, 0.3));
+    background-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
     border-radius: 2px;
   }
 
   .search-highlight-active {
-    background-color: var(--highlight-active-bg, rgba(255, 165, 0, 0.5));
+    background-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
     outline: 2px solid var(--accent-primary);
     outline-offset: 1px;
   }
-}
-
-// ================================
-// Responsive
-// ================================
-
-// ================================
-// LaTeX 编辑器样式
-// ================================
-
-.latexEditor {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  background-color: var(--bg-primary);
-  overflow: hidden;
-}
-
-.latexEditorSplit {
-  flex-direction: row;
-
-  .latexEditorPane,
-  .latexPreviewPane {
-    width: 50%;
-  }
-}
-
-.latexEditorReadonly {
-  .latexEditorContent {
-    opacity: 0.8;
-  }
-}
-
-.latexEditorPane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  border-right: 1px solid var(--border-primary);
-}
-
-.latexPreviewPane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.latexEditorHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-2) var(--spacing-3);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  flex-shrink: 0;
-}
-
-.latexEditorTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.latexEditorToggle {
-  font-size: var(--font-size-xs);
-  padding: var(--spacing-1) var(--spacing-2);
-  background-color: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-
-  &:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-  }
-}
-
-.latexEditorContent {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-
-  @include scrollbar;
-
-  .cm-editor {
-    height: 100%;
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    line-height: 1.6;
-    background-color: var(--bg-primary);
-
-    &.cm-focused {
-      outline: none;
-    }
-
-    .cm-scroller {
-      overflow: auto;
-      padding: var(--spacing-3);
-    }
-
-    .cm-content {
-      padding: 0;
-      caret-color: var(--text-primary);
-    }
-
-    .cm-line {
-      padding: 0;
-    }
-
-    .cm-gutters {
-      background-color: var(--bg-secondary);
-      border-right: 1px solid var(--border-primary);
-      color: var(--text-muted);
-      font-size: var(--font-size-xs);
-      padding-right: var(--spacing-2);
-    }
-
-    .cm-activeLineGutter {
-      background-color: var(--bg-hover);
-    }
-
-    .cm-activeLine {
-      background-color: var(--bg-hover);
-    }
-  }
-}
-
-.latexPreviewContent {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--spacing-4);
-  background-color: var(--bg-primary);
-
-  @include scrollbar;
-
-  // 复用 previewContent 的样式
-  @extend .previewContent;
 }
 
 .hidden {
@@ -1834,175 +1730,8 @@
 }
 
 // ================================
-// LaTeX 编辑器实时渲染模式样式
-// Typora 风格：点击编辑，失焦渲染
+// Responsive
 // ================================
-
-.latexEditorLive {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  background-color: var(--bg-primary);
-  overflow: hidden;
-  border-radius: var(--radius-lg);
-}
-
-.latexEditorLiveEditing {
-  // 编辑模式下的特殊样式
-  .latexEditorLiveContent {
-    background-color: var(--bg-secondary);
-  }
-}
-
-.latexEditorLiveHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-2) var(--spacing-4);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  flex-shrink: 0;
-}
-
-.latexEditorLiveTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.latexEditorLiveToggle {
-  font-size: var(--font-size-sm);
-  padding: var(--spacing-1) var(--spacing-3);
-  background-color: var(--accent-primary);
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-on-accent);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  font-weight: 500;
-
-  &:hover {
-    background-color: var(--accent-primary-hover);
-  }
-
-  &:active {
-    background-color: var(--accent-primary-active);
-  }
-}
-
-// 渲染状态指示器
-.latexEditorLiveStatus {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  font-weight: 400;
-  font-style: italic;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-// 渲染错误指示器
-.latexEditorLiveError {
-  color: var(--color-error);
-  font-size: var(--font-size-sm);
-  cursor: help;
-  margin-left: var(--spacing-1);
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-.latexEditorLiveContent {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.latexEditorLiveSource {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-
-  @include scrollbar;
-
-  .cm-editor {
-    height: 100%;
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    line-height: 1.6;
-    background-color: var(--bg-primary);
-
-    &.cm-focused {
-      outline: none;
-    }
-
-    .cm-scroller {
-      overflow: auto;
-      padding: var(--spacing-4);
-    }
-
-    .cm-content {
-      padding: 0;
-      caret-color: var(--text-primary);
-      max-width: 100%;
-    }
-
-    .cm-line {
-      padding: 0;
-    }
-
-    .cm-gutters {
-      background-color: var(--bg-secondary);
-      border-right: 1px solid var(--border-primary);
-      color: var(--text-muted);
-      font-size: var(--font-size-xs);
-      padding-right: var(--spacing-2);
-    }
-
-    .cm-activeLineGutter {
-      background-color: var(--bg-hover);
-    }
-
-    .cm-activeLine {
-      background-color: var(--bg-hover);
-    }
-  }
-}
-
-.latexEditorLivePreview {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--spacing-6);
-  background-color: var(--bg-primary);
-  cursor: text;
-  transition: background-color 0.15s ease;
-
-  @include scrollbar;
-
-  &:hover {
-    background-color: var(--bg-secondary);
-  }
-
-  &:focus {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: -2px;
-  }
-
-  // 预览内容居中显示
-  .previewContent {
-    max-width: 800px;
-    margin: 0 auto;
-  }
-}
 
 @media (max-width: 768px) {
   .toolbar {
@@ -2039,466 +1768,28 @@
 }
 
 // ================================
-// 实时渲染 LaTeX 编辑器样式
+// LaTeX 编辑器：容器、头部、状态指示器、面板（每个选择器只定义一次）
 // ================================
 
-.latexEditorRealtime {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  background-color: var(--bg-primary);
-  overflow: hidden;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-primary);
-}
-
-.latexEditorRendering {
-  // 渲染中状态
-  .latexEditorHeader {
-    background-color: var(--bg-tertiary);
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
-}
-
-.latexEditorHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-2) var(--spacing-4);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  flex-shrink: 0;
-}
-
-.latexEditorTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.latexEditorStatus {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  font-weight: 400;
-  font-style: italic;
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-.latexEditorError {
-  color: var(--color-error);
-  font-size: var(--font-size-sm);
-  cursor: help;
-  margin-left: var(--spacing-1);
-}
-
-.latexEditorMeta {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.latexEditorMain {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.latexEditorPane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  border-right: 1px solid var(--border-primary);
-  overflow: hidden;
-}
-
-.latexPreviewPane {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.latexEditorPaneHeader {
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: var(--spacing-1) var(--spacing-3);
-  background-color: var(--bg-tertiary);
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border-primary);
-  flex-shrink: 0;
-}
-
-.latexEditorContent {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-
-  @include scrollbar;
-
-  .cm-editor {
-    height: 100%;
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    line-height: 1.6;
-    background-color: var(--bg-primary);
-
-    &.cm-focused {
-      outline: none;
-    }
-
-    .cm-scroller {
-      overflow: auto;
-      padding: var(--spacing-4);
-    }
-
-    .cm-content {
-      padding: 0;
-      caret-color: var(--text-primary);
-      max-width: 100%;
-    }
-
-    .cm-line {
-      padding: 0;
-    }
-
-    .cm-gutters {
-      background-color: var(--bg-secondary);
-      border-right: 1px solid var(--border-primary);
-      color: var(--text-muted);
-      font-size: var(--font-size-xs);
-      padding-right: var(--spacing-2);
-    }
-
-    .cm-activeLineGutter {
-      background-color: var(--bg-hover);
-    }
-
-    .cm-activeLine {
-      background-color: var(--bg-hover);
-    }
-  }
-}
-
-.latexPreviewScroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--spacing-4);
-  background-color: var(--bg-primary);
-
-  @include scrollbar;
-}
-
-.latexPreviewContent {
-  max-width: 800px;
-  margin: 0 auto;
-  line-height: 1.8;
-  color: var(--text-primary);
-}
-
-.latexRenderBlock {
-  margin-bottom: var(--spacing-4);
-  transition: opacity 0.2s ease;
-
-  &[data-loading='true'] {
+  50% {
     opacity: 0.5;
   }
 }
 
-// 响应式布局
-@media (max-width: 1024px) {
-  .latexEditorMain {
-    flex-direction: column;
-  }
-
-  .latexEditorPane {
-    border-right: none;
-    border-bottom: 1px solid var(--border-primary);
-    max-height: 50%;
-  }
-
-  .latexPreviewPane {
-    max-height: 50%;
+@keyframes gapcursor-blink {
+  to {
+    visibility: hidden;
   }
 }
 
-@media (max-width: 768px) {
-  .latexEditorHeader {
-    padding: var(--spacing-2);
-  }
-
-  .latexEditorTitle {
-    font-size: var(--font-size-xs);
-  }
-
-  .latexEditorContent {
-    .cm-editor {
-      font-size: 0.85em;
-
-      .cm-scroller {
-        padding: var(--spacing-2);
-      }
-    }
-  }
-
-  .latexPreviewScroll {
-    padding: var(--spacing-2);
-  }
-}
-
-// ================================
-// 单窗格所见即所得模式样式
-// ================================
-
-.latexEditorLive {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  background-color: var(--bg-primary);
-  overflow: hidden;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-primary);
-  position: relative;
-}
-
-.latexEditorLiveFocused {
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 2px rgba(var(--accent-primary-rgb), 0.2);
-}
-
-.latexEditorLiveRendering {
-  // 渲染中状态
-  .latexEditorLiveHeader {
-    background-color: var(--bg-tertiary);
-  }
-}
-
-.latexEditorLiveHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--spacing-2) var(--spacing-4);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-primary);
-  flex-shrink: 0;
-  transition: background-color 0.15s ease;
-}
-
-.latexEditorLiveTitle {
-  font-size: var(--font-size-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-}
-
-.latexEditorLiveMode {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-.latexEditorLiveStatus {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-}
-
-.latexEditorLiveRendering {
-  animation: pulse 1.5s ease-in-out infinite;
-  color: var(--accent-primary);
-}
-
-.latexEditorLiveErrorIcon {
-  color: var(--color-error);
-  cursor: help;
-}
-
-.latexEditorLiveTime {
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-}
-
-.latexEditorLiveMain {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  position: relative;
-}
-
-.latexEditorLiveEditor {
-  position: absolute;
-  inset: 0;
-  overflow: auto;
-  transition: opacity 0.15s ease;
-
-  @include scrollbar;
-
-  .cm-editor {
-    height: 100%;
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    line-height: 1.6;
-    background-color: var(--bg-primary);
-
-    &.cm-focused {
-      outline: none;
-    }
-
-    .cm-scroller {
-      overflow: auto;
-      padding: var(--spacing-4);
-    }
-
-    .cm-content {
-      padding: 0;
-      caret-color: var(--text-primary);
-      max-width: 100%;
-    }
-
-    .cm-line {
-      padding: 0;
-    }
-
-    .cm-gutters {
-      background-color: var(--bg-secondary);
-      border-right: 1px solid var(--border-primary);
-      color: var(--text-muted);
-      font-size: var(--font-size-xs);
-      padding-right: var(--spacing-2);
-    }
-
-    .cm-activeLineGutter {
-      background-color: var(--bg-hover);
-    }
-
-    .cm-activeLine {
-      background-color: var(--bg-hover);
-    }
-  }
-}
-
-.latexEditorLiveEditorHidden {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.latexEditorLivePreviewOverlay {
-  position: absolute;
-  inset: 0;
-  overflow: auto;
-  padding: var(--spacing-6);
-  background-color: var(--bg-primary);
-  cursor: text;
-  transition: background-color 0.15s ease;
-
-  @include scrollbar;
-
-  &:hover {
-    background-color: var(--bg-secondary);
-  }
-
-  &:focus {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: -2px;
-  }
-}
-
-.latexEditorLivePreviewContent {
-  max-width: 800px;
-  margin: 0 auto;
-  line-height: 1.8;
-  color: var(--text-primary);
-}
-
-.latexEditorLivePreviewOnly {
-  padding: var(--spacing-6);
-  height: 100%;
-  overflow: auto;
-
-  @include scrollbar;
-}
-
-.latexEditorLiveErrorBar {
-  padding: var(--spacing-2) var(--spacing-4);
-  background-color: rgba(var(--color-error-rgb), 0.1);
-  border-top: 1px solid var(--color-error);
-  flex-shrink: 0;
-}
-
-.latexEditorLiveErrorText {
-  font-size: var(--font-size-sm);
-  color: var(--color-error);
-}
-
-.latexError {
-  padding: var(--spacing-4);
-  background-color: rgba(var(--color-error-rgb), 0.1);
-  border: 1px solid var(--color-error);
-  border-radius: var(--radius-md);
-  color: var(--color-error);
-  font-size: var(--font-size-sm);
-}
-
-// 响应式布局
-@media (max-width: 768px) {
-  .latexEditorLive {
-    border-radius: var(--radius-md);
-  }
-
-  .latexEditorLiveHeader {
-    padding: var(--spacing-2);
-  }
-
-  .latexEditorLiveTitle {
-    font-size: var(--font-size-xs);
-  }
-
-  .latexEditorLiveEditor {
-    .cm-editor {
-      font-size: 0.85em;
-
-      .cm-scroller {
-        padding: var(--spacing-2);
-      }
-    }
-  }
-
-  .latexEditorLivePreviewOverlay {
-    padding: var(--spacing-3);
-  }
-}
-
-// ================================
-// LaTeX 编辑器样式
-// Typora 风格的块级编辑器
-// 特性：
-// 1. 点击单个块进入编辑模式，其他块保持渲染状态
-// 2. 渲染视图/源码视图互斥显示（一次只展示一个）
-// 3. 大文件优化模式
-// 4. IntersectionObserver 可视区域优先渲染
-// 5. 完整的 LaTeX 语法高亮
-// 6. 统一的主题样式
-// 7. 100% 宽度布局，无居中 box
-// ================================
-
-// 主容器 - 100% 宽度，无边框
-// LaTeX 编辑器容器
-// 重要：确保层叠上下文正确，不遮挡侧边栏
+// 主容器：不创建层叠上下文（z-index: auto），也不用 isolation / contain，避免影响 fixed 定位的对话框
 .latexEditorContainer {
-  // 简化样式，移除可能造成视觉问题的属性
   position: relative;
-  // z-index 设为 auto，避免创建不必要的层叠上下文
-  // 让对话框等 fixed 元素能够正常显示在上层
   z-index: auto;
   display: flex;
   flex-direction: column;
@@ -2508,86 +1799,52 @@
   background-color: var(--bg-primary);
   overflow: hidden;
   border: none;
-  // 移除 isolation 和 contain，避免影响 fixed 定位的对话框
 }
 
-// 编辑器头部（包含视图切换按钮）
+// 头部（视图切换与状态指示器）
 .latexEditorHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  min-height: 44px;
   padding: var(--spacing-2) var(--spacing-4);
   background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border-primary);
   flex-shrink: 0;
-  min-height: 44px;
 }
 
-// 头部右侧区域
+.latexEditorHeaderLeft,
 .latexEditorHeaderRight {
   display: flex;
   align-items: center;
   gap: var(--spacing-2);
 }
 
-// 解析错误指示器
+// 渲染中
+.latexEditorStatus {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-weight: 400;
+  font-style: italic;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+// 解析错误指示器（悬停显示错误详情）
 .latexEditorError {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-1);
+  margin-left: var(--spacing-1);
   padding: var(--spacing-1) var(--spacing-2);
   font-size: var(--font-size-xs);
   color: var(--color-error);
   background-color: var(--color-error-bg);
   border-radius: var(--radius-sm);
+  cursor: help;
 
   svg {
     flex-shrink: 0;
-  }
-}
-
-// 视图模式切换按钮（单按钮设计，一次只显示一个状态）
-.latexViewModeToggleBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-1) var(--spacing-3);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  background-color: var(--bg-tertiary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease,
-    border-color 0.15s ease,
-    opacity 0.15s ease;
-
-  &:hover:not(:disabled) {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-    border-color: var(--border-secondary);
-  }
-
-  &:active:not(:disabled) {
-    background-color: var(--bg-active);
-  }
-
-  // 禁用状态（解析中）
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-
-  svg {
-    flex-shrink: 0;
-    color: var(--accent-primary);
-  }
-
-  span {
-    white-space: nowrap;
   }
 }
 
@@ -2609,1551 +1866,14 @@
   }
 }
 
-// 大文件指示器
-.latexLargeFileIndicator {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--color-warning);
-  background-color: var(--color-warning-bg);
-  border-radius: var(--radius-sm);
-}
-
-// 元数据指示器（解析时间、Worker 状态等）
-.latexEditorMeta {
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  background-color: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-}
-
-// Tree-sitter 模式指示器
-.latexTreeSitterIndicator {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--color-info);
-  background-color: var(--color-info-bg);
-  border-radius: var(--radius-sm);
-
-  svg {
-    flex-shrink: 0;
-  }
-}
-
-// Tree-sitter 模式
-.latexEditorTreeSitter {
-  .latexEditorContent {
-    // Tree-sitter 模式下使用更高效的渲染策略
-    contain: layout style;
-  }
-}
-
-// 大文件模式
-.latexEditorLargeFile {
-  .latexEditorBlocks {
-    contain: content;
-  }
-}
-
-// 只读模式
-.latexEditorReadonly {
-  .latexEditorContent {
-    cursor: default;
-  }
-
-  .latexRenderBlockItem {
-    cursor: default;
-    border-color: transparent !important;
-    background-color: transparent !important;
-
-    &:hover,
-    &:focus {
-      border-color: transparent !important;
-      background-color: transparent !important;
-    }
-  }
-}
-
-// 有块正在编辑时的状态
-.latexEditorHasEditing {
-  // 编辑器内容区域
-  // 确保不遮挡外部元素
-  .latexEditorContent {
-    position: relative;
-    z-index: 0;
-    isolation: isolate;
-    background-color: var(--bg-primary);
-  }
-}
-
-// 主内容区域 - 100% 宽度，无边框
-.latexEditorContent {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  overflow: auto;
-  padding: 0;
-  background-color: var(--bg-primary);
-  border: none;
-  display: flex;
-  flex-direction: column;
-
-  @include scrollbar;
-}
-
-// 渲染块容器 - 100% 宽度，不居中
-.latexEditorBlocks {
-  width: 100%;
-  padding: var(--spacing-4) var(--spacing-6);
-  line-height: 1.8;
-  color: var(--text-primary);
-}
-
-// 加载状态
-.latexEditorLoading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-8);
-  color: var(--text-muted);
-  font-size: var(--font-size-md);
-  animation: pulse 1.5s ease-in-out infinite;
-  flex: 1;
-  min-height: 200px;
-}
-
-// ================================
-// 渲染块样式 - 100% 宽度
-// 特性：
-// 1. 100% 宽度，无居中限制
-// 2. 悬停时显示淡色背景
-// 3. 内部元素无额外边框
-// ================================
-
-.latexRenderBlockItem {
-  display: block;
-  width: 100%;
-  margin-bottom: var(--spacing-2);
-  padding: var(--spacing-3) var(--spacing-4);
-  border-radius: var(--radius-sm);
-  border: none;
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease;
-  cursor: text;
-
-  // LaTeX 渲染内容样式
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    margin-top: var(--spacing-4);
-    margin-bottom: var(--spacing-2);
-    color: var(--text-primary);
-    font-weight: 600;
-    line-height: 1.4;
-    // 内部标题无边框
-    border: none;
-
-    &:first-child {
-      margin-top: 0;
-    }
-  }
-
-  h1 {
-    font-size: 2em;
-  }
-  h2 {
-    font-size: 1.5em;
-  }
-  h3 {
-    font-size: 1.25em;
-  }
-  h4 {
-    font-size: 1.1em;
-  }
-  h5 {
-    font-size: 1em;
-  }
-  h6 {
-    font-size: 0.9em;
-  }
-
-  p {
-    margin-bottom: var(--spacing-3);
-    line-height: 1.8;
-    // 内部段落无边框
-    border: none;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-
-  ul,
-  ol {
-    margin-bottom: var(--spacing-3);
-    padding-left: var(--spacing-6);
-    // 内部列表无边框
-    border: none;
-  }
-
-  li {
-    margin-bottom: var(--spacing-1);
-    // 内部列表项无边框
-    border: none;
-  }
-
-  blockquote {
-    margin: var(--spacing-3) 0;
-    padding: var(--spacing-2) var(--spacing-4);
-    border-left: 3px solid var(--accent-primary);
-    // 只有左边框，其他方向无边框
-    border-top: none;
-    border-right: none;
-    border-bottom: none;
-    background-color: var(--bg-secondary);
-    color: var(--text-secondary);
-  }
-
-  pre,
-  code {
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    // 内部代码无额外边框
-    border: none;
-  }
-
-  code {
-    padding: 0.2em 0.4em;
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-  }
-
-  pre {
-    padding: var(--spacing-3);
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-md);
-    overflow-x: auto;
-
-    code {
-      padding: 0;
-      background: none;
-    }
-  }
-
-  // 普通表格样式（排除数学表格）- 使用 :global() 匹配动态类名
-  table:not(:global(.math-matrix-table)):not(:global(.math-cases-table)):not(
-      :global(.math-aligned-table)
-    ):not(:global(.math-gathered-table)) {
-    width: 100%;
-    border-collapse: collapse;
-    margin: var(--spacing-4) 0;
-
-    th,
-    td {
-      border: 1px solid var(--border-primary);
-      padding: var(--spacing-2) var(--spacing-3);
-      text-align: left;
-    }
-
-    th {
-      background-color: var(--bg-secondary);
-      font-weight: 600;
-    }
-  }
-
-  // 数学表格统一样式 - 无边框（使用 :global() 匹配动态类名）
-  :global {
-    table.math-matrix-table,
-    table.math-cases-table,
-    table.math-aligned-table,
-    table.math-gathered-table,
-    .math-matrix table,
-    .math-cases table,
-    .math-aligned table,
-    .math-gathered table {
-      border: none !important;
-      border-collapse: collapse !important;
-      border-spacing: 0 !important;
-      margin: 0 !important;
-      width: auto !important;
-      background: transparent !important;
-      background-color: transparent !important;
-      display: inline-table !important;
-      vertical-align: middle !important;
-      outline: none !important;
-      box-shadow: none !important;
-
-      &,
-      & * {
-        border: none !important;
-        border-width: 0 !important;
-        border-style: none !important;
-        border-color: transparent !important;
-      }
-
-      tbody,
-      tr,
-      th,
-      td {
-        border: none !important;
-        background: transparent !important;
-        background-color: transparent !important;
-        outline: none !important;
-        box-shadow: none !important;
-      }
-
-      td,
-      th {
-        padding: 0.15em 0.4em !important;
-        text-align: center !important;
-        vertical-align: middle !important;
-      }
-    }
-
-    // 矩阵表格特殊样式
-    table.math-matrix-table {
-      .math-matrix-row {
-        border: none !important;
-
-        .math-matrix-cell {
-          padding: 0.15em 0.4em !important;
-          text-align: center !important;
-          vertical-align: middle !important;
-          white-space: nowrap;
-          border: none !important;
-          background: transparent !important;
-        }
-      }
-    }
-
-    // cases 表格特殊样式
-    table.math-cases-table {
-      .math-cases-row {
-        border: none !important;
-
-        .math-cases-result,
-        .math-cases-condition {
-          text-align: left !important;
-          border: none !important;
-          background: transparent !important;
-        }
-      }
-    }
-  }
-
-  // 数学公式样式 - 无额外边框，宽度占满整行（使用 :global() 匹配动态类名）
-  :global(.latex-math-inline) {
-    display: inline;
-    border: none;
-    background: transparent;
-  }
-
-  :global(.latex-math-block) {
-    display: block;
-    width: 100%;
-    max-width: 100%;
-    text-align: center;
-    margin: var(--spacing-4) 0;
-    padding: var(--spacing-2) 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    border: none;
-    background: transparent;
-
-    // 公式自适应缩放
-    :global(.katex-display) {
-      margin: 0;
-      overflow-x: auto;
-      overflow-y: hidden;
-
-      > :global(.katex) {
-        max-width: 100%;
-        overflow-x: auto;
-        text-align: center;
-      }
-    }
-
-    :global(.katex) {
-      max-width: 100%;
-
-      // 全局修复：确保 KaTeX 内部的矩阵/表格不显示边框
-      :global(.mtable),
-      :global(.mtr),
-      :global(.mtd) {
-        border: none !important;
-        background: transparent;
-      }
-
-      // 确保括号元素不受影响
-      :global(.mopen),
-      :global(.mclose) {
-        border: none !important;
-      }
-    }
-
-    // align 环境的多行对齐公式样式
-    &:global(.latex-math-align),
-    &:global(.latex-math-equation),
-    &:global(.latex-math-gather) {
-      // 确保多行公式有足够的间距
-      padding: var(--spacing-3) var(--spacing-4);
-    }
-
-    // cases 环境（分段函数）
-    &:global(.latex-math-cases) {
-      padding: var(--spacing-2) var(--spacing-4);
-
-      // KaTeX cases 样式修复
-      :global(.katex) {
-        :global(.mord .mtable),
-        :global(.mtable) {
-          border: none !important;
-          background: transparent;
-
-          :global(.mtr),
-          :global(.mtd) {
-            border: none !important;
-            background: transparent;
-          }
-
-          :global(.mtd) {
-            padding: 0.15em 0.4em;
-            text-align: left;
-          }
-        }
-
-        // cases 左大括号
-        :global(.mopen) {
-          border: none !important;
-        }
-      }
-    }
-
-    // matrix 环境（矩阵）
-    &:global(.latex-math-matrix) {
-      padding: var(--spacing-3) var(--spacing-4);
-
-      // KaTeX 矩阵样式修复 - 确保不显示边框
-      :global(.katex) {
-        // 矩阵容器
-        :global(.mord .mtable),
-        :global(.minner .mtable),
-        :global(.mtable) {
-          border: none !important;
-          background: transparent;
-          border-collapse: collapse;
-          border-spacing: 0;
-
-          // 矩阵行
-          :global(.mtr) {
-            border: none !important;
-            background: transparent;
-          }
-
-          // 矩阵单元格
-          :global(.mtd) {
-            border: none !important;
-            background: transparent;
-            padding: 0.15em 0.4em;
-            text-align: center;
-            vertical-align: middle;
-          }
-
-          // 修复 arraycolsep
-          :global(.arraycolsep) {
-            border: none !important;
-          }
-        }
-
-        // 矩阵括号容器
-        :global(.minner) {
-          border: none !important;
-
-          > :global(.mopen),
-          > :global(.mclose) {
-            border: none !important;
-          }
-        }
-
-        // 括号内的矩阵
-        :global(.mord .minner .mtable) {
-          border: none !important;
-        }
-      }
-    }
-
-    // 带编号的公式
-    &[data-numbered='true'] {
-      position: relative;
-
-      &::after {
-        content: attr(data-number);
-        position: absolute;
-        right: var(--spacing-4);
-        top: 50%;
-        transform: translateY(-50%);
-        color: var(--text-secondary);
-        font-size: var(--font-size-sm);
-      }
-    }
-  }
-
-  // 分页符样式（使用 :global() 匹配动态类名）
-  :global(.latex-page-break) {
-    border: none;
-    border-top: 2px dashed var(--border-secondary);
-    margin: var(--spacing-6) 0;
-    opacity: 0.5;
-  }
-
-  // 目录等占位符（使用 :global() 匹配动态类名）
-  :global(.latex-toc-placeholder),
-  :global(.latex-lof-placeholder),
-  :global(.latex-lot-placeholder),
-  :global(.latex-bibliography-placeholder) {
-    padding: var(--spacing-4);
-    margin: var(--spacing-4) 0;
-    background-color: var(--bg-secondary);
-    border: 1px dashed var(--border-secondary);
-    border-radius: var(--radius-md);
-    text-align: center;
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  // 垂直间距（使用 :global() 匹配动态类名）
-  :global(.latex-vspace) {
-    display: block;
-    width: 100%;
-  }
-
-  // 多行对齐公式内部样式 - 增强版（使用 :global() 匹配动态类名）
-  :global(.math-aligned) {
-    display: inline-block;
-    text-align: left;
-    vertical-align: middle;
-
-    :global(.math-aligned-table) {
-      border-collapse: collapse;
-      margin: 0 auto;
-      border-spacing: 0;
-
-      :global(.math-aligned-row) {
-        line-height: 2.2;
-        vertical-align: baseline;
-
-        :global(.math-aligned-cell) {
-          padding: var(--spacing-1) var(--spacing-3);
-          white-space: nowrap;
-          vertical-align: baseline;
-
-          // 奇数列（左侧，靠右对齐到等号）
-          &:global(.math-align-right) {
-            text-align: right;
-            padding-right: var(--spacing-1);
-          }
-
-          // 偶数列（右侧，靠左对齐从等号开始）
-          &:global(.math-align-left) {
-            text-align: left;
-            padding-left: var(--spacing-1);
-          }
-
-          // 第一个单元格不需要左边距
-          &:first-child {
-            padding-left: 0;
-          }
-
-          // 最后一个单元格不需要右边距
-          &:last-child {
-            padding-right: 0;
-          }
-        }
-      }
-    }
-  }
-
-  // gathered 环境样式（多行居中）（使用 :global() 匹配动态类名）
-  :global(.math-gathered) {
-    display: inline-block;
-    text-align: center;
-
-    :global(.math-gathered-table) {
-      border-collapse: collapse;
-      margin: 0 auto;
-
-      :global(.math-gathered-row) {
-        line-height: 2.2;
-
-        :global(.math-gathered-cell) {
-          padding: var(--spacing-1) 0;
-          text-align: center;
-        }
-      }
-    }
-  }
-
-  // cases 环境样式（分段函数）- 修复边框问题（使用 :global() 匹配动态类名）
-  :global(.math-cases) {
-    display: inline-flex;
-    align-items: center;
-    vertical-align: middle;
-    gap: var(--spacing-1);
-
-    :global(.math-cases-left) {
-      font-size: 2.5em;
-      font-weight: 200;
-      line-height: 1;
-      font-family: 'Times New Roman', Times, serif;
-      color: var(--text-primary);
-    }
-
-    :global(.math-cases-table) {
-      border-collapse: collapse;
-      border-spacing: 0;
-      border: none !important;
-      background: transparent;
-
-      // 移除所有边框
-      &,
-      tr,
-      td,
-      th,
-      tbody {
-        border: none !important;
-        background: transparent;
-      }
-
-      :global(.math-cases-row) {
-        line-height: 2;
-        border: none !important;
-
-        :global(.math-cases-result),
-        :global(.math-cases-condition) {
-          padding: var(--spacing-1) var(--spacing-2);
-          text-align: left;
-          vertical-align: middle;
-          border: none !important;
-          background: transparent;
-        }
-
-        :global(.math-cases-condition) {
-          color: var(--text-secondary);
-          padding-left: var(--spacing-4);
-        }
-      }
-    }
-  }
-
-  // 矩阵环境样式 - 修复边框问题（使用 :global() 匹配动态类名）
-  :global(.math-matrix) {
-    display: inline-flex;
-    align-items: stretch;
-    justify-content: center;
-    vertical-align: middle;
-    gap: 0;
-
-    :global(.math-matrix-left),
-    :global(.math-matrix-right) {
-      font-size: 1.5em;
-      font-weight: 200;
-      line-height: 1;
-      vertical-align: middle;
-      font-family: 'Times New Roman', Times, serif;
-      color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      align-self: stretch;
-      padding: 0.1em 0;
-    }
-
-    :global(.math-matrix-left) {
-      margin-right: 0.15em;
-    }
-
-    :global(.math-matrix-right) {
-      margin-left: 0.15em;
-    }
-
-    // 根据行数动态调整括号大小
-    &:has(:global(.math-matrix-table) tr:nth-child(2)) {
-      > :global(.math-matrix-left),
-      > :global(.math-matrix-right) {
-        font-size: 1.8em;
-      }
-    }
-
-    &:has(:global(.math-matrix-table) tr:nth-child(3)) {
-      > :global(.math-matrix-left),
-      > :global(.math-matrix-right) {
-        font-size: 2.2em;
-      }
-    }
-
-    &:has(:global(.math-matrix-table) tr:nth-child(4)) {
-      > :global(.math-matrix-left),
-      > :global(.math-matrix-right) {
-        font-size: 2.6em;
-      }
-    }
-
-    &:has(:global(.math-matrix-table) tr:nth-child(5)) {
-      > :global(.math-matrix-left),
-      > :global(.math-matrix-right) {
-        font-size: 3em;
-      }
-    }
-
-    :global(.math-matrix-table) {
-      display: inline-table;
-      border-collapse: collapse;
-      border-spacing: 0;
-      vertical-align: middle;
-      border: none !important;
-      background: transparent;
-
-      // 移除所有边框
-      &,
-      tr,
-      td,
-      th,
-      tbody {
-        border: none !important;
-        background: transparent;
-      }
-
-      :global(.math-matrix-row) {
-        border: none !important;
-
-        :global(.math-matrix-cell) {
-          padding: var(--spacing-1) var(--spacing-3);
-          text-align: center;
-          vertical-align: middle;
-          white-space: nowrap;
-          border: none !important;
-          background: transparent;
-          line-height: 1.8;
-        }
-      }
-    }
-  }
-
-  // latex-math-block 基础样式（来自 math-env-handler）（使用 :global() 匹配动态类名）
-  :global(.latex-math-block) {
-    display: block;
-    margin: var(--spacing-4) 0;
-    padding: var(--spacing-3) var(--spacing-4);
-    text-align: center;
-    overflow-x: auto;
-
-    // 矩阵环境
-    &:global(.latex-math-matrix) {
-      padding: var(--spacing-3) var(--spacing-4);
-    }
-
-    // 分段函数环境
-    &:global(.latex-math-cases) {
-      padding: var(--spacing-2) var(--spacing-4);
-    }
-
-    // 对齐环境
-    &:global(.latex-math-align) {
-      padding: var(--spacing-3) var(--spacing-4);
-    }
-
-    // 居中多行环境
-    &:global(.latex-math-gather) {
-      padding: var(--spacing-3) var(--spacing-4);
-    }
-
-    // 单行公式环境
-    &:global(.latex-math-equation) {
-      padding: var(--spacing-3) var(--spacing-4);
-    }
-
-    // 带编号的公式
-    &:global(.latex-math-numbered) {
-      position: relative;
-
-      &::after {
-        content: '(' attr(data-equation-number) ')';
-        position: absolute;
-        right: var(--spacing-4);
-        top: 50%;
-        transform: translateY(-50%);
-        color: var(--text-secondary);
-        font-size: 0.9em;
-      }
-    }
-
-    // 错误状态
-    &:global(.latex-math-error) {
-      border: 1px solid var(--color-danger, #ef4444);
-      background: rgba(239, 68, 68, 0.05);
-      border-radius: var(--radius-md);
-    }
-
-    // 空公式
-    &:global(.latex-math-empty) {
-      min-height: 2em;
-      background: var(--bg-subtle);
-      border-radius: var(--radius-sm);
-
-      &::after {
-        content: '空公式';
-        color: var(--text-tertiary);
-        font-style: italic;
-      }
-    }
-  }
-
-  // 分数样式（使用 :global() 匹配动态类名）
-  :global(.math-frac) {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    vertical-align: middle;
-    text-align: center;
-
-    :global(.math-frac-num) {
-      padding: 0 var(--spacing-1);
-    }
-
-    :global(.math-frac-line) {
-      display: block;
-      width: 100%;
-      height: 1px;
-      background-color: var(--text-primary);
-      min-width: 0.8em;
-      margin: 1px 0;
-    }
-
-    :global(.math-frac-den) {
-      padding: 0 var(--spacing-1);
-    }
-  }
-
-  // 根号样式（使用 :global() 匹配动态类名）
-  :global(.math-sqrt) {
-    display: inline-flex;
-    align-items: stretch;
-    vertical-align: middle;
-
-    :global(.math-sqrt-symbol) {
-      font-size: 1.2em;
-      margin-right: -2px;
-    }
-
-    :global(.math-sqrt-content) {
-      border-top: 1px solid var(--text-primary);
-      padding: 0 var(--spacing-1);
-    }
-
-    &:global(.math-sqrt-nth) {
-      :global(.math-sqrt-index) {
-        font-size: 0.7em;
-        vertical-align: super;
-        margin-right: -2px;
-      }
-    }
-  }
-
-  // 上下标样式（使用 :global() 匹配动态类名）
-  :global(.math-script) {
-    display: inline-block;
-    position: relative;
-
-    :global(.math-script-base) {
-      display: inline-block;
-    }
-
-    :global(.math-sup) {
-      font-size: 0.7em;
-      vertical-align: super;
-      margin-left: 1px;
-    }
-
-    :global(.math-sub) {
-      font-size: 0.7em;
-      vertical-align: sub;
-      margin-left: 1px;
-    }
-
-    // 同时有上下标
-    &:global(.math-subsup) {
-      :global(.math-scripts) {
-        display: inline-flex;
-        flex-direction: column;
-        align-items: flex-start;
-        font-size: 0.7em;
-        vertical-align: middle;
-        margin-left: 1px;
-
-        :global(.math-sup) {
-          line-height: 1;
-        }
-
-        :global(.math-sub) {
-          line-height: 1;
-        }
-      }
-    }
-
-    // 极限式布局（lim, sum 等运算符的上下标在正上方/正下方）
-    // 关键：只对直接子元素应用 block 布局，不影响嵌套的下标（如 x_0 中的 0）
-    //
-    // 期望布局（以 \sum_{i=1}^{n} 为例）：
-    //     n      <- 上标 (order: -1)
-    //     Σ      <- base (order: 0)
-    //    i=1     <- 下标 (order: 1)
-    &:global(.math-limit-style) {
-      display: inline-flex !important;
-      flex-direction: column !important;
-      align-items: center !important;
-      justify-content: center !important;
-      vertical-align: middle !important;
-      text-align: center !important;
-
-      // 基础元素（如 lim, sum, Σ）- 直接子元素
-      > :global(.math-script-base) {
-        display: block !important;
-        order: 0 !important;
-        line-height: 1.2;
-        flex-shrink: 0;
-
-        // 大型运算符符号放大显示
-        :global(.math-op-large) {
-          font-size: 2.6em;
-          line-height: 1;
-        }
-      }
-
-      // 下标在基础元素正下方 - 只针对直接子元素（带 .math-under 类）
-      // 不影响嵌套的下标（如 x_0 中的 0）
-      > :global(.math-sub.math-under) {
-        display: block !important;
-        font-size: 0.9em;
-        line-height: 1.1;
-        order: 1 !important;
-        margin: 0 !important;
-        padding: 0;
-        vertical-align: baseline !important;
-        position: static !important;
-        flex-shrink: 0;
-
-        // 嵌套的下标保持正常的 inline 样式
-        :global(.math-sub) {
-          display: inline !important;
-          font-size: 0.9em;
-          vertical-align: sub;
-          position: relative;
-        }
-      }
-
-      // 上标在基础元素正上方 - 只针对直接子元素（带 .math-over 类）
-      > :global(.math-sup.math-over) {
-        display: block !important;
-        font-size: 0.9em;
-        line-height: 1.1;
-        order: -1 !important;
-        margin: 0 !important;
-        padding: 0;
-        vertical-align: baseline !important;
-        position: static !important;
-        flex-shrink: 0;
-
-        // 嵌套的上标保持正常的 inline 样式
-        :global(.math-sup) {
-          display: inline !important;
-          font-size: 0.9em;
-          vertical-align: super;
-          position: relative;
-        }
-      }
-
-      // 处理同时有上下标的情况（通过 .math-scripts 包装器）
-      // 需要将 .math-scripts 拆分，让上标在 base 上方，下标在 base 下方
-      &:global(.math-subsup) {
-        // 使用 CSS Grid 实现三行布局：上标、base、下标
-        display: inline-grid !important;
-        grid-template-rows: auto auto auto;
-        grid-template-columns: 1fr;
-        justify-items: center;
-        align-items: center;
-
-        > :global(.math-script-base) {
-          grid-row: 2;
-          grid-column: 1;
-          display: block !important;
-
-          // 大型运算符符号放大显示
-          :global(.math-op-large) {
-            font-size: 2.6em;
-            line-height: 1;
-          }
-        }
-
-        > :global(.math-scripts) {
-          // 使用 display: contents 让子元素直接参与 grid 布局
-          display: contents !important;
-
-          > :global(.math-sup.math-over) {
-            grid-row: 1;
-            grid-column: 1;
-            display: block !important;
-            font-size: 0.9em;
-            line-height: 1.1;
-            margin: 0 !important;
-            text-align: center;
-          }
-
-          > :global(.math-sub.math-under) {
-            grid-row: 3;
-            grid-column: 1;
-            display: block !important;
-            font-size: 0.9em;
-            line-height: 1.1;
-            margin: 0 !important;
-            text-align: center;
-          }
-        }
-      }
-    }
-
-    // 积分运算符使用斜式上下标（上下标在符号右侧，而不是正上方/正下方）
-    // 布局：∫ 然后右侧是 b(上) 和 a(下) 紧凑堆叠
-    &:global(.math-integral-script) {
-      display: inline-flex !important;
-      flex-direction: row !important;
-      align-items: center !important;
-      vertical-align: middle !important;
-
-      > :global(.math-script-base) {
-        display: inline-block !important;
-        order: 0 !important;
-      }
-
-      > :global(.math-sub) {
-        display: inline-block !important;
-        font-size: 0.9em !important;
-        vertical-align: sub !important;
-        position: relative !important;
-        top: 0.2em !important;
-        order: 1 !important;
-        margin-left: -0.05em;
-      }
-
-      > :global(.math-sup) {
-        display: inline-block !important;
-        font-size: 0.9em !important;
-        vertical-align: super !important;
-        position: relative !important;
-        top: -0.3em !important;
-        order: 2 !important;
-        margin-left: 0;
-      }
-
-      // 同时有上下标时 - 上下标在积分符号右侧垂直堆叠
-      > :global(.math-scripts) {
-        display: inline-flex !important;
-        flex-direction: column !important;
-        align-items: flex-start !important;
-        justify-content: center !important;
-        vertical-align: middle !important;
-        margin-left: 0;
-        line-height: 1;
-
-        > :global(.math-sup) {
-          display: block !important;
-          font-size: 0.9em !important;
-          line-height: 1.2 !important;
-          order: 0 !important;
-          margin: 0 !important;
-          padding: 0 !important;
-        }
-
-        > :global(.math-sub) {
-          display: block !important;
-          font-size: 0.9em !important;
-          line-height: 1.2 !important;
-          order: 1 !important;
-          margin: 0 !important;
-          padding: 0 !important;
-        }
-      }
-    }
-  }
-
-  // 积分运算符样式
-  :global(.math-integral-op) {
-    font-style: normal;
-    font-size: 2.4em;
-    vertical-align: middle;
-    line-height: 1;
-  }
-
-  // 分隔符样式（\left...\right）（使用 :global() 匹配动态类名）
-  :global(.math-delimited) {
-    display: inline-flex;
-    align-items: center;
-
-    :global(.math-delimiter-left),
-    :global(.math-delimiter-right) {
-      font-size: 1.2em;
-      font-weight: 300;
-      font-family: 'Times New Roman', serif;
-    }
-
-    :global(.math-delimiter-content) {
-      padding: 0 var(--spacing-1);
-    }
-  }
-
-  // 重音符号样式（使用 :global() 匹配动态类名）
-  :global(.math-accent) {
-    display: inline-block;
-    position: relative;
-    text-align: center;
-
-    :global(.math-accent-base) {
-      display: inline-block;
-    }
-
-    :global(.math-accent-mark) {
-      position: absolute;
-      top: -0.4em;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 0.8em;
-    }
-  }
-
-  // 大型运算符样式（使用 :global() 匹配动态类名）
-  :global(.math-op-large) {
-    font-size: 1.4em;
-    vertical-align: middle;
-  }
-
-  // 关系运算符样式（使用 :global() 匹配动态类名）
-  :global(.math-op-rel) {
-    margin: 0 var(--spacing-1);
-  }
-
-  // 二元运算符样式（使用 :global() 匹配动态类名）
-  :global(.math-op-bin) {
-    margin: 0 var(--spacing-1);
-  }
-
-  // 数学函数名样式（sin, cos, log 等）（使用 :global() 匹配动态类名）
-  :global(.math-function-name) {
-    font-style: normal;
-    font-family: var(--font-sans);
-  }
-
-  // 空格样式（使用 :global() 匹配动态类名）
-  :global(.math-space) {
-    display: inline-block;
-  }
-
-  :global(.latexError) {
-    color: var(--color-error);
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-    border: none;
-  }
-
-  // 数学公式错误详情折叠面板（使用 :global() 匹配动态类名）
-  :global(.latex-math-error-details) {
-    margin-top: var(--spacing-2);
-    font-size: var(--font-size-sm);
-    color: var(--text-secondary);
-
-    summary {
-      cursor: pointer;
-      color: var(--color-warning);
-      font-weight: 500;
-
-      &:hover {
-        color: var(--color-warning-hover);
-      }
-    }
-
-    pre {
-      margin-top: var(--spacing-2);
-      padding: var(--spacing-2);
-      background-color: var(--bg-tertiary);
-      border-radius: var(--radius-sm);
-      font-family: var(--font-mono);
-      font-size: 0.85em;
-      white-space: pre-wrap;
-      word-break: break-all;
-      overflow-x: auto;
-      max-height: 200px;
-      overflow-y: auto;
-
-      @include scrollbar;
-    }
-  }
-
-  // 空数学块样式（使用 :global() 匹配动态类名）
-  :global(.latex-math-empty) {
-    display: block;
-    width: 100%;
-    min-height: 2em;
-    background-color: var(--bg-secondary);
-    border-radius: var(--radius-sm);
-    opacity: 0.5;
-  }
-}
-
-// 可点击的渲染块样式（非只读模式）
-.latexRenderBlockClickable {
-  cursor: pointer;
-
-  // 悬停时显示淡色背景，无边框
-  &:hover {
-    background-color: var(--bg-hover);
-  }
-
-  // 聚焦时显示淡色背景和淡紫色轮廓
-  &:focus {
-    outline: 2px solid var(--accent-secondary);
-    outline-offset: -1px;
-    background-color: var(--bg-hover);
-  }
-}
-
-// 正在编辑的块样式
-.latexRenderBlockEditing {
-  // 编辑时显示淡紫色轮廓
-  outline: 2px solid var(--accent-secondary);
-  outline-offset: -1px;
-  background-color: var(--bg-secondary);
-  padding: 0;
-
-  // 编辑模式下不需要悬停效果
-  &:hover,
-  &:focus {
-    background-color: var(--bg-secondary);
-    outline: 2px solid var(--accent-secondary);
-  }
-}
-
-// ================================
-// 内联块编辑器样式（Typora 风格）
-// ================================
-
-// 内联块编辑器样式
-.latexInlineEditor {
-  width: 100%;
-  min-height: 80px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  // 确保不会遮挡侧边栏
-  position: relative;
-  z-index: 0;
-
-  // CodeMirror 编辑器样式 - LaTeX 语法高亮
-  :global {
-    .cm-editor {
-      font-family: var(--font-mono);
-      font-size: var(--font-size-lg); // 与全文源码编辑器一致
-      line-height: 1.7;
-      background-color: var(--bg-secondary);
-      border: none;
-
-      &.cm-focused {
-        outline: none;
-      }
-
-      .cm-scroller {
-        min-height: 80px;
-        padding: 0;
-        overflow: auto;
-      }
-
-      .cm-content {
-        padding: var(--spacing-3) var(--spacing-3) var(--spacing-3) var(--spacing-2);
-        caret-color: var(--text-primary);
-        color: var(--text-primary);
-      }
-
-      .cm-line {
-        padding: 0 var(--spacing-2);
-        line-height: 1.7;
-      }
-
-      // 行号样式 - 与全文源码编辑器一致
-      .cm-gutters {
-        background-color: var(--bg-tertiary);
-        border-right: 1px solid var(--border-primary);
-        color: var(--text-muted);
-        font-size: var(--font-size-lg); // 与内容字体大小一致
-        min-width: 4em;
-        padding: var(--spacing-3) 0;
-      }
-
-      .cm-lineNumbers .cm-gutterElement {
-        padding: 0 var(--spacing-3) 0 var(--spacing-2);
-        min-width: 3.5em;
-        text-align: right;
-        color: var(--text-muted);
-        font-size: var(--font-size-lg); // 与内容字体大小一致
-        line-height: 1.7;
-      }
-
-      .cm-activeLineGutter {
-        background-color: var(--bg-hover);
-        color: var(--text-secondary);
-      }
-
-      .cm-activeLine {
-        background-color: var(--bg-hover);
-      }
-
-      // LaTeX 语法高亮 - 使用主题变量
-      .cm-keyword,
-      .cm-meta {
-        color: var(--code-keyword, #569cd6);
-        font-weight: 500;
-      }
-
-      .cm-comment {
-        color: var(--code-comment, #6a9955);
-        font-style: italic;
-      }
-
-      .cm-string {
-        color: var(--code-string, #ce9178);
-      }
-
-      .cm-number {
-        color: var(--code-number, #b5cea8);
-      }
-
-      .cm-operator {
-        color: var(--code-operator, #d4d4d4);
-      }
-
-      .cm-bracket {
-        color: var(--code-punctuation, #808080);
-      }
-
-      .cm-tag {
-        color: var(--code-tag, #4ec9b0);
-      }
-
-      .cm-variableName {
-        color: var(--code-variable, #9cdcfe);
-      }
-
-      .cm-typeName {
-        color: var(--code-class-name, #4ec9b0);
-      }
-
-      .cm-heading {
-        color: var(--code-function, #dcdcaa);
-        font-weight: 600;
-      }
-
-      // 转义字符
-      .cm-escape {
-        color: var(--code-regex, #d16969);
-      }
-
-      // 选择高亮
-      .cm-selectionBackground {
-        background-color: var(--accent-primary-alpha, rgba(124, 58, 237, 0.3)) !important;
-      }
-
-      &.cm-focused .cm-selectionBackground {
-        background-color: var(--accent-primary-alpha, rgba(124, 58, 237, 0.4)) !important;
-      }
-
-      // 光标样式
-      .cm-cursor {
-        border-left-color: var(--text-primary);
-        border-left-width: 2px;
-      }
-    }
-  }
-}
-
-// ================================
-// 全文源码编辑器样式
-// ================================
-
-// 全文源码编辑器样式 - 100% 宽度
-// 重要：z-index 必须低于侧边栏，确保文件系统可点击
-.latexFullSourceEditor {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  overflow: hidden;
-  border: none;
-  background-color: var(--bg-primary);
-  // 确保不遮挡侧边栏和文件系统点击
-  // 使用 isolation 创建新的层叠上下文，避免子元素 z-index 溢出
-  position: relative;
-  z-index: 0;
-  isolation: isolate;
-
-  // CodeMirror 编辑器样式 - 完整 LaTeX 语法高亮
-  :global {
-    .cm-editor {
-      height: 100%;
-      font-family: var(--font-mono);
-      font-size: var(--font-size-lg); // 使用 lg 尺寸，确保与内容一致
-      line-height: 1.7;
-      background-color: var(--bg-primary);
-      border: none;
-      // 确保编辑器不会创建高 z-index 层级
-      position: relative;
-      z-index: 0;
-
-      &.cm-focused {
-        outline: none;
-      }
-
-      .cm-scroller {
-        overflow: auto;
-        padding: 0;
-      }
-
-      .cm-content {
-        padding: var(--spacing-4) var(--spacing-4) var(--spacing-4) var(--spacing-2);
-        caret-color: var(--text-primary);
-        color: var(--text-primary);
-        min-height: 100%;
-      }
-
-      .cm-line {
-        padding: 0 var(--spacing-2);
-        line-height: 1.7;
-      }
-
-      // 行号样式 - 修复颜色和尺寸，与内容字体大小一致
-      .cm-gutters {
-        background-color: var(--bg-secondary);
-        border-right: 1px solid var(--border-primary);
-        color: var(--text-muted);
-        font-size: var(--font-size-lg); // 与内容字体大小一致
-        padding: var(--spacing-4) 0;
-        min-width: 4.5em;
-      }
-
-      .cm-lineNumbers .cm-gutterElement {
-        padding: 0 var(--spacing-3) 0 var(--spacing-2);
-        min-width: 4em;
-        text-align: right;
-        color: var(--text-muted);
-        font-size: var(--font-size-lg); // 与内容字体大小一致
-        line-height: 1.7;
-      }
-
-      .cm-activeLineGutter {
-        background-color: var(--bg-hover);
-        color: var(--text-secondary);
-      }
-
-      .cm-activeLine {
-        background-color: var(--bg-hover);
-      }
-
-      // LaTeX 语法高亮 - 使用主题变量
-      .cm-keyword,
-      .cm-meta {
-        color: var(--code-keyword, #569cd6);
-        font-weight: 500;
-      }
-
-      .cm-comment {
-        color: var(--code-comment, #6a9955);
-        font-style: italic;
-      }
-
-      .cm-string {
-        color: var(--code-string, #ce9178);
-      }
-
-      .cm-number {
-        color: var(--code-number, #b5cea8);
-      }
-
-      .cm-operator {
-        color: var(--code-operator, #d4d4d4);
-      }
-
-      .cm-bracket {
-        color: var(--code-punctuation, #808080);
-      }
-
-      .cm-tag {
-        color: var(--code-tag, #4ec9b0);
-      }
-
-      .cm-variableName {
-        color: var(--code-variable, #9cdcfe);
-      }
-
-      .cm-typeName {
-        color: var(--code-class-name, #4ec9b0);
-      }
-
-      .cm-heading {
-        color: var(--code-function, #dcdcaa);
-        font-weight: 600;
-      }
-
-      // 转义字符
-      .cm-escape {
-        color: var(--code-regex, #d16969);
-      }
-
-      // 选择高亮
-      .cm-selectionBackground {
-        background-color: var(--accent-primary-alpha, rgba(124, 58, 237, 0.3)) !important;
-      }
-
-      &.cm-focused .cm-selectionBackground {
-        background-color: var(--accent-primary-alpha, rgba(124, 58, 237, 0.4)) !important;
-      }
-
-      // 光标样式
-      .cm-cursor {
-        border-left-color: var(--text-primary);
-        border-left-width: 2px;
-      }
-    }
-  }
-}
-
-// ================================
-// LaTeX 编辑器新增样式
-// ================================
-
-// 超大文件指示器
+// 大文件 / 超大文件指示器
+.latexLargeFileIndicator,
 .latexHugeFileIndicator {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-1);
   padding: var(--spacing-1) var(--spacing-2);
   font-size: var(--font-size-xs);
-  color: var(--color-error);
-  background-color: var(--color-error-bg);
   border-radius: var(--radius-sm);
 
   svg {
@@ -4161,308 +1881,54 @@
   }
 }
 
-// 超大文件模式
-.latexEditorHugeFile {
-  .latexEditorBlocks {
-    contain: strict;
-  }
-
-  .latexEditorContent {
-    contain: layout style;
-  }
+.latexLargeFileIndicator {
+  color: var(--color-warning);
+  background-color: var(--color-warning-bg);
 }
 
-// 块占位符（未渲染的块）
-.latexBlockPlaceholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 60px;
-  margin-bottom: var(--spacing-2);
-  padding: var(--spacing-3) var(--spacing-4);
-  border: 1px dashed var(--border-primary);
-  border-radius: var(--radius-sm);
-  background-color: var(--bg-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-
-  &:hover {
-    background-color: var(--bg-hover);
-    border-color: var(--border-secondary);
-  }
-
-  &:focus {
-    outline: 2px solid var(--accent-secondary);
-    outline-offset: -1px;
-  }
+.latexHugeFileIndicator {
+  color: var(--color-error);
+  background-color: var(--color-error-bg);
 }
 
-// 块加载状态
-.latexBlockLoading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+// 最近一次增量解析的耗时与复用率
+.latexEditorMeta {
+  display: inline-flex;
   gap: var(--spacing-2);
+  padding: var(--spacing-1) var(--spacing-2);
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
-  font-size: var(--font-size-sm);
-
-  span {
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-}
-
-// 渲染完成的块
-.latexBlock {
-  display: block;
-  width: 100%;
-  margin-bottom: var(--spacing-2);
-  padding: var(--spacing-3) var(--spacing-4);
-  border-radius: var(--radius-sm);
-  border: none;
-  transition:
-    background-color 0.15s ease,
-    box-shadow 0.15s ease;
-  cursor: text;
-
-  &:hover {
-    background-color: var(--bg-hover);
-  }
-
-  &:focus {
-    outline: 2px solid var(--accent-secondary);
-    outline-offset: -1px;
-    background-color: var(--bg-hover);
-  }
-
-  // 继承渲染块的内容样式
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    margin-top: var(--spacing-4);
-    margin-bottom: var(--spacing-2);
-    color: var(--text-primary);
-    font-weight: 600;
-    line-height: 1.4;
-    border: none;
-
-    &:first-child {
-      margin-top: 0;
-    }
-  }
-
-  h1 {
-    font-size: 2em;
-  }
-  h2 {
-    font-size: 1.5em;
-  }
-  h3 {
-    font-size: 1.25em;
-  }
-  h4 {
-    font-size: 1.1em;
-  }
-
-  p {
-    margin-bottom: var(--spacing-3);
-    line-height: 1.8;
-    border: none;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-
-  ul,
-  ol {
-    margin-bottom: var(--spacing-3);
-    padding-left: var(--spacing-6);
-    border: none;
-  }
-
-  li {
-    margin-bottom: var(--spacing-1);
-    border: none;
-  }
-}
-
-// 正在编辑的块
-.latexBlockEditing {
-  width: 100%;
-  margin-bottom: var(--spacing-2);
-  border-radius: var(--radius-sm);
-  outline: 2px solid var(--accent-secondary);
-  outline-offset: -1px;
-  background-color: var(--bg-secondary);
-  overflow: hidden;
-}
-
-// 块源码预览
-.latexBlockSource {
-  width: 100%;
-  padding: var(--spacing-3) var(--spacing-4);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
   background-color: var(--bg-tertiary);
   border-radius: var(--radius-sm);
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-x: auto;
-  border: none;
-  margin: 0;
-}
-
-// 错误块样式
-.latexErrorBlock {
-  padding: var(--spacing-4);
-  background-color: var(--color-error-bg);
-  border: 1px solid var(--color-error);
-  border-radius: var(--radius-md);
-  color: var(--color-error);
-  font-size: var(--font-size-sm);
   font-family: var(--font-mono);
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
-// 错误消息样式
-.latexErrorMessage {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2) 0;
-  font-weight: 500;
-  color: var(--color-error);
-
-  &::before {
-    content: '⚠';
-    font-size: 1.2em;
-  }
-}
-
-// LaTeX 错误样式
-.latexError {
-  color: var(--color-error);
-  font-family: var(--font-mono);
-  font-size: 0.85em;
-  background-color: var(--color-error-bg);
-  padding: 0.1em 0.3em;
-  border-radius: var(--radius-sm);
-}
-
-// 数学公式渲染错误样式
-.latexMathError {
-  display: inline-block;
-  padding: var(--spacing-2) var(--spacing-3);
-  background-color: var(--color-error-bg);
-  border: 1px solid var(--color-error);
-  border-radius: var(--radius-sm);
-  color: var(--color-error);
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-
-  // 错误图标
-  &::before {
-    content: '⚠ ';
-    font-size: 1.1em;
-  }
-}
-
-// 数学公式错误容器（块级）
-.latexMathBlockError {
-  display: block;
-  width: 100%;
-  text-align: center;
-  margin: var(--spacing-4) 0;
-  padding: var(--spacing-3);
-  background-color: var(--color-error-bg);
-  border: 1px dashed var(--color-error);
-  border-radius: var(--radius-md);
-
-  .latexMathErrorContent {
-    color: var(--color-error);
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-}
-
-// 空状态样式
-.latexEmpty {
-  color: var(--text-muted);
-  font-style: italic;
-  text-align: center;
-  padding: var(--spacing-8) var(--spacing-4);
-  cursor: text;
-}
-
-// 响应式布局
-@media (max-width: 768px) {
-  .latexEditorContent {
-    padding: var(--spacing-2) var(--spacing-3);
-  }
-
-  .latexInlineEditor {
-    :global {
-      .cm-editor {
-        font-size: 0.85em;
-      }
-    }
-  }
-
-  .latexRenderBlockItem {
-    padding: var(--spacing-2);
-  }
-}
-
-// ================================
-// LaTeX 编辑器新版样式
-// 支持：源码视图、预览视图、分栏视图
-// ================================
-
-// 主编辑区域（替代 latexEditorContent）
+// 主编辑区域：源码与预览面板横向排列
 .latexEditorMain {
-  flex: 1;
   display: flex;
+  flex: 1;
   width: 100%;
   min-height: 0;
   overflow: hidden;
   background-color: var(--bg-primary);
 }
 
-// 单个面板（源码或预览）
+// 源码或预览面板：尺寸由容器决定，contain: strict 让一侧的布局与绘制不波及另一侧
+// （大文档分栏时，源码每次按键都会触发整个预览重新布局与绘制）。面板内容自己滚动
 .latexEditorPane {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  width: 100%;
-  height: 100%;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
-  @include scrollbar;
-}
-
-// 分栏模式下的左侧面板（源码）
-.latexEditorPaneLeft {
-  flex: 1;
-  min-width: 0;
   height: 100%;
-  overflow: auto;
-  border-right: none;
-  @include scrollbar;
-}
+  overflow: hidden;
+  contain: strict;
 
-// 分栏模式下的右侧面板（预览）
-.latexEditorPaneRight {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  overflow: auto;
-  @include scrollbar;
+  > * {
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 // 分栏分隔线
@@ -4471,19 +1937,6 @@
   height: 100%;
   background-color: var(--border-primary);
   flex-shrink: 0;
-  cursor: col-resize;
-  transition: background-color 0.15s ease;
-
-  &:hover {
-    background-color: var(--accent-primary);
-  }
-}
-
-// 分栏模式容器样式
-.latexEditorSplit {
-  .latexEditorMain {
-    flex-direction: row;
-  }
 }
 
 // 视图模式切换按钮组
@@ -4569,6 +2022,9 @@
       .cm-scroller {
         overflow: auto;
         padding: var(--spacing-4);
+        // 滚动同步直接设置 scrollTop，不用平滑滚动
+        scroll-behavior: auto;
+        will-change: scroll-position;
       }
 
       .cm-content {
@@ -4598,183 +2054,222 @@
       // LaTeX 语法高亮
       .cm-keyword,
       .cm-meta {
-        color: var(--syntax-keyword);
+        color: var(--code-keyword);
         font-weight: 500;
       }
 
       .cm-comment {
-        color: var(--syntax-comment);
+        color: var(--code-comment);
         font-style: italic;
       }
 
       .cm-string {
-        color: var(--syntax-string);
+        color: var(--code-string);
       }
 
       .cm-number {
-        color: var(--syntax-number);
+        color: var(--code-number);
       }
 
       .cm-operator {
-        color: var(--syntax-operator);
+        color: var(--code-operator);
       }
 
       .cm-bracket {
-        color: var(--syntax-bracket);
+        color: var(--code-punctuation);
       }
 
       .cm-tag {
-        color: var(--syntax-tag);
+        color: var(--code-tag);
       }
 
       .cm-variableName {
-        color: var(--syntax-variable);
+        color: var(--code-variable);
       }
 
       .cm-typeName {
-        color: var(--syntax-type);
+        color: var(--code-class-name);
+      }
+
+      // 诊断下划线：以波浪线替代 lint 默认的固定色 SVG
+      .cm-lintRange {
+        background-image: none;
+        padding-bottom: 0;
+        text-decoration-line: underline;
+        text-decoration-style: wavy;
+        text-decoration-skip-ink: none;
+        text-underline-offset: 3px;
+      }
+
+      .cm-lintRange-error {
+        text-decoration-color: var(--color-error);
+      }
+
+      .cm-lintRange-warning {
+        text-decoration-color: var(--color-warning);
+      }
+
+      .cm-lintRange-info {
+        text-decoration-color: var(--color-info);
+      }
+
+      .cm-lintRange-active {
+        background-color: var(--accent-primary-alpha);
+      }
+
+      .cm-lintPoint::after {
+        border-bottom-color: var(--color-error);
+      }
+
+      .cm-lintPoint-warning::after {
+        border-bottom-color: var(--color-warning);
+      }
+
+      .cm-lintPoint-info::after {
+        border-bottom-color: var(--color-info);
+      }
+
+      .cm-lint-marker {
+        content: normal;
+        width: 0.6em;
+        height: 0.6em;
+        margin: 0.2em;
+        border-radius: 50%;
+      }
+
+      .cm-lint-marker-error {
+        background-color: var(--color-error);
+      }
+
+      .cm-lint-marker-warning {
+        background-color: var(--color-warning);
+      }
+
+      .cm-lint-marker-info {
+        background-color: var(--color-info);
+      }
+
+      .cm-tooltip {
+        background-color: var(--bg-secondary);
+        border: 1px solid var(--border-primary);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-lg);
+      }
+
+      .cm-diagnostic {
+        font-size: var(--font-size-xs);
+      }
+
+      .cm-diagnostic-error {
+        border-left-color: var(--color-error);
+      }
+
+      .cm-diagnostic-warning {
+        border-left-color: var(--color-warning);
+      }
+
+      .cm-diagnostic-info {
+        border-left-color: var(--color-info);
+      }
+
+      .cm-diagnosticSource {
+        color: var(--text-muted);
+      }
+
+      .cm-panels {
+        background-color: var(--bg-secondary);
+        color: var(--text-primary);
+      }
+
+      .cm-panels-bottom {
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      .cm-panel.cm-panel-lint {
+        ul {
+          max-height: 160px;
+
+          [aria-selected] {
+            background-color: var(--bg-hover);
+          }
+        }
+
+        ul:focus [aria-selected] {
+          background-color: var(--accent-primary-alpha);
+          color: var(--text-primary);
+        }
+
+        button[name='close'] {
+          color: var(--text-muted);
+          cursor: pointer;
+        }
+      }
+
+      // 折叠
+      .cm-foldGutter span {
+        color: var(--text-muted);
+
+        &:hover {
+          color: var(--text-primary);
+        }
+      }
+
+      .cm-foldPlaceholder {
+        background-color: var(--bg-tertiary);
+        border: 1px solid var(--border-subtle);
+        color: var(--text-muted);
       }
     }
   }
 }
 
-// 预览区域容器
+// 预览区：外框定位悬浮的“渲染中”提示，内层是滚动容器（渲染管线与滚动同步的 scrollContainer）
+.latexPreviewFrame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .latexPreview {
-  width: 100%;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   overflow: auto;
   padding: var(--spacing-4) var(--spacing-6);
   background-color: var(--bg-primary);
   @include scrollbar;
 
-  // 平滑滚动（滚动同步时使用）
+  // 平滑滚动（滚动同步时禁用，避免延迟）
   scroll-behavior: smooth;
 
-  // 滚动同步时禁用平滑滚动（避免延迟）
   &.syncScrolling {
     scroll-behavior: auto;
   }
+
+  // 预览内容缩放：--latex-preview-zoom 由 LatexEditor 根据缩放级别写入
+  .latexPreviewContent {
+    font-size: calc(var(--latex-preview-zoom, 1) * 100%);
+  }
 }
 
 // ================================
-// 分栏模式滚动同步优化样式
+// 分栏模式：左右各占一半；行号与预览顶部对齐，段落与标题间距贴近源码行高（滚动同步更稳定）
 // ================================
 
-// 分栏容器优化 - 确保左右对齐
 .latexEditorSplit {
-  .latexEditorMain {
-    display: flex;
-    flex-direction: row;
-    align-items: stretch;
-  }
-
-  // 左侧源码面板
-  .latexEditorPaneLeft {
-    flex: 1;
-    min-width: 0;
+  .latexEditorPane {
     max-width: 50%;
-    height: 100%;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-
-    // 源码编辑器填充整个面板
-    .latexSourceEditor {
-      flex: 1;
-      min-height: 0;
-    }
   }
 
-  // 右侧预览面板
-  .latexEditorPaneRight {
-    flex: 1;
-    min-width: 0;
-    max-width: 50%;
-    height: 100%;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-
-    // 预览内容填充整个面板
-    .latexPreview {
-      flex: 1;
-      min-height: 0;
-    }
-  }
-
-  // 分隔线样式增强
-  .latexEditorDivider {
-    width: 1px;
-    height: 100%;
-    background-color: var(--border-primary);
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
-
-    // 拖拽区域扩展（便于鼠标操作）
-    &::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -4px;
-      right: -4px;
-      bottom: 0;
-      cursor: col-resize;
-    }
-
-    &:hover {
-      background-color: var(--accent-primary);
-    }
-  }
-}
-
-// 源码编辑器滚动容器优化
-.latexSourceEditor {
-  :global {
-    .cm-editor {
-      .cm-scroller {
-        // 确保滚动平滑
-        scroll-behavior: auto;
-        // 优化滚动性能
-        will-change: scroll-position;
-      }
-    }
-  }
-}
-
-// 滚动同步指示器（可选，用于调试）
-.scrollSyncIndicator {
-  position: absolute;
-  top: var(--spacing-2);
-  right: var(--spacing-2);
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--text-tertiary);
-  background-color: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  pointer-events: none;
-  z-index: 10;
-
-  &.visible {
-    opacity: 1;
-  }
-}
-
-// 分栏模式行号对齐优化
-.latexEditorSplit {
   .latexSourceEditor {
     :global {
       .cm-editor {
         .cm-gutters {
-          // 行号区域固定宽度，便于对齐
           min-width: 40px;
         }
 
         .cm-content {
-          // 内容区域与预览区域对齐
           padding-top: 0;
           padding-bottom: var(--spacing-4);
         }
@@ -4784,16 +2279,13 @@
 
   .latexPreview {
     .latexPreviewContent {
-      // 预览内容顶部对齐
       padding-top: 0;
 
-      // 段落间距与源码行高匹配
       p {
         margin-bottom: 1.2em;
         line-height: 1.6;
       }
 
-      // 标题间距优化
       h1,
       h2,
       h3,
@@ -4811,15 +2303,14 @@
   }
 }
 
-// 移动端分栏模式优化
+// 窄窗口：分栏改为上下排列
 @media (max-width: 768px) {
   .latexEditorSplit {
     .latexEditorMain {
       flex-direction: column;
     }
 
-    .latexEditorPaneLeft,
-    .latexEditorPaneRight {
+    .latexEditorPane {
       max-width: 100%;
       width: 100%;
       height: 50%;
@@ -4828,13 +2319,15 @@
     .latexEditorDivider {
       width: 100%;
       height: 1px;
+    }
+  }
 
-      &::before {
-        top: -4px;
-        bottom: -4px;
-        left: 0;
-        right: 0;
-        cursor: row-resize;
+  .latexViewModeGroup {
+    .latexViewModeBtn {
+      padding: var(--spacing-1);
+
+      span {
+        display: none;
       }
     }
   }
@@ -4842,16 +2335,16 @@
 
 // 预览内容区域
 .latexPreviewContent {
+  overflow: auto;
   width: 100%;
   max-width: 100%;
+  padding: var(--spacing-4);
+  background-color: var(--bg-primary);
   line-height: 1.8;
   color: var(--text-primary);
   font-size: 1.1em;
-
-  // 数学公式基础字体增大
-  :global(.math-formula) {
-    font-size: 1.2em;
-  }
+  @include scrollbar;
+  @extend .previewContent;
 
   :global(.math-display) {
     font-size: 1.4em;
@@ -4870,7 +2363,6 @@
     font-size: 1.1em;
   }
 
-  // 继承所有 latexRenderBlockItem 的样式
   h1,
   h2,
   h3,
@@ -5240,45 +2732,29 @@
     vertical-align: middle;
     line-height: 1;
   }
-
-  // 旧的极限式布局样式 - 保留但降低优先级（由上面的规则覆盖）
-  // 旧的嵌套样式已移到外部，这里只保留注释以维护文件结构
-  // 极限式和积分式布局现在在 .latexPreviewContent 的顶层定义
-  // 以确保足够的 CSS 特异性
 }
 
-// 缩放控制栏
+// 预览缩放（头部视图切换旁，预览可见时显示）
 .zoomControls {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2);
-  background-color: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  z-index: 100;
-  opacity: 0.9;
-  transition: opacity 0.2s ease;
-
-  &:hover {
-    opacity: 1;
-  }
+  gap: 2px;
+  padding: 2px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
 }
 
 .zoomButton {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 1px solid var(--border-color);
+  border: none;
   border-radius: var(--radius-sm);
-  background-color: var(--bg-primary);
+  background-color: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
@@ -5286,7 +2762,6 @@
   &:hover:not(:disabled) {
     background-color: var(--bg-hover);
     color: var(--text-primary);
-    border-color: var(--border-hover);
   }
 
   &:active:not(:disabled) {
@@ -5300,27 +2775,33 @@
 }
 
 .zoomLevel {
-  min-width: 50px;
+  min-width: 44px;
   text-align: center;
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: var(--spacing-1) var(--spacing-2);
+  padding: 2px var(--spacing-1);
+  border: none;
   border-radius: var(--radius-sm);
+  background-color: transparent;
   transition: all 0.15s ease;
 
-  &:hover {
+  &:hover:not(:disabled) {
     background-color: var(--bg-hover);
     color: var(--text-primary);
   }
+
+  &:disabled {
+    cursor: default;
+  }
 }
 
-// 预览加载状态 - 使用绝对定位，不影响内容布局
+// 预览渲染中（悬浮在预览区右下角，不影响内容布局）
 .latexPreviewLoading {
   position: absolute;
   bottom: var(--spacing-4);
-  right: var(--spacing-4);
+  right: var(--spacing-5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5331,12 +2812,12 @@
   background-color: var(--bg-secondary);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  z-index: 10;
+  z-index: 2;
   pointer-events: none;
 }
 
-// 预览加载旋转动画
-.latexPreviewSpinner {
+// 头部与预览共用的加载旋转图标
+.latexSpinner {
   animation: spin 1s linear infinite;
 }
 
@@ -5365,300 +2846,10 @@
   }
 }
 
-// 解析中指示器
-.latexEditorParsing {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: var(--spacing-1) var(--spacing-2);
-  font-size: var(--font-size-xs);
-  color: var(--accent-primary);
-  background-color: var(--accent-bg);
-  border-radius: var(--radius-sm);
-}
-
-// 编辑器加载旋转动画
-.latexEditorSpinner {
-  animation: spin 1s linear infinite;
-}
-
-// 简化预览模式（复杂度过高时）
-.latexSimplifiedPreview {
-  padding: var(--spacing-4);
-}
-
-.latexSimplifiedNotice {
-  padding: var(--spacing-4);
-  margin-bottom: var(--spacing-4);
-  background-color: var(--color-warning-bg);
-  border: 1px solid var(--color-warning);
-  border-radius: var(--radius-md);
-  color: var(--color-warning);
-
-  strong {
-    display: block;
-    margin-bottom: var(--spacing-2);
-    font-size: var(--font-size-md);
-  }
-
-  p {
-    margin: 0;
-    font-size: var(--font-size-sm);
-  }
-}
-
-.latexSimplifiedSource {
-  padding: var(--spacing-4);
-  background-color: var(--bg-tertiary);
-  border-radius: var(--radius-md);
+// 块 ID 标记（^block-id）：保留在正文中，弱化显示
+.blockIdMarker {
+  color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: var(--text-secondary);
-}
-
-// 分栏模式响应式
-@media (max-width: 768px) {
-  .latexEditorSplit {
-    .latexEditorMain {
-      flex-direction: column;
-    }
-
-    .latexEditorPaneLeft,
-    .latexEditorPaneRight {
-      height: 50%;
-      width: 100%;
-    }
-
-    .latexEditorDivider {
-      width: 100%;
-      height: 1px;
-      cursor: row-resize;
-    }
-  }
-
-  .latexViewModeGroup {
-    .latexViewModeBtn {
-      padding: var(--spacing-1);
-
-      span {
-        display: none;
-      }
-    }
-  }
-}
-
-// ================================
-// 虚拟滚动组件样式
-// ================================
-
-.virtualScrollContainer {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-
-  // 自定义滚动条
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: var(--bg-secondary);
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 4px;
-
-    &:hover {
-      background: var(--text-tertiary);
-    }
-  }
-}
-
-.virtualScrollSpacer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 1px;
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.virtualScrollContent {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  will-change: transform;
-}
-
-.virtualScrollItem {
-  position: relative;
-  width: 100%;
-  box-sizing: border-box;
-
-  // 淡入动画
-  animation: virtualItemFadeIn 0.15s ease-out;
-}
-
-@keyframes virtualItemFadeIn {
-  from {
-    opacity: 0.7;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.virtualScrollItemContent {
-  width: 100%;
-
-  // 继承渲染块样式
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    margin-top: var(--spacing-4);
-    margin-bottom: var(--spacing-2);
-    font-weight: 600;
-    line-height: 1.3;
-    color: var(--text-primary);
-
-    &:first-child {
-      margin-top: 0;
-    }
-  }
-
-  h1 {
-    font-size: 1.75rem;
-  }
-
-  h2 {
-    font-size: 1.5rem;
-  }
-
-  h3 {
-    font-size: 1.25rem;
-  }
-
-  p {
-    margin: var(--spacing-2) 0;
-    line-height: 1.6;
-    color: var(--text-primary);
-
-    &:first-child {
-      margin-top: 0;
-    }
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-
-  ul,
-  ol {
-    margin: var(--spacing-2) 0;
-    padding-left: var(--spacing-6);
-  }
-
-  li {
-    margin: var(--spacing-1) 0;
-    line-height: 1.6;
-  }
-
-  pre,
-  code {
-    font-family: var(--font-mono);
-    font-size: var(--font-size-sm);
-  }
-
-  code {
-    padding: 0.125rem 0.25rem;
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-  }
-
-  pre {
-    padding: var(--spacing-3);
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-md);
-    overflow-x: auto;
-
-    code {
-      padding: 0;
-      background: none;
-      border-radius: 0;
-    }
-  }
-}
-
-.virtualScrollEmpty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  min-height: 200px;
-  color: var(--text-tertiary);
-  font-size: var(--font-size-sm);
-}
-
-.virtualScrollLoading {
-  position: absolute;
-  bottom: var(--spacing-4);
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2) var(--spacing-4);
-  background-color: var(--bg-secondary);
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-md);
-  color: var(--text-secondary);
-  font-size: var(--font-size-xs);
-
-  span {
-    animation: pulse 1.5s ease-in-out infinite;
-  }
-}
-
-// 虚拟滚动项 - 带源码行信息
-.virtualScrollItem[data-source-start-line] {
-  &::before {
-    content: attr(data-source-start-line);
-    position: absolute;
-    left: -2rem;
-    top: 0;
-    font-size: 0.65rem;
-    color: var(--text-tertiary);
-    opacity: 0;
-    transition: opacity 0.15s ease;
-  }
-
-  &:hover::before {
-    opacity: 1;
-  }
-}
-
-// 虚拟滚动响应式
-@media (max-width: 768px) {
-  .virtualScrollContainer {
-    &::-webkit-scrollbar {
-      width: 4px;
-    }
-  }
-
-  .virtualScrollItem[data-source-start-line]::before {
-    display: none;
-  }
+  font-size: 0.8em;
+  opacity: 0.6;
 }

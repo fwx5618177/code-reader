@@ -19,6 +19,9 @@ export {
   folderToListItem,
   buildFolderTree,
   flattenFolderTree,
+  listFolderPaths,
+  collectDescendantIds,
+  wouldCreateCycle,
 } from './types';
 
 // Repository

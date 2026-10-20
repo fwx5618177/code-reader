@@ -5,6 +5,15 @@ node_modules/
 dist/
 build/
 
+# 打包：应用暂存目录（见 packages/desktop/scripts/stage-app.mjs）与安装包输出
+packages/desktop/.app-stage/
+# 插件作者工具的打包产物（见 packages/desktop/scripts/plugin-tools.ts）
+packages/desktop/scripts/.plugin-tools.mjs
+packages/desktop/release/
+
+# 构建时从 node_modules 复制的 OCR 资源（见 packages/desktop/scripts/ocr-assets.ts）
+packages/desktop/assets/ocr/
+
 # Environment files
 .env
 .env.local
@@ -32,3 +41,14 @@ Thumbs.db
 prompt.md
 
 .spec-workflow/
+# TypeScript 增量构建产物
+*.tsbuildinfo
+
+# 测试报告产物
+test-results/
+coverage/
+
+# 冒烟测试的临时用户数据目录
+packages/desktop/.smoke-userdata/
+# 本地 CDP 端到端验证的临时脚本与数据
+packages/desktop/.e2e/

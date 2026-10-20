@@ -1,0 +1,51 @@
+// ================================
+// 写作大纲样式：--outline-depth 为相对最高级标题的缩进层级
+// ================================
+
+@use '../../styles/variables' as *;
+
+.outline {
+  flex: 1;
+  min-height: 0;
+  padding: var(--spacing-1) 0;
+  overflow-y: auto;
+  @include scrollbar;
+}
+
+.heading {
+  @include button-reset;
+  @include truncate;
+  display: block;
+  width: 100%;
+  padding: 3px var(--spacing-3);
+  padding-left: calc(var(--spacing-3) + var(--outline-depth, 0) * 12px);
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  text-align: left;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+// LaTeX 文档信息（\title / \author）
+.documentInfo {
+  padding: var(--spacing-1) var(--spacing-3) var(--spacing-2);
+  margin-bottom: var(--spacing-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.documentTitle {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.documentAuthors {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}

@@ -3,9 +3,9 @@
 // Bridge between renderer and main process database
 // ================================
 
-import { ipcMain, app } from 'electron';
+import { ipcMain } from 'electron';
 import { getSQLiteService, type FTSResult } from './sqlite';
-import { join } from 'path';
+import { parseTransactionStatements } from './statements';
 
 /**
  * Register all database-related IPC handlers
@@ -59,6 +59,24 @@ export function registerDatabaseHandlers(): void {
       };
     } catch (error) {
       console.error('[DB:IPC] Run error:', error);
+      throw error;
+    }
+  });
+
+  /**
+   * 在同一个事务中依次执行多条写语句：任一失败则全部回滚
+   */
+  ipcMain.handle('db:transaction', async (_event, statements: unknown) => {
+    try {
+      const parsed = parseTransactionStatements(statements);
+      return sqlite.transaction(() =>
+        parsed.map(({ sql, params }) => {
+          const result = sqlite.run(sql, params);
+          return { changes: result.changes, lastInsertRowid: Number(result.lastInsertRowid) };
+        })
+      );
+    } catch (error) {
+      console.error('[DB:IPC] Transaction error:', error);
       throw error;
     }
   });
@@ -167,29 +185,6 @@ export function registerDatabaseHandlers(): void {
   });
 
   /**
-   * Create a backup
-   */
-  ipcMain.handle('db:backup', async (_event, customPath?: string) => {
-    try {
-      const backupDir = join(app.getPath('userData'), 'backups');
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = customPath || join(backupDir, `knowledge-backup-${timestamp}.db`);
-
-      // Ensure backup directory exists
-      const { mkdirSync, existsSync } = await import('fs');
-      if (!existsSync(backupDir)) {
-        mkdirSync(backupDir, { recursive: true });
-      }
-
-      await sqlite.backup(backupPath);
-      return { success: true, path: backupPath };
-    } catch (error) {
-      console.error('[DB:IPC] Backup error:', error);
-      throw error;
-    }
-  });
-
-  /**
    * Vacuum the database
    */
   ipcMain.handle('db:vacuum', async () => {
@@ -242,13 +237,13 @@ export function cleanupDatabaseHandlers(): void {
     'db:initialize',
     'db:close',
     'db:run',
+    'db:transaction',
     'db:get',
     'db:all',
     'db:exec',
     'db:search',
     'db:rebuildFTS',
     'db:getSchemaVersion',
-    'db:backup',
     'db:vacuum',
     'db:stats',
     'db:clearAllData',

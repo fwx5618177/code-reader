@@ -1,15 +1,25 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeImage, protocol } from 'electron';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { existsSync } from 'fs';
-import dirTree from 'directory-tree';
-import { readFile, stat, writeFile, mkdir, access } from 'fs/promises';
+import { readFile, stat, writeFile, mkdir, access, rename } from 'fs/promises';
 
 // Import services
-import { getSQLiteService } from './database/sqlite';
+import { getWorkspaceManager } from './workspace/workspace-manager';
+import { registerWorkspaceHandlers, cleanupWorkspaceHandlers } from './workspace/ipc-handlers';
 import { registerDatabaseHandlers, cleanupDatabaseHandlers } from './database/ipc-handlers';
 import { registerSearchHandlers, cleanupSearchHandlers } from './database/search-ipc-handlers';
-import { registerVersionAndGitHandlers } from './database/version-ipc-handlers';
+import { registerEntityHandlers, cleanupEntityHandlers } from './database/entity-ipc-handlers';
+import {
+  registerCategorizationHandlers,
+  cleanupCategorizationHandlers,
+} from './database/categorization-ipc-handlers';
+import { registerVersionHistoryHandlers } from './database/version-ipc-handlers';
+import { registerWebHandlers } from './web/ipc-handlers';
+import { registerSpellcheckHandlers } from './spellcheck/ipc-handlers';
+import { registerPluginHandlers } from './plugins/ipc-handlers';
+import { OCR_SCHEME_PRIVILEGES, registerOcrHandlers } from './ocr/ipc-handlers';
+import { MEDIA_SCHEME_PRIVILEGES, registerMediaProtocol } from './media/media-protocol';
 import { registerAIHandlers, cleanupAIHandlers } from './ai/ipc-handlers';
 import {
   registerAgentHandlers,
@@ -17,12 +27,28 @@ import {
   updateAgentMainWindow,
 } from './agent/ipc-handlers';
 import { getAgentExecutor } from './agent/agent-executor';
+import { cleanupBackupHandlers, registerBackupHandlers } from './transfer/backup';
+import { cleanupSyncHandlers, getSyncService, registerSyncHandlers } from './sync/sync-service';
+import { cleanupTransferHandlers, registerTransferHandlers } from './transfer/files';
+import { cleanupOrganizeHandlers, getOrganizeScheduler, registerOrganizeHandlers } from './agent/organize-schedule';
 import { initializeTray } from './tray/tray-manager';
+import { installAppMenu } from './app-menu';
+import {
+  registerFlushHandlers,
+  cleanupFlushHandlers,
+  flushBeforeClose,
+  flushBeforeQuit,
+} from './flush/window-flush';
+import { currentPlatform } from './platform';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-(app as any).applicationSupportsSecureRestorableState = true;
+/** 平台差异（窗口外观、应用图标、退出行为） */
+const platform = currentPlatform();
+
+// 自定义协议须在 app ready 之前注册权限；Electron 只允许调用一次，全部协议合并在这里
+protocol.registerSchemesAsPrivileged([OCR_SCHEME_PRIVILEGES, MEDIA_SCHEME_PRIVILEGES]);
 
 let mainWindow: BrowserWindow | null = null;
 const childWindows: Map<string, BrowserWindow> = new Map();
@@ -108,10 +134,7 @@ function loadAppIcon(): Electron.NativeImage {
         const icon = nativeImage.createFromPath(iconPath);
         if (!icon.isEmpty()) {
           console.log(`[Main] Successfully loaded app icon from: ${iconPath}`);
-          // On macOS, also set the dock icon
-          if (process.platform === 'darwin') {
-            app.dock?.setIcon(icon);
-          }
+          platform.applyAppIcon(icon);
           return icon;
         } else {
           console.log(`[Main] Icon file exists but created empty image: ${iconPath}`);
@@ -124,11 +147,7 @@ function loadAppIcon(): Electron.NativeImage {
 
   console.log('[Main] Using fallback programmatic icon');
   const fallbackIcon = createFallbackIcon();
-
-  // On macOS, also set the dock icon for fallback
-  if (process.platform === 'darwin') {
-    app.dock?.setIcon(fallbackIcon);
-  }
+  platform.applyAppIcon(fallbackIcon);
 
   return fallbackIcon;
 }
@@ -144,25 +163,13 @@ function createWindow() {
     minWidth: 800,
     minHeight: 600,
     icon: appIcon,
-    // 无边框窗口，使用自定义标题栏
-    frame: false,
-    titleBarStyle: 'hidden',
-    // macOS 特定设置
-    trafficLightPosition: { x: 12, y: 12 },
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    // Windows 特定设置
-    ...(process.platform === 'win32' && {
-      titleBarOverlay: {
-        color: '#1e1e1e',
-        symbolColor: '#e0e0e0',
-        height: 38,
-      },
-    }),
+    // 无边框窗口，使用自定义标题栏（交通灯 / 窗口按钮由平台适配提供）
+    ...platform.windowChrome(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: join(__dirname, 'preload.cjs'),
+      // 关闭 Chromium 拼写检查：编辑器使用自研 Hunspell 检查器（词典可导入、热切换），避免两套波浪线重叠
       spellcheck: false,
     },
     backgroundColor: '#1e1e1e',
@@ -170,15 +177,19 @@ function createWindow() {
   });
 
   // 设置 Content-Security-Policy
-  // 注意：worker-src blob: 允许从 Blob URL 创建 Worker（用于差分计算等后台任务）
+  // - worker-src blob:：允许从 Blob URL 创建 Worker（用于差分计算等后台任务）
+  // - img-src https:：Markdown 与网页剪藏中的远程图片；media-src kb-media:：本地音视频附件经流式协议播放（支持拖动进度），blob:：EPUB 内嵌的音视频，https:：Markdown 中远程音视频地址
+  // - connect-src 不放行任何外部服务：AI 请求只由主进程发起，渲染进程不直连网络
+  // - ocr-resource:：文字识别 Worker 从本地协议加载脚本（script-src）与语言数据（connect-src）；
+  //   'wasm-unsafe-eval' 仅允许编译 WebAssembly（识别引擎），不放行 eval
   mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           process.env.NODE_ENV === 'development'
-            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* https://*.openai.com https://*.anthropic.com"
-            : "default-src 'self'; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://*.openai.com https://*.anthropic.com",
+            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* blob: ocr-resource:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https: kb-media:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* ocr-resource:"
+            : "default-src 'self'; script-src 'self' blob: ocr-resource: 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https: kb-media:; font-src 'self' data:; connect-src 'self' ocr-resource:",
         ],
       },
     });
@@ -221,6 +232,9 @@ function createWindow() {
   // 初始化系统托盘
   initializeTray(mainWindow);
 
+  // 须在托盘的 close 监听之后注册：只是隐藏到托盘时不落盘
+  flushBeforeClose(mainWindow);
+
   return mainWindow;
 }
 
@@ -235,22 +249,12 @@ function createChildWindow(mode: string): BrowserWindow {
     minWidth: 600,
     minHeight: 400,
     icon: appIcon,
-    frame: false,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: { x: 12, y: 12 },
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
-    ...(process.platform === 'win32' && {
-      titleBarOverlay: {
-        color: '#1e1e1e',
-        symbolColor: '#e0e0e0',
-        height: 38,
-      },
-    }),
+    ...platform.windowChrome(),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: join(__dirname, 'preload.cjs'),
+      // 同主窗口：拼写检查由自研 Hunspell 检查器负责
       spellcheck: false,
     },
     backgroundColor: '#1e1e1e',
@@ -277,17 +281,9 @@ function createChildWindow(mode: string): BrowserWindow {
     childWindows.delete(windowId);
   });
 
-  return child;
-}
+  flushBeforeClose(child);
 
-// 转换目录树结构
-function convertTreeFormat(node: dirTree.DirectoryTree): FileNode {
-  return {
-    name: node.name,
-    path: node.path,
-    type: node.type === 'directory' ? 'directory' : 'file',
-    ...(node?.children && { children: node?.children?.map(convertTreeFormat) }),
-  };
+  return child;
 }
 
 // 设置IPC通信
@@ -330,27 +326,6 @@ function setupIPC() {
   // 文件系统操作
   // =====================================
 
-  // 打开本地文件夹
-  ipcMain.handle('open-local-folder', async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openDirectory'],
-    });
-
-    if (!result.canceled && result.filePaths.length > 0) {
-      const folderPath = result.filePaths[0];
-      const tree = dirTree(folderPath, {
-        exclude: /node_modules|\.git|\.DS_Store/,
-        attributes: ['type'],
-      });
-
-      return {
-        path: folderPath,
-        files: tree?.children ? tree?.children?.map(convertTreeFormat) : [],
-      };
-    }
-    return null;
-  });
-
   // 读取文件内容
   ipcMain.handle('read-file', async (_event, filePath: string) => {
     try {
@@ -358,6 +333,16 @@ function setupIPC() {
       return content;
     } catch (error) {
       console.error('Error reading file:', error);
+      throw error;
+    }
+  });
+
+  // 读取二进制文件（渲染进程转为 Blob URL 预览图片/音视频附件，不需要放开 file: 协议）
+  ipcMain.handle('read-binary-file', async (_event, filePath: string) => {
+    try {
+      return new Uint8Array(await readFile(filePath));
+    } catch (error) {
+      console.error('Error reading binary file:', error);
       throw error;
     }
   });
@@ -391,11 +376,10 @@ function setupIPC() {
   });
 
   // 写入二进制文件
-  ipcMain.handle('write-binary-file', async (_event, filePath: string, data: number[]) => {
+  ipcMain.handle('write-binary-file', async (_event, filePath: string, data: Uint8Array) => {
     try {
-      // 从渲染进程接收的数据是序列化后的数组，转换回 Buffer
-      const buffer = Buffer.from(data);
-      await writeFile(filePath, buffer);
+      // 二进制数据经结构化克隆直接传来，不转成数字数组
+      await writeFile(filePath, data);
       return true;
     } catch (error) {
       console.error('Error writing binary file:', error);
@@ -424,11 +408,22 @@ function setupIPC() {
     }
   });
 
+  // 重命名/移动文件
+  ipcMain.handle('rename-path', async (_event, fromPath: string, toPath: string) => {
+    try {
+      await rename(fromPath, toPath);
+      return true;
+    } catch (error) {
+      console.error('Error renaming path:', error);
+      throw error;
+    }
+  });
+
   // =====================================
-  // 知识库数据操作 (Phase 1)
+  // 应用数据目录
   // =====================================
 
-  // 获取知识库存储路径
+  // 应用级数据目录（settings.json 所在）；当前知识库的数据库与附件路径见 workspace:getCurrent
   ipcMain.handle('get-data-path', () => {
     return app.getPath('userData');
   });
@@ -459,8 +454,45 @@ function setupIPC() {
   // Semantic search handlers
   registerSearchHandlers();
 
+  // 实体图谱查询
+  registerEntityHandlers();
+
+  // 自动归类待审阅提议
+  registerCategorizationHandlers();
+
+  // 定期整理建议（按间隔自动提交整库归类）
+  registerOrganizeHandlers();
+
   // Version history and Git handlers
-  registerVersionAndGitHandlers();
+  registerVersionHistoryHandlers();
+
+  // 网页剪藏的 HTML 抓取
+  registerWebHandlers();
+
+  // 拼写检查词典与用户词表
+  registerSpellcheckHandlers(getPackageRoot());
+
+  // 插件：列出内置与用户插件、读取入口代码、打开插件目录、卸载
+  registerPluginHandlers(getPackageRoot());
+
+  // 扫描版 PDF 文字识别：资源协议、语言数据与识别结果
+  registerOcrHandlers(getPackageRoot());
+
+  // 本地音视频附件的流式播放（支持 Range）
+  registerMediaProtocol();
+
+  // 知识库管理与切换
+  registerWorkspaceHandlers();
+
+  // 备份与恢复、批量导入导出的文件访问
+  registerBackupHandlers();
+  registerTransferHandlers();
+
+  // 多设备同步（共享文件夹）
+  registerSyncHandlers();
+
+  // 切换知识库、关闭窗口、退出前的落盘 ack
+  registerFlushHandlers();
 }
 
 // 初始化数据库和服务
@@ -468,15 +500,17 @@ async function initializeServices() {
   try {
     console.log('[Main] Initializing services...');
 
-    // Initialize SQLite database
-    const sqlite = getSQLiteService();
-    sqlite.initialize();
+    // 打开上次使用的知识库（建表 + 迁移）
+    getWorkspaceManager().openCurrent();
     console.log('[Main] Database initialized');
 
     // Start agent executor
     const agent = getAgentExecutor();
     agent.start();
     console.log('[Main] Agent executor started');
+
+    getOrganizeScheduler().start();
+    getSyncService().start();
 
     console.log('[Main] All services initialized');
   } catch (error) {
@@ -495,8 +529,16 @@ async function cleanup() {
 
     // Cleanup handlers
     cleanupSearchHandlers();
+    cleanupEntityHandlers();
+    cleanupCategorizationHandlers();
+    cleanupOrganizeHandlers();
     cleanupAIHandlers();
     cleanupDatabaseHandlers();
+    cleanupWorkspaceHandlers();
+    cleanupBackupHandlers();
+    cleanupTransferHandlers();
+    cleanupSyncHandlers();
+    cleanupFlushHandlers();
 
     console.log('[Main] Cleanup complete');
   } catch (error) {
@@ -506,6 +548,7 @@ async function cleanup() {
 
 // 应用准备就绪时创建窗口
 app.whenReady().then(async () => {
+  installAppMenu(platform.id === 'mac');
   setupIPC();
   await initializeServices();
   createWindow();
@@ -519,20 +562,10 @@ app.whenReady().then(async () => {
 
 // 所有窗口关闭时退出应用
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (platform.quitWhenAllWindowsClosed) {
     app.quit();
   }
 });
 
-// 应用退出前清理
-app.on('before-quit', async () => {
-  await cleanup();
-});
-
-// 类型定义
-interface FileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  children?: FileNode[];
-}
+// 应用退出前：所有窗口落盘后再清理资源并退出
+flushBeforeQuit(cleanup);

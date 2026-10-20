@@ -539,6 +539,23 @@
   font-style: italic;
 }
 
+// 版本对比：更宽更高，差异视图填满中间区域
+.versionDiff {
+  max-width: 960px;
+  height: 80vh;
+}
+
+.diffBody {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: var(--spacing-3) var(--spacing-4);
+}
+
+.diffViewer {
+  flex: 1;
+}
+
 .previewFooter {
   display: flex;
   justify-content: flex-end;

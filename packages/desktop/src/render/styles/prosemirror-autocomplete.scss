@@ -25,6 +25,11 @@
   animation: pm-autocomplete-enter 0.15s ease;
 
   @include scrollbar;
+
+  // 光标下方放不下时翻到上方：入场方向相反
+  &.pm-autocomplete-panel-above {
+    animation-name: pm-autocomplete-enter-above;
+  }
 }
 
 // ================================
@@ -35,6 +40,17 @@
   from {
     opacity: 0;
     transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pm-autocomplete-enter-above {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -147,15 +163,6 @@
 }
 
 // ================================
-// 匹配高亮
-// ================================
-
-.pm-autocomplete-match {
-  color: var(--accent-primary);
-  font-weight: $font-weight-semibold;
-}
-
-// ================================
 // 详情文本
 // ================================
 
@@ -167,173 +174,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-// ================================
-// 类型标签
-// ================================
-
-.pm-autocomplete-type {
-  flex-shrink: 0;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 2px var(--spacing-2);
-  border-radius: var(--radius-sm);
-  background-color: var(--bg-tertiary);
-  color: var(--text-muted);
-}
-
-// ================================
-// 分组标题
-// ================================
-
-.pm-autocomplete-group-header {
-  padding: var(--spacing-2) var(--spacing-3) var(--spacing-1);
-  font-size: var(--font-size-xs);
-  font-weight: $font-weight-semibold;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-}
-
-// ================================
-// 分隔线
-// ================================
-
-.pm-autocomplete-divider {
-  height: 1px;
-  margin: var(--spacing-1) 0;
-  background-color: var(--border-subtle);
-}
-
-// ================================
-// 文档预览区域
-// ================================
-
-.pm-autocomplete-documentation {
-  padding: var(--spacing-2) var(--spacing-3);
-  font-size: var(--font-size-xs);
-  color: var(--text-secondary);
-  background-color: var(--bg-tertiary);
-  border-top: 1px solid var(--border-subtle);
-  line-height: $line-height-normal;
-
-  code {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    padding: 2px var(--spacing-1);
-    background-color: var(--bg-quaternary);
-    border-radius: var(--radius-sm);
-    color: var(--code-string);
-  }
-
-  pre {
-    margin: var(--spacing-2) 0;
-    padding: var(--spacing-2);
-    background-color: var(--bg-quaternary);
-    border-radius: var(--radius-sm);
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-
-    code {
-      padding: 0;
-      background: none;
-    }
-  }
-}
-
-// ================================
-// 加载状态
-// ================================
-
-.pm-autocomplete-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-3);
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-
-  &::before {
-    content: '';
-    width: 14px;
-    height: 14px;
-    border: 2px solid var(--border-primary);
-    border-top-color: var(--accent-primary);
-    border-radius: 50%;
-    animation: pm-autocomplete-spin 0.8s linear infinite;
-  }
-}
-
-@keyframes pm-autocomplete-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-// ================================
-// 空状态
-// ================================
-
-.pm-autocomplete-empty {
-  padding: var(--spacing-4);
-  text-align: center;
-  color: var(--text-muted);
-  font-size: var(--font-size-sm);
-}
-
-// ================================
-// 错误状态
-// ================================
-
-.pm-autocomplete-error {
-  padding: var(--spacing-3);
-  margin: var(--spacing-2);
-  text-align: center;
-  color: var(--color-error);
-  font-size: var(--font-size-sm);
-  background-color: var(--color-error-bg);
-  border-radius: var(--radius-sm);
-}
-
-// ================================
-// 快捷键提示
-// ================================
-
-.pm-autocomplete-shortcut {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-  font-size: var(--font-size-xs);
-  color: var(--text-faint);
-
-  kbd {
-    display: inline-block;
-    padding: 1px var(--spacing-1);
-    font-size: 10px;
-    font-family: inherit;
-    background-color: var(--bg-tertiary);
-    border: 1px solid var(--border-primary);
-    border-radius: var(--radius-sm);
-  }
-}
-
-// ================================
-// 拼写错误样式
-// ================================
-
-.pm-spell-error {
-  text-decoration: wavy underline var(--color-error);
-  text-underline-offset: 3px;
-}
-
-.pm-spell-warning {
-  text-decoration: wavy underline var(--color-warning);
-  text-underline-offset: 3px;
 }
 
 // ================================

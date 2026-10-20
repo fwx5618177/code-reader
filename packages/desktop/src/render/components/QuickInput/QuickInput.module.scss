@@ -254,6 +254,14 @@
   gap: var(--spacing-3);
 }
 
+// 录音实时电平波形（Canvas 尺寸由 CSS 决定，绘制时按 devicePixelRatio 同步像素尺寸）
+.waveform {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: 48px;
+}
+
 .pulse {
   width: 12px;
   height: 12px;

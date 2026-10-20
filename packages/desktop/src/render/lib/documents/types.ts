@@ -3,8 +3,6 @@
 // Single responsibility: Type definitions only
 // ================================
 
-import { DocumentTypeId, getFileTypeId } from './file-types';
-
 /**
  * Full document entity with all fields
  */
@@ -124,11 +122,3 @@ export function documentToListItem(doc: Document): DocumentListItem {
   };
 }
 
-/**
- * 根据文档标题推断文件类型
- * @param title 文档标题（可能包含扩展名）
- * @returns 文件类型 ID
- */
-export function inferDocumentFileType(title: string): DocumentTypeId {
-  return getFileTypeId(title);
-}

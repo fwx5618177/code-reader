@@ -1,77 +1,188 @@
-import React, { useState, useEffect, useCallback, useReducer, useRef, Suspense, lazy } from 'react';
-import FileTree from './components/FileTree';
+import React, { useState, useEffect, useCallback, useMemo, useReducer, useRef } from 'react';
 import Layout from './components/Layout';
 import QuickInput, { QuickInputData } from './components/QuickInput';
-import SearchPanel, { SearchResult } from './components/SearchPanel';
+import SearchPanel from './components/SearchPanel';
 import SettingsPanel from './components/SettingsPanel';
 import EditorFooter from './components/EditorFooter';
 import WelcomeGuide, { wasWelcomeGuideDismissed } from './components/WelcomeGuide';
+import UserGuide from './components/UserGuide';
 import WritingSidebar, { type CreateDocumentOptions } from './components/WritingSidebar';
 import VersionHistory from './components/VersionHistory';
 import TitleInput from './components/TitleInput';
-import { PermissionProvider } from './components/PermissionDialog/PermissionProvider';
+import SplitEditor from './components/SplitEditor';
+import PaneEditor, { type PaneEditorProps } from './components/SplitEditor/PaneEditor';
+import PageSettings from './components/PageSettings';
+import PageSurface from './components/PageSettings/PageSurface';
+import { useEditorTabs } from './hooks/useEditorTabs';
+import { usePageSettings } from './hooks/usePageSettings';
+import { PAGE_CONTENT_WIDTH_VALUES } from './lib/editor/page-settings';
 
-// Lazy load heavy editor components for better initial load performance
-const CodeViewer = lazy(() => import('./components/CodeViewer'));
-const RichEditor = lazy(() => import('./components/RichEditor'));
-
-// Loading fallback component
-const EditorLoadingFallback: React.FC = () => (
-  <div className="editor-loading">
-    <div className="loading-spinner" />
-    <span>加载编辑器...</span>
-  </div>
-);
-
-import VirtualFolders, { VirtualFolder, GroupByType } from './components/VirtualFolders';
+import VirtualFolders, { VirtualFolder } from './components/VirtualFolders';
+import InputDialog, { ConfirmDialog } from './components/InputDialog';
+import KnowledgeWorkspace from './components/KnowledgeWorkspace';
+import { EMPTY_FILTERS, type ItemFilters } from './components/KnowledgeWorkspace/filtering';
+import AgentActivityPanel from './components/AgentActivity';
+import { categorizationReview } from './lib/categorization/reviewStore';
+import BacklinksPanel from './components/BacklinksPanel';
+import ResizablePanel from './components/ResizablePanel';
+import {
+  CalendarPanel,
+  DocumentTags,
+  GraphPanel,
+  PanelEmpty,
+  RecordingsPanel,
+  SidebarItemList,
+  SidebarSearch,
+  TagCloud,
+  WritingOutline,
+  LatexOutline,
+  describeReading,
+  describeUpdated,
+  diaryTitle,
+} from './components/SidebarPanels';
+import PluginViewsPanel from './components/PluginHost/PluginViews';
+import {
+  ReadingShelf,
+  ReadingView,
+  isOnShelf,
+  type CreateExcerptInput,
+} from './components/ReadingWorkspace';
 import {
   useDocuments,
   PLACEHOLDERS,
   fileTypeRegistry,
   getFileTypeId,
+  keepFileExtension,
   type DocumentTypeId,
 } from './lib/documents';
+import { ensureExtension } from './lib/documents/file-types';
+import { pickRecentDocuments, sortByRecentUpdate } from './lib/documents/recent';
+import { isWritingDocument } from './lib/documents/constants';
+import { isReadableItem, itemOpenTarget } from './lib/knowledge/open-target';
+import { useKnowledgeBase } from './lib/knowledge/useKnowledgeBase';
+import { onKnowledgeChanged } from './lib/knowledge/changes';
+import { refreshAfterSync } from './lib/sync/refresh';
+import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
+import { knowledgeRepository } from './lib/knowledge/repository';
+import { syncTagsFromFrontMatter, writeBackAgentTags } from './lib/knowledge/front-matter-tags';
+import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
+import { buildFolderTree, wouldCreateCycle, type FolderTreeNode } from './lib/folders/types';
 import {
-  RefreshCw,
-  FolderPlus,
+  createLinkResolver,
+  displayTitle,
+  isLinkableTitle,
+  linkRepository,
+  LinkResolverContext,
+  normalizeLinkTarget,
+  planLinkRename,
+  addBlockIdToMarkdown,
+  useLinkIndex,
+  useRelatedLinks,
+} from './lib/links';
+import {
+  extractWikiLinks,
+  parseWikiLinkInner,
+  type BlockIdSlot,
+  type RevealRequest,
+  type SourceLocation,
+} from './lib/markdown';
+import {
   ChevronDown,
   ChevronRight,
   Plus,
-  Brain,
-  BookOpen,
   PenTool,
   X,
   History,
+  Link2,
+  LayoutTemplate,
+  PenLine,
+  Eye,
+  Columns2,
 } from 'lucide-react';
-import { AppMode, APP_MODE_CONFIGS, appReducer, DEFAULT_APP_STATE } from './types/app-modes';
+import {
+  AppMode,
+  APP_MODE_CONFIGS,
+  appReducer,
+  DEFAULT_APP_STATE,
+  getActiveSidebarPanel,
+} from './types/app-modes';
 import { aiConfigService } from './services/aiConfigService';
-import { knowledgeStorage } from './services/knowledgeStorage';
+import { registerFlush } from './services/flushRegistry';
+import { getEditorManager } from './lib/core';
+import { pickRecentlyRead, resolveArticle } from './lib/reading';
+import type { PaneView } from './lib/editor-tabs';
+import { PANELS } from './lib/layout/panel-sizes';
 import './App.scss';
 
-interface FileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  children?: FileNode[];
-}
+/** 写作区的视图模式（底栏切换；⌘/ 在编辑与预览间切换，⌘⇧/ 切换分屏） */
+const WRITING_VIEW_MODES: ReadonlyArray<{ mode: PaneView; label: string; icon: React.ReactNode }> = [
+  { mode: 'edit', label: '编辑', icon: <PenLine size={14} /> },
+  { mode: 'preview', label: '预览（⌘/）', icon: <Eye size={14} /> },
+  { mode: 'split', label: '分屏：编辑与预览并排（⌘⇧/）', icon: <Columns2 size={14} /> },
+];
 
 const App: React.FC = () => {
   // Use reducer for app state management
   const [appState, dispatch] = useReducer(appReducer, DEFAULT_APP_STATE);
 
   // Local UI state
-  const [files, setFiles] = useState<FileNode[]>([]);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [folderPath, setFolderPath] = useState<string | null>(null);
-  // 侧边栏折叠状态（当前固定为展开）
-  const sidebarCollapsed = false;
   const [explorerExpanded, setExplorerExpanded] = useState(true);
 
-  // 虚拟文件夹状态
-  const [virtualFolders, setVirtualFolders] = useState<VirtualFolder[]>([]);
-  const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>();
-  const [, setFoldersLoading] = useState(false);
-  const [groupBy, setGroupBy] = useState<GroupByType>('tags');
+  // 知识库：SQLite 是唯一数据源，知识库、写作、阅读、Agent 共用
+  const kb = useKnowledgeBase(true);
+  const linkIndex = useLinkIndex(kb.items);
+  const linkResolver = useMemo(() => createLinkResolver(linkIndex), [linkIndex]);
+  const relatedLinks = useRelatedLinks(kb.items);
+
+  // 知识库侧边栏选中的范围（智能文件夹或用户文件夹）与选中的条目
+  const [selectedFolderId, setSelectedFolderId] = useState<string>('all');
+  const [selectedKnowledgeItemId, setSelectedKnowledgeItemId] = useState<string | undefined>();
+  // 知识库条目流筛选：工具栏与侧栏标签云共同修改
+  const [knowledgeFilters, setKnowledgeFilters] = useState<ItemFilters>(EMPTY_FILTERS);
+
+  // 阅读模式选中的条目
+  const [readingItemId, setReadingItemId] = useState<string | undefined>();
+  // 侧栏「章节」「书签」面板的挂载点：阅读视图把导航渲染到这里
+  const [readingNavTarget, setReadingNavTarget] = useState<HTMLDivElement | null>(null);
+
+  // 写作模式的反向链接面板
+  const [showBacklinks, setShowBacklinks] = useState(true);
+
+  // 页面设置（纸张背景、页宽、正文排版）：写作与专注模式共用
+  const pageSettings = usePageSettings();
+  const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
+  const pageContentWidth = PAGE_CONTENT_WIDTH_VALUES[pageSettings.settings.contentWidth];
+
+  // 轻提示（快速收集结果等）
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // 文档保存后：同步 [[链接]] 到 links 表、文档属性（YAML 头部）的 tags 到条目标签，并刷新知识库中的该条目（反向链接随之更新）。
+  // 按保存的文档执行：分栏时保存的不一定是当前文档；最新的索引通过 ref 读取
+  const linkSyncRef = useRef({ linkIndex, refresh: kb.refreshItem });
+  linkSyncRef.current = { linkIndex, refresh: kb.refreshItem };
+  const syncDocumentLinks = useCallback((document: { id: string; content: string }) => {
+    const { linkIndex: index, refresh } = linkSyncRef.current;
+    const targetIds = new Set<string>();
+    for (const link of extractWikiLinks(document.content, document.id)) {
+      const target = index.resolve(link.target);
+      if (target && target.id !== document.id) targetIds.add(target.id);
+    }
+    Promise.all([
+      linkRepository.syncReferences(document.id, [...targetIds]),
+      syncTagsFromFrontMatter(document.id, document.content),
+    ])
+      .then(() => refresh(document.id))
+      .catch((error) => console.error('同步双向链接与文档属性失败:', error));
+  }, []);
+  const documentsConfig = useMemo(() => ({ onDocumentSaved: syncDocumentLinks }), [syncDocumentLinks]);
+
+  // AI 自动打的标签写回笔记的 YAML（写了 tags 键的笔记），再刷新该条目
+  useEffect(() => writeBackAgentTags((itemId) => void linkSyncRef.current.refresh(itemId)), []);
 
   // Writing mode state - using useDocuments hook for document management
   // Auto-save is now handled internally by the hook via AutoSaveManager
@@ -83,7 +194,6 @@ const App: React.FC = () => {
     // Editor state
     currentDocument,
     selectedId: selectedDocId,
-    editorLoading,
     isDirty: editorDirty,
 
     // Auto-save state
@@ -92,7 +202,6 @@ const App: React.FC = () => {
 
     // Global state
     isInitialized: documentsInitialized,
-    isFirstTime,
 
     // Computed values
     wordCount: docWordCount,
@@ -100,37 +209,134 @@ const App: React.FC = () => {
 
     // Actions
     initialize: initializeDocuments,
-    selectDocument,
+    selectDocument: selectSessionDocument,
     reloadDocument,
     createDocument,
     updateLocal,
     saveDocument: saveCurrentDocument,
     deleteDocument,
     refreshList,
-  } = useDocuments();
+    saveExecutor,
+  } = useDocuments(documentsConfig);
+
+  // 标签页与分栏：聚焦窗格的活动标签决定编辑会话的文档
+  const editorTabs = useEditorTabs({
+    documents: documentList,
+    isInitialized: documentsInitialized,
+    sessionDocId: selectedDocId,
+    sessionDocument: currentDocument,
+    isDirty: editorDirty,
+    selectSessionDocument,
+    saveSessionDocument: saveCurrentDocument,
+    refreshList,
+    shortcutsEnabled: appState.mode === 'writing' && appState.writingFeature !== 'focus',
+    onError: setNotice,
+  });
+  // 所有“打开文档”入口（侧边栏、搜索、跨模式跳转等）都在聚焦窗格中打开标签
+  const selectDocument = editorTabs.openDocument;
+  // 视图模式按栏独立；底栏按钮、⌘/ 与专注模式作用于聚焦的一栏
+  const writingView: PaneView = editorTabs.panes[editorTabs.focusedPane]?.view ?? 'edit';
+  const { focusedPane, setPaneView } = editorTabs;
+  const setWritingView = useCallback((view: PaneView) => setPaneView(focusedPane, view), [focusedPane, setPaneView]);
 
   // 处理文档移动（移动后刷新列表）
   const handleMoveDocument = useCallback(async () => {
     await refreshList();
   }, [refreshList]);
 
-  // 处理文档重命名
-  const handleRenameDocument = useCallback(
-    (id: string, newTitle: string) => {
-      // 如果是当前选中的文档，直接更新本地状态
-      if (id === selectedDocId) {
-        updateLocal({ title: newTitle });
+  // 批量导入等整体变化后写作文档列表同样重新加载（知识库数据由 useKnowledgeBase 自行订阅）
+  useEffect(() => onKnowledgeChanged(() => void refreshList()), [refreshList]);
+
+  // 多设备同步写入了远端修改：刷新列表与正在编辑的文档
+  useEffect(() => window.electron.sync?.onApplied((itemIds) => void refreshAfterSync(itemIds)), []);
+
+  // ================================
+  // 重命名：自动改写其他笔记中指向原标题的 [[链接]]，并提示改写数量
+  // ================================
+
+  const renameStateRef = useRef({ items: kb.items, currentDocument });
+  renameStateRef.current = { items: kb.items, currentDocument };
+  /** 当前文档最近一次提交的标题（编辑器标题逐键保存，失焦时才视为一次重命名） */
+  const committedTitleRef = useRef<{ id: string; title: string } | null>(null);
+  useEffect(() => {
+    const doc = renameStateRef.current.currentDocument;
+    committedTitleRef.current = doc ? { id: doc.id, title: doc.title } : null;
+  }, [currentDocument?.id]);
+
+  const updateLinksAfterRename = useCallback(
+    async (oldTitle: string, newTitle: string) => {
+      try {
+        // 先保存编辑中的文档，改写基于最新内容
+        await saveCurrentDocument();
+        const { items, currentDocument: current } = renameStateRef.current;
+        const sources = items
+          .filter((item) => item.type === 'note')
+          .map((item) => ({
+            id: item.id,
+            content: item.id === current?.id ? current.content : (item.content ?? ''),
+          }));
+        const plan = planLinkRename(sources, oldTitle, newTitle);
+        if (plan.count === 0) return;
+        if (!isLinkableTitle(newTitle)) {
+          setNotice(`新标题含有 # | [ ] 等字符，无法作为链接目标，${plan.count} 处指向原标题的链接未更新`);
+          return;
+        }
+        await Promise.all(
+          plan.changes.map((change) => knowledgeRepository.update(change.id, { content: change.content }))
+        );
+        if (current && plan.changes.some((change) => change.id === current.id)) await reloadDocument();
+        await kb.reload();
+        setNotice(`已更新 ${plan.changes.length} 篇笔记中的 ${plan.count} 处链接`);
+      } catch (error) {
+        console.error('更新链接失败:', error);
+        setNotice(`更新链接失败：${error instanceof Error ? error.message : String(error)}`);
       }
-      // 刷新列表以显示新标题
-      refreshList();
     },
-    [selectedDocId, updateLocal, refreshList]
+    [saveCurrentDocument, reloadDocument, kb.reload]
   );
+
+  /** 替换条目 metadata（录音列表回填旧录音的时长） */
+  const handleUpdateItemMetadata = useCallback(
+    (id: string, metadata: Record<string, unknown>) => kb.updateItem(id, { metadata }),
+    [kb.updateItem]
+  );
+
+  /** 重命名条目（写作侧边栏与知识库详情面板） */
+  const handleRenameItem = useCallback(
+    async (id: string, newTitle: string) => {
+      const { items, currentDocument: current } = renameStateRef.current;
+      const isCurrent = id === current?.id;
+      const oldTitle = isCurrent
+        ? (committedTitleRef.current?.title ?? current.title)
+        : items.find((item) => item.id === id)?.title;
+      if (isCurrent) {
+        // 打开中的文档经编辑会话修改，避免之后的自动保存写回旧标题
+        updateLocal({ title: newTitle });
+        committedTitleRef.current = { id, title: newTitle };
+      }
+      await kb.updateItem(id, { title: newTitle });
+      await refreshList();
+      if (oldTitle && normalizeLinkTarget(oldTitle) !== normalizeLinkTarget(newTitle)) {
+        await updateLinksAfterRename(oldTitle, newTitle);
+      }
+    },
+    [updateLocal, kb.updateItem, refreshList, updateLinksAfterRename]
+  );
+
+  /** 编辑器标题失焦：标题有变化时更新指向原标题的链接 */
+  const handleTitleCommit = useCallback(() => {
+    const committed = committedTitleRef.current;
+    const current = renameStateRef.current.currentDocument;
+    if (!committed || !current || committed.id !== current.id || committed.title === current.title) return;
+    committedTitleRef.current = { id: current.id, title: current.title };
+    void updateLinksAfterRename(committed.title, current.title);
+  }, [updateLinksAfterRename]);
 
   const [writingSidebarCollapsed, setWritingSidebarCollapsed] = useState(false);
 
-  // Welcome guide state - show on first time or when manually triggered
-  const [showWelcomeGuide, setShowWelcomeGuide] = useState(false);
+  // “从这里开始”卡片：第一次启动时显示一次；使用指南：Ribbon、F1、菜单栏 帮助
+  const [showWelcomeGuide, setShowWelcomeGuide] = useState(() => !wasWelcomeGuideDismissed());
+  const [showUserGuide, setShowUserGuide] = useState(false);
 
   // Version history panel state
   const [showVersionHistory, setShowVersionHistory] = useState(false);
@@ -146,38 +352,6 @@ const App: React.FC = () => {
     aiConfigService.initialize().catch(console.error);
   }, []);
 
-  // 加载虚拟文件夹数据
-  useEffect(() => {
-    const loadVirtualFolders = async () => {
-      if (appState.mode !== 'knowledge') return;
-
-      setFoldersLoading(true);
-      try {
-        const folders = await knowledgeStorage.getAllFolders();
-        const items = await knowledgeStorage.getAllItems();
-
-        // 将 Folder 转换为 VirtualFolder 格式
-        const virtualFolderList: VirtualFolder[] = folders.map((folder) => ({
-          id: folder.id,
-          name: folder.name,
-          type: (folder.type === 'smart' ? 'smart' : 'manual') as 'manual' | 'smart' | 'auto',
-          icon: folder.icon,
-          color: folder.color,
-          itemCount: items.filter((item) => item.folderId === folder.id).length,
-          children: [],
-        }));
-
-        setVirtualFolders(virtualFolderList);
-      } catch (error) {
-        console.error('加载虚拟文件夹失败:', error);
-      } finally {
-        setFoldersLoading(false);
-      }
-    };
-
-    loadVirtualFolders();
-  }, [appState.mode]);
-
   // Initialize documents when entering writing mode
   useEffect(() => {
     if (appState.mode === 'writing' && !documentsInitialized) {
@@ -185,27 +359,17 @@ const App: React.FC = () => {
     }
   }, [appState.mode, documentsInitialized, initializeDocuments]);
 
-  // Show welcome guide for first-time users (when documents list is empty and not dismissed before)
+  const handleOpenWelcomeGuide = useCallback(() => setShowWelcomeGuide(true), []);
+  const handleCloseWelcomeGuide = useCallback(() => setShowWelcomeGuide(false), []);
+  const handleOpenUserGuide = useCallback(() => setShowUserGuide(true), []);
+  const handleCloseUserGuide = useCallback(() => setShowUserGuide(false), []);
+
+  // 菜单栏 帮助 → 使用指南 / 从这里开始
   useEffect(() => {
-    if (
-      appState.mode === 'writing' &&
-      documentsInitialized &&
-      isFirstTime &&
-      !wasWelcomeGuideDismissed()
-    ) {
-      setShowWelcomeGuide(true);
-    }
-  }, [appState.mode, documentsInitialized, isFirstTime]);
-
-  // Handler to open welcome guide (for ? button)
-  const handleOpenWelcomeGuide = useCallback(() => {
-    setShowWelcomeGuide(true);
-  }, []);
-
-  // Handler to close welcome guide
-  const handleCloseWelcomeGuide = useCallback(() => {
-    setShowWelcomeGuide(false);
-  }, []);
+    const { help } = window.electron;
+    const unsubscribers = [help.onOpenGuide(handleOpenUserGuide), help.onOpenStart(handleOpenWelcomeGuide)];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [handleOpenUserGuide, handleOpenWelcomeGuide]);
 
   // Create a new document - wrapper around hook's createDocument
   // Uses the folderId parameter if provided
@@ -239,27 +403,10 @@ const App: React.FC = () => {
     [createDocument]
   );
 
-  // Handle title change - updates local state via hook
-  // 保持原有文件扩展名，避免意外更改文件类型
+  // 专注模式标题栏编辑当前文档标题：保持原有文件扩展名，避免意外更改文件类型
   const handleTitleChange = useCallback(
     (newTitle: string) => {
-      // 获取当前文档的原始扩展名
-      const currentTitle = currentDocument?.title ?? '';
-      const lastDot = currentTitle.lastIndexOf('.');
-      const originalExtension = lastDot !== -1 ? currentTitle.slice(lastDot) : '';
-
-      // 检查新标题是否已有扩展名
-      const newLastDot = newTitle.lastIndexOf('.');
-      const hasNewExtension = newLastDot !== -1 && newLastDot > newTitle.length - 6; // 扩展名不超过 5 个字符
-
-      // 如果原标题有扩展名且新标题没有，则保持原扩展名
-      let finalTitle = newTitle;
-      if (originalExtension && !hasNewExtension) {
-        // 去除新标题末尾的点（如果有）
-        finalTitle = newTitle.replace(/\.+$/, '') + originalExtension;
-      }
-
-      updateLocal({ title: finalTitle });
+      updateLocal({ title: keepFileExtension(currentDocument?.title ?? '', newTitle) });
     },
     [updateLocal, currentDocument?.title]
   );
@@ -267,10 +414,20 @@ const App: React.FC = () => {
   // 全局快捷键监听
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 编辑器已处理的按键（如 ⌘B 加粗、⌘I 斜体）不再触发全局快捷键
+      if (e.defaultPrevented) return;
+
       // Skip if typing in input (except for some shortcuts)
       const target = e.target as HTMLElement;
       const isInputActive =
         target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+      // F1 打开使用指南（编辑器内也生效）
+      if (e.key === 'F1') {
+        e.preventDefault();
+        setShowUserGuide(true);
+        return;
+      }
 
       // Cmd/Ctrl + N 打开快速输入（文本模式）
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'n') {
@@ -283,13 +440,6 @@ const App: React.FC = () => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'r') {
         e.preventDefault();
         dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'voice' });
-        return;
-      }
-
-      // Cmd/Ctrl + O 打开文件夹
-      if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
-        e.preventDefault();
-        handleOpenLocal();
         return;
       }
 
@@ -331,9 +481,20 @@ const App: React.FC = () => {
           dispatch({ type: 'TOGGLE_SEARCH', payload: false });
         } else if (appState.settingsOpen) {
           dispatch({ type: 'TOGGLE_SETTINGS', payload: false });
+        } else if (pageSettingsOpen) {
+          setPageSettingsOpen(false);
         } else if (isInFocusMode) {
           dispatch({ type: 'EXIT_FOCUS_MODE' });
         }
+        return;
+      }
+
+      // Cmd/Ctrl + / 聚焦的一栏在编辑与预览间切换，Cmd/Ctrl + Shift + / 切换并排（编辑器内也生效）
+      if ((e.metaKey || e.ctrlKey) && e.code === 'Slash' && appState.mode === 'writing') {
+        e.preventDefault();
+        setWritingView(
+          e.shiftKey ? (writingView === 'split' ? 'edit' : 'split') : writingView === 'preview' ? 'edit' : 'preview'
+        );
         return;
       }
 
@@ -345,19 +506,15 @@ const App: React.FC = () => {
         switch (e.key) {
           case '1':
             e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'code-reader' });
+            dispatch({ type: 'SET_MODE', payload: 'knowledge' });
             break;
           case '2':
             e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'reading' });
+            dispatch({ type: 'SET_MODE', payload: 'writing' });
             break;
           case '3':
             e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'knowledge' });
-            break;
-          case '4':
-            e.preventDefault();
-            dispatch({ type: 'SET_MODE', payload: 'writing' });
+            dispatch({ type: 'SET_MODE', payload: 'reading' });
             break;
         }
       }
@@ -377,438 +534,876 @@ const App: React.FC = () => {
     appState.quickInputOpen,
     appState.searchOpen,
     appState.settingsOpen,
+    pageSettingsOpen,
     editorDirty,
     isInFocusMode,
+    writingView,
+    setWritingView,
   ]);
 
-  // Apply mode changes
+  // 托盘菜单动作：与对应的全局快捷键行为一致
   useEffect(() => {
-    document.documentElement.setAttribute('data-mode', appState.mode);
-    document.documentElement.setAttribute('data-writing-feature', appState.writingFeature);
-    if (modeConfig.ui.distractionFree || isInFocusMode) {
-      document.body.classList.add('distraction-free');
-    } else {
-      document.body.classList.remove('distraction-free');
-    }
-  }, [appState.mode, appState.writingFeature, modeConfig, isInFocusMode]);
+    const { tray } = window.electron;
+    const unsubscribers = [
+      tray.onQuickNote(() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })),
+      tray.onOpenSearch(() => dispatch({ type: 'TOGGLE_SEARCH', payload: true })),
+      tray.onSwitchMode((mode) => dispatch({ type: 'SET_MODE', payload: mode })),
+      tray.onOpenSettings(() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })),
+    ];
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, []);
 
-  const handleOpenLocal = async () => {
-    try {
-      const result = (await window.electron.ipcRenderer.invoke('open-local-folder')) as {
-        path: string;
-        files: FileNode[];
-      } | null;
-      if (result) {
-        setFolderPath(result.path);
-        setFiles(result.files);
-        setSelectedFile(null);
-        dispatch({ type: 'SET_FOLDER_PATH', payload: result.path });
-      }
-    } catch (error) {
-      console.error('Error opening folder:', error);
-    }
-  };
-
-  const handleFileSelect = (filePath: string) => {
-    setSelectedFile(filePath);
-  };
-
-  const handleRefresh = async () => {
-    if (folderPath) {
+  // 处理快速输入提交：写入知识库并提交 Agent 处理
+  const handleQuickInputSubmit = useCallback(
+    async (data: QuickInputData) => {
       try {
-        const result = (await window.electron.ipcRenderer.invoke('open-local-folder')) as {
-          path: string;
-          files: FileNode[];
-        } | null;
-        if (result) {
-          setFolderPath(result.path);
-          setFiles(result.files);
+        const { item, processing, warning } = await captureQuickInput(data);
+        dispatch({ type: 'TOGGLE_QUICK_INPUT', payload: false });
+        await kb.reload();
+        setSelectedKnowledgeItemId(item.id);
+        if (warning) {
+          setNotice(warning);
+        } else if (processing === 'no-provider') {
+          setNotice('已保存。尚未配置 AI 服务商，摘要与标签不会自动生成（设置 → AI 服务）');
+        } else if (processing === 'submitted') {
+          setNotice('已保存，AI 正在后台整理…');
+        } else {
+          setNotice('已保存');
         }
       } catch (error) {
-        console.error('Error refreshing folder:', error);
+        console.error('保存快速输入失败:', error);
+        setNotice(`保存失败：${error instanceof Error ? error.message : String(error)}`);
       }
-    }
-  };
-
-  // 处理快速输入提交
-  const handleQuickInputSubmit = useCallback(async (data: QuickInputData) => {
-    try {
-      // 1. 根据输入类型确定知识条目类型
-      const typeMap: Record<string, 'note' | 'audio' | 'image' | 'file' | 'bookmark'> = {
-        text: 'note',
-        voice: 'audio',
-        image: 'image',
-        file: 'file',
-        url: 'bookmark',
-      };
-      const itemType = typeMap[data.type] || 'note';
-
-      // 2. 保存附件并获取路径
-      const attachmentPaths: string[] = [];
-      if (data.attachments && data.attachments.length > 0) {
-        for (const file of data.attachments) {
-          const filePath = await knowledgeStorage.saveAttachment(file);
-          attachmentPaths.push(filePath);
-        }
-      }
-
-      // 3. 创建知识条目
-      const item = await knowledgeStorage.createItem({
-        title: data.title || '快速笔记',
-        type: itemType,
-        content: data.content,
-        sourceUrl: data.sourceUrl,
-        folderId: data.folderId,
-        filePath: attachmentPaths[0], // 主附件路径
-      });
-
-      // 4. 处理标签
-      if (data.tags && data.tags.length > 0) {
-        const tagIds: string[] = [];
-        for (const tagName of data.tags) {
-          const tag = await knowledgeStorage.findOrCreateTag(tagName);
-          tagIds.push(tag.id);
-        }
-        // 更新条目的标签
-        await knowledgeStorage.updateItem(item.id, { tagIds });
-      }
-
-      // 5. 关闭快速输入面板
-      dispatch({ type: 'TOGGLE_QUICK_INPUT' });
-    } catch (error) {
-      console.error('保存快速输入失败:', error);
-    }
-  }, []);
+    },
+    [kb.reload]
+  );
 
   // Mode switch handler
   const handleModeChange = useCallback((mode: AppMode) => {
     dispatch({ type: 'SET_MODE', payload: mode });
   }, []);
 
-  // 搜索结果选择处理
-  const handleSearchResultSelect = useCallback(
-    (result: SearchResult) => {
-      // 根据结果类型导航到对应位置
-      if (result.type === 'note' || result.type === 'document') {
-        // 切换到写作模式并选择文档
-        dispatch({ type: 'SET_MODE', payload: 'writing' });
-        selectDocument(result.id);
-      } else if (result.type === 'code') {
-        // 切换到代码阅读模式
-        dispatch({ type: 'SET_MODE', payload: 'code-reader' });
-        setSelectedFile(result.id);
-      } else {
-        // 其他类型暂时切换到知识库模式
-        dispatch({ type: 'SET_MODE', payload: 'knowledge' });
+  // 侧边栏文件夹：用户文件夹树 + 每个文件夹直接包含的条目数（与选中文件夹时列出的条目一致）
+  const virtualFolders = useMemo<VirtualFolder[]>(() => {
+    const counts = new Map<string, number>();
+    for (const item of kb.items) {
+      if (item.folderId) counts.set(item.folderId, (counts.get(item.folderId) ?? 0) + 1);
+    }
+    const toVirtualFolder = (node: FolderTreeNode): VirtualFolder => ({
+      id: node.id,
+      name: node.name,
+      type: 'manual',
+      itemCount: node.documentCount,
+      children: node.children.map(toVirtualFolder),
+    });
+    return buildFolderTree(kb.folders, counts).map(toVirtualFolder);
+  }, [kb.items, kb.folders]);
+
+  // 知识库工作区的范围
+  const knowledgeScope = useMemo(() => {
+    const preset = SMART_FOLDER_PRESETS.find((p) => p.id === selectedFolderId);
+    if (preset) return { label: preset.name, rules: preset.rules };
+    const folder = kb.folders.find((f) => f.id === selectedFolderId);
+    return folder ? { label: folder.name, folderId: folder.id } : { label: '全部', rules: [] };
+  }, [selectedFolderId, kb.folders]);
+
+  const handleFolderSelect = useCallback((folderId: string) => {
+    setSelectedFolderId(folderId);
+  }, []);
+
+  // 知识库文件夹的重命名 / 删除确认对话框
+  const [folderDialog, setFolderDialog] = useState<{
+    action: 'rename' | 'delete';
+    folder: VirtualFolder;
+  } | null>(null);
+  const closeFolderDialog = useCallback(() => setFolderDialog(null), []);
+
+  /** 执行文件夹 / 条目归档操作，结果以轻提示反馈 */
+  const runFolderAction = useCallback(
+    async (action: () => Promise<void>, success: string, failure: string) => {
+      try {
+        await action();
+        setNotice(success);
+      } catch (error) {
+        console.error(`${failure}:`, error);
+        setNotice(`${failure}：${error instanceof Error ? error.message : String(error)}`);
       }
-      // 关闭搜索面板
-      dispatch({ type: 'TOGGLE_SEARCH' });
+    },
+    []
+  );
+
+  /** 在顶层（parentId 为 null）或某个文件夹下新建文件夹，名称在同级中不重复 */
+  const handleCreateFolder = useCallback(
+    (parentId: string | null) => {
+      const siblingNames = new Set(
+        kb.folders.filter((folder) => folder.parentId === parentId).map((folder) => folder.name)
+      );
+      let index = siblingNames.size + 1;
+      while (siblingNames.has(`新建文件夹 ${index}`)) index++;
+      const name = `新建文件夹 ${index}`;
+      void runFolderAction(() => kb.createFolder(name, parentId), `已新建「${name}」`, '新建文件夹失败');
+    },
+    [kb.createFolder, kb.folders, runFolderAction]
+  );
+
+  const handleEditFolder = useCallback((folder: VirtualFolder) => {
+    setFolderDialog({ action: 'rename', folder });
+  }, []);
+
+  const handleDeleteFolder = useCallback((folder: VirtualFolder) => {
+    setFolderDialog({ action: 'delete', folder });
+  }, []);
+
+  const confirmRenameFolder = useCallback(
+    (name: string) => {
+      if (!folderDialog) return;
+      const { id } = folderDialog.folder;
+      setFolderDialog(null);
+      void runFolderAction(() => kb.renameFolder(id, name), `已重命名为「${name}」`, '重命名失败');
+    },
+    [folderDialog, kb.renameFolder, runFolderAction]
+  );
+
+  // 文件夹内的条目不删除，变为未归档；删除的是当前选中文件夹时回到「全部」
+  const confirmDeleteFolder = useCallback(() => {
+    if (!folderDialog) return;
+    const { id, name } = folderDialog.folder;
+    setFolderDialog(null);
+    void runFolderAction(
+      async () => {
+        await kb.deleteFolder(id);
+        setSelectedFolderId((current) => (current === id ? 'all' : current));
+      },
+      `已删除文件夹「${name}」`,
+      '删除文件夹失败'
+    );
+  }, [folderDialog, kb.deleteFolder, runFolderAction]);
+
+  /** 条目拖到侧边栏文件夹上：移动到该文件夹 */
+  const handleDropItemOnFolder = useCallback(
+    (folderId: string, itemId: string) => {
+      const folder = kb.folders.find((f) => f.id === folderId);
+      if (!folder) return;
+      void runFolderAction(
+        () => kb.updateItem(itemId, { folderId }),
+        `已移动到「${folder.name}」`,
+        '移动失败'
+      );
+    },
+    [kb.folders, kb.updateItem, runFolderAction]
+  );
+
+  /** 文件夹拖到另一个文件夹上时是否可以放下：父级未变化或会形成环时不接收 */
+  const canMoveFolder = useCallback(
+    (folderId: string, parentId: string | null) => {
+      const folder = kb.folders.find((f) => f.id === folderId);
+      return (
+        folder !== undefined &&
+        folder.parentId !== parentId &&
+        !wouldCreateCycle(kb.folders, folderId, parentId)
+      );
+    },
+    [kb.folders]
+  );
+
+  /** 文件夹拖到另一个文件夹（或「我的文件夹」根节点）上：改变层级 */
+  const handleMoveFolder = useCallback(
+    (folderId: string, parentId: string | null) => {
+      const folder = kb.folders.find((f) => f.id === folderId);
+      if (!folder) return;
+      const target = parentId ? kb.folders.find((f) => f.id === parentId)?.name : undefined;
+      void runFolderAction(
+        () => kb.moveFolder(folderId, parentId),
+        target ? `已将「${folder.name}」移到「${target}」` : `已将「${folder.name}」移到顶层`,
+        '移动文件夹失败'
+      );
+    },
+    [kb.folders, kb.moveFolder, runFolderAction]
+  );
+
+  // ================================
+  // 跨模式导航：知识库 ⇄ 写作 ⇄ 阅读
+  // ================================
+
+  /** 在写作模式中打开笔记 */
+  const openInWriting = useCallback(
+    (itemId: string) => {
+      dispatch({ type: 'SET_MODE', payload: 'writing' });
+      void selectDocument(itemId);
     },
     [selectDocument]
   );
 
-  // 文件夹选择处理 - 筛选知识库项目
-  const handleFolderSelect = useCallback(async (folderId: string) => {
-    setSelectedFolderId(folderId);
-
-    // 根据文件夹 ID 筛选知识库项目
-    try {
-      const allItems = await knowledgeStorage.getAllItems();
-      const filteredItems = folderId
-        ? allItems.filter((item) => item.folderId === folderId)
-        : allItems;
-
-      // 更新虚拟文件夹的项目计数（如果需要显示）
-      console.log(`已筛选 ${filteredItems.length} 个项目`);
-    } catch (error) {
-      console.error('筛选文件夹项目失败:', error);
-    }
+  /** 在知识库中打开条目 */
+  const openInKnowledge = useCallback((itemId: string) => {
+    dispatch({ type: 'SET_MODE', payload: 'knowledge' });
+    setSelectedKnowledgeItemId(itemId);
   }, []);
 
-  // 创建虚拟文件夹
-  const handleCreateFolder = useCallback(async () => {
-    try {
-      const folderName = `新建文件夹 ${virtualFolders.length + 1}`;
-      const newFolder = await knowledgeStorage.createFolder(folderName);
-
-      // 添加到列表
-      const newVirtualFolder: VirtualFolder = {
-        id: newFolder.id,
-        name: newFolder.name,
-        type: 'manual',
-        icon: newFolder.icon,
-        color: newFolder.color,
-        itemCount: 0,
-        children: [],
-      };
-      setVirtualFolders((prev) => [...prev, newVirtualFolder]);
-    } catch (error) {
-      console.error('创建文件夹失败:', error);
-    }
-  }, [virtualFolders.length]);
-
-  // ================================
-  // Editor Change Handler
-  // Optimized to prevent cursor loss during auto-save
-  //
-  // Key design decisions:
-  // 1. Use ref for updateLocal to avoid closure staleness
-  // 2. Micro-debounce (16ms) to batch rapid changes without noticeable delay
-  // 3. Skip duplicate content to avoid unnecessary state updates
-  // 4. ProseMirror handles its own state - we just sync to React when needed
-  // ================================
-
-  // Stable ref for updateLocal to avoid recreating callback
-  const updateLocalRef = useRef(updateLocal);
-  updateLocalRef.current = updateLocal;
-
-  // Refs for debouncing and tracking
-  const pendingUpdateRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastContentRef = useRef<string>('');
-  const lastDocIdRef = useRef<string | null>(null);
-
-  // Reset content tracking when document changes
-  useEffect(() => {
-    if (selectedDocId !== lastDocIdRef.current) {
-      lastDocIdRef.current = selectedDocId;
-      lastContentRef.current = currentDocument?.content || '';
-
-      // Clear any pending updates from the previous document
-      if (pendingUpdateRef.current) {
-        clearTimeout(pendingUpdateRef.current);
-        pendingUpdateRef.current = null;
-      }
-    }
-  }, [selectedDocId, currentDocument?.content]);
-
-  // Stable editor change handler - never changes identity
-  // Uses refs internally to always access latest values
-  const handleEditorChange = useCallback((html: string) => {
-    // Skip if content hasn't actually changed
-    if (html === lastContentRef.current) {
-      return;
-    }
-
-    // Store the new content immediately
-    lastContentRef.current = html;
-
-    // Clear any pending update
-    if (pendingUpdateRef.current) {
-      clearTimeout(pendingUpdateRef.current);
-    }
-
-    // Micro-debounce: batch rapid changes but stay responsive
-    // 16ms is roughly one frame - imperceptible delay
-    pendingUpdateRef.current = setTimeout(() => {
-      pendingUpdateRef.current = null;
-      // Use ref to get latest updateLocal function
-      updateLocalRef.current({ content: html });
-    }, 16);
-  }, []); // Empty deps - uses refs for all external values
-
-  // Cleanup pending updates on unmount
-  useEffect(() => {
-    return () => {
-      if (pendingUpdateRef.current) {
-        clearTimeout(pendingUpdateRef.current);
-        pendingUpdateRef.current = null;
-      }
-    };
+  /** 切换到知识库并打开「待审阅归类」面板 */
+  const reviewCategorization = useCallback(() => {
+    dispatch({ type: 'SET_MODE', payload: 'knowledge' });
+    categorizationReview.open();
   }, []);
 
-  // Get sidebar title based on mode
-  const getSidebarTitle = () => {
-    switch (appState.mode) {
-      case 'code-reader':
-        return '资源管理器';
-      case 'reading':
-        return '书库';
-      case 'knowledge':
-        return '知识库';
-      case 'writing':
-        return '文档';
+  /** 在阅读模式中打开条目（PDF / EPUB / 网页剪藏等） */
+  const openInReading = useCallback((itemId: string) => {
+    dispatch({ type: 'SET_MODE', payload: 'reading' });
+    setReadingItemId(itemId);
+  }, []);
+
+  // 托盘“最近打开”：写作文档按更新时间排序，列表内容变化时才推送给主进程
+  const sentRecentDocumentsRef = useRef('');
+  useEffect(() => {
+    const recent = pickRecentDocuments(kb.items);
+    const key = JSON.stringify(recent);
+    if (key === sentRecentDocumentsRef.current) return;
+    sentRecentDocumentsRef.current = key;
+    window.electron.tray.setRecentDocuments(recent);
+  }, [kb.items]);
+
+  useEffect(() => window.electron.tray.onOpenDocument(openInWriting), [openInWriting]);
+
+  /** 打开条目：写作文档进入写作，文档附件（PDF / EPUB 等）进入阅读，其他类型在知识库中查看 */
+  const openItem = useCallback(
+    (itemId: string) => {
+      const item = kb.items.find((i) => i.id === itemId);
+      const target = item ? itemOpenTarget(item) : 'knowledge';
+      if (target === 'writing') openInWriting(itemId);
+      else if (target === 'reading') openInReading(itemId);
+      else openInKnowledge(itemId);
+    },
+    [kb.items, openInWriting, openInReading, openInKnowledge]
+  );
+
+  /** 由 [[双向链接]] 创建尚不存在的笔记 */
+  const createNoteFromLink = useCallback(
+    async (title: string) => {
+      dispatch({ type: 'SET_MODE', payload: 'writing' });
+      const document = await createDocument({
+        title: ensureExtension(title.trim(), 'markdown'),
+        content: `# ${title.trim()}\n`,
+      });
+      if (document) await kb.refreshItem(document.id);
+    },
+    [createDocument, kb.refreshItem]
+  );
+
+  /**
+   * 通过 [[文档#标题]] / [[文档#^块]]、大纲或全局精确查找打开文档后要定位的标题、块或源码行（见 RevealRequest）
+   * view 为负责定位的视图：写作编辑器或阅读视图
+   */
+  const [headingRequest, setHeadingRequest] = useState<
+    (RevealRequest & { view: 'writing' | 'reading'; docId: string }) | null
+  >(null);
+
+  /**
+   * 点击 [[双向链接]]（目标#标题）：目标存在则打开并定位标题或块，否则创建
+   * 阅读模式下目标可在阅读视图中呈现时留在阅读模式，由阅读视图定位
+   */
+  const openWikiTarget = useCallback(
+    (ref: string) => {
+      const parts = parseWikiLinkInner(ref);
+      // [[#标题]] 由各视图在当前文档内处理
+      if (!parts?.target) return;
+      const item = linkIndex.resolve(parts.target);
+      if (!item) {
+        void createNoteFromLink(parts.target);
+        return;
+      }
+      const readInPlace = appState.mode === 'reading' && (isReadableItem(item) || resolveArticle(item) !== null);
+      if (readInPlace) openInReading(item.id);
+      else openItem(item.id);
+      if (!parts.heading) return;
+      if (readInPlace) setHeadingRequest({ view: 'reading', docId: item.id, heading: parts.heading });
+      else if (isWritingDocument(item)) setHeadingRequest({ view: 'writing', docId: item.id, heading: parts.heading });
+    },
+    [linkIndex, appState.mode, openInReading, openItem, createNoteFromLink]
+  );
+  const revealHeading =
+    headingRequest?.view === 'writing' && headingRequest.docId === editorTabs.activeDocId
+      ? headingRequest
+      : null;
+  const revealReading =
+    headingRequest?.view === 'reading' && headingRequest.docId === readingItemId ? headingRequest : null;
+
+  /**
+   * [[文档#^ 补全选中其他文档中没有 ID 的块：在目标文档源码中写入 ^id 并保存
+   * （段落/标题末尾追加，表格/代码块之后插入独立一段）
+   * 链接已先插入，写回失败时提示（链接将显示为“块不存在”）
+   */
+  const assignBlockId = useCallback(
+    async (target: string, slot: BlockIdSlot, id: string) => {
+      const item = linkIndex.resolve(target);
+      const content = item?.type === 'note' ? addBlockIdToMarkdown(item.content ?? '', slot, id) : null;
+      if (!item || content === null) {
+        setNotice(`无法为「${target}」中的块写入 ID ^${id}`);
+        return;
+      }
+      try {
+        await kb.updateItem(item.id, { content });
+      } catch (error) {
+        console.error('写入块 ID 失败:', error);
+        setNotice(`写入块 ID 失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    [linkIndex, kb.updateItem]
+  );
+
+  /** 写作编辑器 [[ 补全的候选：文档标题与文档属性里的别名（同名文档只列一次）。
+   *  按内容生成键：只有标题或别名变了才换新数组，保存后的索引刷新不会让编辑器重新渲染 */
+  const linkTargetsKey = useMemo(() => {
+    const byTitle = new Map<string, string[]>();
+    for (const doc of documentList) {
+      const title = displayTitle(doc.title);
+      byTitle.set(title, [...new Set([...(byTitle.get(title) ?? []), ...linkIndex.aliasNamesOf(doc.id)])]);
+    }
+    return JSON.stringify([...byTitle]);
+  }, [documentList, linkIndex]);
+  const linkTargets = useMemo(
+    () => (JSON.parse(linkTargetsKey) as [string, string[]][]).map(([title, aliases]) => ({ title, aliases })),
+    [linkTargetsKey]
+  );
+
+  /** Agent 浮窗中的条目标题 */
+  const itemTitles = useMemo(
+    () => new Map(kb.items.map((item) => [item.id, displayTitle(item.title)])),
+    [kb.items]
+  );
+  const resolveItemTitle = useCallback((id: string) => itemTitles.get(id), [itemTitles]);
+
+  // 切换文档时确保知识库中有该条目（新建文档后反向链接面板可立即使用）
+  useEffect(() => {
+    if (selectedDocId && !kb.items.some((item) => item.id === selectedDocId)) {
+      void kb.refreshItem(selectedDocId);
+    }
+  }, [selectedDocId, kb.items, kb.refreshItem]);
+
+  // ================================
+  // 阅读模式
+  // ================================
+
+  const shelfItems = useMemo(() => kb.items.filter(isOnShelf), [kb.items]);
+  const readingItem = useMemo(
+    () => kb.items.find((item) => item.id === readingItemId) ?? null,
+    [kb.items, readingItemId]
+  );
+
+  /** 阅读摘录：创建笔记、打标签并提交 AI 整理 */
+  const handleCreateExcerpt = useCallback(
+    async (input: CreateExcerptInput): Promise<string> => {
+      const item = await knowledgeRepository.create({
+        title: input.title,
+        type: 'note',
+        content: input.content,
+        metadata: { excerptOf: input.sourceItemId },
+      });
+      if (input.tags.length > 0) await knowledgeRepository.setItemTags(item.id, input.tags);
+      await kb.refreshItem(item.id);
+      void requestProcessing(item);
+      setNotice('摘录已保存到知识库');
+      return item.id;
+    },
+    [kb.refreshItem]
+  );
+
+  // 落盘（切换知识库、关闭窗口、退出前）：写回所有文档的待保存更改（包括已关闭、仍在缓存中的文档）；
+  // 各栏编辑器微防抖中的内容由 PaneEditor 自行写入并落盘
+  useEffect(() => registerFlush(() => getEditorManager().flushAll()), []);
+
+  // ================================
+  // 侧栏：Ribbon 导航按钮选择面板，每个模式各自记住活动面板
+  // ================================
+
+  const activeSidebarPanel = getActiveSidebarPanel(appState);
+
+  const recentItems = useMemo(() => sortByRecentUpdate(kb.items), [kb.items]);
+  const writingItems = useMemo(
+    () => kb.items.filter((item) => isWritingDocument(item) && !item.isDeleted),
+    [kb.items]
+  );
+  const recentWritingItems = useMemo(() => sortByRecentUpdate(writingItems), [writingItems]);
+  const recentlyReadItems = useMemo(() => pickRecentlyRead(kb.items), [kb.items]);
+  const shelfIds = useMemo(() => new Set(shelfItems.map((item) => item.id)), [shelfItems]);
+  const isShelfHit = useCallback((hit: { id: string }) => shelfIds.has(hit.id), [shelfIds]);
+
+  /** 标签云：切换某个标签是否参与知识库条目流筛选 */
+  const toggleKnowledgeTag = useCallback((tagId: string) => {
+    setKnowledgeFilters((prev) => ({
+      ...prev,
+      tagIds: prev.tagIds.includes(tagId)
+        ? prev.tagIds.filter((id) => id !== tagId)
+        : [...prev.tagIds, tagId],
+    }));
+  }, []);
+  const clearKnowledgeTags = useCallback(
+    () => setKnowledgeFilters((prev) => ({ ...prev, tagIds: [] })),
+    []
+  );
+
+  /** 创建某天的日记：写作笔记「日记 YYYY-MM-DD.md」，打上「日记」标签并在写作模式中打开 */
+  const createDiary = useCallback(
+    async (date: Date) => {
+      dispatch({ type: 'SET_MODE', payload: 'writing' });
+      const heading = date.toLocaleDateString('zh-CN', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long',
+      });
+      const document = await createDocument({ title: diaryTitle(date), content: `# ${heading}\n\n` });
+      if (!document) {
+        setNotice('创建日记失败');
+        return;
+      }
+      try {
+        await kb.setItemTags(document.id, ['日记']);
+      } catch (error) {
+        console.error('为日记添加标签失败:', error);
+        setNotice('日记已创建，但添加「日记」标签失败');
+      }
+    },
+    [createDocument, kb.setItemTags]
+  );
+
+  /**
+   * 全局搜索打开条目。精确查找的命中：写作文档在编辑器中定位源码行；
+   * 可阅读的条目（网页剪藏、PDF 等）在阅读视图中按命中文字定位
+   */
+  const openSearchHit = useCallback(
+    (id: string, location?: SourceLocation) => {
+      const item = kb.items.find((candidate) => candidate.id === id);
+      if (location?.text && item && !isWritingDocument(item) && (isReadableItem(item) || resolveArticle(item) !== null)) {
+        openInReading(id);
+        setHeadingRequest({ view: 'reading', docId: id, heading: '', location });
+        return;
+      }
+      openItem(id);
+      if (location && item && isWritingDocument(item)) {
+        setHeadingRequest({ view: 'writing', docId: id, heading: '', location });
+      }
+    },
+    [openItem, openInReading, kb.items]
+  );
+
+  /** 写作大纲：在编辑器中定位到当前文档的第 occurrence 个同名标题 */
+  const revealWritingHeading = useCallback(
+    (heading: string, occurrence: number) => {
+      if (selectedDocId) setHeadingRequest({ view: 'writing', docId: selectedDocId, heading, occurrence });
+    },
+    [selectedDocId]
+  );
+
+  /** 侧栏请求在知识库工作区中显示某条目详情（工作区选中条目并重新打开已关闭的详情面板） */
+  const [knowledgeDetailsRequest, setKnowledgeDetailsRequest] = useState<{ id: string } | null>(null);
+  const openKnowledgeDetails = useCallback((id: string) => setKnowledgeDetailsRequest({ id }), []);
+
+  /** 侧栏「章节」「书签」面板由阅读视图渲染到挂载点 */
+  const readingNavPanel =
+    activeSidebarPanel.id === 'chapters' || activeSidebarPanel.id === 'bookmarks'
+      ? activeSidebarPanel.id
+      : null;
+
+  const renderKnowledgeSidebar = () => {
+    switch (activeSidebarPanel.id) {
+      case 'search':
+        return (
+          <SidebarSearch
+            placeholder="搜索知识库与写作文档"
+            selectedId={selectedKnowledgeItemId}
+            onOpenItem={setSelectedKnowledgeItemId}
+          />
+        );
+      case 'tags':
+        return (
+          <TagCloud
+            tags={kb.tags}
+            selectedTagIds={knowledgeFilters.tagIds}
+            onToggleTag={toggleKnowledgeTag}
+            onClearTags={clearKnowledgeTags}
+          />
+        );
+      case 'recordings':
+        return (
+          <RecordingsPanel
+            items={kb.items}
+            selectedItemId={selectedKnowledgeItemId}
+            onOpenDetails={openKnowledgeDetails}
+            onRename={handleRenameItem}
+            onDelete={kb.removeItem}
+            onUpdateMetadata={handleUpdateItemMetadata}
+            onError={setNotice}
+          />
+        );
+      case 'graph':
+        return (
+          <GraphPanel
+            index={linkIndex}
+            related={relatedLinks}
+            focusId={selectedKnowledgeItemId}
+            onOpenItem={setSelectedKnowledgeItemId}
+            onCreateNote={(title) => void createNoteFromLink(title)}
+            onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
+          />
+        );
+      case 'calendar':
+        return (
+          <CalendarPanel
+            items={kb.items}
+            selectedItemId={selectedKnowledgeItemId}
+            onOpenItem={setSelectedKnowledgeItemId}
+            onOpenDiary={openInWriting}
+            onCreateDiary={(date) => void createDiary(date)}
+          />
+        );
+      case 'recent':
+        return (
+          <SidebarItemList
+            items={recentItems}
+            selectedId={selectedKnowledgeItemId}
+            onOpen={setSelectedKnowledgeItemId}
+            describe={describeUpdated}
+            emptyText="知识库还没有条目"
+            ariaLabel="最近更新的条目"
+          />
+        );
       default:
-        return '资源管理器';
+        return (
+          <VirtualFolders
+            folders={virtualFolders}
+            items={kb.items}
+            selectedFolderId={selectedFolderId}
+            onFolderSelect={handleFolderSelect}
+            onCreateFolder={() => handleCreateFolder(null)}
+            onCreateSubfolder={handleCreateFolder}
+            onEditFolder={handleEditFolder}
+            onDeleteFolder={handleDeleteFolder}
+            onDropItem={handleDropItemOnFolder}
+            onMoveFolder={handleMoveFolder}
+            canMoveFolder={canMoveFolder}
+          />
+        );
     }
   };
 
-  // Render sidebar content based on mode and active panel
+  const renderReadingSidebar = () => {
+    switch (activeSidebarPanel.id) {
+      case 'chapters':
+      case 'bookmarks':
+        return readingItem ? (
+          <div ref={setReadingNavTarget} />
+        ) : (
+          <PanelEmpty>先在书库中选择要阅读的内容</PanelEmpty>
+        );
+      case 'search':
+        return (
+          <SidebarSearch
+            placeholder="搜索书库内容"
+            filterHit={isShelfHit}
+            selectedId={readingItemId}
+            onOpenItem={setReadingItemId}
+          />
+        );
+      case 'recent':
+        return (
+          <SidebarItemList
+            items={recentlyReadItems}
+            selectedId={readingItemId}
+            onOpen={setReadingItemId}
+            describe={describeReading}
+            emptyText="还没有阅读记录"
+            ariaLabel="最近阅读"
+          />
+        );
+      default:
+        return (
+          <ReadingShelf items={shelfItems} selectedId={readingItemId} onSelect={setReadingItemId} />
+        );
+    }
+  };
+
+  const renderWritingSidebar = () => {
+    switch (activeSidebarPanel.id) {
+      case 'outline': {
+        if (!currentDocument) return <PanelEmpty>打开一个文档查看大纲</PanelEmpty>;
+        const fileType = getFileTypeId(currentDocument.title);
+        if (fileType === 'markdown') {
+          return (
+            <WritingOutline documentId={currentDocument.id} content={currentDocument.content} onSelectHeading={revealWritingHeading} />
+          );
+        }
+        if (fileType === 'latex') {
+          return (
+            <LatexOutline
+              key={currentDocument.id}
+              content={currentDocument.content}
+              onSelectHeading={revealWritingHeading}
+            />
+          );
+        }
+        return <PanelEmpty>大纲支持 Markdown 与 LaTeX 文档</PanelEmpty>;
+      }
+      case 'references': {
+        const currentItem = writingItems.find((item) => item.id === selectedDocId);
+        return currentItem ? (
+          <BacklinksPanel
+            item={currentItem}
+            items={kb.items}
+            linkIndex={linkIndex}
+            related={relatedLinks}
+            onOpenItem={openItem}
+            onCreateNote={(title) => void createNoteFromLink(title)}
+          />
+        ) : (
+          <PanelEmpty>打开一个文档查看反向链接与出链</PanelEmpty>
+        );
+      }
+      case 'tags':
+        return (
+          <DocumentTags
+            documents={writingItems}
+            tags={kb.tags}
+            selectedDocId={editorTabs.activeDocId}
+            onOpenDocument={selectDocument}
+          />
+        );
+      case 'recent':
+        return (
+          <SidebarItemList
+            items={recentWritingItems}
+            selectedId={editorTabs.activeDocId}
+            onOpen={selectDocument}
+            describe={describeUpdated}
+            emptyText="还没有写作文档"
+            ariaLabel="最近编辑的文档"
+          />
+        );
+      default:
+        return (
+          <WritingSidebar
+            documents={documentList}
+            selectedDocId={editorTabs.activeDocId}
+            documentsLoading={documentsLoading}
+            isCollapsed={writingSidebarCollapsed}
+            onToggleCollapse={() => setWritingSidebarCollapsed(!writingSidebarCollapsed)}
+            onSelectDocument={selectDocument}
+            onCreateDocument={createNewDocument}
+            onDeleteDocument={deleteDocument}
+            onOpenHelp={handleOpenWelcomeGuide}
+            onMoveDocument={handleMoveDocument}
+            onRenameDocument={handleRenameItem}
+          />
+        );
+    }
+  };
+
   const renderSidebarContent = () => {
-    if (appState.mode === 'knowledge') {
-      // Show virtual folders for knowledge mode
-      return (
-        <VirtualFolders
-          folders={virtualFolders}
-          selectedFolderId={selectedFolderId}
-          groupBy={groupBy}
-          onFolderSelect={handleFolderSelect}
-          onGroupByChange={setGroupBy}
-          onCreateFolder={handleCreateFolder}
-        />
-      );
+    // 插件视图在各模式中相同
+    if (activeSidebarPanel.id === 'plugins') return <PluginViewsPanel />;
+    switch (appState.mode) {
+      case 'knowledge':
+        return renderKnowledgeSidebar();
+      case 'reading':
+        return renderReadingSidebar();
+      case 'writing':
+        return renderWritingSidebar();
     }
-
-    if (appState.mode === 'reading') {
-      // Reading mode - book library
-      return (
-        <div className="reading-sidebar">
-          <div className="empty-hint">
-            <BookOpen size={32} strokeWidth={1} />
-            <p>打开书籍或导入电子书</p>
-            <button className="import-btn" onClick={handleOpenLocal}>
-              <Plus size={14} />
-              <span>导入书籍</span>
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    if (appState.mode === 'writing') {
-      // Writing mode - use WritingSidebar component with unified tree structure
-      return (
-        <WritingSidebar
-          documents={documentList}
-          selectedDocId={selectedDocId}
-          documentsLoading={documentsLoading}
-          isCollapsed={writingSidebarCollapsed}
-          onToggleCollapse={() => setWritingSidebarCollapsed(!writingSidebarCollapsed)}
-          onSelectDocument={selectDocument}
-          onCreateDocument={createNewDocument}
-          onDeleteDocument={deleteDocument}
-          onOpenHelp={handleOpenWelcomeGuide}
-          onMoveDocument={handleMoveDocument}
-          onRenameDocument={handleRenameDocument}
-        />
-      );
-    }
-
-    // Default: show file tree for code-reader mode
-    return (
-      <>
-        {folderPath && (
-          <div className="folder-name">
-            <span title={folderPath}>{folderPath.split('/').pop()}</span>
-          </div>
-        )}
-        <FileTree files={files} onFileSelect={handleFileSelect} selectedFile={selectedFile} />
-      </>
-    );
   };
 
   // Word count calculations - now from useDocuments hook
   const focusWordCount = docWordCount;
   const focusCharCount = docCharCount;
 
+  // 页面设置入口与浮层：写作模式与专注模式的底栏共用
+  const pageSettingsButton = (
+    <button
+      className={`footer-action-btn ${pageSettingsOpen ? 'active' : ''}`}
+      onClick={() => setPageSettingsOpen((open) => !open)}
+      title="页面设置（纸张、页宽、排版、打字机模式）"
+      aria-expanded={pageSettingsOpen}
+    >
+      <LayoutTemplate size={14} />
+    </button>
+  );
+  const pageSettingsPanel = pageSettingsOpen ? (
+    <PageSettings
+      settings={pageSettings.settings}
+      onChange={pageSettings.updateSettings}
+      onReset={pageSettings.resetSettings}
+      onClose={() => setPageSettingsOpen(false)}
+    />
+  ) : null;
+
+  // 视图模式切换：写作模式与专注模式的底栏共用；LaTeX 文档有自己的源码 / 预览布局，不显示
+  const viewModeButtons =
+    currentDocument && getFileTypeId(currentDocument.title) !== 'latex'
+      ? WRITING_VIEW_MODES.map(({ mode, label, icon }) => (
+          <button
+            key={mode}
+            className={`footer-action-btn ${writingView === mode ? 'active' : ''}`}
+            onClick={() => setWritingView(mode)}
+            title={label}
+            aria-label={label}
+            aria-pressed={writingView === mode}
+          >
+            {icon}
+          </button>
+        ))
+      : null;
+
+  /** 写作编辑器的公共属性：分栏各栏与专注模式共用；定位请求只交给聚焦的一栏，视图模式按栏 */
+  const writingEditorProps = (
+    focused: boolean,
+    view: PaneView,
+    options: NonNullable<PaneEditorProps['editorProps']['options']>
+  ): PaneEditorProps['editorProps'] => ({
+    linkTargets,
+    onWikiLinkClick: openWikiTarget,
+    revealHeading: focused ? revealHeading : null,
+    onAssignBlockId: assignBlockId,
+    mode: view,
+    options: {
+      showWordCount: false,
+      showToolbar: false,
+      showBorder: false,
+      typewriterMode: pageSettings.settings.typewriter,
+      contentMaxWidth: pageContentWidth,
+      ...options,
+    },
+  });
+
+  // 编辑会话已切换到聚焦栏的活动文档（状态栏、反向链接与版本历史作用于它）
+  const sessionReady = selectedDocId !== null && selectedDocId === editorTabs.activeDocId;
+  const currentKnowledgeItem =
+    appState.mode === 'writing' && sessionReady ? kb.items.find((item) => item.id === selectedDocId) : undefined;
+
+  // 写作模式的文档状态与操作：放进应用底部状态栏（类名供 E2E 定位）
+  const writingStatus = (
+    <EditorFooter
+      hasDocument={sessionReady}
+      charCount={focusCharCount}
+      wordCount={focusWordCount}
+      isDirty={editorDirty}
+      isSaving={isSaving}
+      lastSavedAt={lastSavedAt}
+      showHints={false}
+      placement="statusbar"
+      className="writing-footer"
+    >
+      {viewModeButtons}
+      {/* 反向链接面板开关 */}
+      {editorTabs.activeDocId && (
+        <button
+          className={`footer-action-btn ${showBacklinks ? 'active' : ''}`}
+          onClick={() => setShowBacklinks(!showBacklinks)}
+          title="反向链接与局部图谱"
+        >
+          <Link2 size={14} />
+          {currentKnowledgeItem && <span>{linkIndex.backlinks(currentKnowledgeItem.id).length}</span>}
+        </button>
+      )}
+      {/* Version History Button */}
+      {editorTabs.activeDocId && (
+        <button className="footer-action-btn" onClick={() => setShowVersionHistory(true)} title="版本历史">
+          <History size={14} />
+        </button>
+      )}
+      {pageSettingsButton}
+    </EditorFooter>
+  );
+
   // Render main content based on mode
   const renderMainContent = () => {
     switch (appState.mode) {
-      case 'code-reader':
-        return (
-          <Suspense fallback={<EditorLoadingFallback />}>
-            <CodeViewer filePath={selectedFile} />
-          </Suspense>
-        );
-
       case 'reading':
         return (
           <div className="reading-content">
-            <div className="empty-state">
-              <BookOpen size={48} strokeWidth={1} />
-              <h2>阅读模式</h2>
-              <p>从左侧选择书籍开始阅读，或导入新的电子书</p>
-              <button className="start-btn" onClick={handleOpenLocal}>
-                <Plus size={16} />
-                <span>导入书籍</span>
-              </button>
-            </div>
+            <ReadingView
+              key={readingItem?.id ?? 'empty'}
+              item={readingItem}
+              onUpdateItem={kb.updateItem}
+              onCreateExcerpt={handleCreateExcerpt}
+              onOpenInWriting={openInWriting}
+              onWikiLinkClick={openWikiTarget}
+              revealTarget={revealReading}
+              navPanel={readingNavPanel}
+              navTarget={readingNavTarget}
+            />
           </div>
         );
 
       case 'knowledge':
         return (
           <div className="knowledge-content">
-            <div className="empty-state">
-              <Brain size={48} strokeWidth={1} />
-              <h2>欢迎使用知识库</h2>
-              <p>按 ⌘N 快速添加笔记、录音或网页剪藏</p>
-              <button
-                className="start-btn"
-                onClick={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
-              >
-                <Plus size={16} />
-                <span>开始创建</span>
-              </button>
-            </div>
+            <KnowledgeWorkspace
+              kb={kb}
+              scope={knowledgeScope}
+              linkIndex={linkIndex}
+              related={relatedLinks}
+              selectedItemId={selectedKnowledgeItemId}
+              onSelectItem={setSelectedKnowledgeItemId}
+              onOpenInWriting={openInWriting}
+              onOpenInReading={openInReading}
+              onCreateNote={(title) => void createNoteFromLink(title)}
+              onRenameItem={handleRenameItem}
+              onQuickCapture={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
+              onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
+              filters={knowledgeFilters}
+              onFiltersChange={setKnowledgeFilters}
+              detailsRequest={knowledgeDetailsRequest}
+            />
           </div>
         );
 
       case 'writing':
-        // Only render editor when document is loaded to prevent stale content
-        const canRenderEditor = selectedDocId && currentDocument && !editorLoading;
-
         return (
           <div className="writing-content">
-            <div className="writing-editor-wrapper">
-              {editorLoading ? (
-                <div className="editor-loading">
-                  <p>加载中...</p>
-                </div>
-              ) : canRenderEditor ? (
-                <Suspense fallback={<EditorLoadingFallback />}>
-                  <RichEditor
-                    key={`${selectedDocId}-${currentDocument.id}`}
-                    initialContent={currentDocument.content}
-                    onChange={handleEditorChange}
-                    fileType={getFileTypeId(currentDocument.title)}
-                    fileName={currentDocument.title}
-                    options={{
+            <PageSurface className="writing-body" settings={pageSettings.settings}>
+            <SplitEditor
+              tabs={editorTabs}
+              renderPane={(docId, focused, view) => (
+                <div className="writing-editor-wrapper">
+                  <PaneEditor
+                    docId={docId}
+                    focused={focused}
+                    executor={saveExecutor}
+                    editorProps={writingEditorProps(focused, view, {
                       placeholder: PLACEHOLDERS.CONTENT,
-                      showWordCount: false,
-                      showToolbar: false,
-                      showBorder: false,
-                      typewriterMode: appState.writingFeature === 'typewriter',
-                      focusMode: false,
                       showTitle: true,
-                      title: currentDocument.title,
                       titlePlaceholder: PLACEHOLDERS.TITLE,
-                      onTitleChange: handleTitleChange,
-                    }}
+                      onTitleBlur: handleTitleCommit,
+                    })}
                   />
-                </Suspense>
-              ) : (
+                </div>
+              )}
+              emptyPane={
                 <div className="editor-empty">
                   <PenTool size={48} strokeWidth={1} />
                   <p>选择或创建一个文档开始写作</p>
                 </div>
-              )}
-            </div>
-            <EditorFooter
-              charCount={focusCharCount}
-              wordCount={focusWordCount}
-              isDirty={editorDirty}
-              isSaving={isSaving}
-              lastSavedAt={lastSavedAt}
-              showHints={true}
-              hints={[{ key: '⌘S', label: '保存' }]}
-              className="writing-footer"
-            >
-              {/* Version History Button */}
-              {selectedDocId && (
-                <button
-                  className="footer-action-btn"
-                  onClick={() => setShowVersionHistory(true)}
-                  title="版本历史"
-                >
-                  <History size={14} />
-                </button>
-              )}
-            </EditorFooter>
+              }
+            />
+            {showBacklinks && currentKnowledgeItem && (
+              <ResizablePanel spec={PANELS.backlinks} side="right" label="调整反向链接面板宽度">
+                <BacklinksPanel
+                  item={currentKnowledgeItem}
+                  items={kb.items}
+                  linkIndex={linkIndex}
+                  related={relatedLinks}
+                  onOpenItem={openItem}
+                  onCreateNote={(title) => void createNoteFromLink(title)}
+                  onClose={() => setShowBacklinks(false)}
+                />
+              </ResizablePanel>
+            )}
+            </PageSurface>
+            {pageSettingsPanel}
 
             {/* Version History Panel */}
             <VersionHistory
               itemId={selectedDocId || ''}
               isOpen={showVersionHistory}
+              currentContent={currentDocument?.content ?? ''}
               onClose={() => setShowVersionHistory(false)}
               onRestore={() => {
                 // 版本恢复后强制重新加载文档内容
@@ -823,11 +1418,19 @@ const App: React.FC = () => {
     }
   };
 
+  // 轻提示：普通布局与专注模式共用（如重命名后更新链接数的反馈在专注模式中也要可见）
+  const noticeBar = notice ? (
+    <div className="app-notice" role="status">
+      {notice}
+    </div>
+  ) : null;
+
   // Focus mode render - clean, distraction-free with RichEditor
   if (isInFocusMode) {
     return (
+      <LinkResolverContext.Provider value={linkResolver}>
       <div className="app focus-mode">
-        <div className="focus-container">
+        <PageSurface className="focus-container" settings={pageSettings.settings}>
           {/* Minimal header with close button */}
           <div className="focus-header">
             <TitleInput
@@ -835,6 +1438,7 @@ const App: React.FC = () => {
               value={currentDocument?.title ?? ''}
               documentId={selectedDocId}
               onChange={handleTitleChange}
+              onBlur={handleTitleCommit}
               placeholder={PLACEHOLDERS.TITLE}
             />
             <button
@@ -846,32 +1450,20 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Main editor - RichEditor without toolbar */}
+          {/* 正文编辑器：编辑聚焦栏的活动文档 */}
           <div className="focus-content">
-            {currentDocument ? (
-              <Suspense fallback={<EditorLoadingFallback />}>
-                <RichEditor
-                  key={`focus-${selectedDocId}-${currentDocument.id}`}
-                  initialContent={currentDocument.content}
-                  onChange={handleEditorChange}
-                  fileType={getFileTypeId(currentDocument.title)}
-                  fileName={currentDocument.title}
-                  options={{
-                    placeholder: PLACEHOLDERS.FOCUS_CONTENT,
-                    showWordCount: false,
-                    showToolbar: false,
-                    showBorder: false,
-                    focusMode: true,
-                    minHeight: '100%',
-                    contentMaxWidth: '720px',
-                    showTitle: false,
-                  }}
-                />
-              </Suspense>
-            ) : (
-              <div className="editor-loading">
-                <p>加载中...</p>
-              </div>
+            {editorTabs.activeDocId && (
+              <PaneEditor
+                key={editorTabs.activeDocId}
+                docId={editorTabs.activeDocId}
+                focused
+                executor={saveExecutor}
+                editorProps={writingEditorProps(true, writingView, {
+                  placeholder: PLACEHOLDERS.FOCUS_CONTENT,
+                  minHeight: '100%',
+                  showTitle: false,
+                })}
+              />
             )}
           </div>
 
@@ -886,9 +1478,11 @@ const App: React.FC = () => {
             hints={[
               { key: 'Esc', label: '退出' },
               { key: '⌘S', label: '保存' },
+              { key: '⌘/', label: '预览' },
             ]}
             className="focus-footer"
           >
+            {viewModeButtons}
             {/* Version History Button */}
             {selectedDocId && (
               <button
@@ -899,100 +1493,81 @@ const App: React.FC = () => {
                 <History size={14} />
               </button>
             )}
+            {pageSettingsButton}
           </EditorFooter>
+          {pageSettingsPanel}
 
           {/* Version History Panel in Focus Mode */}
           <VersionHistory
             itemId={selectedDocId || ''}
             isOpen={showVersionHistory}
+            currentContent={currentDocument?.content ?? ''}
             onClose={() => setShowVersionHistory(false)}
             onRestore={() => {
               // 版本恢复后强制重新加载文档内容
               reloadDocument();
             }}
           />
-        </div>
+        </PageSurface>
+        {noticeBar}
       </div>
+      </LinkResolverContext.Provider>
     );
   }
 
   return (
+    <LinkResolverContext.Provider value={linkResolver}>
     <Layout
-      onOpenLocal={handleOpenLocal}
-      folderPath={folderPath}
       onQuickInput={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'text' })}
       onStartRecording={() => dispatch({ type: 'OPEN_QUICK_INPUT', payload: 'voice' })}
       currentMode={appState.mode}
       onModeChange={handleModeChange}
       onOpenSearch={() => dispatch({ type: 'TOGGLE_SEARCH', payload: true })}
       onOpenSettings={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: true })}
+      onOpenGuide={handleOpenUserGuide}
       onEnterFocusMode={() => dispatch({ type: 'ENTER_FOCUS_MODE' })}
       isInFocusMode={isInFocusMode}
+      activePanel={appState.sidebarVisible ? activeSidebarPanel.id : null}
+      onPanelChange={(panel) => dispatch({ type: 'TOGGLE_SIDEBAR_PANEL', payload: panel })}
+      statusContent={appState.mode === 'writing' ? writingStatus : null}
     >
       <div className="app-content">
         {/* Sidebar */}
         {modeConfig.ui.showSidebar && appState.sidebarVisible && (
-          <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-            {/* Explorer Section */}
-            <div className="sidebar-section">
-              <div
-                className="sidebar-section-header"
-                onClick={() => setExplorerExpanded(!explorerExpanded)}
-              >
-                <span className="section-toggle">
-                  {explorerExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                </span>
-                <span className="section-title">{getSidebarTitle()}</span>
-                <div className="section-actions">
-                  {appState.mode === 'code-reader' && (
-                    <>
-                      <button
-                        className="section-action-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenLocal();
-                        }}
-                        title="打开文件夹"
-                      >
-                        <FolderPlus size={14} />
-                      </button>
-                      <button
-                        className="section-action-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRefresh();
-                        }}
-                        title="刷新"
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {explorerExpanded && (
-                <div className="sidebar-section-content">{renderSidebarContent()}</div>
-              )}
-            </div>
-
-            {/* Quick Input Button - only show in non-writing modes */}
-            {appState.mode !== 'writing' && (
-              <div className="sidebar-footer">
-                <button
-                  className="quick-input-trigger"
-                  onClick={() => dispatch({ type: 'TOGGLE_QUICK_INPUT', payload: true })}
-                  title="快速输入 (⌘N)"
+          <ResizablePanel spec={PANELS.sidebar} side="left" label="调整侧栏宽度">
+            <aside className="sidebar">
+              {/* Explorer Section */}
+              <div className="sidebar-section">
+                <div
+                  className="sidebar-section-header"
+                  onClick={() => setExplorerExpanded(!explorerExpanded)}
                 >
-                  <Plus size={16} />
-                  <span>快速输入</span>
-                </button>
-              </div>
-            )}
+                  <span className="section-toggle">
+                    {explorerExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  </span>
+                  <span className="section-title">{activeSidebarPanel.label}</span>
+                </div>
 
-            {/* Resize Handle */}
-            <div className="sidebar-resizer" />
-          </aside>
+                {explorerExpanded && (
+                  <div className="sidebar-section-content">{renderSidebarContent()}</div>
+                )}
+              </div>
+
+              {/* Quick Input Button - only show in non-writing modes */}
+              {appState.mode !== 'writing' && (
+                <div className="sidebar-footer">
+                  <button
+                    className="quick-input-trigger"
+                    onClick={() => dispatch({ type: 'TOGGLE_QUICK_INPUT', payload: true })}
+                    title="快速输入 (⌘N)"
+                  >
+                    <Plus size={16} />
+                    <span>快速输入</span>
+                  </button>
+                </div>
+              )}
+            </aside>
+          </ResizablePanel>
         )}
 
         {/* Main Content */}
@@ -1011,7 +1586,7 @@ const App: React.FC = () => {
       <SearchPanel
         isOpen={appState.searchOpen}
         onClose={() => dispatch({ type: 'TOGGLE_SEARCH', payload: false })}
-        onResultSelect={handleSearchResultSelect}
+        onOpenItem={openSearchHit}
       />
 
       {/* Settings Panel */}
@@ -1020,16 +1595,39 @@ const App: React.FC = () => {
         onClose={() => dispatch({ type: 'TOGGLE_SETTINGS', payload: false })}
       />
 
-      {/* Welcome Guide Modal (for writing mode) */}
-      <WelcomeGuide
-        isOpen={showWelcomeGuide}
-        onClose={handleCloseWelcomeGuide}
-        persistDismissal={isFirstTime}
+      <WelcomeGuide isOpen={showWelcomeGuide} onClose={handleCloseWelcomeGuide} onOpenGuide={handleOpenUserGuide} />
+      <UserGuide isOpen={showUserGuide} onClose={handleCloseUserGuide} />
+
+      {/* AI 后台任务进度（任意模式可见） */}
+      <AgentActivityPanel
+        resolveTitle={resolveItemTitle}
+        onOpenItem={openInKnowledge}
+        onReviewCategorization={reviewCategorization}
       />
 
-      {/* Permission Dialog Provider - 用于插件权限确认 */}
-      <PermissionProvider autoConnect />
+      {/* 知识库文件夹重命名 / 删除 */}
+      <InputDialog
+        isOpen={folderDialog?.action === 'rename'}
+        title="重命名文件夹"
+        placeholder="请输入文件夹名称"
+        defaultValue={folderDialog?.folder.name ?? ''}
+        onConfirm={confirmRenameFolder}
+        onCancel={closeFolderDialog}
+      />
+      <ConfirmDialog
+        isOpen={folderDialog?.action === 'delete'}
+        title="删除文件夹"
+        message={`确定删除文件夹「${folderDialog?.folder.name ?? ''}」吗？其中的 ${folderDialog?.folder.itemCount ?? 0} 个条目不会被删除，将变为未归档${folderDialog?.folder.children?.length ? `；${folderDialog.folder.children.length} 个子文件夹将上移一级` : ''}。`}
+        confirmText="删除"
+        isDanger
+        onConfirm={confirmDeleteFolder}
+        onCancel={closeFolderDialog}
+      />
+
+      {noticeBar}
+
     </Layout>
+    </LinkResolverContext.Provider>
   );
 };
 

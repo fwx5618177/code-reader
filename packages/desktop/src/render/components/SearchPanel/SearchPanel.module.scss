@@ -391,11 +391,21 @@
 // ================================
 
 .resultsHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
   padding: var(--spacing-2) var(--spacing-4);
   font-size: var(--font-size-xs);
+  font-weight: $font-weight-semibold;
   color: var(--text-muted);
+  background-color: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-subtle);
   transition: border-color 0.3s ease;
+}
+
+.groupCount {
+  font-weight: $font-weight-normal;
+  color: var(--text-faint);
 }
 
 .resultsList {
@@ -454,23 +464,6 @@
   @include truncate;
 }
 
-.resultHighlight {
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  line-height: $line-height-normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-
-  :global(mark) {
-    background-color: var(--color-warning-bg);
-    color: var(--color-warning);
-    padding: 0 2px;
-    border-radius: 2px;
-  }
-}
-
 .resultMeta {
   display: flex;
   align-items: center;
@@ -488,28 +481,6 @@
   svg {
     width: 12px;
     height: 12px;
-  }
-}
-
-.metaItemDate {
-  margin-left: auto;
-}
-
-.resultScore {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  flex-shrink: 0;
-
-  span {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 36px;
-    height: 20px;
-    padding: 0 var(--spacing-1);
-    background-color: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    transition: background-color 0.3s ease;
   }
 }
 
@@ -552,4 +523,136 @@
       background-color 0.3s ease,
       border-color 0.3s ease;
   }
+}
+
+// ================================
+// 搜索模式：全文 / 精确，以及精确查找的选项
+// ================================
+
+.modeBar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin-top: var(--spacing-2);
+  padding: 0 var(--spacing-2);
+}
+
+.modeTabs {
+  display: inline-flex;
+  padding: 2px;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.modeTab {
+  @include button-reset;
+  height: 24px;
+  padding: 0 var(--spacing-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  transition: $transition-colors;
+
+  &:hover {
+    color: var(--text-primary);
+  }
+}
+
+.modeTabActive {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.optionToggle {
+  @include button-reset;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 var(--spacing-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.optionToggleActive {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.searchError {
+  padding: var(--spacing-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-error);
+}
+
+// ================================
+// 精确查找结果：条目标题 + 命中行
+// ================================
+
+.exactItemHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: var(--spacing-2) var(--spacing-4);
+  font-size: var(--font-size-sm);
+  font-weight: $font-weight-semibold;
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+
+  svg {
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+}
+
+.lineHit {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-3);
+  padding: var(--spacing-1) var(--spacing-4) var(--spacing-1) var(--spacing-8);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+.lineNumber {
+  flex-shrink: 0;
+  min-width: 3ch;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-faint);
+  text-align: right;
+}
+
+.lineText {
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+
+  mark {
+    background-color: var(--color-warning-bg);
+    color: var(--color-warning);
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+}
+
+.truncatedHint {
+  padding: var(--spacing-2) var(--spacing-4);
+  font-size: var(--font-size-xs);
+  color: var(--text-faint);
 }

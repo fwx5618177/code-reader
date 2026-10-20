@@ -20,6 +20,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { QuickInputType } from '../../types/knowledge';
+import { isSingleWebUrl } from '../../lib/knowledge/web-clip';
+import { useRecordingWaveform } from './useRecordingWaveform';
 import styles from './QuickInput.module.scss';
 
 interface QuickInputProps {
@@ -37,6 +39,11 @@ export interface QuickInputData {
   tags?: string[];
   folderId?: string;
   attachments?: File[];
+  /**
+   * 本弹窗录制的音频附件及其已知时长（毫秒）：
+   * MediaRecorder 生成的 WebM 不含时长，保存时写入条目 metadata
+   */
+  recordingDurationsMs?: ReadonlyMap<File, number>;
   sourceUrl?: string;
 }
 
@@ -94,6 +101,10 @@ const QuickInput: React.FC<QuickInputProps> = ({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  /** 已录制的音频附件 → 录音时长（毫秒） */
+  const [recordingDurations, setRecordingDurations] = useState<ReadonlyMap<File, number>>(new Map());
+  /** 录音中的麦克风音频流，用于绘制实时波形；停止录音后为 null */
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showTagInput, setShowTagInput] = useState(false);
 
@@ -101,7 +112,37 @@ const QuickInput: React.FC<QuickInputProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  /** 当前录音占用的麦克风流；停止或丢弃录音时关闭全部音轨释放麦克风 */
+  const streamRef = useRef<MediaStream | null>(null);
+  /** 录音会话序号：关闭弹窗时递增，之前发起的麦克风请求与录音结果一律作废 */
+  const recordingSessionRef = useRef(0);
+  const autoStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const waveformRef = useRef<HTMLCanvasElement>(null);
+
+  useRecordingWaveform(waveformRef, recordingStream);
+
+  /**
+   * 丢弃进行中的录音（弹窗关闭或卸载时调用）：停止录音器与全部音轨、取消定时器，
+   * 并使之后才到达的 getUserMedia 结果与 onstop 回调失效，不会再生成录音附件
+   */
+  const discardRecording = useCallback(() => {
+    recordingSessionRef.current++;
+    if (autoStartTimerRef.current) {
+      clearTimeout(autoStartTimerRef.current);
+      autoStartTimerRef.current = null;
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    audioChunksRef.current = [];
+  }, []);
 
   // 设置初始模式并在打开时聚焦
   useEffect(() => {
@@ -110,7 +151,8 @@ const QuickInput: React.FC<QuickInputProps> = ({
 
       // 如果以语音模式打开，自动开始录音
       if (initialMode === 'voice') {
-        setTimeout(() => {
+        autoStartTimerRef.current = setTimeout(() => {
+          autoStartTimerRef.current = null;
           startRecording();
         }, 100);
       } else if (textareaRef.current) {
@@ -121,14 +163,8 @@ const QuickInput: React.FC<QuickInputProps> = ({
     }
   }, [isOpen, initialMode]);
 
-  // 清理录音定时器
-  useEffect(() => {
-    return () => {
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-      }
-    };
-  }, []);
+  // 卸载时释放麦克风与定时器
+  useEffect(() => discardRecording, [discardRecording]);
 
   // ESC 关闭
   useEffect(() => {
@@ -153,17 +189,20 @@ const QuickInput: React.FC<QuickInputProps> = ({
     setTags([]);
     setTagInput('');
     setAttachments([]);
+    setRecordingDurations(new Map());
     setIsRecording(false);
+    setRecordingStream(null);
     setRecordingTime(0);
     setShowTagInput(false);
   }, []);
 
-  // 关闭时重置
+  // 关闭时丢弃录音并重置
   useEffect(() => {
     if (!isOpen) {
+      discardRecording();
       resetForm();
     }
-  }, [isOpen, resetForm]);
+  }, [isOpen, discardRecording, resetForm]);
 
   // 提交
   const handleSubmit = async () => {
@@ -178,6 +217,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
         title: title.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
+        recordingDurationsMs: recordingDurations.size > 0 ? recordingDurations : undefined,
         sourceUrl: inputType === 'url' ? content.trim() : undefined,
       };
 
@@ -193,30 +233,45 @@ const QuickInput: React.FC<QuickInputProps> = ({
 
   // 开始录音
   const startRecording = async () => {
+    const session = recordingSessionRef.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 等待授权期间弹窗已关闭：立即释放麦克风
+      if (session !== recordingSessionRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
+      streamRef.current = stream;
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
         audioChunksRef.current.push(event.data);
       };
 
+      // onstop 闭包捕获的是开始时的 recordingTime（恒为 0），时长按起止时间戳计算
+      const startedAt = Date.now();
       mediaRecorder.onstop = () => {
+        // 录音已被丢弃（弹窗关闭）：音轨已在 discardRecording 中关闭，不再生成附件
+        if (session !== recordingSessionRef.current) return;
+        const durationMs = Date.now() - startedAt;
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         const audioFile = new File([audioBlob], `recording-${Date.now()}.webm`, {
           type: 'audio/webm',
         });
         setAttachments((prev) => [...prev, audioFile]);
-        setContent(`[语音录音 ${formatTime(recordingTime)}]`);
+        setRecordingDurations((prev) => new Map(prev).set(audioFile, durationMs));
+        setContent(`[语音录音 ${formatTime(Math.round(durationMs / 1000))}]`);
 
         // 停止所有音轨
         stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       };
 
       mediaRecorder.start();
       setIsRecording(true);
+      setRecordingStream(stream);
 
       // 开始计时
       recordingTimerRef.current = setInterval(() => {
@@ -233,6 +288,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      setRecordingStream(null);
 
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
@@ -265,8 +321,11 @@ const QuickInput: React.FC<QuickInputProps> = ({
     }
   };
 
-  // 处理粘贴
+  // 处理粘贴：图片切换到图片模式；在空的文字输入中粘贴单个网址时切换到网址模式（保存时自动剪藏）
   const handlePaste = (e: React.ClipboardEvent) => {
+    if (inputType === 'text' && !content.trim() && isSingleWebUrl(e.clipboardData.getData('text/plain'))) {
+      setInputType('url');
+    }
     const items = Array.from(e.clipboardData.items);
     for (const item of items) {
       if (item.type.startsWith('image/')) {
@@ -376,6 +435,7 @@ const QuickInput: React.FC<QuickInputProps> = ({
                     <span className={styles.pulse} />
                     <span className={styles.time}>{formatTime(recordingTime)}</span>
                   </div>
+                  <canvas ref={waveformRef} className={styles.waveform} role="img" aria-label="录音音量" />
                   <button className={styles.stopButton} onClick={stopRecording}>
                     <StopCircle size={24} />
                     <span>停止录音</span>

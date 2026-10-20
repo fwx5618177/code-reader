@@ -60,9 +60,9 @@ export interface EditorManagerConfig {
  * 创建编辑器的选项
  */
 export interface CreateEditorOptions {
-  /** 初始标题 */
+  /** 初始标题（与初始内容一样取自存储） */
   initialTitle?: string;
-  /** 初始内容 */
+  /** 初始内容：取自存储，实例以它为已保存的基线（未编辑时没有未保存的修改） */
   initialContent?: string;
   /** 初始版本 ID */
   initialVersionId?: number;
@@ -297,6 +297,27 @@ export class DocumentEditorManager {
   }
 
   /**
+   * 用存储中的最新内容替换托管实例（如多设备同步写入了远端修改）：内容视为已保存，不会触发保存写回。
+   * 有未保存修改的实例不替换（本机的编辑会在下次同步时参与裁决）
+   *
+   * @returns 是否替换了（没有实例或有未保存修改时为 false）
+   */
+  reloadFromStorage(documentId: string, title: string, content: string): boolean {
+    const instance = this.get(documentId);
+    if (!instance) return false;
+    const { model, saveEngine } = instance;
+    const pending = saveEngine.getState().isScheduled || saveEngine.isSaving() || model.hasUnsavedChanges();
+    if (pending) return false;
+    if (model.getTitle() === title && model.getContent() === content) return true;
+    saveEngine.cancelPendingSave();
+    model.reset({ documentId, initialTitle: title, initialContent: content, initialVersionId: model.getVersionId() + 1 });
+    model.markCurrentAsSaved();
+    // 重置时的内容变化通知已请求了一次保存，内容与存储一致，取消它
+    saveEngine.cancelPendingSave();
+    return true;
+  }
+
+  /**
    * 强制立即销毁实例
    *
    * 当需要确保实例被清理时使用，不管引用计数。
@@ -368,6 +389,21 @@ export class DocumentEditorManager {
   }
 
   /**
+   * 落盘：所有实例（包括已释放但仍在缓存中、防抖保存尚未触发的实例）立即写回未保存的更改。
+   * 任一文档保存失败时 reject，错误信息汇总全部失败的文档
+   */
+  async flushAll(): Promise<void> {
+    const instances = [...this.instances.values()].filter((instance) => !instance.isDestroyed);
+    const results = await Promise.all(instances.map((instance) => instance.saveEngine.flush()));
+    const failures = results.flatMap((result, index) =>
+      result && !result.success ? [`${instances[index].documentId}: ${result.error}`] : []
+    );
+    if (failures.length > 0) {
+      throw new Error(`文档保存失败 - ${failures.join('; ')}`);
+    }
+  }
+
+  /**
    * 销毁所有实例并清理管理器
    */
   destroy(): void {
@@ -404,6 +440,7 @@ export class DocumentEditorManager {
     };
 
     const model = createEditorModel(modelConfig);
+    model.markCurrentAsSaved();
 
     // 创建带策略的 SaveEngine
     const strategy =
@@ -422,6 +459,15 @@ export class DocumentEditorManager {
     };
 
     const saveEngine = new SaveEngine(saveEngineConfig);
+
+    // 实例自身负责自动保存与保存后的标记，不依赖创建它的组件：
+    // 同一文档可能同时被多个编辑窗格持有，任一方释放后其余持有方照常工作
+    model.onContentChange(() => saveEngine.requestSave());
+    saveEngine.addEventListener((event) => {
+      if (event.type === 'SAVE_SUCCESS') {
+        model.markAsSaved(event.result.savedVersionId, event.result.savedContentHash);
+      }
+    });
 
     const now = Date.now();
 

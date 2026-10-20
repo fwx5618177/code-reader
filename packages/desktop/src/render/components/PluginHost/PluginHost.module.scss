@@ -1,0 +1,43 @@
+// ================================
+// PluginHost 样式：插件消息提示
+// ================================
+
+@use '../../styles/variables' as *;
+
+.toasts {
+  position: fixed;
+  right: var(--spacing-4);
+  bottom: calc(#{$statusbar-height} + var(--spacing-3));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--spacing-2);
+  z-index: $z-toast;
+  pointer-events: none;
+}
+
+.toast {
+  max-width: 360px;
+  padding: var(--spacing-2) var(--spacing-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-primary);
+  border-left-width: 3px;
+  background-color: var(--bg-secondary);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-size-sm);
+  line-height: $line-height-relaxed;
+  color: var(--text-primary);
+  word-break: break-word;
+
+  &.info {
+    border-left-color: var(--color-info);
+  }
+
+  &.warning {
+    border-left-color: var(--color-warning);
+  }
+
+  &.error {
+    border-left-color: var(--color-error);
+  }
+}

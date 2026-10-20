@@ -213,28 +213,6 @@ export interface FilterRule {
 }
 
 // ================================
-// Project (项目)
-// ================================
-
-/**
- * 项目 - 用于组织相关的知识条目
- */
-export interface Project extends BaseEntity {
-  /** 项目名称 */
-  name: string;
-  /** 项目描述 */
-  description?: string;
-  /** 封面图 */
-  coverImage?: string;
-  /** 颜色 */
-  color?: string;
-  /** 是否归档 */
-  isArchived: boolean;
-  /** 条目数量 */
-  itemCount: number;
-}
-
-// ================================
 // Link (知识关联)
 // ================================
 
@@ -280,39 +258,9 @@ export type QuickInputType =
   | 'file' // 文件
   | 'url'; // 网址
 
-/**
- * 快速输入记录
- */
-export interface QuickInputRecord {
-  /** 输入类型 */
-  type: QuickInputType;
-  /** 内容 */
-  content: string;
-  /** 附件路径 */
-  attachments?: string[];
-  /** 来源 */
-  source?: string;
-  /** 时间戳 */
-  timestamp: Date;
-}
-
 // ================================
 // Search (搜索)
 // ================================
-
-/**
- * 搜索结果
- */
-export interface SearchResult {
-  /** 匹配的知识条目 */
-  item: KnowledgeItem;
-  /** 相关度得分 */
-  score: number;
-  /** 高亮片段 */
-  highlights?: SearchHighlight[];
-  /** 匹配类型 */
-  matchType: 'exact' | 'fuzzy' | 'semantic';
-}
 
 /**
  * 搜索高亮
@@ -326,89 +274,18 @@ export interface SearchHighlight {
   positions?: Array<{ start: number; end: number }>;
 }
 
-/**
- * 搜索选项
- */
-export interface SearchOptions {
-  /** 搜索关键词 */
-  query: string;
-  /** 类型过滤 */
-  types?: KnowledgeItemType[];
-  /** 标签过滤 */
-  tagIds?: string[];
-  /** 文件夹过滤 */
-  folderIds?: string[];
-  /** 项目过滤 */
-  projectIds?: string[];
-  /** 时间范围 */
-  dateRange?: { start: Date; end: Date };
-  /** 是否只搜索收藏 */
-  favoritesOnly?: boolean;
-  /** 排序方式 */
-  sortBy?: 'relevance' | 'createdAt' | 'updatedAt' | 'viewCount';
-  /** 排序顺序 */
-  sortOrder?: 'asc' | 'desc';
-  /** 分页 */
-  limit?: number;
-  offset?: number;
-  /** 是否使用语义搜索 */
-  useSemantic?: boolean;
-}
-
-// ================================
-// Agent Task (AI 任务)
-// ================================
-
-/**
- * AI 任务类型
- */
-export type AgentTaskType =
-  | 'transcribe' // 语音转写
-  | 'summarize' // 内容摘要
-  | 'extract-tags' // 提取标签
-  | 'categorize' // 分类
-  | 'extract-entities' // 实体提取
-  | 'generate-embedding' // 生成向量
-  | 'find-related'; // 寻找相关内容
-
-/**
- * AI 任务状态
- */
-export type AgentTaskStatus =
-  | 'pending' // 待处理
-  | 'processing' // 处理中
-  | 'completed' // 已完成
-  | 'failed'; // 失败
-
-/**
- * AI 任务
- */
-export interface AgentTask extends BaseEntity {
-  /** 任务类型 */
-  type: AgentTaskType;
-  /** 任务状态 */
-  status: AgentTaskStatus;
-  /** 目标知识条目 ID */
-  targetItemId: string;
-  /** 优先级 (1-10) */
-  priority: number;
-  /** 进度 (0-100) */
-  progress: number;
-  /** 错误信息 */
-  errorMessage?: string;
-  /** 重试次数 */
-  retryCount: number;
-  /** 开始时间 */
-  startedAt?: Date;
-  /** 完成时间 */
-  completedAt?: Date;
-  /** 结果数据 */
-  result?: unknown;
-}
-
 // ================================
 // Settings (设置)
 // ================================
+
+/** 单个插件的持久化偏好 */
+export interface PluginPreference {
+  enabled: boolean;
+  /** 用户已授予的权限（插件更新后新增的权限需重新授权） */
+  grantedPermissions: string[];
+  /** 用户修改过的插件配置（未修改的项取 manifest 默认值） */
+  configuration?: Record<string, string | number | boolean>;
+}
 
 /**
  * 应用设置
@@ -421,10 +298,8 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
 
   // ======= 存储 =======
-  /** 数据存储路径 */
+  /** 应用数据目录（settings.json 所在）；知识库数据与附件路径由当前知识库决定 */
   dataPath: string;
-  /** 附件存储路径 */
-  attachmentsPath: string;
 
   // ======= AI =======
   /** 启用 AI 功能 */
@@ -446,37 +321,19 @@ export interface AppSettings {
   /** 默认输入类型 */
   defaultInputType: QuickInputType;
 
+  // ======= 编辑器 =======
+  /** 启用拼写检查（自研 Hunspell 检查器） */
+  spellCheck: boolean;
+  /** 当前词典 ID（builtin:en_US / user:xx） */
+  spellCheckDictionary: string;
+
+  // ======= 插件 =======
+  /** 插件启用状态与已授予的权限（按插件 ID） */
+  plugins: Record<string, PluginPreference>;
+
   // ======= 同步 =======
   /** 启用同步 */
   enableSync: boolean;
   /** 同步服务 */
   syncProvider?: 'icloud' | 'dropbox' | 'custom';
-}
-
-// ================================
-// Statistics (统计)
-// ================================
-
-/**
- * 知识库统计
- */
-export interface KnowledgeBaseStats {
-  /** 总条目数 */
-  totalItems: number;
-  /** 按类型统计 */
-  itemsByType: Record<KnowledgeItemType, number>;
-  /** 总标签数 */
-  totalTags: number;
-  /** 总文件夹数 */
-  totalFolders: number;
-  /** 总项目数 */
-  totalProjects: number;
-  /** 总存储大小（字节） */
-  totalStorageSize: number;
-  /** 本周新增 */
-  itemsThisWeek: number;
-  /** 本月新增 */
-  itemsThisMonth: number;
-  /** 待处理任务数 */
-  pendingTasks: number;
 }

@@ -11,6 +11,8 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface ColorPalette {
   // Background colors (layered depth)
+  /** 应用底色：标题栏、Ribbon、侧栏与状态栏所在的外框，内容区以卡片形式放在上面 */
+  bgCanvas: string;
   bgPrimary: string;
   bgSecondary: string;
   bgTertiary: string;
@@ -84,6 +86,8 @@ export interface ThemeConfig {
   customAccent?: AccentColor;
   reduceMotion: boolean;
   reduceTransparency: boolean;
+  /** 选用的插件主题（<插件 ID>/<主题 ID>）；插件不可用时回到内置配色 */
+  pluginTheme?: string;
 }
 
 export interface ComputedTheme {
@@ -99,6 +103,7 @@ export interface ComputedTheme {
 
 export const DARK_PALETTE: ColorPalette = {
   // Background colors (layered depth)
+  bgCanvas: '#161616',
   bgPrimary: '#1e1e1e',
   bgSecondary: '#252526',
   bgTertiary: '#2d2d2d',
@@ -147,6 +152,7 @@ export const DARK_PALETTE: ColorPalette = {
 
 export const LIGHT_PALETTE: ColorPalette = {
   // Background colors (layered depth)
+  bgCanvas: '#eceef1',
   bgPrimary: '#ffffff',
   bgSecondary: '#f8f9fa',
   bgTertiary: '#f1f3f5',
@@ -469,6 +475,7 @@ export function generateCSSVariables(theme: ComputedTheme): Record<string, strin
 
   return {
     // Background colors
+    '--bg-canvas': colors.bgCanvas,
     '--bg-primary': colors.bgPrimary,
     '--bg-secondary': colors.bgSecondary,
     '--bg-tertiary': colors.bgTertiary,

@@ -75,20 +75,6 @@ export {
   createDisposable,
 } from './types';
 
-// ================================
-// 核心模块导出
-// ================================
-
-export {
-  PluginManager,
-  createPluginManager,
-  type PluginManagerConfig,
-  type PluginEventListener,
-  type StorageProvider,
-  type CommandProvider,
-  type EditorProvider,
-  type UIProvider,
-} from './core';
 
 // ================================
 // 注册表导出
@@ -102,22 +88,28 @@ export {
   type ExtensionRegistryStats,
 } from './registry';
 
+
 // ================================
-// 沙箱导出
+// 生命周期编排导出（版本范围、依赖解析、激活事件）
 // ================================
 
 export {
-  PluginSandbox,
-  createPluginSandbox,
-  DEFAULT_SANDBOX_CONFIG,
-  type SandboxConfig,
-  type SandboxDependencies,
-  type EditorProxy,
-  type UIProxy,
-} from './sandbox';
+  parseVersion,
+  isValidVersion,
+  compareVersions,
+  isValidVersionRange,
+  satisfiesVersionRange,
+  resolveDependencies,
+  ACTIVATION_EVENT_KINDS,
+  DEFAULT_ACTIVATION_EVENTS,
+  activationEvent,
+  parseActivationEvent,
+  shouldActivate,
+  matchedActivationEvent,
+  type DependencyNode,
+  type DependencyResolution,
+  type ActivationEventKind,
+  type BareActivationEventKind,
+  type ParsedActivationEvent,
+} from './lifecycle';
 
-// ================================
-// 默认导出
-// ================================
-
-export { PluginManager as default } from './core';

@@ -652,8 +652,36 @@ export interface LaTeXParseResult {
   document: DocumentNode;
   /** 解析警告 */
   warnings: ParseWarning[];
+  /** 交叉引用索引（标签、引用、文献引用与文献条目） */
+  crossReferences: CrossReferenceIndex;
   /** 解析耗时（毫秒） */
   duration: number;
+}
+
+/** 交叉引用索引中的一处出现 */
+export interface CrossReferenceEntry {
+  /** 键：标签名或文献键 */
+  key: string;
+  /** 产生该条目的命令（不含反斜杠：label / ref / eqref / cite / citep / bibitem 等） */
+  command: string;
+  /** 键文本本身在源码中的位置 */
+  position: Position;
+}
+
+/** 交叉引用索引 */
+export interface CrossReferenceIndex {
+  /** \label 定义 */
+  labels: CrossReferenceEntry[];
+  /** \ref / \eqref / \cref 等对标签的引用（多键命令拆为多条） */
+  references: CrossReferenceEntry[];
+  /** \cite 系列命令引用的文献键（每个键一条） */
+  citations: CrossReferenceEntry[];
+  /** \bibitem 定义的文献键 */
+  bibItems: CrossReferenceEntry[];
+  /** 外部参考文献数据库（\bibliography{a,b} / \addbibresource{x.bib}） */
+  bibliographySources: string[];
+  /** 引入的其他源文件（\input / \include / \subfile） */
+  includedFiles: string[];
 }
 
 /** 解析警告 */

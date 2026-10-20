@@ -2,6 +2,17 @@
 
 高性能搜索库，提供全文搜索索引、文件内容搜索、模糊匹配等功能。
 
+桌面端的用法：
+- `SearchIndex`：写作文档的全文搜索（`desktop/src/render/lib/writing/writing-service.ts`）。
+- `FileSearcher`：⌘P 搜索面板的“精确”模式（`desktop/src/render/components/SearchPanel/exact-search.ts`）。条目正文经 `IFileProvider` 提供，支持逐行查找、区分大小写、全词、正则。
+
+匹配规则：
+- 字面查找的命中不重叠，与替换一致。
+- 全词判断按 Unicode 字母、数字和下划线计算。
+- 正则无效时抛出 `InvalidSearchPatternError`。
+- `maxFiles` 是最多返回的匹配文件数。
+- 不含 `/` 的 glob（如 `*.min.js`）与 `.gitignore` 相同，匹配任意目录下的文件名。
+
 ## 特性
 
 - **倒排索引全文搜索**：基于 BM25 算法的高效全文搜索

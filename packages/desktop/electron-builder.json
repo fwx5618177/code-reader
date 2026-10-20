@@ -3,14 +3,31 @@
   "appId": "com.codereader.app",
   "productName": "Code Reader",
   "directories": {
+    "app": ".app-stage",
     "output": "release",
     "buildResources": "assets"
   },
-  "files": ["dist/**/*", "assets/**/*"],
+  "files": ["dist/**/*"],
+  "asarUnpack": ["**/*.node"],
   "extraResources": [
     {
       "from": "assets/icons",
       "to": "assets/icons",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "assets/dictionaries",
+      "to": "assets/dictionaries",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "assets/ocr",
+      "to": "assets/ocr",
+      "filter": ["**/*"]
+    },
+    {
+      "from": "assets/plugins",
+      "to": "assets/plugins",
       "filter": ["**/*"]
     }
   ],
@@ -87,11 +104,11 @@
     "category": "Development",
     "maintainer": "Code Reader Team",
     "synopsis": "A powerful code reading and knowledge management tool",
-    "description": "Code Reader is a desktop application for reading code, managing knowledge, and focused writing."
+    "description": "Code Reader is a personal knowledge base and writing app with Markdown and LaTeX support."
   },
   "publish": {
     "provider": "github",
-    "owner": "your-username",
+    "owner": "fwx5618177",
     "repo": "code-reader"
   }
 }

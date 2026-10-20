@@ -1,0 +1,280 @@
+// ================================
+// 标签管理对话框样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.overlay {
+  @include overlay;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: $z-modal;
+}
+
+.dialog {
+  @include card;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2);
+  width: 90%;
+  max-width: 460px;
+  max-height: 72vh;
+  padding: var(--spacing-3) var(--spacing-4);
+}
+
+.header {
+  @include flex-between;
+
+  h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--font-size-md);
+    font-weight: $font-weight-semibold;
+  }
+}
+
+.total {
+  margin-left: var(--spacing-1);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-normal;
+}
+
+.iconButton {
+  @include button-reset;
+  @include flex-center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  transition: $transition-colors;
+
+  &:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 28px;
+  padding: 0 var(--spacing-2);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+
+  &:focus-within {
+    border-color: var(--accent-primary);
+  }
+
+  input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: var(--font-size-sm);
+    outline: none;
+  }
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  margin: 0;
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+}
+
+.empty {
+  margin: 0;
+  padding: var(--spacing-6) 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.list {
+  @include scrollbar;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.row {
+  border-radius: var(--radius-sm);
+
+  &:hover,
+  &[data-selected='true'] {
+    background-color: var(--bg-hover);
+  }
+}
+
+.rowMain {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  height: 32px;
+  padding: 0 var(--spacing-2) 0 calc(var(--spacing-2) + var(--tag-depth, 0) * 18px);
+}
+
+.checkbox {
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+// 未设置颜色时显示为空心圆
+.swatch {
+  @include button-reset;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--tag-color, var(--border-primary));
+  border-radius: var(--radius-full);
+  background-color: var(--tag-color, transparent);
+
+  &:hover,
+  &[aria-expanded='true'] {
+    box-shadow: 0 0 0 2px var(--bg-selected);
+  }
+}
+
+.name {
+  @include button-reset;
+  @include truncate;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: text;
+}
+
+.nameInput {
+  @include input-base;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--spacing-1);
+  font-family: inherit;
+  outline: none;
+
+  &:focus {
+    border-color: var(--accent-primary);
+  }
+}
+
+.count {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.rowHint {
+  margin: 0;
+  padding: 0 var(--spacing-2) var(--spacing-1) 44px;
+  color: var(--color-warning);
+  font-size: var(--font-size-xs);
+}
+
+.palette {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  padding: 0 var(--spacing-2) var(--spacing-2) 44px;
+}
+
+.paletteOption {
+  @include button-reset;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  background-color: var(--tag-color);
+
+  &[aria-pressed='true'] {
+    box-shadow:
+      0 0 0 2px var(--bg-quaternary),
+      0 0 0 4px var(--tag-color);
+  }
+}
+
+.paletteClear {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  padding: 0 var(--spacing-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+
+  &:hover,
+  &[aria-pressed='true'] {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  min-height: 32px;
+  padding-top: var(--spacing-2);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.hint {
+  color: var(--text-muted);
+}
+
+.select {
+  @include input-base;
+  height: 26px;
+  max-width: 160px;
+  padding: 0 var(--spacing-1);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.primaryButton {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  height: 26px;
+  margin-left: auto;
+  padding: 0 var(--spacing-3);
+  background-color: var(--accent-primary);
+  border-radius: var(--radius-md);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-xs);
+  font-weight: $font-weight-medium;
+
+  &:hover:not(:disabled) {
+    background-color: var(--accent-primary-hover);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

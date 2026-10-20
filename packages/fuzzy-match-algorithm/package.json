@@ -33,14 +33,13 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rimraf dist && tsc",
     "dev": "tsc --watch",
     "clean": "rimraf dist",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
-    "benchmark": "tsx benchmark/index.ts"
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "algorithm",
@@ -58,6 +57,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@code-reader/test-support": "workspace:*",
     "@vitest/coverage-v8": "^1.3.0",
     "rimraf": "^6.0.1",
     "tsx": "^4.7.0",

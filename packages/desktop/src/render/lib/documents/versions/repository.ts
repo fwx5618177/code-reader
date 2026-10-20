@@ -8,6 +8,9 @@ import {
   DocumentVersion,
   CreateVersionInput,
   VersionListOptions,
+  type VersionPruneResult,
+  type VersionRetentionPolicy,
+  type VersionStats,
 } from './types';
 
 // ================================
@@ -66,10 +69,27 @@ class VersionRepository {
   }
 
   /**
-   * Prune old versions, keeping only the most recent N
+   * 按已保存的保留策略清理一篇文档的旧版本
    */
-  async prune(itemId: string, keepCount?: number): Promise<number> {
-    return window.electron.version.prune(itemId, keepCount);
+  async prune(itemId: string): Promise<number> {
+    return window.electron.version.prune(itemId);
+  }
+
+  /** 按保留策略清理全部文档 */
+  async pruneAll(): Promise<VersionPruneResult> {
+    return window.electron.version.pruneAll();
+  }
+
+  async getRetention(): Promise<VersionRetentionPolicy> {
+    return window.electron.version.getRetention();
+  }
+
+  async setRetention(policy: VersionRetentionPolicy): Promise<VersionRetentionPolicy> {
+    return window.electron.version.setRetention(policy);
+  }
+
+  async getStats(): Promise<VersionStats> {
+    return window.electron.version.getStats();
   }
 
   /**

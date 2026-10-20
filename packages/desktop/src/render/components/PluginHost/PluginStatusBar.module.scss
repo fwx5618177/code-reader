@@ -1,0 +1,32 @@
+// ================================
+// 插件状态栏项样式
+// ================================
+
+@use '../../styles/variables' as *;
+
+.clickable {
+  @include button-reset;
+  border-radius: var(--radius-sm);
+  transition: all $transition-fast;
+
+  &:hover {
+    background-color: var(--bg-hover);
+  }
+}
+
+// 放在 .clickable 之后，覆盖 button-reset 清掉的内边距与颜色
+.item {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  padding: 0 var(--spacing-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.item.clickable:hover {
+  color: var(--text-primary);
+}

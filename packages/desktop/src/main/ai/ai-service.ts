@@ -8,25 +8,23 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { app } from 'electron';
 import { join } from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { randomUUID } from 'crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
+import { readLegacyAIConfig } from './legacy-config';
+import {
+  isAIProviderType,
+  normalizeProviderBaseUrl,
+  providerRequiresApiKey,
+  type AIConfigSnapshot,
+  type AIProviderConfig,
+  type AIProviderInput,
+  type AIProviderUpdate,
+  type AIProviderView,
+} from './provider-config';
 
 // ================================
 // Types
 // ================================
-
-export type AIProviderType = 'openai' | 'anthropic' | 'deepseek' | 'moonshot' | 'zhipu' | 'ollama';
-
-export interface AIProviderConfig {
-  id: string;
-  type: AIProviderType;
-  name: string;
-  baseUrl?: string;
-  apiKey?: string;
-  isEnabled: boolean;
-  defaultModel?: string;
-  embeddingModel?: string;
-  settings?: Record<string, unknown>;
-}
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -39,7 +37,6 @@ export interface ChatCompletionRequest {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
-  stream?: boolean;
 }
 
 export interface ChatCompletionResponse {
@@ -52,6 +49,8 @@ export interface ChatCompletionResponse {
     totalTokens: number;
   };
   finishReason?: string;
+  /** 流式对话被调用方停止；此时 content 为停止前已生成的部分 */
+  aborted?: boolean;
 }
 
 export interface EmbeddingRequest {
@@ -122,7 +121,31 @@ interface AIConfigFile {
   providers: AIProviderConfig[];
   defaultProviderId?: string;
   defaultEmbeddingProviderId?: string;
+  defaultTranscriptionProviderId?: string;
   updatedAt: string;
+}
+
+/** 去除首尾空白，空字符串视为未设置 */
+function normalizeOptional(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function requireName(name: string | undefined): string {
+  const normalized = normalizeOptional(name);
+  if (!normalized) {
+    throw new Error('Provider name is required');
+  }
+  return normalized;
+}
+
+/** 无需密钥的服务商仍要给 OpenAI SDK 一个非空值，否则 SDK 会在构造时报错 */
+const LOCAL_API_KEY_PLACEHOLDER = 'local';
+
+function assertApiKey(provider: AIProviderConfig): void {
+  if (providerRequiresApiKey(provider.type) && !provider.apiKey) {
+    throw new Error(`No API key configured for provider: ${provider.name}`);
+  }
 }
 
 class AIConfigManager {
@@ -139,6 +162,51 @@ class AIConfigManager {
 
     this.configPath = join(configDir, 'ai-config.json');
     this.config = this.loadConfig();
+    this.importLegacyConfig(userDataPath);
+    this.normalizeStoredBaseUrls();
+  }
+
+  /**
+   * 修正已保存的服务商地址（如旧版 Ollama 预设的 /api 地址），有变化时写回
+   */
+  private normalizeStoredBaseUrls(): void {
+    let changed = false;
+    this.config.providers = this.config.providers.map((provider) => {
+      const baseUrl = normalizeProviderBaseUrl(provider.type, provider.baseUrl);
+      if (baseUrl === provider.baseUrl) return provider;
+      changed = true;
+      return { ...provider, baseUrl };
+    });
+    if (changed) {
+      this.saveConfig();
+    }
+  }
+
+  /**
+   * 一次性迁移：主配置尚无服务商时导入旧版渲染进程配置 <userData>/ai-config.json，
+   * 导入并保存成功后将旧文件重命名为 ai-config.legacy.json，之后不再触发。
+   */
+  private importLegacyConfig(userDataPath: string): void {
+    if (this.config.providers.length > 0) return;
+
+    const legacyPath = join(userDataPath, 'ai-config.json');
+    if (!existsSync(legacyPath)) return;
+
+    try {
+      const imported = readLegacyAIConfig(readFileSync(legacyPath, 'utf-8'));
+      this.config.providers = imported.providers;
+      this.config.defaultProviderId = imported.defaultProviderId;
+      this.config.defaultTranscriptionProviderId = imported.defaultTranscriptionProviderId;
+      this.saveConfig();
+      renameSync(legacyPath, join(userDataPath, 'ai-config.legacy.json'));
+      console.log(`[AIConfig] Imported ${imported.providers.length} provider(s) from legacy config`);
+      if (imported.skipped.length > 0) {
+        console.warn('[AIConfig] Skipped unsupported legacy providers:', imported.skipped);
+      }
+    } catch (error) {
+      // 保留旧文件，下次启动重试，避免丢失用户配置
+      console.error('[AIConfig] Failed to import legacy config:', error);
+    }
   }
 
   private loadConfig(): AIConfigFile {
@@ -194,26 +262,63 @@ class AIConfigManager {
     return this.config.providers.find((p) => p.isEnabled && p.embeddingModel);
   }
 
-  getEnabledProviders(): AIProviderConfig[] {
-    return this.config.providers.filter((p) => p.isEnabled);
+  getDefaultTranscriptionProvider(): AIProviderConfig | undefined {
+    if (this.config.defaultTranscriptionProviderId) {
+      const provider = this.getProvider(this.config.defaultTranscriptionProviderId);
+      if (provider?.isEnabled && provider.transcriptionModel) return provider;
+    }
+    // 回退到任一启用且配置了转写模型的服务商
+    return this.config.providers.find((p) => p.isEnabled && p.transcriptionModel);
   }
 
-  addProvider(provider: AIProviderConfig): void {
-    const existing = this.config.providers.findIndex((p) => p.id === provider.id);
-    if (existing >= 0) {
-      this.config.providers[existing] = provider;
-    } else {
-      this.config.providers.push(provider);
+  addProvider(input: AIProviderInput): AIProviderConfig {
+    if (!isAIProviderType(input.type)) {
+      throw new Error(`Unsupported provider type: ${String(input.type)}`);
     }
+
+    const provider: AIProviderConfig = {
+      id: randomUUID(),
+      type: input.type,
+      name: requireName(input.name),
+      baseUrl: normalizeProviderBaseUrl(input.type, normalizeOptional(input.baseUrl)),
+      apiKey: normalizeOptional(input.apiKey),
+      isEnabled: input.isEnabled,
+      defaultModel: normalizeOptional(input.defaultModel),
+      embeddingModel: normalizeOptional(input.embeddingModel),
+      transcriptionModel: normalizeOptional(input.transcriptionModel),
+      settings: input.settings,
+    };
+
+    this.config.providers.push(provider);
     this.saveConfig();
+    return provider;
   }
 
-  updateProvider(id: string, updates: Partial<AIProviderConfig>): void {
+  updateProvider(id: string, updates: AIProviderUpdate): AIProviderConfig {
     const index = this.config.providers.findIndex((p) => p.id === id);
-    if (index >= 0) {
-      this.config.providers[index] = { ...this.config.providers[index], ...updates };
-      this.saveConfig();
+    if (index < 0) {
+      throw new Error(`Provider not found: ${id}`);
     }
+
+    const current = this.config.providers[index];
+    const optional = (key: 'baseUrl' | 'defaultModel' | 'embeddingModel' | 'transcriptionModel') =>
+      updates[key] === undefined ? current[key] : normalizeOptional(updates[key]);
+
+    const updated: AIProviderConfig = {
+      ...current,
+      name: updates.name === undefined ? current.name : requireName(updates.name),
+      apiKey: normalizeOptional(updates.apiKey) ?? current.apiKey,
+      isEnabled: updates.isEnabled ?? current.isEnabled,
+      baseUrl: normalizeProviderBaseUrl(current.type, optional('baseUrl')),
+      defaultModel: optional('defaultModel'),
+      embeddingModel: optional('embeddingModel'),
+      transcriptionModel: optional('transcriptionModel'),
+      settings: updates.settings ?? current.settings,
+    };
+
+    this.config.providers[index] = updated;
+    this.saveConfig();
+    return updated;
   }
 
   removeProvider(id: string): void {
@@ -224,18 +329,45 @@ class AIConfigManager {
     if (this.config.defaultEmbeddingProviderId === id) {
       this.config.defaultEmbeddingProviderId = undefined;
     }
+    if (this.config.defaultTranscriptionProviderId === id) {
+      this.config.defaultTranscriptionProviderId = undefined;
+    }
     this.saveConfig();
   }
 
   setDefaultProvider(id: string): void {
+    this.requireProvider(id);
     this.config.defaultProviderId = id;
     this.saveConfig();
   }
 
   setDefaultEmbeddingProvider(id: string): void {
+    if (!this.requireProvider(id).embeddingModel) {
+      throw new Error('Provider has no embedding model configured');
+    }
     this.config.defaultEmbeddingProviderId = id;
     this.saveConfig();
   }
+
+  setDefaultTranscriptionProvider(id: string): void {
+    if (!this.requireProvider(id).transcriptionModel) {
+      throw new Error('Provider has no transcription model configured');
+    }
+    this.config.defaultTranscriptionProviderId = id;
+    this.saveConfig();
+  }
+
+  private requireProvider(id: string): AIProviderConfig {
+    const provider = this.getProvider(id);
+    if (!provider) {
+      throw new Error(`Provider not found: ${id}`);
+    }
+    return provider;
+  }
+}
+
+function toProviderView({ apiKey, ...rest }: AIProviderConfig): AIProviderView {
+  return { ...rest, hasApiKey: Boolean(apiKey), requiresApiKey: providerRequiresApiKey(rest.type) };
 }
 
 // ================================
@@ -255,26 +387,25 @@ export class AIService {
   // Provider Management
   // ================================
 
-  getProviders(): AIProviderConfig[] {
-    return this.configManager.getProviders();
+  getConfigSnapshot(): AIConfigSnapshot {
+    return {
+      providers: this.configManager.getProviders().map(toProviderView),
+      defaultProviderId: this.configManager.getDefaultProvider()?.id,
+      defaultEmbeddingProviderId: this.configManager.getDefaultEmbeddingProvider()?.id,
+      defaultTranscriptionProviderId: this.configManager.getDefaultTranscriptionProvider()?.id,
+    };
   }
 
-  getProvider(id: string): AIProviderConfig | undefined {
-    return this.configManager.getProvider(id);
+  addProvider(input: AIProviderInput): AIProviderView {
+    return toProviderView(this.configManager.addProvider(input));
   }
 
-  addProvider(provider: AIProviderConfig): void {
-    this.configManager.addProvider(provider);
-    // Clear cached client
-    this.openaiClients.delete(provider.id);
-    this.anthropicClients.delete(provider.id);
-  }
-
-  updateProvider(id: string, updates: Partial<AIProviderConfig>): void {
-    this.configManager.updateProvider(id, updates);
-    // Clear cached client
+  updateProvider(id: string, updates: AIProviderUpdate): AIProviderView {
+    const provider = this.configManager.updateProvider(id, updates);
+    // 密钥或地址可能变化，丢弃缓存的客户端
     this.openaiClients.delete(id);
     this.anthropicClients.delete(id);
+    return toProviderView(provider);
   }
 
   removeProvider(id: string): void {
@@ -291,6 +422,10 @@ export class AIService {
     this.configManager.setDefaultEmbeddingProvider(id);
   }
 
+  setDefaultTranscriptionProvider(id: string): void {
+    this.configManager.setDefaultTranscriptionProvider(id);
+  }
+
   // ================================
   // Client Management
   // ================================
@@ -299,7 +434,7 @@ export class AIService {
     let client = this.openaiClients.get(provider.id);
     if (!client) {
       client = new OpenAI({
-        apiKey: provider.apiKey,
+        apiKey: provider.apiKey ?? LOCAL_API_KEY_PLACEHOLDER,
         baseURL: provider.baseUrl,
       });
       this.openaiClients.set(provider.id, client);
@@ -324,6 +459,42 @@ export class AIService {
   // ================================
 
   async chatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse> {
+    const { provider, model } = this.resolveChatTarget(request);
+    return provider.type === 'anthropic'
+      ? this.anthropicChatCompletion(provider, request, model)
+      : this.openaiChatCompletion(provider, request, model);
+  }
+
+  /**
+   * 流式对话：每收到一段文本调用 onDelta，结束后返回完整结果
+   * signal 中止后不视为失败，返回已生成的部分并标记 aborted
+   */
+  async chatCompletionStream(
+    request: ChatCompletionRequest,
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<ChatCompletionResponse> {
+    const { provider, model } = this.resolveChatTarget(request);
+    let partial = '';
+    const emit = (delta: string) => {
+      partial += delta;
+      onDelta(delta);
+    };
+    try {
+      return provider.type === 'anthropic'
+        ? await this.anthropicChatCompletionStream(provider, request, model, emit, signal)
+        : await this.openaiChatCompletionStream(provider, request, model, emit, signal);
+    } catch (error) {
+      if (signal?.aborted) return { id: '', content: partial, model, aborted: true };
+      throw error;
+    }
+  }
+
+  /** 解析本次对话使用的服务商与模型；除 anthropic 外均走 OpenAI 兼容接口 */
+  private resolveChatTarget(request: ChatCompletionRequest): {
+    provider: AIProviderConfig;
+    model: string;
+  } {
     const provider = request.providerId
       ? this.configManager.getProvider(request.providerId)
       : this.configManager.getDefaultProvider();
@@ -332,26 +503,17 @@ export class AIService {
       throw new Error('No AI provider configured');
     }
 
-    if (!provider.apiKey) {
-      throw new Error(`No API key configured for provider: ${provider.name}`);
-    }
+    assertApiKey(provider);
 
     const model = request.model || provider.defaultModel;
     if (!model) {
       throw new Error('No model specified');
     }
+    return { provider, model };
+  }
 
-    switch (provider.type) {
-      case 'anthropic':
-        return this.anthropicChatCompletion(provider, request, model);
-      case 'openai':
-      case 'deepseek':
-      case 'moonshot':
-      case 'zhipu':
-      case 'ollama':
-      default:
-        return this.openaiChatCompletion(provider, request, model);
-    }
+  private openaiMessages(request: ChatCompletionRequest) {
+    return request.messages.map((m) => ({ role: m.role, content: m.content }));
   }
 
   private async openaiChatCompletion(
@@ -363,10 +525,7 @@ export class AIService {
 
     const response = await client.chat.completions.create({
       model,
-      messages: request.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+      messages: this.openaiMessages(request),
       temperature: request.temperature ?? 0.7,
       max_tokens: request.maxTokens,
     });
@@ -388,27 +547,59 @@ export class AIService {
     };
   }
 
-  private async anthropicChatCompletion(
+  private async openaiChatCompletionStream(
     provider: AIProviderConfig,
     request: ChatCompletionRequest,
-    model: string
+    model: string,
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
   ): Promise<ChatCompletionResponse> {
-    const client = this.getAnthropicClient(provider);
+    const client = this.getOpenAIClient(provider);
 
-    // Separate system message from other messages
+    const stream = await client.chat.completions.create(
+      {
+        model,
+        messages: this.openaiMessages(request),
+        temperature: request.temperature ?? 0.7,
+        max_tokens: request.maxTokens,
+        stream: true,
+      },
+      { signal }
+    );
+
+    let id = '';
+    let responseModel = model;
+    let content = '';
+    let finishReason: string | undefined;
+    for await (const chunk of stream) {
+      id = chunk.id || id;
+      responseModel = chunk.model || responseModel;
+      const choice = chunk.choices[0];
+      const delta = choice?.delta?.content;
+      if (delta) {
+        content += delta;
+        onDelta(delta);
+      }
+      finishReason = choice?.finish_reason || finishReason;
+    }
+
+    return { id, content, model: responseModel, finishReason };
+  }
+
+  private anthropicRequest(request: ChatCompletionRequest, model: string) {
+    // system 消息在 Anthropic 接口中是独立参数
     const systemMessage = request.messages.find((m) => m.role === 'system');
-    const otherMessages = request.messages.filter((m) => m.role !== 'system');
-
-    const response = await client.messages.create({
+    return {
       model,
       max_tokens: request.maxTokens || 4096,
       system: systemMessage?.content,
-      messages: otherMessages.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-      })),
-    });
+      messages: request.messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    };
+  }
 
+  private toAnthropicResponse(response: Anthropic.Message): ChatCompletionResponse {
     const textContent = response.content.find((c) => c.type === 'text');
 
     return {
@@ -424,6 +615,29 @@ export class AIService {
     };
   }
 
+  private async anthropicChatCompletion(
+    provider: AIProviderConfig,
+    request: ChatCompletionRequest,
+    model: string
+  ): Promise<ChatCompletionResponse> {
+    const client = this.getAnthropicClient(provider);
+    const response = await client.messages.create(this.anthropicRequest(request, model));
+    return this.toAnthropicResponse(response);
+  }
+
+  private async anthropicChatCompletionStream(
+    provider: AIProviderConfig,
+    request: ChatCompletionRequest,
+    model: string,
+    onDelta: (delta: string) => void,
+    signal?: AbortSignal
+  ): Promise<ChatCompletionResponse> {
+    const client = this.getAnthropicClient(provider);
+    const stream = client.messages.stream(this.anthropicRequest(request, model), { signal });
+    stream.on('text', onDelta);
+    return this.toAnthropicResponse(await stream.finalMessage());
+  }
+
   // ================================
   // Embeddings
   // ================================
@@ -437,9 +651,7 @@ export class AIService {
       throw new Error('No embedding provider configured');
     }
 
-    if (!provider.apiKey) {
-      throw new Error(`No API key configured for provider: ${provider.name}`);
-    }
+    assertApiKey(provider);
 
     const model = request.model || provider.embeddingModel || 'text-embedding-3-small';
 
@@ -529,7 +741,7 @@ export class AIService {
 要求：
 1. 最多提取${maxTags}个标签
 2. 标签应该简短（1-3个词）
-3. 优先使用已有标签列表中的标签：${existingTags.length > 0 ? existingTags.join(', ') : '（暂无已有标签）'}
+3. 优先使用已有标签列表中的标签：${existingTags.length > 0 ? existingTags.join(', ') : '（暂无已有标签）'}；标签可以用“父/子”表示层级（如“技术/前端”），已有层级标签时沿用其层级
 4. 为每个标签评估置信度（0-1之间的小数）
 5. 返回JSON格式：{"tags": [{"name": "标签名", "confidence": 0.9}, ...]}
 
@@ -560,29 +772,30 @@ export class AIService {
   }
 
   // ================================
-  // Transcription (OpenAI Whisper)
+  // Transcription (OpenAI-compatible audio/transcriptions)
   // ================================
 
   async transcribe(request: TranscribeRequest): Promise<TranscribeResponse> {
     const provider = request.providerId
       ? this.configManager.getProvider(request.providerId)
-      : this.configManager.getDefaultProvider();
+      : this.configManager.getDefaultTranscriptionProvider();
 
     if (!provider) {
-      throw new Error('No AI provider configured');
+      throw new Error('No transcription provider configured');
     }
 
-    if (!provider.apiKey) {
-      throw new Error(`No API key configured for provider: ${provider.name}`);
+    assertApiKey(provider);
+
+    if (!provider.transcriptionModel) {
+      throw new Error(`No transcription model configured for provider: ${provider.name}`);
     }
 
-    // Currently only OpenAI API supports transcription
     const client = this.getOpenAIClient(provider);
     const { createReadStream } = await import('fs');
 
     const response = await client.audio.transcriptions.create({
       file: createReadStream(request.audioPath),
-      model: 'whisper-1',
+      model: provider.transcriptionModel,
       language: request.language,
       response_format: 'verbose_json',
       timestamp_granularities: ['segment'],
@@ -610,10 +823,6 @@ export class AIService {
     const provider = this.configManager.getProvider(providerId);
     if (!provider) {
       return { success: false, error: 'Provider not found' };
-    }
-
-    if (!provider.apiKey) {
-      return { success: false, error: 'No API key configured' };
     }
 
     const startTime = Date.now();

@@ -34,38 +34,6 @@ export type TranscriptionProviderType =
   | 'custom';
 
 // ================================
-// Base Provider Configuration
-// ================================
-
-/**
- * Base configuration for all AI providers
- */
-export interface BaseProviderConfig {
-  /** Unique identifier for this configuration */
-  id: string;
-  /** Display name for the provider */
-  name: string;
-  /** Whether this provider is enabled */
-  enabled: boolean;
-  /** API key (encrypted in storage) */
-  apiKey: string;
-  /** Base URL for API calls */
-  baseUrl?: string;
-  /** Organization ID (for OpenAI) */
-  organizationId?: string;
-  /** Custom headers */
-  customHeaders?: Record<string, string>;
-  /** Request timeout in milliseconds */
-  timeout?: number;
-  /** Max retries on failure */
-  maxRetries?: number;
-  /** Created timestamp */
-  createdAt: string;
-  /** Updated timestamp */
-  updatedAt: string;
-}
-
-// ================================
 // LLM Provider Configuration
 // ================================
 
@@ -107,24 +75,6 @@ export interface ModelConfig {
   isDefault?: boolean;
 }
 
-/**
- * LLM Provider Configuration
- */
-export interface LLMProviderConfig extends BaseProviderConfig {
-  /** Provider type */
-  type: AIProviderType;
-  /** Available models */
-  models: ModelConfig[];
-  /** Default model for summarization */
-  defaultSummarizationModel?: string;
-  /** Default model for tagging */
-  defaultTaggingModel?: string;
-  /** Default model for embeddings */
-  defaultEmbeddingModel?: string;
-  /** Default model for chat */
-  defaultChatModel?: string;
-}
-
 // ================================
 // Transcription Provider Configuration
 // ================================
@@ -149,26 +99,6 @@ export interface TranscriptionModelConfig {
   supportedFormats: string[];
 }
 
-/**
- * Transcription Provider Configuration
- */
-export interface TranscriptionProviderConfig extends BaseProviderConfig {
-  /** Provider type */
-  type: TranscriptionProviderType;
-  /** Available models */
-  models: TranscriptionModelConfig[];
-  /** Default model */
-  defaultModel?: string;
-  /** Default language */
-  defaultLanguage?: string;
-  /** Enable word timestamps by default */
-  enableWordTimestamps?: boolean;
-  /** App ID (for some providers like iFlytek) */
-  appId?: string;
-  /** App Secret (for some providers) */
-  appSecret?: string;
-}
-
 // ================================
 // Provider Presets
 // ================================
@@ -176,9 +106,12 @@ export interface TranscriptionProviderConfig extends BaseProviderConfig {
 /**
  * Preset configuration for quick setup
  */
-export interface ProviderPreset {
+export interface ProviderPreset<
+  TType extends AIProviderType | TranscriptionProviderType = AIProviderType | TranscriptionProviderType,
+  TModel extends ModelConfig | TranscriptionModelConfig = ModelConfig | TranscriptionModelConfig,
+> {
   /** Provider type */
-  type: AIProviderType | TranscriptionProviderType;
+  type: TType;
   /** Display name */
   name: string;
   /** Description */
@@ -189,8 +122,8 @@ export interface ProviderPreset {
   defaultBaseUrl: string;
   /** Documentation URL */
   docsUrl: string;
-  /** Available models */
-  availableModels: (ModelConfig | TranscriptionModelConfig)[];
+  /** Available models（按服务商类别区分为 LLM 模型或转写模型） */
+  availableModels: TModel[];
   /** Required fields */
   requiredFields: string[];
   /** Optional fields */
@@ -198,245 +131,10 @@ export interface ProviderPreset {
 }
 
 // ================================
-// AI Settings
-// ================================
-
-/**
- * AI feature settings
- */
-export interface AIFeatureSettings {
-  /** Enable auto-summarization */
-  autoSummarize: boolean;
-  /** Enable auto-tagging */
-  autoTag: boolean;
-  /** Enable auto-transcription */
-  autoTranscribe: boolean;
-  /** Enable semantic search */
-  semanticSearch: boolean;
-  /** Enable related content suggestions */
-  relatedSuggestions: boolean;
-
-  /** Max summary length (words) */
-  summaryMaxLength: number;
-  /** Max tags per item */
-  maxTagsPerItem: number;
-  /** Minimum confidence for auto-tags */
-  tagConfidenceThreshold: number;
-
-  /** Embedding dimensions */
-  embeddingDimensions: number;
-  /** Similarity threshold for related content */
-  similarityThreshold: number;
-}
-
-/**
- * Complete AI configuration
- */
-export interface AIConfig {
-  /** Version for migration purposes */
-  version: number;
-  /** LLM providers */
-  llmProviders: LLMProviderConfig[];
-  /** Active LLM provider ID */
-  activeLLMProviderId?: string;
-  /** Transcription providers */
-  transcriptionProviders: TranscriptionProviderConfig[];
-  /** Active transcription provider ID */
-  activeTranscriptionProviderId?: string;
-  /** Feature settings */
-  features: AIFeatureSettings;
-  /** Last updated timestamp */
-  updatedAt: string;
-}
-
-// ================================
-// Provider Status & Health
-// ================================
-
-/**
- * Provider health status
- */
-export type ProviderHealthStatus = 'healthy' | 'degraded' | 'error' | 'unknown';
-
-/**
- * Provider health check result
- */
-export interface ProviderHealthCheck {
-  /** Provider ID */
-  providerId: string;
-  /** Status */
-  status: ProviderHealthStatus;
-  /** Response time in ms */
-  responseTime?: number;
-  /** Error message if any */
-  errorMessage?: string;
-  /** Last checked timestamp */
-  lastChecked: string;
-  /** Quota/usage info if available */
-  usage?: {
-    used: number;
-    limit: number;
-    resetAt?: string;
-  };
-}
-
-// ================================
-// API Request/Response Types
-// ================================
-
-/**
- * Summarization request
- */
-export interface SummarizeRequest {
-  /** Content to summarize */
-  content: string;
-  /** Content type hint */
-  contentType?: 'text' | 'code' | 'transcript' | 'article';
-  /** Max length in words */
-  maxLength?: number;
-  /** Language */
-  language?: string;
-  /** Include key points */
-  includeKeyPoints?: boolean;
-}
-
-/**
- * Summarization response
- */
-export interface SummarizeResponse {
-  /** Generated summary */
-  summary: string;
-  /** Key points extracted */
-  keyPoints?: string[];
-  /** Tokens used */
-  tokensUsed?: {
-    input: number;
-    output: number;
-  };
-}
-
-/**
- * Tag extraction request
- */
-export interface ExtractTagsRequest {
-  /** Content to analyze */
-  content: string;
-  /** Title for context */
-  title?: string;
-  /** Existing tags to consider */
-  existingTags?: string[];
-  /** Max number of tags */
-  maxTags?: number;
-  /** Language */
-  language?: string;
-}
-
-/**
- * Tag extraction response
- */
-export interface ExtractTagsResponse {
-  /** Suggested tags */
-  tags: Array<{
-    name: string;
-    confidence: number;
-    category?: string;
-  }>;
-}
-
-/**
- * Transcription request
- */
-export interface TranscribeRequest {
-  /** Audio file path or base64 */
-  audio: string;
-  /** Audio format */
-  format: string;
-  /** Language hint */
-  language?: string;
-  /** Enable word timestamps */
-  wordTimestamps?: boolean;
-  /** Enable speaker detection */
-  speakerDiarization?: boolean;
-}
-
-/**
- * Transcription response
- */
-export interface TranscribeResponse {
-  /** Full transcript text */
-  text: string;
-  /** Segments with timestamps */
-  segments?: Array<{
-    start: number;
-    end: number;
-    text: string;
-    speaker?: string;
-    confidence?: number;
-  }>;
-  /** Detected language */
-  detectedLanguage?: string;
-  /** Duration in seconds */
-  duration?: number;
-}
-
-/**
- * Embedding request
- */
-export interface EmbeddingRequest {
-  /** Text to embed */
-  text: string;
-  /** Model to use */
-  model?: string;
-}
-
-/**
- * Embedding response
- */
-export interface EmbeddingResponse {
-  /** Embedding vector */
-  embedding: number[];
-  /** Dimensions */
-  dimensions: number;
-  /** Tokens used */
-  tokensUsed?: number;
-}
-
-// ================================
-// Default Configurations
-// ================================
-
-/**
- * Default AI feature settings
- */
-export const DEFAULT_AI_FEATURE_SETTINGS: AIFeatureSettings = {
-  autoSummarize: true,
-  autoTag: true,
-  autoTranscribe: true,
-  semanticSearch: false,
-  relatedSuggestions: true,
-  summaryMaxLength: 150,
-  maxTagsPerItem: 5,
-  tagConfidenceThreshold: 0.7,
-  embeddingDimensions: 1536,
-  similarityThreshold: 0.75,
-};
-
-/**
- * Default AI configuration
- */
-export const DEFAULT_AI_CONFIG: AIConfig = {
-  version: 1,
-  llmProviders: [],
-  transcriptionProviders: [],
-  features: DEFAULT_AI_FEATURE_SETTINGS,
-  updatedAt: new Date().toISOString(),
-};
-
-// ================================
 // Provider Presets Data
 // ================================
 
-export const LLM_PROVIDER_PRESETS: ProviderPreset[] = [
+export const LLM_PROVIDER_PRESETS: ProviderPreset<AIProviderType, ModelConfig>[] = [
   {
     type: 'openai',
     name: 'OpenAI',
@@ -635,7 +333,7 @@ export const LLM_PROVIDER_PRESETS: ProviderPreset[] = [
     name: 'Ollama (Local)',
     description: '本地运行的 LLM (Llama, Mistral 等)',
     icon: 'ollama',
-    defaultBaseUrl: 'http://localhost:11434/api',
+    defaultBaseUrl: 'http://localhost:11434/v1',
     docsUrl: 'https://ollama.ai/docs',
     availableModels: [],
     requiredFields: ['baseUrl'],
@@ -643,7 +341,10 @@ export const LLM_PROVIDER_PRESETS: ProviderPreset[] = [
   },
 ];
 
-export const TRANSCRIPTION_PROVIDER_PRESETS: ProviderPreset[] = [
+export const TRANSCRIPTION_PROVIDER_PRESETS: ProviderPreset<
+  TranscriptionProviderType,
+  TranscriptionModelConfig
+>[] = [
   {
     type: 'openai-whisper',
     name: 'OpenAI Whisper',

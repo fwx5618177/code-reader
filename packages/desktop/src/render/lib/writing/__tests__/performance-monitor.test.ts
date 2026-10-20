@@ -23,7 +23,21 @@ import {
 
 describe('PerformanceMonitor', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // 被测实现使用单调时钟 performance.now() 计时，Vitest 默认不伪造 performance，
+    // 需显式加入 toFake，vi.advanceTimersByTime 才能推进计时
+    vi.useFakeTimers({
+      shouldAdvanceTime: true,
+      toFake: [
+        'setTimeout',
+        'clearTimeout',
+        'setInterval',
+        'clearInterval',
+        'setImmediate',
+        'clearImmediate',
+        'Date',
+        'performance',
+      ],
+    });
     resetDefaultPerformanceMonitor();
   });
 

@@ -1,0 +1,84 @@
+# 持续集成：类型检查、单元测试、基准测试
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CI 不需要 Electron 二进制，跳过下载以加快安装
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+  # 性能断言的预算按开发机设定；GitHub 运行器约慢 10 倍且多个包并行测试，统一放宽（见 packages/test-support）
+  PERF_BUDGET_SCALE: '10'
+
+jobs:
+  verify:
+    name: 类型检查与测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # desktop 通过 dist 引用各子包，需先构建子包产物
+      - name: 构建子包
+        run: pnpm build:libs
+
+      - name: 类型检查
+        run: pnpm typecheck
+
+      - name: 单元测试
+        run: pnpm test
+
+  benchmark:
+    name: 基准测试
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建子包
+        run: pnpm build:libs
+
+      - name: 运行基准测试
+        run: pnpm benchmark 2>&1 | tee benchmark-result.txt
+
+      - name: 写入任务摘要
+        if: always()
+        run: |
+          {
+            echo '## 基准测试结果'
+            echo '```'
+            cat benchmark-result.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传基准测试结果
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-result
+          path: benchmark-result.txt

@@ -237,25 +237,16 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 
-  // 搜索高亮样式
-  :global(mark),
-  :global(em),
-  :global(b) {
-    background-color: var(--bg-highlight, rgba(255, 215, 0, 0.3));
+  // 搜索高亮
+  :global(mark) {
+    background-color: var(--bg-highlight);
     color: inherit;
-    font-style: normal;
     font-weight: $font-weight-medium;
     padding: 0 2px;
     border-radius: 2px;
   }
 }
 
-.resultScore {
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-top: 4px;
-  opacity: 0.7;
-}
 
 .searchNoResults {
   padding: var(--spacing-3);
@@ -635,7 +626,7 @@
 
 // 有效放置指示器
 .canDrop {
-  background-color: rgba(var(--accent-primary-rgb, 0, 122, 204), 0.1);
+  background-color: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 // 放置位置指示器
@@ -664,7 +655,7 @@
 }
 
 .dropPositionInside {
-  background-color: rgba(var(--accent-primary-rgb, 0, 122, 204), 0.15);
+  background-color: color-mix(in srgb, var(--accent-primary) 15%, transparent);
   outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
 
@@ -676,7 +667,7 @@
 
 // 无效放置指示器
 .cannotDrop {
-  background-color: rgba(var(--color-error-rgb, 255, 85, 85), 0.1);
+  background-color: color-mix(in srgb, var(--color-error) 10%, transparent);
   cursor: not-allowed;
 
   &::before {

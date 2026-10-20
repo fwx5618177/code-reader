@@ -1,0 +1,14 @@
+// ================================
+// 标签颜色圆点
+// ================================
+
+@use '../../styles/variables' as *;
+
+.dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--tag-color);
+}
