@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findPageContaining, findTextBlock, plainTextOfSourceLine } from '../text-locate';
+import { findPageContaining, findTextBlock, findTextElements, plainTextOfSourceLine } from '../text-locate';
 
 describe('按文字定位', () => {
   it('在渲染后的正文中找到命中行所在的块：忽略空白与换行、跨越行内元素', () => {
@@ -20,5 +20,12 @@ describe('按文字定位', () => {
     const pages = ['封面', '第二页 内容\n关键 字', '关键字 再次出现'];
     expect(findPageContaining(pages, '关键字')).toBe(2);
     expect(findPageContaining(pages, '没有')).toBeNull();
+  });
+
+  it('PDF 文本层中命中文字跨越的全部片段（用于页内高亮）', () => {
+    const layer = document.createElement('div');
+    layer.innerHTML = '<span>第一行 开头</span><br><span>关键</span><span>字 在</span><span>这里</span><span>其他</span>';
+    expect(findTextElements(layer, '关键字在这里').map((element) => element.textContent)).toEqual(['关键', '字 在', '这里']);
+    expect(findTextElements(layer, '不存在')).toEqual([]);
   });
 });

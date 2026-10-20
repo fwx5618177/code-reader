@@ -15,12 +15,10 @@ export function plainTextOfSourceLine(sourceLine: string): string {
   return markdownToPlainText(sourceLine) || sourceLine;
 }
 
-/**
- * 在元素的文字中查找 needle（忽略空白），返回命中起点所在的块级元素；找不到返回 null
- */
-export function findTextBlock(root: HTMLElement, needle: string): HTMLElement | null {
+/** 在元素的文字中查找 needle（忽略空白）：返回命中的各个字符所属的文本节点（按顺序、不重复）；找不到返回空数组 */
+function matchedTextNodes(root: HTMLElement, needle: string): Text[] {
   const target = removeWhitespace(needle);
-  if (!target) return null;
+  if (!target) return [];
   const nodes: Text[] = [];
   /** 去掉空白后每个字符所属的文本节点（nodes 下标） */
   const owners: number[] = [];
@@ -34,9 +32,28 @@ export function findTextBlock(root: HTMLElement, needle: string): HTMLElement | 
     for (let i = 0; i < compact.length; i++) owners.push(nodes.length - 1);
   }
   const index = text.indexOf(target);
-  if (index === -1) return null;
-  const parent = nodes[owners[index]].parentElement;
+  if (index === -1) return [];
+  return nodes.slice(owners[index], owners[index + target.length - 1] + 1);
+}
+
+/**
+ * 在元素的文字中查找 needle（忽略空白），返回命中起点所在的块级元素；找不到返回 null
+ */
+export function findTextBlock(root: HTMLElement, needle: string): HTMLElement | null {
+  const parent = matchedTextNodes(root, needle)[0]?.parentElement;
   return parent ? (parent.closest<HTMLElement>(BLOCK_SELECTOR) ?? parent) : null;
+}
+
+/**
+ * 命中文字所在的全部元素（如 PDF 文本层中的各个文字片段，命中可能跨越多个片段）；找不到返回空数组
+ */
+export function findTextElements(root: HTMLElement, needle: string): HTMLElement[] {
+  const elements: HTMLElement[] = [];
+  for (const node of matchedTextNodes(root, needle)) {
+    const parent = node.parentElement;
+    if (parent && parent !== root && !elements.includes(parent)) elements.push(parent);
+  }
+  return elements;
 }
 
 /** 包含 needle（忽略空白）的第一页页码（从 1 计）；找不到返回 null */

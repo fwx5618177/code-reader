@@ -5,6 +5,7 @@
 // 扫描页识别后用识别结果生成文本层（结构与 pdf.js 文本层一致），选区、高亮与摘录同样可用。
 // 高亮按页保存片段（跨页选区拆为多个片段）：页面文本层渲染完成后在该页内定位并标记本页的片段，
 // 页面释放时标记随文本层一起移除，重新渲染后再次恢复。
+// 精确查找的命中同样等所在页的文本层渲染后，在文本层中定位并短暂高亮命中的文字
 // ================================
 
 import React, {
@@ -34,6 +35,8 @@ import {
 import type { OcrPageResult } from '../../lib/reading/ocr';
 import { renderOcrTextLayer } from '../../lib/reading/ocr-text-layer';
 import { loadPdfjs, type PDFDocumentProxy } from '../../lib/reading/pdf';
+import { findTextElements } from '../../lib/reading/text-locate';
+import { flashElement } from '../../lib/editor/reveal-highlight';
 import type { LoadedPdf, PdfPageSize } from './hooks';
 import type { PdfOcrState } from './usePdfOcr';
 import styles from './PdfReader.module.scss';
@@ -50,11 +53,8 @@ const TEXT_LAYER_ATTR = 'data-text-layer';
 const NO_READING_HIGHLIGHTS: readonly ReadingHighlight[] = [];
 const NO_HIGHLIGHTS: readonly HighlightTarget[] = [];
 
-/** 等待所在页渲染后再定位的高亮 */
-interface PendingReveal {
-  id: string;
-  page: number;
-}
+/** 等待所在页渲染后再定位的目标：高亮，或一段文字（精确查找的命中） */
+type PendingReveal = { page: number; highlightId: string } | { page: number; text: string };
 
 function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(zoom * 100) / 100));
@@ -119,6 +119,8 @@ export interface PdfReaderHandle {
   scrollToPage(page: number): void;
   /** 滚动到高亮：所在页（首个片段所在页）已渲染时直接定位，否则先到该页页首，待文本层渲染后再定位 */
   scrollToHighlight(id: string, page: number): void;
+  /** 滚动到第 page 页中的一段文字并短暂高亮（忽略空白匹配）；文字无法定位时停留在页首 */
+  scrollToText(page: number, text: string): void;
 }
 
 export interface PdfReaderProps {
@@ -194,7 +196,13 @@ export const PdfReader = forwardRef<PdfReaderHandle, PdfReaderProps>(function Pd
           return;
         }
         pageElement(container, page)?.scrollIntoView({ block: 'start' });
-        setPendingReveal({ id, page });
+        setPendingReveal({ highlightId: id, page });
+      },
+      scrollToText(page, text) {
+        const container = pagesRef.current;
+        if (!container) return;
+        pageElement(container, page)?.scrollIntoView({ block: 'start' });
+        setPendingReveal({ text, page });
       },
     }),
     []
@@ -344,7 +352,7 @@ export const PdfReader = forwardRef<PdfReaderHandle, PdfReaderProps>(function Pd
                   pageHighlights.some((highlight) => highlight.id === activeHighlightId) ? activeHighlightId : null
                 }
                 ocrResult={ocrResult && ocrResult.lines.length > 0 ? ocrResult : null}
-                revealHighlightId={pendingReveal?.page === pageNumber ? pendingReveal.id : null}
+                reveal={pendingReveal?.page === pageNumber ? pendingReveal : null}
                 onRevealed={clearPendingReveal}
               />
             );
@@ -405,8 +413,8 @@ interface PdfPageProps {
   activeHighlightId: string | null;
   /** 本页的识别结果；有结果时用它生成文本层，取代 pdf.js 文本层 */
   ocrResult: OcrPageResult | null;
-  /** 本页高亮标记完成后需要滚动到的高亮 */
-  revealHighlightId: string | null;
+  /** 本页文本层就绪、高亮标记完成后需要定位的高亮或文字 */
+  reveal: PendingReveal | null;
   onRevealed: () => void;
 }
 
@@ -419,7 +427,7 @@ const PdfPage = memo(function PdfPage({
   highlights,
   activeHighlightId,
   ocrResult,
-  revealHighlightId,
+  reveal,
   onRevealed,
 }: PdfPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -510,13 +518,19 @@ const PdfPage = memo(function PdfPage({
     return setActiveHighlight(textContainer, activeHighlightId, styles.highlightMarkActive);
   }, [textReady, highlights, activeHighlightId]);
 
-  // 在标记之后执行：定位等待中的高亮（文字无法定位时停留在页首）
+  // 在标记之后执行：定位等待中的高亮或文字（文字命中的片段短暂高亮）；无法定位时停留在页首
   useEffect(() => {
     const textContainer = textLayerRef.current;
-    if (!textReady || !textContainer || !revealHighlightId) return;
-    findHighlightMark(textContainer, revealHighlightId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!textReady || !textContainer || !reveal) return;
+    if ('highlightId' in reveal) {
+      findHighlightMark(textContainer, reveal.highlightId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      const elements = findTextElements(textContainer, reveal.text);
+      elements[0]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      elements.forEach(flashElement);
+    }
     onRevealed();
-  }, [textReady, revealHighlightId, onRevealed]);
+  }, [textReady, reveal, onRevealed]);
 
   return (
     <div

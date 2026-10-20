@@ -344,7 +344,7 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     extractPageTexts(pdfDocument.pdf, controller.signal)
       .then((pages) => {
         const page = findPageContaining(pages, text);
-        if (page !== null) pdfReaderRef.current?.scrollToPage(page);
+        if (page !== null) pdfReaderRef.current?.scrollToText(page, text);
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) console.error('[Reading] 按文字定位 PDF 页面失败:', error);
