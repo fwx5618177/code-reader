@@ -355,7 +355,18 @@ export class EditorModel implements IEditorModel {
   }
 
   getLastSavedContentHash(): string | null {
-    return this.lastSavedContentHash;
+    return this.lastSavedContentHash ?? this.lastSaved?.get() ?? null;
+  }
+
+  /**
+   * 把当前内容记为已保存（内容刚从存储读出、与存储一致时）。
+   * 不计算哈希：之后判断有无未保存的修改直接比较内容，哈希在确实需要时才算
+   */
+  markCurrentAsSaved(): void {
+    this.lastSavedVersionId = this.versionTracker.getVersionId();
+    this.lastSavedContentHash = null;
+    this.lastSaved = this.hash;
+    this.pendingSnapshots.clear();
   }
 
   markAsSaved(versionId: number, contentHash: string): void {
@@ -380,12 +391,12 @@ export class EditorModel implements IEditorModel {
    * 已知保存时的内容就直接比较字符串，不计算哈希
    */
   hasUnsavedChanges(): boolean {
-    if (this.lastSavedContentHash === null) {
-      // 从未保存过 - 如果非空则有更改
-      return !this.isEmpty();
-    }
     const saved = this.lastSaved;
     if (saved) return saved !== this.hash && (saved.title !== this.title || saved.content !== this.content);
+    if (this.lastSavedContentHash === null) {
+      // 从未保存过（新建且未写入存储）- 如果非空则有更改
+      return !this.isEmpty();
+    }
     return this.hash.get() !== this.lastSavedContentHash;
   }
 

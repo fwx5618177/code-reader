@@ -25,6 +25,31 @@ afterEach(() => {
 });
 
 describe('托管实例自带自动保存', () => {
+  it('从存储打开的文档没有未保存的修改；编辑后有、改回原样后又没有，切走时不会多写一次', async () => {
+    const executor = okExecutor();
+    const { result } = renderHook(() =>
+      useManagedEditor({ documentId: 'doc', initialTitle: '笔记.tex', initialContent: '\\section{A}', executor, debounceMs: 5 })
+    );
+    expect(result.current.hasUnsavedChanges).toBe(false);
+
+    act(() => result.current.updateContent('\\section{AB}'));
+    expect(result.current.hasUnsavedChanges).toBe(true);
+    act(() => result.current.updateContent('\\section{A}'));
+    expect(result.current.hasUnsavedChanges).toBe(false);
+
+    await waitForSave();
+    expect(executor.save).not.toHaveBeenCalled();
+    expect(result.current.isScheduled).toBe(false);
+  });
+
+  it('loadContent 载入的存储内容作为已保存基线，不触发保存', async () => {
+    const executor = okExecutor();
+    const { result } = renderHook(() => useManagedEditor({ documentId: 'doc', executor, debounceMs: 5 }));
+    act(() => result.current.loadContent('新标题', '存储中的正文'));
+    expect(result.current.hasUnsavedChanges).toBe(false);
+    await waitForSave();
+    expect(executor.save).not.toHaveBeenCalled();
+  });
   it('没有任何 hook 订阅时，内容变化也会防抖保存并标记为已保存', async () => {
     const executor = okExecutor();
     const { instance } = getEditorManager().acquire('doc', { executor, debounceMs: 5 });

@@ -127,9 +127,10 @@ export class SaveEngine implements ISaveEngine {
       return;
     }
 
-    // 检查是否有需要保存的更改
+    // 检查是否有需要保存的更改；改回已保存的内容时，之前排队的保存也不再需要
     if (!this.contentProvider.hasUnsavedChanges()) {
       this.log('没有未保存的更改，跳过');
+      if (this.state.isScheduled) this.cancelPendingSave();
       this.emitEvent({ type: 'SAVE_SKIPPED', reason: '没有未保存的更改' });
       return;
     }

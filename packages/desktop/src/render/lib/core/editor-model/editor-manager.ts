@@ -60,9 +60,9 @@ export interface EditorManagerConfig {
  * 创建编辑器的选项
  */
 export interface CreateEditorOptions {
-  /** 初始标题 */
+  /** 初始标题（与初始内容一样取自存储） */
   initialTitle?: string;
-  /** 初始内容 */
+  /** 初始内容：取自存储，实例以它为已保存的基线（未编辑时没有未保存的修改） */
   initialContent?: string;
   /** 初始版本 ID */
   initialVersionId?: number;
@@ -306,17 +306,12 @@ export class DocumentEditorManager {
     const instance = this.get(documentId);
     if (!instance) return false;
     const { model, saveEngine } = instance;
-    // 刚加载、未编辑过的模型也会报告“未保存”（从未保存过），因此以是否有待执行 / 进行中的保存，
-    // 或保存过之后又有修改来判断本机是否有未写入的编辑
-    const pending =
-      saveEngine.getState().isScheduled ||
-      saveEngine.isSaving() ||
-      (model.getLastSavedContentHash() !== null && model.hasUnsavedChanges());
+    const pending = saveEngine.getState().isScheduled || saveEngine.isSaving() || model.hasUnsavedChanges();
     if (pending) return false;
     if (model.getTitle() === title && model.getContent() === content) return true;
     saveEngine.cancelPendingSave();
     model.reset({ documentId, initialTitle: title, initialContent: content, initialVersionId: model.getVersionId() + 1 });
-    model.markAsSaved(model.getVersionId(), model.getContentHash());
+    model.markCurrentAsSaved();
     // 重置时的内容变化通知已请求了一次保存，内容与存储一致，取消它
     saveEngine.cancelPendingSave();
     return true;
@@ -445,6 +440,7 @@ export class DocumentEditorManager {
     };
 
     const model = createEditorModel(modelConfig);
+    model.markCurrentAsSaved();
 
     // 创建带策略的 SaveEngine
     const strategy =

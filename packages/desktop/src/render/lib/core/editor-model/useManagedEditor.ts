@@ -433,16 +433,19 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
       }
       // 先取消待处理的保存
       instance.saveEngine.cancelPendingSave();
-      // 用新内容重置模型
+      // 用存储中的内容重置模型，并以它为已保存的基线
       instance.model.reset({
         documentId: instance.documentId,
         initialTitle: title,
         initialContent: content,
         initialVersionId: 1,
       });
+      instance.model.markCurrentAsSaved();
+      // 重置时的内容变化通知已请求了一次保存，内容与存储一致，取消它
+      instance.saveEngine.cancelPendingSave();
       // 更新 React 状态
       setCurrentVersionId(1);
-      setLastSavedVersionId(null);
+      setLastSavedVersionId(1);
       setLastSavedAt(null);
     },
     [getInstance]
@@ -466,7 +469,7 @@ export function useManagedEditor(config: UseManagedEditorConfig): UseManagedEdit
       if (instance) {
         setIsAcquired(true);
         setCurrentVersionId(instance.model.getVersionId());
-        setLastSavedVersionId(null);
+        setLastSavedVersionId(instance.model.getLastSavedVersionId());
         setLastSavedAt(null);
       }
     },
