@@ -40,7 +40,7 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `format-parser` | LaTeX 解析（交叉引用索引、文档元数据）与按内容识别格式（desktop 用其做交叉引用检查与无扩展名文档的格式判断） |
 | `markdown-parser` | 零依赖的 CommonMark / GFM 解析器（规范 100% 通过、markdown-it 生态常用语法与 `{…}` 属性、与 markdown-it 相同的链接规范化、语法扩展、源码绝对位置、markdown-it 兼容 token 流与保留源码模式）、HTML 渲染器与增量解析；编辑器的 Markdown 分词、大纲与链接同步都由它完成 |
 | `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）与 CodeMirror 适配器（desktop 用于代码块片段补全与 Markdown 编辑器的 Emoji 补全） |
-| `autocomplete-service-extras` | desktop 未使用的 ProseMirror 补全适配器与补全预设（按需引入） |
+| `autocomplete-service-extras` | ProseMirror 补全插件（desktop 的 Markdown 编辑器使用：斜杠命令、`[[` 双链与别名、Emoji、LaTeX 命令）、基于它的补全服务适配器与补全预设（后两者按需引入） |
 | `fuzzy-match-algorithm` | 补全与拼写建议的核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |
 | `plugin-system` | 插件基础库：贡献点类型、生命周期编排（版本范围、依赖解析、激活事件）、扩展点注册表（desktop 全部使用，运行时为 `desktop/src/render/lib/plugins` 的 Worker 沙箱） |
 | `plugin-system-extras` | desktop 未使用的同进程插件管理器与插件沙箱（按需引入） |

@@ -9,7 +9,8 @@
 | Damerau-Levenshtein 距离 | `@code-reader/fuzzy-match-algorithm` `damerauLevenshteinDistance` | 拼写建议排序（相邻字符交换只计 1 次，适合打字错误） | `lib/spellcheck/suggest.ts` |
 | 文本差分（Myers 等，按内容自动选择） | `@code-reader/diff-algorithm` `createDiffEngine`、`quickDiff` | 版本对比、增量保存、撤销重做快照 | `lib/writing`（`writing-service.ts`、`DiffViewer`）、`lib/core/delta/history-manager.ts`、`lib/core/save-engine`、`lib/documents/writing-integration.ts` |
 | 全文索引与搜索 | `@code-reader/search-service` | 写作文档全文搜索与建议 | `lib/writing` |
-| 补全服务 | `@code-reader/autocomplete-service` | CodeMirror 代码块补全（Markdown / Emoji / 代码片段 provider） | `components/RichEditor/CodeBlockView.ts` |
+| 补全服务 | `@code-reader/autocomplete-service` | CodeMirror 代码块补全（代码片段 provider）；Markdown 编辑器的 Emoji 补全（`EmojiProvider`） | `components/RichEditor/CodeBlockView.ts`、`components/RichEditor/index.tsx` |
+| ProseMirror 补全插件 | `@code-reader/autocomplete-service-extras` `createAutocompletePlugin`、`fromServiceProvider` | 触发符定位、多提供者合并与排序（优先级 > 前缀 > 字母序）、面板与键盘导航 | `components/RichEditor/index.tsx`（提供者：`lib/markdown/completion.ts`、`lib/editor/latex-completion.ts`） |
 | 文本存储（Piece Table / Rope） | `@code-reader/text-buffer` | LaTeX 编辑缓冲区，按规模选择结构 | `lib/latex/latex-document.ts` |
 
 ## 2. desktop 内的业务算法
