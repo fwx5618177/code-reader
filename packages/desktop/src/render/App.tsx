@@ -938,16 +938,24 @@ const App: React.FC = () => {
     [createDocument, kb.setItemTags]
   );
 
-  /** 全局搜索打开条目；精确查找的命中行在写作编辑器中定位 */
+  /**
+   * 全局搜索打开条目。精确查找的命中：写作文档在编辑器中定位源码行；
+   * 可阅读的条目（网页剪藏、PDF 等）在阅读视图中按命中文字定位
+   */
   const openSearchHit = useCallback(
     (id: string, location?: SourceLocation) => {
-      openItem(id);
       const item = kb.items.find((candidate) => candidate.id === id);
+      if (location?.text && item && !isWritingDocument(item) && (isReadableItem(item) || resolveArticle(item) !== null)) {
+        openInReading(id);
+        setHeadingRequest({ view: 'reading', docId: id, heading: '', location });
+        return;
+      }
+      openItem(id);
       if (location && item && isWritingDocument(item)) {
         setHeadingRequest({ view: 'writing', docId: id, heading: '', location });
       }
     },
-    [openItem, kb.items]
+    [openItem, openInReading, kb.items]
   );
 
   /** 写作大纲：在编辑器中定位到当前文档的第 occurrence 个同名标题 */

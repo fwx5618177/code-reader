@@ -126,10 +126,14 @@ export function findLinkTargetInDoc(doc: PMNode, subpath: string, occurrence = 0
   return findHeadingInDoc(doc, subpath, occurrence);
 }
 
-/** 源码中的位置：行号（从 1 计）与解析后文档的顶层块序号（从 0 计） */
+/**
+ * 源码中的位置：行号（从 1 计）与解析后文档的顶层块序号（从 0 计）。
+ * 阅读条目（网页剪藏、PDF 等）另带该行的源码文字 text，阅读视图按文字定位
+ */
 export interface SourceLocation {
   line: number;
   block: number;
+  text?: string;
 }
 
 /**

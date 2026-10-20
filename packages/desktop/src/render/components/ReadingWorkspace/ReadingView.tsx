@@ -36,6 +36,7 @@ import {
   renderContentToHtml,
   wikiLinkClickTarget,
   type RenderedDocument,
+  type RevealRequest,
 } from '../../lib/markdown';
 import {
   addBookmark,
@@ -64,6 +65,8 @@ import {
 import { generateUUID } from '../../lib/utils/id';
 import { isWritingDocument } from '../../lib/documents/constants';
 import { bookProgress, EPUB_TARGET_ATTR } from '../../lib/reading/epub';
+import { extractPageTexts } from '../../lib/reading/pdf';
+import { findPageContaining, findTextBlock, plainTextOfSourceLine } from '../../lib/reading/text-locate';
 import { registerFlush } from '../../services/flushRegistry';
 import type { KnowledgeItem } from '../../types/knowledge';
 import { useDismiss, useLatestRef, useReadingSettings } from './hooks';
@@ -111,9 +114,9 @@ export interface ReadingViewProps {
   onWikiLinkClick?: (target: string) => void;
   /**
    * 通过 [[文档#标题]] / [[文档#^块]] 打开时要定位的标题（occurrence 为同名标题序号）或 ^块 ID；
-   * 每个请求对象只定位一次
+   * 带 location.text 时（全局精确查找的命中）按文字定位正文或 PDF 页面。每个请求对象只定位一次
    */
-  revealTarget?: { heading: string; occurrence?: number } | null;
+  revealTarget?: RevealRequest | null;
   /** 应用侧栏当前显示的阅读导航面板；设置且有挂载点时导航渲染到侧栏，视图内侧栏隐藏 */
   navPanel?: ReadingSidebarPanel | null;
   /** 应用侧栏中的导航挂载点 */
@@ -310,15 +313,44 @@ const ReadingDocument: React.FC<ReadingDocumentProps> = ({
     setLocatedHighlightIds(applyHighlightMarks(articleEl, highlights, styles.highlightMark));
   }, [rendered, highlights]);
 
-  // 通过 [[文档#标题]] / [[文档#^块]] 打开时定位锚点（在写入正文与恢复阅读位置之后执行）
+  // 通过 [[文档#标题]] / [[文档#^块]] 打开时定位锚点；精确查找的命中按文字定位（在写入正文与恢复阅读位置之后执行）
   useEffect(() => {
     const articleEl = articleRef.current;
     if (!articleEl || !markdownRendered || !revealTarget || revealedRequests.has(revealTarget)) return;
+    if (revealTarget.location?.text !== undefined) return;
     revealedRequests.add(revealTarget);
     const article = resolveArticle(itemRef.current);
     const id = article && linkAnchorId(article.content, article.format, revealTarget.heading, revealTarget.occurrence);
     if (id) revealAnchor(articleEl, id);
   }, [markdownRendered, revealTarget, itemRef]);
+
+  const pdfDocument = pdf.file.document;
+  useEffect(() => {
+    const text = revealTarget?.location?.text;
+    if (!revealTarget || text === undefined || revealedRequests.has(revealTarget)) return;
+    const articleEl = articleRef.current;
+    if (articleEl && markdownRendered) {
+      revealedRequests.add(revealTarget);
+      const block = findTextBlock(articleEl, plainTextOfSourceLine(text));
+      if (block) {
+        block.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashElement(block);
+      }
+      return;
+    }
+    if (!pdfDocument) return;
+    revealedRequests.add(revealTarget);
+    const controller = new AbortController();
+    extractPageTexts(pdfDocument.pdf, controller.signal)
+      .then((pages) => {
+        const page = findPageContaining(pages, text);
+        if (page !== null) pdfReaderRef.current?.scrollToPage(page);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) console.error('[Reading] 按文字定位 PDF 页面失败:', error);
+      });
+    return () => controller.abort();
+  }, [markdownRendered, pdfDocument, revealTarget, pdfReaderRef]);
 
   // ---------- 目录滚动联动 ----------
 

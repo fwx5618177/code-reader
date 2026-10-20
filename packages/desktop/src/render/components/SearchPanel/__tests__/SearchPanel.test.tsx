@@ -9,6 +9,7 @@ import type { HybridSearchResult } from '../../../types/electron';
 import type { DocumentSearchResult } from '../../../lib/writing';
 import { mergeSearchResults, splitHighlights } from '../search-results';
 import { lineSegments } from '../exact-search';
+import { DocumentEditorManager, getEditorManager } from '../../../lib/core/editor-model/editor-manager';
 import SearchPanel from '..';
 
 const searchDocuments = vi.fn();
@@ -197,6 +198,25 @@ describe('SearchPanel', () => {
       fireEvent.change(screen.getByLabelText('搜索'), { target: { value: '(todo' } });
       await act(async () => vi.advanceTimersByTimeAsync(300));
       expect(screen.getByRole('alert').textContent).toContain('无效的正则表达式');
+    });
+
+    it('编辑中尚未保存的内容参与查找：覆盖数据库中的旧正文，数据库正文为空的条目也能找到', async () => {
+      const executor = { save: vi.fn(async () => ({ success: true }) as never) };
+      const manager = getEditorManager();
+      manager.acquire('n1', { initialTitle: '笔记.md', initialContent: ROWS[0].content, executor, autoSaveEnabled: false }).instance.model.updateContent('已改写为 UNSAVED');
+      manager.acquire('e1', { initialTitle: '新建.md', initialContent: '', executor, autoSaveEnabled: false }).instance.model.updateContent('草稿 UNSAVED');
+      databaseAll.mockImplementation(async (sql: string) =>
+        sql.includes('id IN') ? [{ id: 'e1', title: '新建.md', type: 'note' }] : ROWS
+      );
+      try {
+        renderPanel();
+        await exactSearchFor('unsaved');
+        expect(screen.getByRole('group', { name: '笔记' }).textContent).toContain('已改写为 UNSAVED');
+        expect(screen.getByRole('group', { name: '新建' }).textContent).toContain('草稿 UNSAVED');
+        expect(screen.queryByText('第一处', { exact: false })).toBeNull();
+      } finally {
+        DocumentEditorManager.resetInstance();
+      }
     });
 
     it('lineSegments：长行截取命中附近，命中部分高亮', () => {

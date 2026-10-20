@@ -5,6 +5,7 @@
 
 import { FileSearcher, type FileMatch, type IFileProvider, type MatchPosition } from '@code-reader/search-service';
 import { databaseService } from '../../services/database';
+import { getEditorManager } from '../../lib/core/editor-model/editor-manager';
 import { isWritingDocument } from '../../lib/documents/constants';
 import { getFileTypeId } from '../../lib/documents/file-types';
 import { displayTitle } from '../../lib/links/link-index';
@@ -82,10 +83,11 @@ function toItemType(type: string): KnowledgeItemType {
 }
 
 /**
- * 源码行对应的顶层块：Markdown 笔记按块级结构换算，纯文本一行一段，其余格式（LaTeX 等）不需要
+ * 源码行对应的位置：Markdown 笔记按块级结构换算顶层块，纯文本一行一段，LaTeX 只用行号；
+ * 阅读条目带上该行文字，由阅读视图按文字定位
  */
-function locate(row: SearchableRow, line: number): SourceLocation {
-  if (!isWritingDocument(row)) return { line, block: 0 };
+function locate(row: SearchableRow, line: number, text: string): SourceLocation {
+  if (!isWritingDocument(row)) return { line, block: 0, text };
   const fileType = getFileTypeId(row.title);
   if (fileType === 'plain') return { line, block: line - 1 };
   if (fileType === 'latex') return { line, block: 0 };
@@ -102,23 +104,49 @@ function toItemHit(match: FileMatch, row: SearchableRow): ExactItemHit {
       lineNumber: line.lineNumber,
       text: line.lineContent,
       positions: line.positions,
-      location: locate(row, line.lineNumber),
+      location: locate(row, line.lineNumber, line.lineContent),
     })),
   };
 }
 
 /**
- * 在全部条目正文中精确查找。正则无效时抛出 search-service 的 InvalidSearchPatternError
+ * 正在编辑、尚未写入数据库的内容覆盖数据库中的旧内容（不强制保存，查找不产生写入与版本）。
+ * 数据库中正文为空、只在编辑器里有内容的条目补读标题与类型后加入（排在最前）
+ */
+async function withUnsavedEdits(rows: SearchableRow[]): Promise<SearchableRow[]> {
+  const manager = getEditorManager();
+  const unsaved = new Map<string, string>();
+  for (const id of manager.getActiveDocumentIds()) {
+    const model = manager.get(id)?.model;
+    if (model?.hasUnsavedChanges()) unsaved.set(id, model.getContent());
+  }
+  if (unsaved.size === 0) return rows;
+
+  const merged = rows.map((row) => (unsaved.has(row.id) ? { ...row, content: unsaved.get(row.id)! } : row));
+  const known = new Set(rows.map((row) => row.id));
+  const missing = [...unsaved.keys()].filter((id) => !known.has(id) && unsaved.get(id));
+  if (missing.length === 0) return merged;
+  const extra = await databaseService.all<Omit<SearchableRow, 'content'>>(
+    `SELECT id, title, type FROM knowledge_items WHERE is_deleted = 0 AND id IN (${missing.map(() => '?').join(', ')})`,
+    missing
+  );
+  return [...extra.map((row) => ({ ...row, content: unsaved.get(row.id)! })), ...merged];
+}
+
+/**
+ * 在全部条目正文中精确查找（含编辑中尚未保存的内容）。正则无效时抛出 search-service 的 InvalidSearchPatternError
  */
 export async function exactSearch(
   query: string,
   options: ExactSearchOptions,
   signal?: AbortSignal
 ): Promise<ExactSearchResult> {
-  const rows = await databaseService.all<SearchableRow>(
-    `SELECT id, title, type, content FROM knowledge_items
-     WHERE is_deleted = 0 AND content IS NOT NULL AND content != ''
-     ORDER BY is_pinned DESC, updated_at DESC`
+  const rows = await withUnsavedEdits(
+    await databaseService.all<SearchableRow>(
+      `SELECT id, title, type, content FROM knowledge_items
+       WHERE is_deleted = 0 AND content IS NOT NULL AND content != ''
+       ORDER BY is_pinned DESC, updated_at DESC`
+    )
   );
   const byId = new Map(rows.map((row) => [row.id, row]));
   const searcher = new FileSearcher(new KnowledgeContentProvider(byId));
