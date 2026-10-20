@@ -7,9 +7,9 @@
 
 桌面端的用法：
 - **代码块补全**：`desktop/src/render/components/RichEditor/CodeBlockView.ts` 使用补全服务、`createCodeProviders`（只注册代码片段）和 `CodeMirrorAdapter`，片段按当前代码块的语言过滤。
-- **Markdown 编辑器的 `:emoji` 补全**：`desktop/src/render/lib/editor/prosemirror-autocomplete.ts` 的 `EmojiCompletionProvider` 使用这里的 `EmojiProvider`。短代码、别名和中文描述都能匹配，例如 `:smile`、`:+1`、`:微笑`。
+- **Markdown 编辑器的 `:emoji` 补全**：`RichEditor` 用 extras 包的 `fromServiceProvider(new EmojiProvider(), { trigger: ':' })` 把这里的 `EmojiProvider` 接到 ProseMirror 补全插件上。短代码、别名和中文描述都能匹配，例如 `:smile`、`:+1`、`:微笑`。
 
-ProseMirror 适配器和几个预设工厂（`createDefaultAutocompleteService`、Markdown 与代码编辑器的 CodeMirror 扩展）在 [`@code-reader/autocomplete-service-extras`](../autocomplete-service-extras/README.md)。
+ProseMirror 补全插件与适配器、几个预设工厂（`createDefaultAutocompleteService`、Markdown 与代码编辑器的 CodeMirror 扩展）在 [`@code-reader/autocomplete-service-extras`](../autocomplete-service-extras/README.md)。
 
 ## 安装
 

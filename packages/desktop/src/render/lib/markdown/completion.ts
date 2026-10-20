@@ -11,11 +11,10 @@ import type { EditorView } from 'prosemirror-view';
 import { setBlockType, wrapIn, toggleMark } from 'prosemirror-commands';
 import { wrapInList } from 'prosemirror-schema-list';
 import type {
-  CompletionContext,
-  CompletionItem,
-  CompletionProvider,
-  CompletionType,
-} from '../editor/prosemirror-autocomplete';
+  EditorCompletionContext,
+  EditorCompletionItem,
+  EditorCompletionProvider,
+} from '@code-reader/autocomplete-service-extras';
 import {
   blockKindLabel,
   findSlotNode,
@@ -121,9 +120,8 @@ export interface ExternalSlashCommand {
 /**
  * 斜杠命令补全
  */
-export class SlashCommandProvider implements CompletionProvider {
+export class SlashCommandProvider implements EditorCompletionProvider {
   readonly name = 'slash-command';
-  readonly type: CompletionType = 'command';
   readonly triggerCharacters = ['/'];
   /** 命令数量有限，全部列出（面板可滚动），排在后面的插件命令不会被截掉 */
   readonly maxResults = Infinity;
@@ -338,11 +336,11 @@ export class SlashCommandProvider implements CompletionProvider {
     ];
   }
 
-  shouldActivate(context: CompletionContext): boolean {
+  shouldActivate(context: EditorCompletionContext): boolean {
     return context.trigger === '/';
   }
 
-  getCompletions(): CompletionItem[] {
+  getCompletions(): EditorCompletionItem[] {
     const commands: SlashCommand[] = [
       ...this.commands,
       ...this.externalCommands().map((command) => ({
@@ -361,7 +359,7 @@ export class SlashCommandProvider implements CompletionProvider {
       label: command.label,
       detail: command.detail,
       insertText: '',
-      type: this.type,
+      type: 'command',
       icon: '/',
       priority: commands.length - index,
       filterText: `${command.label} ${command.keywords}`,
@@ -412,9 +410,8 @@ function writeBlockId(view: EditorView, slot: BlockIdSlot, id: string): Transact
 /**
  * [[ 双向链接补全
  */
-export class WikiLinkCompletionProvider implements CompletionProvider {
+export class WikiLinkCompletionProvider implements EditorCompletionProvider {
   readonly name = 'wiki-link';
-  readonly type: CompletionType = 'link';
   readonly triggerCharacters = ['[['];
 
   /**
@@ -430,11 +427,11 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
     private readonly blockSource?: CompletionBlockSource
   ) {}
 
-  shouldActivate(context: CompletionContext): boolean {
+  shouldActivate(context: EditorCompletionContext): boolean {
     return context.trigger === '[[' && !/[\]|\n]/.test(context.query);
   }
 
-  getCompletions(context: CompletionContext): CompletionItem[] {
+  getCompletions(context: EditorCompletionContext): EditorCompletionItem[] {
     const hash = context.query.indexOf('#');
     if (hash !== -1 && this.blockSource && context.query[hash + 1] === '^') {
       return this.blockCompletions(context.query, hash, this.blockSource);
@@ -443,11 +440,11 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
 
     const query = context.query.trim();
     const targets = this.getTargets();
-    const items: CompletionItem[] = targets.map((target) => ({
+    const items: EditorCompletionItem[] = targets.map((target) => ({
       id: `wiki:${target}`,
       label: target,
       insertText: '',
-      type: this.type,
+      type: 'link',
       icon: '🔗',
       detail: '链接到文档（输入 # 选择标题）',
       apply: (view, from, to) => this.insertLink(view, from, to, { target, heading: null, alias: null }),
@@ -460,16 +457,16 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
   }
 
   /** [[文档#… 补全该文档的标题（[[#… 为当前文档） */
-  private headingCompletions(rawQuery: string, hash: number): CompletionItem[] {
+  private headingCompletions(rawQuery: string, hash: number): EditorCompletionItem[] {
     const target = rawQuery.slice(0, hash).trim();
     // 过滤按用户输入的原样前缀匹配
     const prefix = rawQuery.slice(0, hash + 1);
     const headings = this.getHeadings(target);
-    const items: CompletionItem[] = headings.map((heading, index) => ({
+    const items: EditorCompletionItem[] = headings.map((heading, index) => ({
       id: `wiki-heading:${index}`,
       label: heading.text,
       insertText: '',
-      type: this.type,
+      type: 'link',
       icon: '#',
       detail: `H${heading.level} · ${target || '当前文档'}`,
       // 保持文档中的标题顺序
@@ -490,7 +487,7 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
    * [[文档#^… 补全该文档的块
    * 没有 ID 的块选中时先生成 ID：当前文档直接写入编辑器，其他文档交给 blockSource 写回
    */
-  private blockCompletions(rawQuery: string, hash: number, source: CompletionBlockSource): CompletionItem[] {
+  private blockCompletions(rawQuery: string, hash: number, source: CompletionBlockSource): EditorCompletionItem[] {
     const target = rawQuery.slice(0, hash).trim();
     const prefix = rawQuery.slice(0, hash + 2);
     const blocks = source.blocks(target);
@@ -502,7 +499,7 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
         id: `wiki-block:${index}`,
         label: text || `^${block.id}`,
         insertText: '',
-        type: this.type,
+        type: 'link',
         icon: '^',
         detail: `${block.id ? `^${block.id}` : '选中后生成块 ID'} · ${blockKindLabel(block.kind)} · ${where}`,
         // 保持文档中的块顺序
@@ -543,12 +540,12 @@ export class WikiLinkCompletionProvider implements CompletionProvider {
   }
 
   /** 目标尚不存在时仍可创建链接 */
-  private newLinkItem(label: string, parts: WikiLinkParts): CompletionItem {
+  private newLinkItem(label: string, parts: WikiLinkParts): EditorCompletionItem {
     return {
       id: `wiki-new:${label}`,
       label,
       insertText: '',
-      type: this.type,
+      type: 'link',
       icon: '＋',
       detail: '新建链接（目标稍后创建）',
       priority: -1,

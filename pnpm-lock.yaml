@@ -115,6 +115,9 @@ importers:
       '@code-reader/autocomplete-service':
         specifier: workspace:*
         version: link:../autocomplete-service
+      '@code-reader/autocomplete-service-extras':
+        specifier: workspace:*
+        version: link:../autocomplete-service-extras
       '@code-reader/diff-algorithm':
         specifier: workspace:*
         version: link:../diff-algorithm

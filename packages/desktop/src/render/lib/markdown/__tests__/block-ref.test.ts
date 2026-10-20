@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
-import type { CompletionContext } from '../../editor/prosemirror-autocomplete';
+import type { EditorCompletionContext } from '@code-reader/autocomplete-service-extras';
 import {
   blockRefId,
   collectDocBlocks,
@@ -329,7 +329,7 @@ describe('[[文档#^ 块补全', () => {
   }
 
   const complete = (provider: WikiLinkCompletionProvider, query: string) =>
-    provider.getCompletions({ trigger: '[[', query } as CompletionContext);
+    provider.getCompletions({ trigger: '[[', query } as EditorCompletionContext);
 
   it('列出目标文档的块，可按 ID 或文本过滤', () => {
     const { provider } = createProvider(() => null);

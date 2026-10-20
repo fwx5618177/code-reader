@@ -28,6 +28,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
     "@code-reader/autocomplete-service": "workspace:*",
+    "@code-reader/autocomplete-service-extras": "workspace:*",
     "@code-reader/diff-algorithm": "workspace:*",
     "@code-reader/format-parser": "workspace:*",
     "@code-reader/fuzzy-match-algorithm": "workspace:*",

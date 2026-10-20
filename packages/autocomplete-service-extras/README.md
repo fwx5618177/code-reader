@@ -1,10 +1,9 @@
 # @code-reader/autocomplete-service-extras
 
 本包从 [`@code-reader/autocomplete-service`](../autocomplete-service/README.md) 拆出，按需引入。包含以下能力：
-- **ProseMirror 补全适配器**：插件、补全面板、键盘导航、事件。
+- **ProseMirror 补全插件**：多个提供者按触发符（`/`、`[[`、`:`、`\` 等）或光标前的单词触发；面板随插件状态渲染，支持键盘导航、点击、结构化插入（补全项自带 `apply`）和按提供者设定的结果上限。桌面端 Markdown 编辑器的斜杠菜单、`[[` 双链、Emoji、LaTeX 补全都跑在这个插件上。
+- **ProseMirror 补全适配器**：把整个 `AutocompleteService` 当作一个提供者接到上述插件，按单词查询，并提供事件。
 - **补全预设**：注册全部内置提供者的服务，以及 Markdown 编辑器和代码编辑器的 CodeMirror 扩展。
-
-桌面端的 Markdown 编辑器不使用这里的 ProseMirror 适配器，而是用自己的补全插件（`desktop/src/render/lib/editor/prosemirror-autocomplete.ts`）。那个插件支持斜杠菜单、`[[` 双链、结构化插入（表格、公式块），以及按提供者设定的结果上限。Emoji 补全的数据和匹配规则仍来自核心包的 `EmojiProvider`。
 
 ## 安装
 
@@ -12,7 +11,45 @@
 pnpm add @code-reader/autocomplete-service @code-reader/autocomplete-service-extras
 ```
 
-## ProseMirror 集成
+## ProseMirror 补全插件
+
+```typescript
+import { EmojiProvider } from '@code-reader/autocomplete-service';
+import { createAutocompletePlugin, fromServiceProvider, type EditorCompletionProvider } from '@code-reader/autocomplete-service-extras';
+
+const slash: EditorCompletionProvider = {
+  name: 'slash',
+  triggerCharacters: ['/'],
+  maxResults: Infinity, // 命令全部列出
+  shouldActivate: (context) => context.trigger === '/',
+  getCompletions: () => [
+    // apply 拿到含触发符的文档区间 [from, to)，自行替换成节点
+    { id: 'hr', label: '分隔线', insertText: '', type: 'command', apply: (view, from, to) => { /* … */ } },
+  ],
+};
+
+const plugin = createAutocompletePlugin({
+  providers: [slash, fromServiceProvider(new EmojiProvider(), { trigger: ':' })],
+  maxResults: 10,
+  minTriggerLength: 0,
+});
+```
+
+| 配置 | 说明 |
+|------|------|
+| `providers` | 提供者：`triggerCharacters`（单字符触发符须在行首或空白后，多字符任意位置）、`shouldActivate`、`getCompletions`、`maxResults`、`filtersOwnResults`（自己匹配，插件不再按文本过滤） |
+| `wordPattern` | 没有触发符时用光标前匹配的单词作查询（触发符为空串） |
+| `maxResults` / `minTriggerLength` / `debounceMs` | 默认 10 / 1 / 100 |
+| `activateOnTyping` | 输入时自动打开，默认 true；`Ctrl+空格` 总能手动打开 |
+| `classPrefix` | 面板类名前缀，默认 `pm-autocomplete`（`-panel`、`-item`、`-item-active`、`-icon`、`-icon-<类型>`、`-label`、`-detail`） |
+| `container` / `iconMap` / `showDetail` / `closeOnBlur` | 面板容器（默认编辑器父节点）、图标映射、是否显示详情、失焦关闭 |
+| `onOpen` / `onSelect` / `onClose` | 显示结果、接受补全项、未接受而关闭 |
+
+需要命令式控制（手动打开、上下选择、接受）时用 `new EditorAutocomplete(options)`，它的 `createPlugin()`、`openCompletion(view)`、`moveSelection(view, ±1)`、`acceptCompletion(view)`、`close(view)` 与插件共用状态。
+
+输入后到防抖刷新之前，面板保留上一次的结果（不闪烁），但回车、Tab 交还编辑器，避免按旧位置替换。行内原子节点（图片、公式）在文本里占一个字符，替换区间与文档位置始终对齐。
+
+## ProseMirror 补全适配器
 
 ```typescript
 import { EditorState } from 'prosemirror-state';
@@ -20,24 +57,18 @@ import { EditorView } from 'prosemirror-view';
 import { createDefaultAutocompleteService, createProseMirrorAdapter } from '@code-reader/autocomplete-service-extras';
 
 const service = await createDefaultAutocompleteService();
-const adapter = createProseMirrorAdapter({
-  service,
-  panelClass: 'my-autocomplete-panel',
-  itemClass: 'my-autocomplete-item',
-  activeItemClass: 'my-autocomplete-item-active',
-  maxHeight: 300,
-});
+const adapter = createProseMirrorAdapter({ service, classPrefix: 'my-autocomplete' });
 
 const view = new EditorView(document.getElementById('editor')!, {
   state: EditorState.create({ schema, plugins: [adapter.createPlugin()] }),
 });
 
 adapter.addEventListener((event) => {
-  // event.type: 'show' | 'hide' | 'select' | 'accept'
+  // event.type: 'show' | 'hide' | 'accept'
 });
 ```
 
-富文本里没有字段跳转，因此接受代码片段时，会用 `snippetPlainText` 去掉占位符，保留默认值。
+查询是光标前的单词（字母数字、中文、连字符，加上 `triggerCharacters`，默认 `: # @ / .`），整个交给服务匹配。富文本里没有字段跳转，因此接受代码片段时，会用 `snippetPlainText` 去掉占位符，保留默认值。
 
 ## 预设
 

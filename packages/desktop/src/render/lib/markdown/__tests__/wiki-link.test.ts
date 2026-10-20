@@ -6,7 +6,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { createEditorPlugins } from '../../editor';
-import type { CompletionContext } from '../../editor/prosemirror-autocomplete';
+import type { EditorCompletionContext } from '@code-reader/autocomplete-service-extras';
 import {
   extractHeadings,
   extractSection,
@@ -347,7 +347,7 @@ describe('[[文档# 标题补全', () => {
     (target) => headings[target] ?? []
   );
   const complete = (query: string) =>
-    provider.getCompletions({ trigger: '[[', query } as CompletionContext);
+    provider.getCompletions({ trigger: '[[', query } as EditorCompletionContext);
 
   it('输入 # 后列出目标文档的标题，过滤文本包含已输入的前缀', () => {
     const items = complete('笔记#');

@@ -72,10 +72,11 @@ import {
 } from 'lucide-react';
 import {
   createAutocompletePlugin,
-  EmojiCompletionProvider,
-  LaTeXCompletionProvider,
-  type CompletionProvider,
-} from '../../lib/editor/prosemirror-autocomplete';
+  fromServiceProvider,
+  type EditorCompletionProvider,
+} from '@code-reader/autocomplete-service-extras';
+import { EmojiProvider } from '@code-reader/autocomplete-service';
+import { LaTeXCompletionProvider } from '../../lib/editor/latex-completion';
 import { createCodeBlockView } from './CodeBlockView';
 import { createMathInlineView, createMathBlockView } from './MathNodeView';
 import { createListItemView } from './ListItemView';
@@ -806,7 +807,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     // 补全：Markdown 文档支持斜杠命令与 [[ 双向链接；纯文本只保留 Emoji
     const isCurrentDocument = (target: string) =>
       !target || normalizeLinkTarget(target) === normalizeLinkTarget(documentTitleRef.current);
-    const providers: CompletionProvider[] = [new EmojiCompletionProvider()];
+    const providers: EditorCompletionProvider[] = [fromServiceProvider(new EmojiProvider(), { trigger: ':' })];
     if (isMarkdown) {
       providers.unshift(
         new SlashCommandProvider(schema, pluginSlashCommands),
