@@ -1,5 +1,4 @@
 # 端到端（E2E）回归测试：在 macOS 上构建并启动真实的 Electron 应用，经 Chrome DevTools Protocol 逐个执行场景。
-# 注意：这个工作流还没有在 GitHub 上实际运行过；已在本地按同样的步骤（干净克隆、Node 22、冻结 lockfile 安装、构建子包、E2E）模拟通过。
 name: E2E
 
 on:
@@ -18,14 +17,14 @@ jobs:
     # macOS 运行器有图形会话，Electron 窗口可以直接打开
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          # e2e/cdp.mjs 用全局 WebSocket，Node 22 起才有（.nvmrc 的 20 没有）
-          node-version: 22
+          # e2e/cdp.mjs 用全局 WebSocket，Node 22 起才有
+          node-version-file: .nvmrc
           cache: pnpm
 
       # 需要 Electron 二进制与按 Electron 重新编译的 better-sqlite3（postinstall 完成）
@@ -40,7 +39,7 @@ jobs:
 
       - name: 上传失败截图
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots
           path: packages/desktop/test-results/e2e/
