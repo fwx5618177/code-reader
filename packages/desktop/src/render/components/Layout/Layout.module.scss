@@ -41,6 +41,7 @@
 .statusbar {
   display: flex;
   align-items: center;
+  gap: var(--spacing-3);
   height: $statusbar-height;
   padding: 0 var(--spacing-3);
   font-size: var(--font-size-xs);
@@ -48,38 +49,27 @@
   flex-shrink: 0;
 }
 
-.statusbarLeft {
-  flex: 1;
+.modeIndicator {
   display: flex;
   align-items: center;
-  gap: var(--spacing-3);
+  gap: var(--spacing-1);
+  padding: 0 var(--spacing-2);
+  color: var(--accent-secondary);
+  flex-shrink: 0;
+}
+
+// 当前页面的状态，占满模式指示与插件项之间的空间
+.statusbarContent {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
 .statusbarRight {
   display: flex;
   align-items: center;
   gap: var(--spacing-3);
-}
-
-.statusbarItem {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: 0 var(--spacing-2);
-  border-radius: var(--radius-sm);
-  transition: $transition-colors;
-
-  &:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-secondary);
-  }
-
-  svg {
-    width: 12px;
-    height: 12px;
-  }
-}
-
-.modeIndicator {
-  color: var(--accent-secondary);
+  flex-shrink: 0;
 }

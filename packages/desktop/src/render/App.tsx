@@ -553,17 +553,6 @@ const App: React.FC = () => {
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, []);
 
-  // Apply mode changes
-  useEffect(() => {
-    document.documentElement.setAttribute('data-mode', appState.mode);
-    document.documentElement.setAttribute('data-writing-feature', appState.writingFeature);
-    if (modeConfig.ui.distractionFree || isInFocusMode) {
-      document.body.classList.add('distraction-free');
-    } else {
-      document.body.classList.remove('distraction-free');
-    }
-  }, [appState.mode, appState.writingFeature, modeConfig, isInFocusMode]);
-
   // 处理快速输入提交：写入知识库并提交 Agent 处理
   const handleQuickInputSubmit = useCallback(
     async (data: QuickInputData) => {
@@ -1283,6 +1272,46 @@ const App: React.FC = () => {
     },
   });
 
+  // 编辑会话已切换到聚焦栏的活动文档（状态栏、反向链接与版本历史作用于它）
+  const sessionReady = selectedDocId !== null && selectedDocId === editorTabs.activeDocId;
+  const currentKnowledgeItem =
+    appState.mode === 'writing' && sessionReady ? kb.items.find((item) => item.id === selectedDocId) : undefined;
+
+  // 写作模式的文档状态与操作：放进应用底部状态栏（类名供 E2E 定位）
+  const writingStatus = (
+    <EditorFooter
+      hasDocument={sessionReady}
+      charCount={focusCharCount}
+      wordCount={focusWordCount}
+      isDirty={editorDirty}
+      isSaving={isSaving}
+      lastSavedAt={lastSavedAt}
+      showHints={false}
+      placement="statusbar"
+      className="writing-footer"
+    >
+      {viewModeButtons}
+      {/* 反向链接面板开关 */}
+      {editorTabs.activeDocId && (
+        <button
+          className={`footer-action-btn ${showBacklinks ? 'active' : ''}`}
+          onClick={() => setShowBacklinks(!showBacklinks)}
+          title="反向链接与局部图谱"
+        >
+          <Link2 size={14} />
+          {currentKnowledgeItem && <span>{linkIndex.backlinks(currentKnowledgeItem.id).length}</span>}
+        </button>
+      )}
+      {/* Version History Button */}
+      {editorTabs.activeDocId && (
+        <button className="footer-action-btn" onClick={() => setShowVersionHistory(true)} title="版本历史">
+          <History size={14} />
+        </button>
+      )}
+      {pageSettingsButton}
+    </EditorFooter>
+  );
+
   // Render main content based on mode
   const renderMainContent = () => {
     switch (appState.mode) {
@@ -1327,12 +1356,6 @@ const App: React.FC = () => {
         );
 
       case 'writing':
-        // 编辑会话已切换到聚焦栏的活动文档（底栏、反向链接与版本历史作用于它）
-        const sessionReady = selectedDocId !== null && selectedDocId === editorTabs.activeDocId;
-        const currentKnowledgeItem = sessionReady
-          ? kb.items.find((item) => item.id === selectedDocId)
-          : undefined;
-
         return (
           <div className="writing-content">
             <PageSurface className="writing-body" settings={pageSettings.settings}>
@@ -1374,46 +1397,6 @@ const App: React.FC = () => {
               </ResizablePanel>
             )}
             </PageSurface>
-            <EditorFooter
-              hasDocument={sessionReady}
-              charCount={focusCharCount}
-              wordCount={focusWordCount}
-              isDirty={editorDirty}
-              isSaving={isSaving}
-              lastSavedAt={lastSavedAt}
-              showHints={true}
-              hints={[
-                { key: '⌘S', label: '保存' },
-                { key: '⌘/', label: '预览' },
-              ]}
-              className="writing-footer"
-            >
-              {viewModeButtons}
-              {/* 反向链接面板开关 */}
-              {editorTabs.activeDocId && (
-                <button
-                  className={`footer-action-btn ${showBacklinks ? 'active' : ''}`}
-                  onClick={() => setShowBacklinks(!showBacklinks)}
-                  title="反向链接与局部图谱"
-                >
-                  <Link2 size={14} />
-                  {currentKnowledgeItem && (
-                    <span>{linkIndex.backlinks(currentKnowledgeItem.id).length}</span>
-                  )}
-                </button>
-              )}
-              {/* Version History Button */}
-              {editorTabs.activeDocId && (
-                <button
-                  className="footer-action-btn"
-                  onClick={() => setShowVersionHistory(true)}
-                  title="版本历史"
-                >
-                  <History size={14} />
-                </button>
-              )}
-              {pageSettingsButton}
-            </EditorFooter>
             {pageSettingsPanel}
 
             {/* Version History Panel */}
@@ -1546,6 +1529,7 @@ const App: React.FC = () => {
       isInFocusMode={isInFocusMode}
       activePanel={appState.sidebarVisible ? activeSidebarPanel.id : null}
       onPanelChange={(panel) => dispatch({ type: 'TOGGLE_SIDEBAR_PANEL', payload: panel })}
+      statusContent={appState.mode === 'writing' ? writingStatus : null}
     >
       <div className="app-content">
         {/* Sidebar */}

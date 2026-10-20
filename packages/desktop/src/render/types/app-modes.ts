@@ -46,26 +46,12 @@ export interface AppModeConfig {
  * UI configuration for each mode
  */
 export interface AppModeUIConfig {
-  /** Show ribbon (left icon bar) */
-  showRibbon: boolean;
   /** Show sidebar (file tree, etc.) */
   showSidebar: boolean;
-  /** Show title bar */
-  showTitleBar: boolean;
-  /** Show status bar */
-  showStatusBar: boolean;
-  /** Show tabs */
-  showTabs: boolean;
   /** Sidebar default collapsed */
   sidebarCollapsed: boolean;
   /** Default sidebar panel */
   defaultSidebarPanel: SidebarPanel;
-  /** Enable distraction-free mode features */
-  distractionFree: boolean;
-  /** Theme override (optional) */
-  themeOverride?: 'light' | 'dark';
-  /** Custom accent color (optional) */
-  accentColor?: string;
 }
 
 // ================================
@@ -81,14 +67,9 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
     icon: 'BookOpen',
     shortcut: '⌘3',
     ui: {
-      showRibbon: true,
       showSidebar: true,
-      showTitleBar: true,
-      showStatusBar: true,
-      showTabs: true,
       sidebarCollapsed: true,
       defaultSidebarPanel: 'files',
-      distractionFree: false,
     },
   },
   knowledge: {
@@ -100,14 +81,9 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
     icon: 'Brain',
     shortcut: '⌘1',
     ui: {
-      showRibbon: true,
       showSidebar: true,
-      showTitleBar: true,
-      showStatusBar: true,
-      showTabs: true,
       sidebarCollapsed: false,
       defaultSidebarPanel: 'files',
-      distractionFree: false,
     },
   },
   writing: {
@@ -118,14 +94,9 @@ export const APP_MODE_CONFIGS: Record<AppMode, AppModeConfig> = {
     icon: 'PenTool',
     shortcut: '⌘2',
     ui: {
-      showRibbon: true,
       showSidebar: true,
-      showTitleBar: true,
-      showStatusBar: true,
-      showTabs: false,
       sidebarCollapsed: false,
       defaultSidebarPanel: 'files',
-      distractionFree: false,
     },
   },
 };
@@ -160,12 +131,7 @@ export const WRITING_FEATURES: Record<WritingFeature, WritingFeatureConfig> = {
     description: 'Distraction-free writing, hide all UI elements',
     icon: 'Focus',
     uiOverrides: {
-      showRibbon: false,
       showSidebar: false,
-      showTitleBar: false,
-      showStatusBar: false,
-      showTabs: false,
-      distractionFree: true,
     },
   },
 };

@@ -5,6 +5,7 @@
 // ================================
 
 import React from 'react';
+import { BookOpen, Brain, PenTool } from 'lucide-react';
 import TitleBar from '../TitleBar';
 import Ribbon from '../Ribbon';
 import PluginStatusBar from '../PluginHost/PluginStatusBar';
@@ -40,13 +41,15 @@ interface LayoutProps {
   activePanel: SidebarPanel | null;
   /** 点击 Ribbon 导航按钮 */
   onPanelChange: (panel: SidebarPanel) => void;
+  /** 状态栏中段：当前页面的状态（如写作页的字数、保存状态与视图切换） */
+  statusContent?: React.ReactNode;
 }
 
-// 模式显示名称
-const MODE_DISPLAY_NAMES: Record<AppMode, string> = {
-  reading: '阅读',
-  knowledge: '知识库',
-  writing: '写作',
+// 状态栏的模式指示：图标与标题栏的模式切换一致
+const MODE_STATUS: Record<AppMode, { label: string; icon: React.ReactNode }> = {
+  knowledge: { label: '知识库', icon: <Brain size={12} /> },
+  writing: { label: '写作', icon: <PenTool size={12} /> },
+  reading: { label: '阅读', icon: <BookOpen size={12} /> },
 };
 
 // ================================
@@ -66,34 +69,15 @@ const Layout: React.FC<LayoutProps> = ({
   isInFocusMode = false,
   activePanel,
   onPanelChange,
+  statusContent,
 }) => {
   // 处理模式变更
   const handleModeChange = (mode: AppMode) => {
     onModeChange?.(mode);
   };
 
-  // 获取模式显示名称
-  const getModeDisplayName = (): string => {
-    return MODE_DISPLAY_NAMES[currentMode] || '';
-  };
-
-  // 获取模式 Emoji
-  const getModeEmoji = (): string => {
-    switch (currentMode) {
-      case 'reading':
-        return '📖';
-      case 'knowledge':
-        return '🧠';
-      case 'writing':
-        return '✍️';
-    }
-  };
-
-  // 获取平台类名
-  const platform = window.electron?.platform || 'darwin';
-
   return (
-    <div className={styles.layout} data-platform={platform} data-mode={currentMode}>
+    <div className={styles.layout}>
       {/* 标题栏 */}
       <TitleBar
         title="Code Reader"
@@ -123,17 +107,16 @@ const Layout: React.FC<LayoutProps> = ({
       </div>
 
       {/* 状态栏 */}
-      <div className={styles.statusbar}>
-        <div className={styles.statusbarLeft}>
-          <span className={`${styles.statusbarItem} ${styles.modeIndicator}`}>
-            {getModeEmoji()} {getModeDisplayName()}
-          </span>
-        </div>
+      <footer className={styles.statusbar}>
+        <span className={styles.modeIndicator}>
+          {MODE_STATUS[currentMode].icon}
+          {MODE_STATUS[currentMode].label}
+        </span>
+        <div className={styles.statusbarContent}>{statusContent}</div>
         <div className={styles.statusbarRight}>
           <PluginStatusBar />
-          <span className={styles.statusbarItem}>就绪</span>
         </div>
-      </div>
+      </footer>
     </div>
   );
 };

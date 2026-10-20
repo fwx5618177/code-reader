@@ -19,6 +19,8 @@ export interface EditorFooterProps {
   showHints?: boolean;
   /** Custom hints to display */
   hints?: Array<{ key: string; label: string }>;
+  /** 放在哪里：编辑区下方单独一条（专注模式），或并入应用底部状态栏（写作模式） */
+  placement?: 'panel' | 'statusbar';
   /** Additional class name */
   className?: string;
   /** Additional action buttons or elements to render */
@@ -59,6 +61,7 @@ export const EditorFooter: React.FC<EditorFooterProps> = ({
   lastSavedAt = null,
   showHints = true,
   hints = DEFAULT_HINTS,
+  placement = 'panel',
   className,
   children,
 }) => {
@@ -90,7 +93,9 @@ export const EditorFooter: React.FC<EditorFooterProps> = ({
   };
 
   return (
-    <div className={`${styles.editorFooter} ${className || ''}`}>
+    <div
+      className={`${styles.editorFooter} ${placement === 'statusbar' ? styles.inStatusBar : ''} ${className || ''}`}
+    >
       <div className={styles.stats}>
         {hasDocument ? (
           <>
