@@ -4,7 +4,7 @@
 // ================================
 
 import type { Node as PMNode } from 'prosemirror-model';
-import type Token from 'markdown-it/lib/token.mjs';
+import type { MarkdownItToken as Token } from '@code-reader/markdown-parser';
 import { blockRefId, findBlockInDoc, stripBlockMarker } from './block-ref';
 import { markdownTokenizer } from './parser';
 import { serializeMarkdown } from './serializer';
@@ -93,7 +93,7 @@ export function extractSection(markdown: string, heading: string): string | null
   if (index === -1) return null;
   const { level, line } = headings[index];
   const next = headings.slice(index + 1).find((h) => h.level <= level);
-  // 与 markdown-it 的行切分规则一致
+  // 与分词器的行切分规则一致
   const lines = markdown.split(/\r\n?|\n/);
   return lines.slice(line, next ? next.line : lines.length).join('\n');
 }
@@ -144,7 +144,7 @@ export interface RevealRequest {
 
 /**
  * 源码第 line 行（从 0 计）所在的顶层块序号（从 0 计），即解析后文档的第几个顶层节点。
- * 依据 markdown-it 顶层块 token 的行范围（map）；落在块之间的空行时取下一个块，超出末尾时取最后一个块。
+ * 依据顶层块 token 的行范围（map）；落在块之间的空行时取下一个块，超出末尾时取最后一个块。
  * 没有任何块时返回 null
  */
 export function topLevelBlockAtLine(markdown: string, line: number): number | null {

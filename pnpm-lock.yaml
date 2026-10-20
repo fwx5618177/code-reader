@@ -124,6 +124,9 @@ importers:
       '@code-reader/fuzzy-match-algorithm':
         specifier: workspace:*
         version: link:../fuzzy-match-algorithm
+      '@code-reader/markdown-parser':
+        specifier: workspace:*
+        version: link:../markdown-parser
       '@code-reader/plugin-system':
         specifier: workspace:*
         version: link:../plugin-system
@@ -226,9 +229,6 @@ importers:
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@18.3.1)
-      markdown-it:
-        specifier: ^14.1.0
-        version: 14.1.0
       openai:
         specifier: ^4.67.0
         version: 4.104.0(encoding@0.1.13)(ws@8.19.0)
@@ -305,9 +305,6 @@ importers:
       '@types/fs-extra':
         specifier: ^11.0.4
         version: 11.0.4
-      '@types/markdown-it':
-        specifier: ^14.1.2
-        version: 14.1.2
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.30

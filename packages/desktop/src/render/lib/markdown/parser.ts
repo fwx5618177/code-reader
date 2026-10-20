@@ -1,16 +1,17 @@
 // ================================
 // Markdown → ProseMirror 文档
+// 分词由 @code-reader/markdown-parser 完成（CommonMark + 表格 + ~~删除线~~ + 任务列表 + 扩展语法），
+// 输出 markdown-it 兼容的 token 流，由 prosemirror-markdown 构建文档
 // ================================
 
-import MarkdownIt from 'markdown-it';
-import type Token from 'markdown-it/lib/token.mjs';
+import { MarkdownItCompatTokenizer, type MarkdownItToken as Token } from '@code-reader/markdown-parser';
 import { MarkdownParser } from 'prosemirror-markdown';
 import { DOMParser as PMDOMParser, type Node as PMNode, type Schema } from 'prosemirror-model';
-import { markdownExtensions } from './markdown-it-plugins';
+import { finalizeTokens, markdownBlockExtensions, markdownInlineExtensions } from './syntax-extensions';
 import { markdownSchema, type CellAlign } from './schema';
 
-/** 列表是否紧凑（列表项的段落被 markdown-it 标记为 hidden） */
-function isTightList(tokens: Token[], index: number): boolean {
+/** 列表是否紧凑（列表项的段落被标记为 hidden） */
+function isTightList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hidden'>>, index: number): boolean {
   let depth = 0;
   for (let i = index + 1; i < tokens.length; i++) {
     const token = tokens[i];
@@ -25,35 +26,47 @@ function isTightList(tokens: Token[], index: number): boolean {
 }
 
 /** 从 th/td 的 style 读取对齐方式 */
-function cellAlign(token: Token): CellAlign {
+function cellAlign(token: Pick<Token, 'attrGet'>): CellAlign {
   const match = /text-align:\s*(left|center|right)/.exec(token.attrGet('style') ?? '');
   return match ? (match[1] as CellAlign) : null;
 }
 
-/** 创建配置好的 markdown-it 分词器（CommonMark + 表格 + 删除线 + 扩展语法） */
-export function createTokenizer(): MarkdownIt {
-  const md = new MarkdownIt('commonmark', { html: false, linkify: false });
-  md.enable(['table', 'strikethrough']);
-  md.use(markdownExtensions);
-  return md;
+/** 编辑器的 Markdown 分词器：parse(markdown) 返回 markdown-it 兼容的 token 序列 */
+export interface MarkdownTokenizer {
+  parse(markdown: string, env?: unknown): Token[];
+}
+
+/**
+ * 创建分词器：CommonMark + 表格 + ~~删除线~~ + 扩展语法；不识别 HTML、不支持脚注。
+ * taskLists 为 false 时保留列表项开头的 [ ] / [x] 文本（重命名改写需要与源码一致的行内内容）
+ */
+export function createTokenizer({ taskLists = true }: { taskLists?: boolean } = {}): MarkdownTokenizer {
+  const tokenizer = new MarkdownItCompatTokenizer({
+    html: false,
+    footnotes: false,
+    taskLists,
+    singleTildeStrikethrough: false,
+    inlineExtensions: markdownInlineExtensions,
+    blockExtensions: markdownBlockExtensions,
+  });
+  return { parse: (markdown) => finalizeTokens(tokenizer.parse(markdown)) };
 }
 
 /** 共享的分词器 */
 export const markdownTokenizer = createTokenizer();
 
 /**
- * 创建 Markdown 解析器
+ * 创建 Markdown 解析器。
+ * prosemirror-markdown 只调用分词器的 parse()，token 与 markdown-it 的结构一致，因此按其声明的类型传入
  */
 function createParser(schema: Schema): MarkdownParser {
-  return new MarkdownParser(schema, markdownTokenizer, {
+  const tokenizer = markdownTokenizer as unknown as ConstructorParameters<typeof MarkdownParser>[1];
+  return new MarkdownParser(schema, tokenizer, {
     blockquote: { block: 'blockquote' },
     paragraph: { block: 'paragraph' },
     list_item: {
       block: 'list_item',
-      getAttrs: (tok) => {
-        const checked = tok.attrGet('data-checked');
-        return { checked: checked === null ? null : checked === 'true' };
-      },
+      getAttrs: (tok) => ({ checked: typeof tok.meta?.checked === 'boolean' ? tok.meta.checked : null }),
     },
     bullet_list: {
       block: 'bullet_list',

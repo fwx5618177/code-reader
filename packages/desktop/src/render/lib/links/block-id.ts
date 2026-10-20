@@ -5,7 +5,7 @@
 // 与重命名改写相同，直接在源码上按位置插入，其余内容逐字节保持不变。
 // ================================
 
-import type Token from 'markdown-it/lib/token.mjs';
+import type { MarkdownItToken as Token } from '@code-reader/markdown-parser';
 import { findBlockInDoc, findSlotNode, markdownTokenizer, parseMarkdown, type BlockIdSlot } from '../markdown';
 import { splitLines } from './rename';
 

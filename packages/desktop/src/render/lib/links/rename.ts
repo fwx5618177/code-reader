@@ -7,7 +7,7 @@
 // 目标匹配规则与链接解析一致（忽略大小写与 .md 等扩展名）。
 // ================================
 
-import type Token from 'markdown-it/lib/token.mjs';
+import type { MarkdownItToken as Token } from '@code-reader/markdown-parser';
 import { createTokenizer, type WikiLinkParts } from '../markdown';
 import { displayTitle, normalizeLinkTarget, textExtension } from './link-index';
 
@@ -32,16 +32,15 @@ export interface LinkRenamePlan {
   count: number;
 }
 
-// 任务列表规则会截掉行内内容开头的 [ ]，改写时需要与源码一致的行内内容
-const tokenizer = createTokenizer();
-tokenizer.core.ruler.disable('task_list');
+// 任务列表会截掉行内内容开头的 [ ]，改写时需要与源码一致的行内内容
+const tokenizer = createTokenizer({ taskLists: false });
 
 /** 标题能否作为链接目标（# | [ ] 与换行会破坏链接语法） */
 export function isLinkableTitle(title: string): boolean {
   return !/[[\]|#\n]/.test(title) && displayTitle(title).trim() !== '';
 }
 
-/** 源码按行切分（与 markdown-it 的换行规则一致），记录每行起始偏移 */
+/** 源码按行切分（与分词器的换行规则一致），记录每行起始偏移 */
 export function splitLines(markdown: string): { lines: string[]; starts: number[] } {
   const lines: string[] = [];
   const starts: number[] = [];
