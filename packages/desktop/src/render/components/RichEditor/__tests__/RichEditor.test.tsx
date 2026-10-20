@@ -102,5 +102,32 @@ describe('RichEditor', () => {
     expect(codeBlock?.classList.contains('code-block-wrapper') || codeBlock?.querySelector('.code-block-wrapper')).toBeTruthy();
     expect(scrolled).toContain(codeBlock);
   });
+
+  it('视图模式由上层控制：预览时显示渲染结果、编辑器不可编辑，工具栏不显示模式按钮', async () => {
+    const previewHeading = (root: Element) =>
+      [...root.querySelectorAll('h1')].find((heading) => !heading.closest('.ProseMirror'));
+    const { container, rerender, getByTitle } = render(
+      <RichEditor initialContent={SAMPLE} fileType="markdown" mode="preview" />
+    );
+    await waitFor(() => expect(container.querySelector('.ProseMirror')).not.toBeNull());
+    expect(previewHeading(container)?.textContent).toBe('标题');
+    expect(container.querySelector('.ProseMirror')!.getAttribute('contenteditable')).toBe('false');
+    expect(container.querySelector('[title="预览模式"]')).toBeNull();
+
+    rerender(<RichEditor initialContent={SAMPLE} fileType="markdown" mode="split" />);
+    await waitFor(() =>
+      expect(container.querySelector('.ProseMirror')!.getAttribute('contenteditable')).toBe('true')
+    );
+    expect(previewHeading(container)).toBeDefined();
+
+    rerender(<RichEditor initialContent={SAMPLE} fileType="markdown" mode="edit" />);
+    expect(previewHeading(container)).toBeUndefined();
+
+    // 不受控时由工具栏切换
+    rerender(<RichEditor key="uncontrolled" initialContent={SAMPLE} fileType="markdown" />);
+    await waitFor(() => expect(container.querySelector('.ProseMirror')).not.toBeNull());
+    getByTitle('预览模式').click();
+    await waitFor(() => expect(previewHeading(container)?.textContent).toBe('标题'));
+  });
 });
 

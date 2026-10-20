@@ -621,26 +621,7 @@ $outline-width: 248px;
     margin-top: 0.3em;
   }
 
-  :global(li.task-item) {
-    list-style: none;
-    margin-left: -1.3em;
-
-    &::before {
-      content: '☐';
-      margin-right: 0.5em;
-      color: var(--text-muted);
-    }
-
-    &[data-checked='true'] {
-      color: var(--text-muted);
-      text-decoration: line-through;
-
-      &::before {
-        content: '☑';
-        color: var(--accent-primary);
-      }
-    }
-  }
+  @include task-list-static(1.3em);
 
   hr {
     margin: 2em 0;

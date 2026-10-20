@@ -161,6 +161,11 @@ export interface RichEditorProps {
    * 不触发 onChange、不进入撤销历史；每个请求对象只应用一次
    */
   externalUpdate?: { title?: string; content?: string } | null;
+  /**
+   * 视图模式（编辑 / 预览 / 分屏）：传入时由上层控制，工具栏不再显示模式按钮；不传时由工具栏切换。
+   * LaTeX 文档用自己的源码 / 预览布局，忽略此项
+   */
+  mode?: EditorMode;
 }
 
 /**
@@ -211,6 +216,7 @@ function arePropsEqual(prevProps: RichEditorProps, nextProps: RichEditorProps): 
   if (prevProps.onAssignBlockId !== nextProps.onAssignBlockId) return false;
   if (prevProps.active !== nextProps.active) return false;
   if (prevProps.externalUpdate !== nextProps.externalUpdate) return false;
+  if (prevProps.mode !== nextProps.mode) return false;
 
   // Note: We DON'T compare onChange, onTitleChange, title, titlePlaceholder, linkTargets, onWikiLinkClick
   // - 回调与链接目标通过 ref 读取最新值
@@ -643,6 +649,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   onAssignBlockId,
   active = true,
   externalUpdate,
+  mode,
 }) => {
   // Use refs for callbacks to avoid closure issues and unnecessary re-renders
   // This is critical for preventing cursor loss during auto-save
@@ -752,7 +759,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   const searchPluginKey = searchPluginKeyRef.current;
 
   // State - only UI state, no save state
-  const [editorMode, setEditorMode] = useState<EditorMode>('edit');
+  const [internalMode, setEditorMode] = useState<EditorMode>('edit');
+  const editorMode = mode ?? internalMode;
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
   /** 当前文档的存储内容（预览面板使用） */
@@ -1581,27 +1589,29 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
           {/* Spacer */}
           <div className={styles.toolbarSpacer} />
 
-          {/* Editor Mode Toggle */}
-          <div className={styles.toolbarGroup}>
-            <ToolbarButton
-              icon={<Edit3 size={16} />}
-              title="编辑模式"
-              onClick={() => setEditorMode('edit')}
-              isActive={editorMode === 'edit'}
-            />
-            <ToolbarButton
-              icon={<Eye size={16} />}
-              title="预览模式"
-              onClick={() => setEditorMode('preview')}
-              isActive={editorMode === 'preview'}
-            />
-            <ToolbarButton
-              icon={editorMode === 'split' ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-              title="分屏模式"
-              onClick={() => setEditorMode(editorMode === 'split' ? 'edit' : 'split')}
-              isActive={editorMode === 'split'}
-            />
-          </div>
+          {/* Editor Mode Toggle：视图模式由上层控制时不显示 */}
+          {mode === undefined && (
+            <div className={styles.toolbarGroup}>
+              <ToolbarButton
+                icon={<Edit3 size={16} />}
+                title="编辑模式"
+                onClick={() => setEditorMode('edit')}
+                isActive={editorMode === 'edit'}
+              />
+              <ToolbarButton
+                icon={<Eye size={16} />}
+                title="预览模式"
+                onClick={() => setEditorMode('preview')}
+                isActive={editorMode === 'preview'}
+              />
+              <ToolbarButton
+                icon={editorMode === 'split' ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+                title="分屏模式"
+                onClick={() => setEditorMode(editorMode === 'split' ? 'edit' : 'split')}
+                isActive={editorMode === 'split'}
+              />
+            </div>
+          )}
         </div>
       )}
 

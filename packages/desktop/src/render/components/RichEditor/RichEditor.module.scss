@@ -1593,25 +1593,7 @@ $page-rule-rows: repeating-linear-gradient(
     background-color: var(--bg-tertiary);
   }
 
-  :global(li.task-item) {
-    list-style: none;
-
-    &::before {
-      content: '☐';
-      margin-right: var(--spacing-2);
-      color: var(--text-muted);
-    }
-
-    &[data-checked='true'] {
-      color: var(--text-muted);
-      text-decoration: line-through;
-
-      &::before {
-        content: '☑';
-        color: var(--accent-primary);
-      }
-    }
-  }
+  @include task-list-static(var(--spacing-5));
 
   :global(.wiki-link) {
     color: var(--accent-primary);

@@ -94,6 +94,9 @@ import {
   History,
   Link2,
   LayoutTemplate,
+  PenLine,
+  Eye,
+  Columns2,
 } from 'lucide-react';
 import {
   AppMode,
@@ -106,7 +109,15 @@ import { aiConfigService } from './services/aiConfigService';
 import { registerFlush } from './services/flushRegistry';
 import { getEditorManager } from './lib/core';
 import { pickRecentlyRead, resolveArticle } from './lib/reading';
+import type { EditorMode } from './components/RichEditor';
 import './App.scss';
+
+/** 写作区的视图模式（底栏切换；⌘/ 在编辑与预览间切换，⌘⇧/ 切换分屏） */
+const WRITING_VIEW_MODES: ReadonlyArray<{ mode: EditorMode; label: string; icon: React.ReactNode }> = [
+  { mode: 'edit', label: '编辑', icon: <PenLine size={14} /> },
+  { mode: 'preview', label: '预览（⌘/）', icon: <Eye size={14} /> },
+  { mode: 'split', label: '分屏：编辑与预览并排（⌘⇧/）', icon: <Columns2 size={14} /> },
+];
 
 const App: React.FC = () => {
   // Use reducer for app state management
@@ -141,6 +152,8 @@ const App: React.FC = () => {
   const pageSettings = usePageSettings();
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
   const pageContentWidth = PAGE_CONTENT_WIDTH_VALUES[pageSettings.settings.contentWidth];
+  // 写作区的视图模式：分栏各栏与专注模式共用
+  const [writingView, setWritingView] = useState<EditorMode>('edit');
 
   // 轻提示（快速收集结果等）
   const [notice, setNotice] = useState<string | null>(null);
@@ -479,6 +492,15 @@ const App: React.FC = () => {
         } else if (isInFocusMode) {
           dispatch({ type: 'EXIT_FOCUS_MODE' });
         }
+        return;
+      }
+
+      // Cmd/Ctrl + / 写作区在编辑与预览间切换，Cmd/Ctrl + Shift + / 切换分屏（编辑器内也生效）
+      if ((e.metaKey || e.ctrlKey) && e.code === 'Slash' && appState.mode === 'writing') {
+        e.preventDefault();
+        setWritingView((view) =>
+          e.shiftKey ? (view === 'split' ? 'edit' : 'split') : view === 'preview' ? 'edit' : 'preview'
+        );
         return;
       }
 
@@ -1218,6 +1240,23 @@ const App: React.FC = () => {
     />
   ) : null;
 
+  // 视图模式切换：写作模式与专注模式的底栏共用；LaTeX 文档有自己的源码 / 预览布局，不显示
+  const viewModeButtons =
+    currentDocument && getFileTypeId(currentDocument.title) !== 'latex'
+      ? WRITING_VIEW_MODES.map(({ mode, label, icon }) => (
+          <button
+            key={mode}
+            className={`footer-action-btn ${writingView === mode ? 'active' : ''}`}
+            onClick={() => setWritingView(mode)}
+            title={label}
+            aria-label={label}
+            aria-pressed={writingView === mode}
+          >
+            {icon}
+          </button>
+        ))
+      : null;
+
   /** 写作编辑器的公共属性：分栏各栏与专注模式共用；定位请求只交给聚焦的一栏 */
   const writingEditorProps = (
     focused: boolean,
@@ -1227,6 +1266,7 @@ const App: React.FC = () => {
     onWikiLinkClick: openWikiTarget,
     revealHeading: focused ? revealHeading : null,
     onAssignBlockId: assignBlockId,
+    mode: writingView,
     options: {
       showWordCount: false,
       showToolbar: false,
@@ -1334,9 +1374,13 @@ const App: React.FC = () => {
               isSaving={isSaving}
               lastSavedAt={lastSavedAt}
               showHints={true}
-              hints={[{ key: '⌘S', label: '保存' }]}
+              hints={[
+                { key: '⌘S', label: '保存' },
+                { key: '⌘/', label: '预览' },
+              ]}
               className="writing-footer"
             >
+              {viewModeButtons}
               {/* 反向链接面板开关 */}
               {editorTabs.activeDocId && (
                 <button
@@ -1443,9 +1487,11 @@ const App: React.FC = () => {
             hints={[
               { key: 'Esc', label: '退出' },
               { key: '⌘S', label: '保存' },
+              { key: '⌘/', label: '预览' },
             ]}
             className="focus-footer"
           >
+            {viewModeButtons}
             {/* Version History Button */}
             {selectedDocId && (
               <button

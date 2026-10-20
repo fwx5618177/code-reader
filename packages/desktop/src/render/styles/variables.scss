@@ -571,6 +571,49 @@ $z-toast: 700;
   }
 }
 
+// 只读渲染（预览、阅读视图）里的任务项：方框占第一列，段落与嵌套列表都在第二列。
+// 文字在块级 <p> 里，行内的 ::before 会把它挤到下一行；$indent 抵消列表缩进，让方框对齐普通项的圆点
+@mixin task-list-static($indent) {
+  :global(li.task-item) {
+    list-style: none;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 0.5em;
+    margin-left: calc(-1 * #{$indent});
+
+    > * {
+      grid-column: 2;
+    }
+
+    &::before {
+      content: '';
+      grid-column: 1;
+      align-self: start;
+      width: 1.2em;
+      height: 1.2em;
+      margin-top: 0.4em;
+      font-size: 0.75em;
+      line-height: 1.2em;
+      text-align: center;
+      border: 1.5px solid var(--text-muted);
+      border-radius: var(--radius-sm);
+      box-sizing: border-box;
+    }
+
+    &[data-checked='true'] {
+      color: var(--text-muted);
+      text-decoration: line-through;
+
+      &::before {
+        content: '✓';
+        color: var(--text-on-accent);
+        background-color: var(--accent-primary);
+        border-color: var(--accent-primary);
+      }
+    }
+  }
+}
+
 // 扩展语法（类名与元素由 lib/markdown/schema.ts 的 toDOM 生成）：高亮、插入、上下标、脚注、定义列表、
 // ::: 提示块、缩写。编辑器、预览与阅读视图共用
 @mixin markdown-extensions {
