@@ -22,6 +22,9 @@ describe('读取标签与别名', () => {
     expect(documentProperties('---\ntag: 项目/甲 项目/乙\nalias: 别名\n---\n')).toEqual({ tags: ['项目/甲', '项目/乙'], aliases: ['别名'] });
     expect(documentProperties('正文\n---\ntags: [x]\n---\n')).toEqual({ tags: [], aliases: [] });
     expect(documentProperties('---\ntags: [a, b] # 行尾注释\n---\n').tags).toEqual(['a', 'b']);
+    // 跨多行的行内数组；引号内的逗号不拆分
+    expect(documentProperties('---\ntags: [a,\n  "b, c",\n  d] # 注释\ntitle: x\n---\n').tags).toEqual(['a', 'b, c', 'd']);
+    expect(documentProperties('---\ntags: [\n  a,\n  b,\n]\naliases: [x]\n---\n')).toEqual({ tags: ['a', 'b'], aliases: ['x'] });
   });
 
   it('合并：加入 YAML 中的标签，只去掉上次同步后从 YAML 删掉的', () => {
@@ -67,6 +70,16 @@ describe('标签写回 YAML', () => {
     expect(hasFrontMatterTags('---\nmeta:\n  tags: [a]\n---\n')).toBe(false);
     expect(hasFrontMatterTags('正文\n---\ntags: [a]\n---\n')).toBe(false);
   });
+
+  it('跨多行的行内数组：展开写法保留每行一项、缩进、末尾逗号与 ] 所在行；折行写法写成一行', () => {
+    const expanded = '---\ntags: [\n    工作,\n    旧,\n  ] # 标签\ntitle: x\n---\n';
+    expect(setFrontMatterTags(expanded, ['工作', '新', 'a, b'])).toBe(
+      '---\ntags: [\n    工作,\n    新,\n    "a, b",\n  ] # 标签\ntitle: x\n---\n'
+    );
+    expect(setFrontMatterTags('---\ntags: [\n  a,\n  b]\n---\n', ['b', 'c'])).toBe('---\ntags: [\n  b,\n  c]\n---\n');
+    expect(setFrontMatterTags(expanded, [])).toBe('---\ntags: [] # 标签\ntitle: x\n---\n');
+    expect(setFrontMatterTags('---\ntags: [a,\n  b]\ntitle: x\n---\n', ['a', 'c'])).toBe('---\ntags: [a, c]\ntitle: x\n---\n');
+  });
 });
 
 describe('YAML 检查', () => {
@@ -74,6 +87,17 @@ describe('YAML 检查', () => {
     expect(
       lintFrontMatter('title: "标题: 含冒号"\ntags: [a, b]\nlist:\n  - x\n  - y\nnested:\n  key: v\ntext: |\n  多行\n  - 不是列表\n# 注释\nurl: https://a.b/c # 行尾注释')
     ).toEqual([]);
+    // 跨多行的行内数组 / 映射，#标签 的宽松写法
+    expect(lintFrontMatter('tags: [a,\n  b] # 注释\nmeta: {x: 1,\n  y: [2,\n    3]}\nlist: [\n  a,\n]\nh: [#a, #b]')).toEqual([]);
+  });
+
+  it('跨行的括号没有闭合就开始了下一个键或头部结束：在开始的行报错，之后的行照常检查', () => {
+    expect(lintFrontMatter('tags: [a,\n  b\ntags: 1')).toEqual([
+      { line: 0, message: '括号未闭合' },
+      { line: 2, message: '重复的键「tags」' },
+    ]);
+    expect(lintFrontMatter('x: 1\ntags: [a,\n  b')).toEqual([{ line: 1, message: '括号未闭合' }]);
+    expect(lintFrontMatter('tags: [a,\n  b]]')).toEqual([{ line: 1, message: '括号未闭合' }]);
   });
 
   it('制表符缩进、缺少冒号、重复的键、引号或括号未闭合、孤立的列表项', () => {

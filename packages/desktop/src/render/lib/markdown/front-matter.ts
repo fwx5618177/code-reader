@@ -6,7 +6,14 @@
 // ================================
 
 import { normalizeTagPath } from '../../../shared/tag-path';
-import { frontmatterList, splitFrontmatter } from '../transfer/frontmatter';
+import {
+  flowDepth,
+  flowSequenceEnd,
+  frontmatterList,
+  splitFlowItems,
+  splitFrontmatter,
+  withoutFlowComment,
+} from '../transfer/frontmatter';
 
 /** 文档属性中与知识库同步的字段 */
 export interface DocumentProperties {
@@ -80,16 +87,21 @@ export function setFrontMatterTags(markdown: string, tags: readonly string[]): s
   const { keyLine, end } = located;
   const [, key, separator, rawValue] = /^(tags?)(\s*:\s*)(.*)$/.exec(lines[keyLine]!)!;
   const value = rawValue!.trim();
+  const inline = value.startsWith('[');
+  // 行内数组可以跨多行：到右括号所在的行为止（未闭合时只算本行）
+  const closeLine = inline ? Math.max(keyLine, flowSequenceEnd(lines, keyLine, rawValue!, end)) : keyLine;
+  const flowText = lines.slice(keyLine, closeLine + 1).join('\n');
+  const flowOpen = flowText.indexOf('[');
+  const flowClose = inline ? closingBracket(flowText, flowOpen) : -1;
   let blockEnd = keyLine + 1;
   while (blockEnd < end && /^\s*-(\s|$)/.test(lines[blockEnd]!)) blockEnd++;
   const blockItems = lines.slice(keyLine + 1, blockEnd);
 
-  const rawItems = value.startsWith('[')
-    ? value.slice(1, value.indexOf(']') === -1 ? undefined : value.indexOf(']')).split(',')
-    : value
-      ? value.split(/[,\s]+/)
-      : blockItems.map((line) => line.replace(/^\s*-\s*/, ''));
-  const items = rawItems.map((item) => item.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+  const items = inline
+    ? splitFlowItems(flowText.slice(flowOpen + 1, flowClose === -1 ? undefined : flowClose))
+    : (value ? value.split(/[,\s]+/) : blockItems.map((line) => line.replace(/^\s*-\s*/, '')))
+        .map((item) => item.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean);
   const hashed = items.length > 0 && items.every((item) => item.startsWith('#'));
   const written = ordered.map((tag) => (hashed ? `#${tag}` : tag));
   const quoted = written.map((tag) => (needsQuotes(tag) ? JSON.stringify(tag) : tag));
@@ -99,9 +111,10 @@ export function setFrontMatterTags(markdown: string, tags: readonly string[]): s
     // 块列表（或只有键）：沿用第一项的缩进与前缀
     const prefix = /^(\s*-\s*)/.exec(blockItems[0] ?? '')?.[1] ?? '  - ';
     lines.splice(keyLine + 1, blockItems.length, ...quoted.map((tag) => prefix + tag));
-  } else if (value.startsWith('[')) {
-    const close = rawValue!.indexOf(']');
-    lines[keyLine] = `${key}${separator}${inlineArray}${close === -1 ? '' : rawValue!.slice(close + 1)}`;
+  } else if (inline) {
+    // 右括号之后的内容（行尾注释）保留
+    const after = flowClose === -1 ? '' : flowText.slice(flowClose + 1);
+    lines.splice(keyLine, closeLine - keyLine + 1, ...rewriteFlowSequence(lines.slice(keyLine, closeLine + 1), `${key}${separator}`, quoted, after));
   } else if (written.some((tag) => /[\s,]/.test(tag)) || written.length === 0) {
     // 分隔符写法放不下含空格的标签，也表示不了空列表：改用行内数组
     lines[keyLine] = `${key}${separator}${inlineArray}`;
@@ -111,30 +124,51 @@ export function setFrontMatterTags(markdown: string, tags: readonly string[]): s
   return lines.join(eol);
 }
 
-/** YAML 头部中的一处问题（行号从 0 计，相对头部内容） */
-export interface FrontMatterProblem {
-  line: number;
-  message: string;
-}
-
-/** 值中引号与括号是否闭合（引号内的括号不计） */
-function unbalanced(value: string): string | null {
-  const quote = value[0];
-  if ((quote === '"' || quote === "'") && !new RegExp(`^${quote}(?:[^${quote}\\\\]|\\\\.)*${quote}`).test(value)) return '引号未闭合';
-  let depth = 0;
-  let inQuote: string | null = null;
-  for (const char of value) {
+/** text 中 open 位置的 [ 对应的 ] 的位置（引号内的不计）；未闭合时为 -1 */
+function closingBracket(text: string, open: number): number {
+  for (let index = open + 1, depth = 1, inQuote: string | null = null; index < text.length; index++) {
+    const char = text[index]!;
     if (inQuote) {
       if (char === inQuote) inQuote = null;
     } else if (char === '"' || char === "'") {
       inQuote = char;
     } else if (char === '[' || char === '{') {
       depth++;
-    } else if (char === ']' || char === '}') {
-      depth--;
+    } else if ((char === ']' || char === '}') && --depth === 0) {
+      return index;
     }
   }
-  return depth !== 0 ? '括号未闭合' : null;
+  return -1;
+}
+
+/**
+ * 改写行内数组：原来是展开写法（[ 在键所在行末尾，每行一项）时保留展开写法、项的缩进、末尾逗号与 ] 所在行；
+ * 其他写法（单行，或 [a,⏎ b] 折行）写成一行
+ */
+function rewriteFlowSequence(original: readonly string[], head: string, quoted: readonly string[], after: string): string[] {
+  const expanded = original.length > 1 && /\[\s*$/.test(original[0]!);
+  if (!expanded || quoted.length === 0) return [`${head}[${quoted.join(', ')}]${after}`];
+  const itemLines = original.slice(1).filter((line) => line.trim() && !line.trim().startsWith(']'));
+  const indent = /^\s*/.exec(itemLines[0] ?? '')?.[0] || '  ';
+  const trailingComma = /,\s*$/.test(itemLines[itemLines.length - 1] ?? '');
+  const closeLine = original[original.length - 1]!;
+  const closeOwnLine = closeLine.trim().startsWith(']');
+  const body = quoted.map((tag, index) => `${indent}${tag}${index < quoted.length - 1 || (trailingComma && closeOwnLine) ? ',' : ''}`);
+  if (closeOwnLine) return [`${head}[`, ...body, closeLine];
+  body[body.length - 1] += `]${after}`;
+  return [`${head}[`, ...body];
+}
+
+/** YAML 头部中的一处问题（行号从 0 计，相对头部内容） */
+export interface FrontMatterProblem {
+  line: number;
+  message: string;
+}
+
+/** 值以引号开头却没有闭合 */
+function unclosedQuote(value: string): boolean {
+  const quote = value[0];
+  return (quote === '"' || quote === "'") && !new RegExp(`^${quote}(?:[^${quote}\\\\]|\\\\.)*${quote}`).test(value);
 }
 
 /** 检查 YAML 头部的常见写错 */
@@ -145,8 +179,22 @@ export function lintFrontMatter(yaml: string): FrontMatterProblem[] {
   let openKey = false;
   /** 多行的块文本（| 或 >）之中 */
   let blockScalar = false;
+  /** 跨行的行内数组 / 映射之中：开始的行与尚未闭合的括号层数 */
+  let flow: { line: number; depth: number } | null = null;
   yaml.split('\n').forEach((text, line) => {
     if (/^\s*$/.test(text) || /^\s*#/.test(text)) return;
+    if (flow) {
+      // 顶格的“键:”或列表项：括号没有闭合就开始了下一项，在开始的行报错，这一行照常检查
+      if (/^(-(\s|$)|[^\s#][^:#]*:(\s|$))/.test(text)) {
+        problems.push({ line: flow.line, message: '括号未闭合' });
+        flow = null;
+      } else {
+        flow.depth += flowDepth(withoutFlowComment(text));
+        if (flow.depth < 0) problems.push({ line, message: '括号未闭合' });
+        if (flow.depth <= 0) flow = null;
+        return;
+      }
+    }
     if (/^ *\t/.test(text)) {
       problems.push({ line, message: 'YAML 不能用制表符缩进，请改用空格' });
       return;
@@ -170,11 +218,21 @@ export function lintFrontMatter(yaml: string): FrontMatterProblem[] {
     const key = pair[1]!.replace(/^["']|["']$/g, '');
     if (keys.has(key)) problems.push({ line, message: `重复的键「${key}」` });
     keys.add(key);
-    const value = (pair[2] ?? '').replace(/\s+#.*$/, '').trim();
+    const raw = (pair[2] ?? '').trim();
+    // 行内数组 / 映射只去掉右括号之后的注释（[#a, #b] 这种 #标签 写法按宽松规则接受）
+    const value = /^[[{]/.test(raw) ? withoutFlowComment(raw) : raw.replace(/\s+#.*$/, '').trim();
     openKey = value === '';
     blockScalar = /^[|>][+-]?$/.test(value);
-    const issue = value && !blockScalar ? unbalanced(value) : null;
-    if (issue) problems.push({ line, message: issue });
+    if (!value || blockScalar) return;
+    if (unclosedQuote(value)) {
+      problems.push({ line, message: '引号未闭合' });
+      return;
+    }
+    const depth = flowDepth(value);
+    // [ 或 { 开头、到行尾还没闭合：跨行写法，继续看后面的行
+    if (depth > 0 && /^[[{]/.test(value)) flow = { line, depth };
+    else if (depth !== 0) problems.push({ line, message: '括号未闭合' });
   });
+  if (flow) problems.push({ line: (flow as { line: number }).line, message: '括号未闭合' });
   return problems;
 }
