@@ -38,6 +38,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import { latex } from '../../lib/latex/codemirror-latex';
+import { latexCompletion } from '../../lib/latex/codemirror-completion';
 import { latexAnalysis } from '../../lib/latex/codemirror-analysis';
 import type { LatexAnalysis } from '../../lib/latex/analysis';
 import { requestLatexAnalysis } from '../../lib/latex/analysis-client';
@@ -239,6 +240,8 @@ const SourceEditor = memo<SourceEditorProps>(
 
       if (readOnly) {
         exts.push(EditorView.editable.of(false));
+      } else {
+        exts.push(latexCompletion());
       }
 
       return exts;

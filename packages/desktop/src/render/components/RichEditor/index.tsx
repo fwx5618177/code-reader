@@ -842,7 +842,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
             assignId: (target, slot, id) => onAssignBlockIdRef.current?.(target, slot, id),
           }
         ),
-        new LaTeXCompletionProvider()
+        new LaTeXCompletionProvider({ scope: 'math', markdownBody: true })
       );
     }
     const autocompletePlugin = createAutocompletePlugin({

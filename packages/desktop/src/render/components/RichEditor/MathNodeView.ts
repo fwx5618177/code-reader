@@ -2,15 +2,20 @@
 // MathNodeView
 // 数学公式节点视图（Typora 风格）
 // - 平时显示渲染结果；点击或用方向键选中时展开 LaTeX 源码
-// - 编辑时在源码下方实时预览
+// - 编辑时在源码下方实时预览；输入 \ 加字母时补全 LaTeX 命令（与正文的 LaTeX 补全同一数据）
 // - 在源码首/尾继续按方向键会离开公式，回到正文
 // - 新插入的公式以节点选区创建，因此会自动进入编辑
 // ================================
 
+import { TextFieldAutocomplete } from '@code-reader/autocomplete-service-extras';
 import type { Node as PMNode } from 'prosemirror-model';
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView as PMEditorView } from 'prosemirror-view';
+import { LaTeXCompletionProvider } from '../../lib/editor/latex-completion';
 import { renderMath } from '../../lib/math';
+
+/** 公式源码框里全是公式：\ 在任意位置都触发 */
+const formulaCompletion = new LaTeXCompletionProvider({ scope: 'math' });
 
 export interface MathNodeViewOptions {
   /** 是否为块级公式 */
@@ -28,6 +33,7 @@ export class MathNodeView {
   private readonly editContainer: HTMLElement;
   private readonly editInput: HTMLTextAreaElement;
   private readonly livePreview: HTMLElement;
+  private readonly completion: TextFieldAutocomplete;
 
   constructor(
     node: PMNode,
@@ -65,6 +71,13 @@ export class MathNodeView {
     this.livePreview.className = 'math-node-live-preview';
     this.editContainer.appendChild(this.livePreview);
     this.dom.appendChild(this.editContainer);
+
+    // 按键监听在捕获阶段：面板打开时回车、方向键、Esc 先由补全处理，不会结束编辑或离开公式
+    this.completion = new TextFieldAutocomplete(this.editInput, {
+      providers: [formulaCompletion],
+      minTriggerLength: 1,
+      container: view.dom.parentElement ?? undefined,
+    });
 
     this.bindEvents();
     this.renderMath();
@@ -238,6 +251,10 @@ export class MathNodeView {
 
   ignoreMutation(): boolean {
     return true;
+  }
+
+  destroy(): void {
+    this.completion.detach();
   }
 }
 
