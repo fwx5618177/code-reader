@@ -37,7 +37,7 @@ export interface MarkdownTokenizer {
 }
 
 /**
- * 创建分词器：CommonMark + 表格 + ~~删除线~~ + 扩展语法；不识别 HTML、不支持脚注。
+ * 创建分词器：CommonMark + 表格 + ~~删除线~~ + 文档开头的 YAML 头部 + 扩展语法；不识别 HTML、不支持脚注。
  * taskLists 为 false 时保留列表项开头的 [ ] / [x] 文本（重命名改写需要与源码一致的行内内容）
  */
 export function createTokenizer({ taskLists = true }: { taskLists?: boolean } = {}): MarkdownTokenizer {
@@ -46,6 +46,7 @@ export function createTokenizer({ taskLists = true }: { taskLists?: boolean } = 
     footnotes: false,
     taskLists,
     singleTildeStrikethrough: false,
+    frontMatter: true,
     inlineExtensions: markdownInlineExtensions,
     blockExtensions: markdownBlockExtensions,
   });
@@ -62,6 +63,7 @@ export const markdownTokenizer = createTokenizer();
 function createParser(schema: Schema): MarkdownParser {
   const tokenizer = markdownTokenizer as unknown as ConstructorParameters<typeof MarkdownParser>[1];
   return new MarkdownParser(schema, tokenizer, {
+    front_matter: { block: 'front_matter', noCloseToken: true },
     blockquote: { block: 'blockquote' },
     paragraph: { block: 'paragraph' },
     list_item: {

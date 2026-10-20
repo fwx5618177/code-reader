@@ -53,6 +53,21 @@ function insertBlock(view: EditorView, from: number, to: number, node: PMNode, s
   view.focus();
 }
 
+/** 在文档开头插入 YAML 头部（已有时把光标移到头部末尾） */
+function insertFrontMatter(view: EditorView, from: number, to: number): void {
+  const frontMatter = view.state.schema.nodes.front_matter;
+  let tr = view.state.tr.delete(from, to);
+  const first = tr.doc.firstChild;
+  if (first?.type === frontMatter) {
+    tr.setSelection(TextSelection.create(tr.doc, 1 + first.content.size));
+  } else {
+    tr = tr.insert(0, frontMatter.create());
+    tr.setSelection(TextSelection.create(tr.doc, 1));
+  }
+  view.dispatch(tr.scrollIntoView());
+  view.focus();
+}
+
 /** 斜杠命令定义 */
 interface SlashCommand {
   id: string;
@@ -190,6 +205,13 @@ export class SlashCommandProvider implements CompletionProvider {
         detail: '--- 空格',
         keywords: 'divider hr fgx',
         run: (view, from, to) => insertBlock(view, from, to, nodes.horizontal_rule.create(), false),
+      },
+      {
+        id: 'front-matter',
+        label: '文档属性（YAML 头部）',
+        detail: '文档开头 --- 回车',
+        keywords: 'front matter yaml properties metadata wdsx sx',
+        run: insertFrontMatter,
       },
       {
         id: 'bold',

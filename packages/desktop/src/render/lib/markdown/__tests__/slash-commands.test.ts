@@ -44,3 +44,23 @@ describe('SlashCommandProvider 外部命令', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('文档属性（YAML 头部）命令', () => {
+  it('在文档开头插入头部并把光标放进去；已有头部时只移动光标', () => {
+    const provider = new SlashCommandProvider(markdownSchema);
+    const command = provider.getCompletions().find((completion) => completion.id === 'front-matter')!;
+    const view = fakeView('正文/sx');
+    command.apply!(view as unknown as EditorView, 3, 6);
+    expect(view.state.doc.firstChild!.type.name).toBe('front_matter');
+    expect(view.state.selection.$from.parent.type.name).toBe('front_matter');
+    expect(view.state.doc.child(1).textContent).toBe('正文');
+
+    view.dispatch(view.state.tr.insertText('a: 1'));
+    view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)).insertText('/sx'));
+    const end = view.state.selection.from;
+    command.apply!(view as unknown as EditorView, end - 3, end);
+    expect(view.state.doc.childCount).toBe(2);
+    expect(view.state.selection.$from.parent.type.name).toBe('front_matter');
+    expect(view.state.selection.from).toBe(1 + 'a: 1'.length);
+  });
+});

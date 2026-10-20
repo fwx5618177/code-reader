@@ -36,6 +36,19 @@ function tableCellSpec(tag: 'th' | 'td'): NodeSpec {
 
 /** 文档节点扩展 */
 const EXTRA_NODES: Record<string, NodeSpec> = {
+  // 文档开头的 YAML 头部（---…---，Obsidian 的“属性”）：只能是文档的第一个块，内容按纯文本编辑
+  front_matter: {
+    content: 'text*',
+    marks: '',
+    code: true,
+    defining: true,
+    isolating: true,
+    parseDOM: [{ tag: 'pre[data-front-matter]', preserveWhitespace: 'full' }],
+    toDOM() {
+      return ['pre', { 'data-front-matter': '', class: 'front-matter' }, ['code', 0]];
+    },
+  },
+
   table: {
     content: 'table_row+',
     group: 'block',
@@ -159,6 +172,9 @@ const EXTRA_MARKS: Record<string, MarkSpec> = {
  */
 export function createMarkdownSchema(): Schema {
   let nodes = addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block');
+
+  // 文档：可选的 YAML 头部在最前面
+  nodes = nodes.update('doc', { ...nodes.get('doc')!, content: 'front_matter? block+' });
 
   // 代码块：记录语言（对应 ```lang）
   nodes = nodes.update('code_block', {

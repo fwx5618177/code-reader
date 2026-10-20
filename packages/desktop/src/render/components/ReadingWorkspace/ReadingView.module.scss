@@ -562,6 +562,7 @@ $outline-width: 248px;
     border-bottom: 1px dashed var(--accent-primary-alpha);
   }
 
+  @include front-matter;
   @include wiki-embed;
 
   strong {

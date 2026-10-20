@@ -149,6 +149,23 @@ describe('回车转换', () => {
     expect(block.type.name).toBe('code_block');
     expect(block.attrs.language).toBe('ts');
   });
+
+  it('文档开头 --- 回车生成 YAML 头部，其他位置的 --- 回车不变', () => {
+    const editor = createEditor('');
+    type(editor, '---');
+    expect(press(editor, 'Enter')).toBe(true);
+    expect(editor.state.doc.firstChild!.type.name).toBe('front_matter');
+    type(editor, 'title: 周报');
+    expect(press(editor, 'Enter')).toBe(true);
+    type(editor, 'tags: [a]');
+    expect(markdown(editor)).toBe('---\ntitle: 周报\ntags: [a]\n---\n');
+
+    const second = createEditor('正文\n\n');
+    type(second, '---');
+    press(second, 'Enter');
+    expect(second.state.doc.firstChild!.type.name).toBe('paragraph');
+    second.destroy();
+  });
 });
 
 describe('实时预览', () => {

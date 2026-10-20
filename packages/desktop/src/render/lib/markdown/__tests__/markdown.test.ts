@@ -38,6 +38,7 @@ describe('Markdown 往返', () => {
     块级公式: '$$\n\\int_0^1 x\\,dx\n$$\n',
     双向链接: '参见 [[文档 A]] 和 [[文档 B|别名]]\n',
     表格: '| 名称 | 数量 |\n| :--- | ---: |\n| 苹果 | 3 |\n',
+    YAML头部: '---\ntitle: 周报\ntags: [工作, 复盘]\n---\n\n# 正文\n',
   };
 
   for (const [name, markdown] of Object.entries(samples)) {
@@ -85,6 +86,16 @@ describe('Markdown 往返', () => {
   it('中文软换行不引入空格', () => {
     expect(parseMarkdown('第一行\n第二行').textContent).toBe('第一行第二行');
     expect(parseMarkdown('first\nsecond').textContent).toBe('first second');
+  });
+
+  it('YAML 头部只在文档开头识别，不会变成分割线与标题；未闭合时按普通内容', () => {
+    const doc = parseMarkdown('---\na: 1\n---\n正文\n');
+    expect(doc.firstChild!.type.name).toBe('front_matter');
+    expect(doc.firstChild!.textContent).toBe('a: 1');
+    expect(roundTrip('---\na: 1\n---\n正文\n')).toBe('---\na: 1\n---\n\n正文\n');
+    expect(parseMarkdown('正文\n\n---\na: 1\n---\n').firstChild!.type.name).toBe('paragraph');
+    expect(parseMarkdown('---\na: 1\n').firstChild!.type.name).toBe('horizontal_rule');
+    expect(roundTrip('---\n---\n正文\n')).toBe('---\n---\n\n正文\n');
   });
 });
 

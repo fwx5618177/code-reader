@@ -38,6 +38,11 @@ const baseNodes = defaultMarkdownSerializer.nodes;
 const serializer: MarkdownSerializer = new MarkdownSerializer(
   {
     ...baseNodes,
+    front_matter(state, node) {
+      const yaml = node.textContent;
+      state.write(`---\n${yaml}${yaml && !yaml.endsWith('\n') ? '\n' : ''}---`);
+      state.closeBlock(node);
+    },
     code_block(state, node) {
       const fence = fenceFor(node.textContent);
       state.write(fence + (node.attrs.language || '') + '\n');
@@ -162,7 +167,10 @@ function sameListMarker(a: PMNode, b: PMNode): boolean {
 export function serializeMarkdown(doc: PMNode): string {
   const parts: string[] = [];
   let previous: PMNode | null = null;
-  doc.forEach((child) => {
+  doc.forEach((child, _offset, index) => {
+    // 只有 YAML 头部时，文档结构要求的空段落不输出
+    const filler = index === 1 && doc.childCount === 2 && previous?.type === markdownSchema.nodes.front_matter;
+    if (filler && child.type === markdownSchema.nodes.paragraph && child.content.size === 0) return;
     let block = child;
     if (previous && sameListMarker(previous, block)) {
       block = withAlternateMarker(block);

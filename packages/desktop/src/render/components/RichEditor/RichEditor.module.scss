@@ -491,6 +491,7 @@
   }
 
   // 块级嵌入：只读显示被引用的内容，点击正文选中整个嵌入
+  @include front-matter;
   @include wiki-embed;
 
   :global(.wiki-embed-node.ProseMirror-selectednode) > :global(.wiki-embed) {
@@ -1616,6 +1617,7 @@ $page-rule-rows: repeating-linear-gradient(
     cursor: pointer;
   }
 
+  @include front-matter;
   @include wiki-embed;
 }
 

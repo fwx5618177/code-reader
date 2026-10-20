@@ -531,6 +531,39 @@ $z-toast: 700;
   backdrop-filter: blur(var(--overlay-blur));
 }
 
+// 文档开头的 YAML 头部（文档属性）：编辑器、预览与阅读视图共用
+@mixin front-matter {
+  :global(.front-matter) {
+    position: relative;
+    margin: 0 0 var(--spacing-4);
+    padding: var(--spacing-6) var(--spacing-4) var(--spacing-3);
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-sm);
+    line-height: 1.6;
+    color: var(--text-secondary);
+    background-color: var(--bg-secondary);
+    border: 1px dashed var(--border-primary);
+    border-radius: var(--radius-md);
+    white-space: pre-wrap;
+
+    &::before {
+      content: '文档属性 · YAML';
+      position: absolute;
+      top: var(--spacing-1);
+      left: var(--spacing-4);
+      font-size: var(--font-size-xs);
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    code {
+      padding: 0;
+      font: inherit;
+      background: none;
+    }
+  }
+}
+
 // 块级嵌入（类名由 lib/markdown/html.ts 生成）：编辑器、预览与阅读视图共用
 @mixin wiki-embed {
   :global(.wiki-embed) {

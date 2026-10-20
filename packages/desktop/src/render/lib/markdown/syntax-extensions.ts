@@ -3,7 +3,8 @@
 // - 数学公式：行内 $…$、块级 $$…$$
 // - 双向链接：[[目标]] / [[目标#标题|别名]]；独占一行的 ![[目标#标题]] 为块级嵌入
 // - 中日韩文字之间的软换行不产生空格
-// 任务列表 - [ ] / - [x] 由解析器的 taskLists 选项识别（list_item_open 的 meta.checked）
+// 任务列表 - [ ] / - [x] 由解析器的 taskLists 选项识别（list_item_open 的 meta.checked）；
+// 文档开头的 YAML 头部由 frontMatter 选项识别（front_matter token 的 meta 为 YAML 文本）
 // ================================
 
 import type { BlockExtension, InlineExtension, MarkdownItToken } from '@code-reader/markdown-parser';
@@ -151,10 +152,14 @@ function removeCjkSoftbreaks(children: MarkdownItToken[]): void {
   }
 }
 
-/** 解析后的统一处理：块级公式去掉首尾空白，中日韩文字之间的软换行不产生空格 */
+/**
+ * 解析后的统一处理：块级公式去掉首尾空白，中日韩文字之间的软换行不产生空格；
+ * YAML 头部的文本放入 content（prosemirror-markdown 从 content 创建文本节点）
+ */
 export function finalizeTokens(tokens: MarkdownItToken[]): MarkdownItToken[] {
   for (const token of tokens) {
     if (token.type === 'math_block') token.content = token.content.trim();
+    else if (token.type === 'front_matter') token.content = token.meta as string;
     else if (token.type === 'inline' && token.children) removeCjkSoftbreaks(token.children);
   }
   return tokens;

@@ -436,15 +436,25 @@ function createTableNode(schema: Schema, headers: string[]) {
  * - ```lang → 代码块
  * - $$ → 块级公式（立即进入编辑）
  * - | a | b | → 表格
+ * - 文档第一段为 --- → YAML 头部（与 Typora 相同）
  */
 export function createBlockEnterKeymap(schema: Schema): Plugin {
-  const { code_block: codeBlock, math_block: mathBlock, table } = schema.nodes;
+  const { code_block: codeBlock, math_block: mathBlock, table, front_matter: frontMatter } = schema.nodes;
 
   return keymap({
     Enter: (state: EditorState, dispatch?: (tr: Transaction) => void): boolean => {
       const { $from, empty } = state.selection;
       if (!empty || $from.parent.type.name !== 'paragraph') return false;
       const text = $from.parent.textContent;
+
+      if (frontMatter && text.trim() === '---' && $from.depth === 1 && $from.index(0) === 0) {
+        if (dispatch) {
+          const tr = state.tr.replaceWith($from.before(), $from.after(), frontMatter.create());
+          tr.setSelection(TextSelection.create(tr.doc, 1));
+          dispatch(tr.scrollIntoView());
+        }
+        return true;
+      }
 
       if (codeBlock) {
         const { isMatch, language } = parseCodeFence(text);
