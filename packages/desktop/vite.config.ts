@@ -34,7 +34,7 @@ function electronMainPlugin(): Plugin {
       target: 'node18',
       sourcemap: isDev,
       minify: !isDev,
-      external: ['electron', 'better-sqlite3'],
+      external: ['electron', 'better-sqlite3', 'electron-updater'],
     };
 
     // Build main process (ESM)

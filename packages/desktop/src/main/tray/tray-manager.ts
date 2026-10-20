@@ -1,4 +1,14 @@
-import { Tray, Menu, nativeImage, app, BrowserWindow, nativeTheme, NativeImage, ipcMain } from 'electron';
+import {
+  Tray,
+  Menu,
+  nativeImage,
+  app,
+  BrowserWindow,
+  nativeTheme,
+  NativeImage,
+  ipcMain,
+  autoUpdater,
+} from 'electron';
 import { buildRecentSubmenu, normalizeRecentDocuments, type RecentDocument } from './recent-menu';
 
 /**
@@ -24,6 +34,12 @@ export class TrayManager {
     app.on('before-quit', () => {
       this.isQuitting = true;
     });
+    // 更新重启时 Electron 先关闭全部窗口再退出，此时不能再把主窗口“关闭到托盘”，否则更新卡住（仅 macOS 会隐藏到托盘）
+    if (process.platform === 'darwin') {
+      autoUpdater.on('before-quit-for-update', () => {
+        this.isQuitting = true;
+      });
+    }
 
     // 单例构造时注册一次（initialize 可能随窗口重建多次调用）
     ipcMain.on('tray:set-recent-documents', (_event, payload: unknown) => {

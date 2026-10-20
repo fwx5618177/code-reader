@@ -1,8 +1,9 @@
 // ================================
 // 打包前整理应用目录（electron-builder 的 directories.app）
-// 渲染进程与主进程都已由 Vite / esbuild 打包进 dist，运行时只有原生模块 better-sqlite3 需要随应用分发。
-// pnpm 的隔离式 node_modules 让 electron-builder 找不到 better-sqlite3 的间接依赖（bindings、prebuild-install），
-// 因此在 .app-stage 中放入 dist 与只声明 better-sqlite3 的 package.json，用 npm 安装扁平的生产依赖，
+// 渲染进程与主进程都已由 Vite / esbuild 打包进 dist，运行时只有主进程标记为 external 的依赖需要随应用分发：
+// 原生模块 better-sqlite3，以及自动更新的 electron-updater。
+// pnpm 的隔离式 node_modules 让 electron-builder 找不到它们的间接依赖（如 bindings、prebuild-install），
+// 因此在 .app-stage 中放入 dist 与只声明这些依赖的 package.json，用 npm 安装扁平的生产依赖，
 // 再由 electron-builder 按目标平台与架构重建原生模块。
 //
 // 用法：node scripts/stage-app.mjs（版本号默认取 package.json，可用环境变量 APP_VERSION 覆盖，如发布标签 v1.2.0）
@@ -17,8 +18,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const stage = join(root, '.app-stage');
 const dist = join(root, 'dist');
 
-/** 随应用分发的运行时依赖（主进程打包时标记为 external 的原生模块） */
-const RUNTIME_DEPENDENCIES = ['better-sqlite3'];
+/** 随应用分发的运行时依赖（与 vite.config.ts 中主进程的 external 一致，electron 除外） */
+const RUNTIME_DEPENDENCIES = ['better-sqlite3', 'electron-updater'];
 
 if (!existsSync(join(dist, 'main', 'index.mjs'))) {
   console.error('[stage-app] 未找到 dist/main/index.mjs，请先运行 pnpm build');

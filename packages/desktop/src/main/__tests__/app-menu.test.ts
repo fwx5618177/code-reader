@@ -39,6 +39,16 @@ describe('应用菜单', () => {
     expect(send.mock.calls).toEqual([[HELP_EVENTS.openGuide], [HELP_EVENTS.openStart]]);
     // 没有聚焦窗口时什么也不做
     expect(() => guide!.click!({} as never, undefined, {} as never)).not.toThrow();
+    // 未提供更新入口（开发环境）时只有这两项
+    expect(helpItems(buildAppMenuTemplate(true))).toHaveLength(2);
+  });
+
+  it('提供更新入口时，帮助菜单末尾加分隔线与“检查更新…”', () => {
+    const checkForUpdates = vi.fn();
+    const items = helpItems(buildAppMenuTemplate(false, { checkForUpdates }));
+    expect(items.map((item) => item.type ?? item.label)).toEqual(['使用指南', '从这里开始', 'separator', '检查更新…']);
+    items[3]!.click!({} as never, undefined, {} as never);
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
   });
 
   it('installAppMenu 设置为应用菜单', () => {

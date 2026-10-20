@@ -1,7 +1,7 @@
 // ================================
 // 应用菜单（菜单栏）
 // 沿用 Electron 默认菜单的标准角色（应用、文件、编辑、显示、窗口），只把“帮助”换成应用自己的入口：
-// 使用指南与“从这里开始”。菜单项把动作推送给触发它的窗口，由渲染进程打开对应界面。
+// 使用指南与“从这里开始”，以及打包后的“检查更新…”。菜单项把动作推送给触发它的窗口，由渲染进程打开对应界面。
 // F1 由渲染进程的全局快捷键处理，菜单只显示快捷键、不注册（避免两处同时响应）
 // ================================
 
@@ -13,7 +13,16 @@ export const HELP_EVENTS = {
   openStart: 'help:open-start',
 } as const;
 
-export function buildAppMenuTemplate(isMac: boolean): MenuItemConstructorOptions[] {
+export interface AppMenuActions {
+  /** 自动更新可用时（打包后）提供；不提供则不显示“检查更新…” */
+  checkForUpdates?: () => void;
+}
+
+export function buildAppMenuTemplate(
+  isMac: boolean,
+  actions: AppMenuActions = {}
+): MenuItemConstructorOptions[] {
+  const { checkForUpdates } = actions;
   return [
     ...(isMac ? [{ role: 'appMenu' } as const] : []),
     { role: 'fileMenu' },
@@ -34,11 +43,14 @@ export function buildAppMenuTemplate(isMac: boolean): MenuItemConstructorOptions
           label: '从这里开始',
           click: (_item, window) => window?.webContents.send(HELP_EVENTS.openStart),
         },
+        ...(checkForUpdates
+          ? [{ type: 'separator' } as const, { label: '检查更新…', click: () => checkForUpdates() }]
+          : []),
       ],
     },
   ];
 }
 
-export function installAppMenu(isMac: boolean): void {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenuTemplate(isMac)));
+export function installAppMenu(isMac: boolean, actions?: AppMenuActions): void {
+  Menu.setApplicationMenu(Menu.buildFromTemplate(buildAppMenuTemplate(isMac, actions)));
 }

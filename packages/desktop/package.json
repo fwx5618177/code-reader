@@ -64,6 +64,7 @@
     "@tesseract.js-data/eng": "1.0.0",
     "better-sqlite3": "^11.3.0",
     "diff-match-patch": "^1.0.5",
+    "electron-updater": "^6.8.9",
     "fossil-delta": "^2.0.0",
     "fs-extra": "^11.3.0",
     "jszip": "^3.10.2",

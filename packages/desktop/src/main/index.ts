@@ -33,6 +33,7 @@ import { cleanupTransferHandlers, registerTransferHandlers } from './transfer/fi
 import { cleanupOrganizeHandlers, getOrganizeScheduler, registerOrganizeHandlers } from './agent/organize-schedule';
 import { initializeTray } from './tray/tray-manager';
 import { installAppMenu } from './app-menu';
+import { setupAutoUpdate, stopAutoUpdate } from './updater';
 import {
   registerFlushHandlers,
   cleanupFlushHandlers,
@@ -539,6 +540,7 @@ async function cleanup() {
     cleanupTransferHandlers();
     cleanupSyncHandlers();
     cleanupFlushHandlers();
+    stopAutoUpdate();
 
     console.log('[Main] Cleanup complete');
   } catch (error) {
@@ -548,10 +550,14 @@ async function cleanup() {
 
 // 应用准备就绪时创建窗口
 app.whenReady().then(async () => {
-  installAppMenu(platform.id === 'mac');
+  const updates = setupAutoUpdate();
+  installAppMenu(platform.id === 'mac', {
+    checkForUpdates: updates ? () => void updates.checkNow() : undefined,
+  });
   setupIPC();
   await initializeServices();
   createWindow();
+  updates?.start();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
