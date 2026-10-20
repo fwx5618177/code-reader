@@ -91,6 +91,7 @@ export {
   SlashCommandProvider,
   WikiLinkCompletionProvider,
   type CompletionBlockSource,
+  type CompletionLinkTarget,
   type ExternalSlashCommand,
 } from './completion';
 export { createTableKeymap } from './table-keymap';

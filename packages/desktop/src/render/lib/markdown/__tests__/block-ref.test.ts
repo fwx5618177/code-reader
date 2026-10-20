@@ -316,7 +316,7 @@ describe('[[文档#^ 块补全', () => {
     };
     return {
       assignId,
-      provider: new WikiLinkCompletionProvider(markdownSchema, () => ['笔记'], () => [], source),
+      provider: new WikiLinkCompletionProvider(markdownSchema, () => [{ title: '笔记', aliases: [] }], () => [], source),
     };
   }
 
@@ -398,7 +398,7 @@ describe('[[文档#^ 块补全', () => {
   it('其他文档中没有 ID 的代码块：请求在其后写回 ID', () => {
     const blocks = summarizeBlocks('```js\nconst a = 1;\n```\n');
     const assignId = vi.fn();
-    const provider = new WikiLinkCompletionProvider(markdownSchema, () => ['代码'], () => [], {
+    const provider = new WikiLinkCompletionProvider(markdownSchema, () => [{ title: '代码', aliases: [] }], () => [], {
       isCurrent: () => false,
       blocks: () => blocks,
       assignId,

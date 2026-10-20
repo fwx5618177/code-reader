@@ -97,6 +97,8 @@ export class LinkIndex {
   private outgoing = new Map<string, WikiLinkReference[]>();
   /** 条目 ID → 规范化后的别名 */
   private aliasKeys = new Map<string, string[]>();
+  /** 条目 ID → 别名原文（[[ 补全显示用） */
+  private aliasNames = new Map<string, string[]>();
 
   constructor(private readonly cache: LinkParseCache = new Map()) {}
 
@@ -117,6 +119,7 @@ export class LinkIndex {
     const alive = new Set<string>();
     this.outgoing = new Map();
     this.aliasKeys = new Map();
+    this.aliasNames = new Map();
     const byAlias = new Map<string, KnowledgeItem>();
     for (const item of items) {
       alive.add(item.id);
@@ -131,6 +134,7 @@ export class LinkIndex {
       }
       if (entry.links.length > 0) this.outgoing.set(item.id, entry.links);
       if (entry.aliases.length === 0) continue;
+      this.aliasNames.set(item.id, entry.aliases);
       const keys = entry.aliases.map(normalizeLinkTarget).filter(Boolean);
       this.aliasKeys.set(item.id, keys);
       for (const key of keys) {
@@ -155,6 +159,11 @@ export class LinkIndex {
   /** 条目的文档属性别名（规范化后） */
   aliasesOf(itemId: string): readonly string[] {
     return this.aliasKeys.get(itemId) ?? [];
+  }
+
+  /** 条目的文档属性别名（原文） */
+  aliasNamesOf(itemId: string): readonly string[] {
+    return this.aliasNames.get(itemId) ?? [];
   }
 
   /** 条目的出链 */

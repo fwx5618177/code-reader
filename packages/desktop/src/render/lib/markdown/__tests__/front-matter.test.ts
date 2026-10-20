@@ -157,5 +157,8 @@ describe('别名参与双向链接解析', () => {
     expect(index.resolve('线性代数')?.id).toBe('c');
     expect(index.backlinks('a').map((link) => link.sourceId)).toEqual(['b', 'b']);
     expect(index.resolvedTargets('b')).toEqual(['a']);
+    // [[ 补全显示别名原文
+    expect(index.aliasNamesOf('a')).toEqual(['ML', '线性代数']);
+    expect(index.aliasNamesOf('c')).toEqual([]);
   });
 });

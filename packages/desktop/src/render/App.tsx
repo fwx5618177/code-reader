@@ -856,10 +856,19 @@ const App: React.FC = () => {
     [linkIndex, kb.updateItem]
   );
 
-  /** 写作编辑器 [[ 补全的候选标题 */
+  /** 写作编辑器 [[ 补全的候选：文档标题与文档属性里的别名（同名文档只列一次）。
+   *  按内容生成键：只有标题或别名变了才换新数组，保存后的索引刷新不会让编辑器重新渲染 */
+  const linkTargetsKey = useMemo(() => {
+    const byTitle = new Map<string, string[]>();
+    for (const doc of documentList) {
+      const title = displayTitle(doc.title);
+      byTitle.set(title, [...new Set([...(byTitle.get(title) ?? []), ...linkIndex.aliasNamesOf(doc.id)])]);
+    }
+    return JSON.stringify([...byTitle]);
+  }, [documentList, linkIndex]);
   const linkTargets = useMemo(
-    () => [...new Set(documentList.map((doc) => displayTitle(doc.title)))],
-    [documentList]
+    () => (JSON.parse(linkTargetsKey) as [string, string[]][]).map(([title, aliases]) => ({ title, aliases })),
+    [linkTargetsKey]
   );
 
   /** Agent 浮窗中的条目标题 */

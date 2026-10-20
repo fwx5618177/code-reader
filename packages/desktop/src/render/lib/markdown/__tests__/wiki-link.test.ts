@@ -343,7 +343,7 @@ describe('[[文档# 标题补全', () => {
   };
   const provider = new WikiLinkCompletionProvider(
     markdownSchema,
-    () => ['笔记'],
+    () => [{ title: '笔记', aliases: [] }],
     (target) => headings[target] ?? []
   );
   const complete = (query: string) =>
@@ -369,5 +369,27 @@ describe('[[文档# 标题补全', () => {
     install.apply!(embed, 2, embed.state.doc.firstChild!.nodeSize - 1);
     expect(embed.state.doc.firstChild!.type.name).toBe('wiki_embed');
     expect(serializeMarkdown(embed.state.doc)).toBe('![[笔记#安装]]\n');
+  });
+});
+
+describe('[[ 别名补全', () => {
+  const provider = new WikiLinkCompletionProvider(
+    markdownSchema,
+    () => [{ title: '周报 2026', aliases: ['Weekly', '周报'] }],
+    () => []
+  );
+  const complete = (query: string) =>
+    provider.getCompletions({ trigger: '[[', query } as EditorCompletionContext);
+
+  it('别名作为候选列出，说明指向哪篇笔记；输入的正好是别名时不再提示新建', () => {
+    const items = complete('Weekly');
+    expect(items.find((item) => item.label === 'Weekly')).toMatchObject({ detail: '别名 · 周报 2026', filterText: 'Weekly' });
+    expect(items.some((item) => item.detail?.startsWith('新建'))).toBe(false);
+  });
+
+  it('选择别名插入 [[标题|别名]]', () => {
+    const editor = createEditor('见 [[Week');
+    complete('Week').find((item) => item.label === 'Weekly')!.apply!(editor, 3, editor.state.doc.firstChild!.nodeSize - 1);
+    expect(serializeMarkdown(editor.state.doc)).toBe('见 [[周报 2026|Weekly]]\n');
   });
 });

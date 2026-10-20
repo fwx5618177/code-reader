@@ -407,6 +407,12 @@ function writeBlockId(view: EditorView, slot: BlockIdSlot, id: string): Transact
   return tr;
 }
 
+/** [[ 补全的链接目标：文档标题与文档属性里的别名 */
+export interface CompletionLinkTarget {
+  title: string;
+  aliases: readonly string[];
+}
+
 /**
  * [[ 双向链接补全
  */
@@ -416,13 +422,13 @@ export class WikiLinkCompletionProvider implements EditorCompletionProvider {
 
   /**
    * @param schema 文档 Schema
-   * @param getTargets 返回可链接的文档标题（每次补全时读取最新值）
+   * @param getTargets 返回可链接的文档标题与别名（每次补全时读取最新值）
    * @param getHeadings 返回目标文档的标题（空字符串表示当前文档）
    * @param blockSource [[文档#^ 块补全（未提供时 #^ 按标题处理）
    */
   constructor(
     private readonly schema: Schema,
-    private readonly getTargets: () => string[],
+    private readonly getTargets: () => readonly CompletionLinkTarget[],
     private readonly getHeadings: (target: string) => ReadonlyArray<CompletionHeading>,
     private readonly blockSource?: CompletionBlockSource
   ) {}
@@ -440,17 +446,33 @@ export class WikiLinkCompletionProvider implements EditorCompletionProvider {
 
     const query = context.query.trim();
     const targets = this.getTargets();
-    const items: EditorCompletionItem[] = targets.map((target) => ({
-      id: `wiki:${target}`,
-      label: target,
-      insertText: '',
-      type: 'link',
-      icon: '🔗',
-      detail: '链接到文档（输入 # 选择标题）',
-      apply: (view, from, to) => this.insertLink(view, from, to, { target, heading: null, alias: null }),
-    }));
+    const items: EditorCompletionItem[] = [];
+    for (const { title, aliases } of targets) {
+      items.push({
+        id: `wiki:${title}`,
+        label: title,
+        insertText: '',
+        type: 'link',
+        icon: '🔗',
+        detail: '链接到文档（输入 # 选择标题）',
+        apply: (view, from, to) => this.insertLink(view, from, to, { target: title, heading: null, alias: null }),
+      });
+      // 别名与 Obsidian 一致插入 [[标题|别名]]：显示别名，别名之后改掉或与其他标题重名时仍指向这篇笔记
+      for (const alias of aliases) {
+        items.push({
+          id: `wiki-alias:${title}:${alias}`,
+          label: alias,
+          insertText: '',
+          type: 'link',
+          icon: '🔗',
+          detail: `别名 · ${title}`,
+          filterText: alias,
+          apply: (view, from, to) => this.insertLink(view, from, to, { target: title, heading: null, alias }),
+        });
+      }
+    }
 
-    if (query && !targets.some((target) => target === query)) {
+    if (query && !targets.some(({ title, aliases }) => title === query || aliases.includes(query))) {
       items.push(this.newLinkItem(query, { target: query, heading: null, alias: null }));
     }
     return items;

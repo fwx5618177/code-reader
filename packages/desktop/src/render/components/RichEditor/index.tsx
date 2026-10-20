@@ -34,6 +34,7 @@ import {
   createTableKeymap,
   SlashCommandProvider,
   WikiLinkCompletionProvider,
+  type CompletionLinkTarget,
   type ExternalSlashCommand,
   createBlockIdPlugin,
   extractHeadings,
@@ -144,8 +145,8 @@ export interface RichEditorProps {
   fileType?: 'markdown' | 'latex' | 'plain';
   /** 文件名（用于推断文件类型） */
   fileName?: string;
-  /** 可链接的文档标题（[[ 补全来源） */
-  linkTargets?: string[];
+  /** 可链接的文档标题与别名（[[ 补全来源） */
+  linkTargets?: readonly CompletionLinkTarget[];
   /** 点击双向链接（参数为 目标#标题 形式的引用） */
   onWikiLinkClick?: (target: string) => void;
   /** 滚动到指定标题、块或源码位置（见 RevealRequest），每个请求对象只执行一次 */
@@ -661,7 +662,7 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
   activeRef.current = active;
   const bridgeEditorRef = useRef<EditorInstance | null>(null);
 
-  const linkTargetsRef = useRef<string[]>(linkTargets ?? []);
+  const linkTargetsRef = useRef<readonly CompletionLinkTarget[]>(linkTargets ?? []);
   linkTargetsRef.current = linkTargets ?? [];
 
   const onWikiLinkClickRef = useRef(onWikiLinkClick);
