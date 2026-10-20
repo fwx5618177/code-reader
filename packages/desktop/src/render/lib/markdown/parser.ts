@@ -1,10 +1,10 @@
 // ================================
 // Markdown → ProseMirror 文档
 // 分词由 @code-reader/markdown-parser 完成（CommonMark + 表格 + ~~删除线~~ + 任务列表 + 脚注、高亮、上下标、定义列表、
-// 容器、缩写、裸网址 + 扩展语法），输出 markdown-it 兼容的 token 流，由 TokenDocumentBuilder 按规则表构建文档
+// 容器、缩写、裸网址 + 扩展语法），输出 token 流，由 TokenDocumentBuilder 按规则表构建文档
 // ================================
 
-import { MarkdownItCompatTokenizer, type MarkdownItToken as Token } from '@code-reader/markdown-parser';
+import { TokenStreamTokenizer, type MarkdownToken as Token } from '@code-reader/markdown-parser';
 import { DOMParser as PMDOMParser, type Node as PMNode } from 'prosemirror-model';
 import { finalizeTokens, markdownBlockExtensions, markdownInlineExtensions } from './syntax-extensions';
 import { markdownSchema, type CellAlign } from './schema';
@@ -26,7 +26,7 @@ function isTightList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hid
 }
 
 /**
- * 术语是否紧凑：第一条说明紧接在术语的下一行（与 markdown-it-deflist 一致按术语计）。
+ * 术语是否紧凑：第一条说明紧接在术语的下一行（按术语计）。
  * 按源码行号判断：说明有多个块时段落不会被标记为 hidden，光看 hidden 分不出来
  */
 function isTightDefinitionTerm(tokens: ReadonlyArray<Pick<Token, 'type' | 'position'>>, index: number): boolean {
@@ -45,7 +45,7 @@ function cellAlign(token: Pick<Token, 'attrGet'>): CellAlign {
   return match ? (match[1] as CellAlign) : null;
 }
 
-/** 编辑器的 Markdown 分词器：parse(markdown, env) 返回 markdown-it 兼容的 token 序列；env.key（文档 id）相同的连续解析走增量解析 */
+/** 编辑器的 Markdown 分词器：parse(markdown, env) 返回 token 序列；env.key（文档 id）相同的连续解析走增量解析 */
 export interface MarkdownTokenizer {
   parse(markdown: string, env?: { key?: string }): Token[];
 }
@@ -57,7 +57,7 @@ export interface MarkdownTokenizer {
  * taskLists 为 false 时保留列表项开头的 [ ] / [x] 文本（重命名改写需要与源码一致的行内内容）
  */
 export function createTokenizer({ taskLists = true }: { taskLists?: boolean } = {}): MarkdownTokenizer {
-  const tokenizer = new MarkdownItCompatTokenizer({
+  const tokenizer = new TokenStreamTokenizer({
     html: false,
     footnotes: true,
     taskLists,

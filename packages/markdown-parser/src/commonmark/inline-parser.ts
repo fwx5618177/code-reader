@@ -5,7 +5,7 @@
 // - 链接 / 图片：方括号栈，行内目标与标题、完整 / 折叠 / 快捷引用，链接内不再有链接
 // - 代码 span、自动链接、行内 HTML、反斜杠转义、命名与数字字符引用、软 / 硬换行
 // GFM：删除线（~ 或 ~~，前后长度相同）、脚注引用 [^id]、扩展自动链接（裸网址与邮箱）；
-// markdown-it 生态的常用语法：高亮 ==、插入 ++、上下标、行内脚注 ^[…]、缩写、排版替换、{…} 属性；
+// 常用扩展语法：高亮 ==、插入 ++、上下标、行内脚注 ^[…]、缩写、排版替换、{…} 属性；
 // 语法扩展在触发字符处先于内置语法尝试
 // ================================
 
@@ -93,7 +93,7 @@ const BARE_DOMAIN = new RegExp(
 /** GFM：链接末尾的这些标点不属于链接 */
 const TRAILING_PUNCTUATION = '?!.,:*_~';
 
-/** 上下标内容中的转义（含空格，与 markdown-it-sub / sup 相同） */
+/** 上下标内容中的转义（含空格） */
 const SCRIPT_UNESCAPE = /\\([ \\!"#$%&'()*+,./:;<=>?@[\]^_`{|}~-])/g;
 const SCRIPT_HAS_SPACE = /(^|[^\\])(\\\\)*\s/;
 
@@ -114,7 +114,7 @@ const ATTRIBUTE_TARGETS: ReadonlySet<InlineType> = new Set([
 ]);
 
 
-/** 排版替换（与 markdown-it 的 replacements 规则相同） */
+/** 排版替换规则 */
 const RARE_REPLACEMENT = /\+-|\.\.|\?\?\?\?|!!!!|,,|--/;
 const SCOPED_ABBREVIATION = /\((c|tm|r)\)/gi;
 const SCOPED_SYMBOLS: Record<string, string> = { c: '\u00A9', r: '\u00AE', tm: '\u2122' };
@@ -135,7 +135,7 @@ function typographicReplacements(text: string): string {
   return result;
 }
 
-/** 缩写的边界字符（与 markdown-it-abbr 相同：Unicode 标点、空白与部分 ASCII 符号） */
+/** 缩写的边界字符：Unicode 标点、空白与部分 ASCII 符号 */
 const ABBREVIATION_BOUNDARY = '(?:[\\p{P}\\p{Z}]|[ \\r\\n$+<=>^`|~])';
 
 function abbreviationPattern(abbreviations: ReadonlyMap<string, string>): RegExp | null {
@@ -233,7 +233,7 @@ interface Delimiter {
   originalCount: number;
   canOpen: boolean;
   canClose: boolean;
-  /** 成对分隔符（~~ == ++）奇数长度时多出的一个字符：作闭合时移到元素之后（与 markdown-it 一致） */
+  /** 成对分隔符（~~ == ++）奇数长度时多出的一个字符：作闭合时移到元素之后 */
   lone: Node | null;
   prev: Delimiter | null;
   next: Delimiter | null;
@@ -639,7 +639,7 @@ export class InlineParser {
 
   // ---------- 上下标与行内脚注 ----------
 
-  /** ~下标~ / ^上标^：内容非空且没有未转义的空白，内容按文本处理（与 markdown-it-sub / sup 一致） */
+  /** ~下标~ / ^上标^：内容非空且没有未转义的空白，内容按文本处理 */
   private parseScript(block: Node, char: '~' | '^'): boolean {
     const start = this.pos;
     if (start + 2 >= this.subject.length) return false;
@@ -985,7 +985,7 @@ export class InlineParser {
 
   private parseOpenBracket(block: Node): boolean {
     const start = this.pos;
-    // GFM 脚注引用 [^id]：只有已定义的标签才是引用（与 markdown-it-footnote、cmark-gfm 一致）
+    // GFM 脚注引用 [^id]：只有已定义的标签才是引用（与 cmark-gfm 一致）
     if (this.options.footnotes && this.subject[this.pos + 1] === '^') {
       const footnote = /^\[\^([^\]\s]+)\]/.exec(this.subject.slice(this.pos));
       if (footnote && this.context.footnotes.has(footnote[1]!)) {
@@ -1005,7 +1005,7 @@ export class InlineParser {
   private parseBang(block: Node): boolean {
     const start = this.pos;
     this.pos++;
-    // ![[…]] 等：方括号处能匹配行内扩展时，! 只是文本（与 markdown-it 一致）
+    // ![[…]] 等：方括号处能匹配行内扩展时，! 只是文本
     if (this.subject[this.pos] === '[' && !this.extensionMatchesAt(this.pos)) {
       this.pos++;
       this.pushBracket(this.text(block, '![', start), true);

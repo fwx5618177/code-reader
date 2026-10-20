@@ -227,7 +227,7 @@ export interface InlineExtension {
 
 /** 块级扩展开始时所在的位置 */
 export interface BlockExtensionContext {
-  /** 是否是列表项的第一个块（与 markdown-it 一致，列表项一般以段落开头） */
+  /** 是否是列表项的第一个块（列表项一般以段落开头） */
   firstInListItem: boolean;
 }
 
@@ -269,7 +269,7 @@ export interface CommonMarkOptions {
   html?: boolean;
   /** GFM 删除线：~text~ 或 ~~text~~ */
   strikethrough?: boolean;
-  /** 删除线是否接受单个 ~（GFM 接受；markdown-it 只接受 ~~，避免“约 ~5 分钟”误判） */
+  /** 删除线是否接受单个 ~（GFM 接受；关闭时只接受 ~~，避免“约 ~5 分钟”误判） */
   singleTildeStrikethrough?: boolean;
   /** 尖括号自动链接 <https://…>、<a@b.c> */
   autolink?: boolean;
@@ -286,11 +286,11 @@ export interface CommonMarkOptions {
   /** GFM 扩展自动链接：裸写的 www.…、http(s)://…、邮箱（按 GFM 规范处理末尾标点与括号） */
   linkify?: boolean;
   /**
-   * linkify 时也识别没有 www. 与协议的裸域名 example.com（与 markdown-it 默认的 linkify-it 模糊链接相同，
-   * 按顶级域表判断，地址补 http://）。注意 README.md 这类文件名也会被识别（.md 是摩尔多瓦的顶级域）
+   * linkify 时也识别没有 www. 与协议的裸域名 example.com（按顶级域表判断，
+   * 地址补 http://）。注意 README.md 这类文件名也会被识别（.md 是摩尔多瓦的顶级域）
    */
   linkifyBareDomains?: boolean;
-  /** 排版替换（与 markdown-it 的 replacements 相同）：(c) (r) (tm) +- .. ?.... !!!!! ,, -- --- */
+  /** 排版替换：(c) (r) (tm) +- .. ?.... !!!!! ,, -- --- */
   replacements?: boolean;
   /** 高亮 ==text== */
   mark?: boolean;
@@ -309,7 +309,7 @@ export interface CommonMarkOptions {
   /** 文档开头 --- 与 --- / ... 之间的 YAML 头部（必须闭合，未闭合时按普通内容解析） */
   frontMatter?: boolean;
   /** 标题与段落、表格单元格末尾，围栏代码块信息串末尾，行内元素（链接、图片、代码、强调）紧后的 {#id .class key=value} 属性；
-   *  列表、表格、引用等块的归属与 markdown-it-attrs 相同（见 attributes.ts） */
+   *  列表、表格、引用等块的归属见 attributes.ts */
   attributes?: boolean;
 }
 

@@ -4,7 +4,7 @@
 // ================================
 
 import type { Node as PMNode } from 'prosemirror-model';
-import type { MarkdownItToken as Token } from '@code-reader/markdown-parser';
+import type { MarkdownToken as Token } from '@code-reader/markdown-parser';
 import { blockRefId, findBlockInDoc, stripBlockMarker } from './block-ref';
 import { markdownTokenizer } from './parser';
 import { serializeMarkdown } from './serializer';

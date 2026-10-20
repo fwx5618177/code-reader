@@ -20,7 +20,7 @@ export { collectFootnotes } from './commonmark/footnotes';
 export type { FootnoteEntry } from './commonmark/footnotes';
 export { IncrementalCommonMarkParser } from './commonmark/incremental-document';
 export type { DocumentUpdate } from './commonmark/incremental-document';
-export { MarkdownItToken, toMarkdownItTokens, MarkdownItCompatTokenizer } from './commonmark';
+export { MarkdownToken, toTokenStream, TokenStreamTokenizer } from './commonmark';
 export type { TokenOptions, TokenizerOptions, TokenizerEnv } from './commonmark';
 
 export type {

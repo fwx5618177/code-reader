@@ -1,11 +1,11 @@
 # @code-reader/markdown-parser
 
-零依赖的 Markdown 解析库，桌面端编辑器用它替代了 markdown-it。包含：
+零依赖的 Markdown 解析库，桌面端编辑器的 Markdown 解析、链接提取与 HTML 导出都基于它。包含：
 
 - **CommonMark / GFM 解析器**：输出语法树，块级与行内节点都带源码中的绝对位置（偏移、行、列）。CommonMark 0.31.2 规范 652 个用例全部通过。
-- **markdown-it 兼容的 token 流**：`MarkdownItCompatTokenizer` 输出与 markdown-it 结构相同的 token，可以交给消费 markdown-it token 的工具（桌面端用自有的 token→ProseMirror 文档构建器，不再经过 prosemirror-markdown）；规范用例 652/652 与 markdown-it 逐 token 一致。
-- **常用扩展语法**：GFM 扩展自动链接（可选识别 `example.com` 这类裸域名）、脚注、定义列表、自定义容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性。token 与 markdown-it 对应插件（含 markdown-it-attrs）逐个比较一致。
-- **链接规范化与 markdown-it 相同**：主机名中的中文等字符按 IDNA 转成 `xn--`（零依赖的 Punycode），自动链接的文字把 `xn--` 与百分号编码还原。
+- **token 流**：`TokenStreamTokenizer` 输出扁平 token（`*_open` / `*_close` 成对、行内 token 在 `children` 中），桌面端用它按规则表构建 ProseMirror 文档、提取链接与块 id。
+- **常用扩展语法**：GFM 扩展自动链接（可选识别 `example.com` 这类裸域名）、脚注、定义列表、自定义容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性。
+- **链接规范化**：主机名中的中文等字符按 IDNA 转成 `xn--`（零依赖的 Punycode），自动链接的文字把 `xn--` 与百分号编码还原。
 - **语法扩展接口**：行内扩展（触发字符 + 匹配函数）与块级扩展（开始行 + 续行），用于公式、双向链接等自定义语法。
 - **HTML 渲染器**：输出与 commonmark.js 一致；默认拒绝不安全链接；支持代码高亮、扩展节点的自定义渲染。
 - **语法树级增量解析**：编辑后只重新解析受影响的顶层块，结果与整篇解析逐节点相同。
@@ -18,10 +18,10 @@
 | 项目 | 情况 |
 |------|------|
 | CommonMark 0.31.2 规范 | **652/652**，`__tests__/commonmark-spec.test.ts` 逐字比较 HTML，下限 652 |
-| 与 markdown-it 的 token 一致性 | 规范用例 **652/652**；脚注、定义列表、容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性与对应的 markdown-it 插件逐 token 一致（`markdown-it-tokens.test.ts`、`markdown-it-plugins.test.ts`），插件语法的 HTML 与 markdown-it 渲染结果逐字一致；IDN 主机名与百分号解码的链接与 markdown-it 一致 |
-| GFM 扩展自动链接 | 按 GFM 规范：规范中的扩展自动链接用例全部通过；`linkifyBareDomains` 识别裸域名，顶级域名表与 linkify-it 相同，对照用例与 markdown-it 逐 token 一致 |
+| token 流回归基准 | 规范用例 **652/652** 与扩展语法（脚注、定义列表、容器、高亮 / 插入 / 上下标、缩写、YAML 头部、排版替换、`{…}` 属性、裸域名、IDN 链接）逐 token 与冻结的参照输出 `__tests__/fixtures/reference.json` 一致（`token-stream.test.ts`、`syntax-extension-tokens.test.ts`），扩展语法与 IDN 链接的 HTML 逐字一致 |
+| GFM 扩展自动链接 | 按 GFM 规范：规范中的扩展自动链接用例全部通过；`linkifyBareDomains` 按顶级域名表识别裸域名 |
 | 增量解析 | 12 万次随机编辑（40 组文档 × 1500 次 × 2 种选项）与整篇解析逐节点相同，约 87% 只重新解析附近的块；提交的测试每次运行 3000 次 |
-| 性能（0.91M 字符，Node 24） | 语法树约 79ms；语法树加 token 约 110ms；markdown-it 约 76ms（同一台机器三次取中位数） |
+| 性能（0.91M 字符，Node 24） | 语法树约 79ms；语法树加 token 约 110ms（三次取中位数） |
 | 健壮性 | 4 万次随机输入（含全部扩展语法）不抛错，单次不超过 50ms |
 
 ## 解析与渲染
@@ -49,13 +49,13 @@ renderHtml(document);
 | `gfm` | `true` | 表格、任务列表项、脚注 |
 | `taskLists` / `footnotes` | 同 `gfm` | 单独开关任务列表项、脚注（`[^id]`、`^[行内脚注]`，按第一次引用编号，未定义的 `[^x]` 是文本） |
 | `strikethrough` | `true` | `~~删除线~~` |
-| `singleTildeStrikethrough` | `true` | 单个 `~` 也是删除线（GFM）；`false` 时与 markdown-it 一样只认 `~~` |
+| `singleTildeStrikethrough` | `true` | 单个 `~` 也是删除线（GFM）；`false` 时只认 `~~`（避免“约 ~5 分钟”误判） |
 | `html` | `true` | 识别 HTML 块与行内 HTML，关闭时按文本处理 |
 | `autolink` | `true` | 尖括号自动链接 `<https://…>`、`<a@b.c>` |
 | `linkify` | `false` | 裸写的 `www.…`、`http(s)://…`、`mailto:`、邮箱（GFM 扩展自动链接，处理末尾标点与括号） |
-| `linkifyBareDomains` | `false` | `linkify` 时也识别没有 `www.` 与协议的 `example.com`、`example.com:8080/路径`（顶级域名表与 linkify-it 相同，地址补 `http://`）。注意 `README.md` 这类文件名也会被识别（`.md` 是国家顶级域名） |
+| `linkifyBareDomains` | `false` | `linkify` 时也识别没有 `www.` 与协议的 `example.com`、`example.com:8080/路径`（按顶级域名表判断，地址补 `http://`）。注意 `README.md` 这类文件名也会被识别（`.md` 是国家顶级域名） |
 | `smartPunctuation` | `false` | 弯引号、`--` / `---` 连接号与破折号、`...` 省略号（commonmark.js 规则） |
-| `replacements` | `false` | `(c)` `(r)` `(tm)` `+-` `..` `?....` `!!!!!` `,,` `--` `---`（markdown-it 的 replacements） |
+| `replacements` | `false` | `(c)` `(r)` `(tm)` `+-` `..` `?....` `!!!!!` `,,` `--` `---` |
 | `hardBreaks` | `false` | 段落内的普通换行也输出 `<br />` |
 | `mark` / `insert` | `false` | `==高亮==` / `++插入++` |
 | `subscript` / `superscript` | `false` | `H~2~O` / `2^10^`（内容不能有空白；开启下标后单个 `~` 不再是删除线） |
@@ -63,7 +63,7 @@ renderHtml(document);
 | `definitionLists` | `false` | 术语一行，下一行（或隔一个空行）以 `:` 或 `~` 开头的说明 |
 | `containers` | `false` | `::: 名称 参数` … `:::`；`true` 接受任意名称，数组只接受其中的名称 |
 | `frontMatter` | `false` | 文档开头 `---` 与 `---` / `...` 之间的 YAML（必须闭合，未闭合按普通内容） |
-| `attributes` | `false` | `{#id .class key=value}`：标题、段落、表格单元格末尾，围栏代码块信息串末尾（` ```py {.c} `），链接 / 图片 / 代码 / 强调之后；列表项第一个块末尾属于列表项，单独一行写在列表项第一段之后属于列表，表格 / 列表之后只有 `{…}` 的段落属于该表格 / 列表，段落最后单独一行的 `{…}` 属于在此结束的最外层块，`--- {#id}` 是带属性的分隔线（与 markdown-it-attrs 相同） |
+| `attributes` | `false` | `{#id .class key=value}`：标题、段落、表格单元格末尾，围栏代码块信息串末尾（` ```py {.c} `），链接 / 图片 / 代码 / 强调之后；列表项第一个块末尾属于列表项，单独一行写在列表项第一段之后属于列表，表格 / 列表之后只有 `{…}` 的段落属于该表格 / 列表，段落最后单独一行的 `{…}` 属于在此结束的最外层块，`--- {#id}` 是带属性的分隔线；任何一项不合法时整个 `{…}` 保留为文本（如 R Markdown 的 ` ```{r} `） |
 | `maxNestingDepth` | `100` | 引用、列表、脚注、容器的最大嵌套层数，超过时其余部分按文本处理并给出警告 |
 | `inlineExtensions` / `blockExtensions` | `[]` | 语法扩展，见下文 |
 
@@ -79,12 +79,12 @@ renderHtml(document, {
 });
 ```
 
-被引用的脚注按 markdown-it-footnote 的结构输出在文末（带回链）；YAML 头部不输出。
+被引用的脚注按第一次引用的顺序编号、输出在文末（`<section class="footnotes">`，带回链）；YAML 头部不输出。
 
 ## 语法扩展
 
 ```typescript
-import { MarkdownItCompatTokenizer, type InlineExtension, type BlockExtension } from '@code-reader/markdown-parser';
+import { TokenStreamTokenizer, type InlineExtension, type BlockExtension } from '@code-reader/markdown-parser';
 
 // 行内：在触发字符处先于内置语法尝试，匹配的文本整体成为一个节点，内部不再解析
 const math: InlineExtension = {
@@ -105,27 +105,25 @@ const mathBlock: BlockExtension = {
   next: (line) => (line.trim() === '$$' ? { closed: true } : { content: line, closed: false }),
 };
 
-const tokens = new MarkdownItCompatTokenizer({ inlineExtensions: [math], blockExtensions: [mathBlock] }).parse(source);
+const tokens = new TokenStreamTokenizer({ inlineExtensions: [math], blockExtensions: [mathBlock] }).parse(source);
 // 扩展 token 的 type 为扩展名，content 为内容，meta 为扩展返回的 data
 ```
 
 桌面端的公式（`$…$`、`$$…$$`）、双向链接（`[[…]]`）与块级嵌入（`![[…]]`）都是用这两个接口实现的（`packages/desktop/src/render/lib/markdown/syntax-extensions.ts`）。
 
-## markdown-it 兼容的 token 流
+## token 流
 
 ```typescript
-import { MarkdownParser } from 'prosemirror-markdown';
-import { MarkdownItCompatTokenizer } from '@code-reader/markdown-parser';
+import { TokenStreamTokenizer, type MarkdownToken } from '@code-reader/markdown-parser';
 
-const tokenizer = new MarkdownItCompatTokenizer({ html: false, singleTildeStrikethrough: false });
-const parser = new MarkdownParser(schema, tokenizer as never, tokenSpecs);
+const tokens: MarkdownToken[] = new TokenStreamTokenizer({ html: false, singleTildeStrikethrough: false }).parse(text);
 ```
 
-与 markdown-it 相同的字段：`type`、`tag`、`nesting`、`level`、`map`、`content`、`markup`、`info`、`attrs`、`meta`、`children`、`hidden`。多出的 `position` 是 token 在源码中的绝对位置（行内 token 也有）。只想要 token 时也可以对已有语法树调用 `toMarkdownItTokens(source, document)`。
+字段：`type`、`tag`、`nesting`（1 开、-1 闭、0 自闭合）、`level`、`map`（0 起的 `[起始行, 结束行)`）、`content`、`markup`、`info`、`attrs`、`meta`、`children`、`hidden`，以及 `position`（源码中的绝对位置，行内 token 也有）。已有语法树时可以直接调用 `toTokenStream(source, document)`。桌面端的消费方式见 `packages/desktop/src/render/lib/markdown/token-document-builder.ts`。
 
 ```typescript
 // 编辑器用：保留源码，保存时不丢内容
-const tokenizer = new MarkdownItCompatTokenizer({ footnotes: true, abbreviations: true, preserveSource: true });
+const tokenizer = new TokenStreamTokenizer({ footnotes: true, abbreviations: true, preserveSource: true });
 
 // 同一篇文档反复解析（逐键输入）：env.key 相同的连续解析走语法树级增量解析，结果与整篇解析相同
 tokenizer.parse(text, { key: documentId });
@@ -165,14 +163,6 @@ const result = parser.parseIncremental(parser.applyEdit(text, edit), edit);
 
 for await (const token of parseMarkdownStream(chunks)) { /* 逐块读取、每块同步解析 */ }
 ```
-
-## 与 markdown-it 的差别
-
-- 语法树带每个节点的源码位置；markdown-it 只有块级 `map`（行范围）。
-- 自动链接默认按 GFM 规范；裸域名（如 `example.com`）需要开启 `linkifyBareDomains`。
-- YAML 头部必须闭合（markdown-it-front-matter 在没有结束行时把整篇当作头部）。
-- `{…}` 属性更严格：任何一项不合法时整体保留为文本（如 R Markdown 的 ` ```{r} `、正文中的 `{不是 属性}`），markdown-it-attrs 会把它们当作属性。语法树与 token 的文字中不含 `{…}`。
-- 没有 markdown-it 的插件机制（`md.use`）；自定义语法用上面的语法扩展接口。
 
 ## 子路径
 

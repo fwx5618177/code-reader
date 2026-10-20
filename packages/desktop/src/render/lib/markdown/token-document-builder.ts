@@ -1,12 +1,10 @@
 // ================================
 // token 流 → ProseMirror 文档
-// 输入是 @code-reader/markdown-parser 输出的 markdown-it 兼容 token（成对的 xxx_open / xxx_close，或单个 token），
+// 输入是 @code-reader/markdown-parser 输出的 token 流（成对的 xxx_open / xxx_close，或单个 token），
 // 规则表把 token 类型映射为块节点、行内节点、标记或忽略。
-// 规则表的写法与 prosemirror-markdown 的 MarkdownParser 相同，但不依赖它——它在模块顶层创建 markdown-it 实例，
-// 引入它就会把 markdown-it 打进渲染包
 // ================================
 
-import type { MarkdownItToken as Token } from '@code-reader/markdown-parser';
+import type { MarkdownToken as Token } from '@code-reader/markdown-parser';
 import { Mark, type Attrs, type MarkType, type Node as PMNode, type NodeType, type Schema } from 'prosemirror-model';
 
 /** 一种 token 的处理规则：node / block / mark / ignore 四选一 */

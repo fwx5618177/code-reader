@@ -1,12 +1,10 @@
 // ================================
 // CommonMark 0.31.2 规范一致性：652 个官方用例逐个解析并渲染为 HTML，与期望输出逐字比较。
-// markdown-it（commonmark 预设）同样跑一遍作为测试工具自检，应为 100%。
 // 通过率设有下限（PASS_FLOOR），只能提高不能回退；运行时打印各章节通过率
 // ================================
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import MarkdownIt from 'markdown-it';
 import { describe, expect, it } from 'vitest';
 import { parseCommonMark, renderHtml } from '../src';
 
@@ -60,11 +58,6 @@ function run(render: (markdown: string) => string) {
 }
 
 describe('CommonMark 0.31.2 规范', () => {
-  it('测试工具自检：markdown-it 全部通过', () => {
-    const md = new MarkdownIt('commonmark');
-    expect(run((markdown) => md.render(markdown)).failed.map((example) => example.example)).toEqual([]);
-  });
-
   it(`通过率不低于下限`, () => {
     const { passed, sections, failed } = run(renderOurs);
     const rate = ((passed / examples.length) * 100).toFixed(1);

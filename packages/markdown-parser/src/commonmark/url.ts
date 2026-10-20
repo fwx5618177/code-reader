@@ -1,5 +1,5 @@
 // ================================
-// @code-reader/markdown-parser - 链接地址规范化（与 markdown-it 的 normalizeLink / normalizeLinkText 相同，零依赖）
+// @code-reader/markdown-parser - 链接地址规范化（IDN 主机名转 Punycode 并百分号编码；显示文字反向还原，零依赖）
 // - normalizeLink：http(s) / mailto / 无协议地址的主机名中的非 ASCII 字符按 IDNA 转成 xn--（Punycode），其余百分号编码
 // - normalizeLinkText：自动链接显示的文字中，xn-- 主机名还原为 Unicode，百分号编码还原为字符（保留 ;/?:@&=+$,#%）
 // 主机名的定位规则与 mdurl.parse 相同；Punycode 按 RFC 3492 实现
@@ -34,7 +34,7 @@ export function normalizeUrl(url: string): string {
 const BAD_PROTOCOL = /^(?:vbscript|javascript|file|data):/;
 const GOOD_DATA = /^data:image\/(?:gif|png|jpeg|webp);/;
 
-/** 与 markdown-it 默认规则相同：拒绝 javascript: vbscript: file: 与 data:（常见图片格式的 data: 除外） */
+/** 默认规则：拒绝 javascript: vbscript: file: 与 data:（常见图片格式的 data: 除外） */
 export function isSafeUrl(url: string): boolean {
   const normalized = url.trim().toLowerCase();
   return !BAD_PROTOCOL.test(normalized) || GOOD_DATA.test(normalized);
@@ -153,7 +153,7 @@ export function domainToUnicode(domain: string): string {
 
 const PROTOCOL = /^([a-z0-9.+-]+:)/i;
 const SLASHED_PROTOCOLS = new Set(['http:', 'https:', 'ftp:', 'gopher:', 'file:']);
-/** 只有这些协议（及没有协议的 //host）的主机名做 IDNA 转换（与 markdown-it 相同，区分大小写） */
+/** 只有这些协议（及没有协议的 //host）的主机名做 IDNA 转换（区分大小写） */
 const RECODE_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 const NON_HOST_CHARS = "%/?;#'{}|\\^`<>\" \r\n\t";
 const HOST_PART = /^[+a-z0-9A-Z_-]{0,63}$/;
@@ -214,7 +214,7 @@ function recodeHost(url: string, recode: (host: string) => string): string {
   }
 }
 
-/** 链接地址：主机名 IDNA 编码后百分号编码（markdown-it 的 normalizeLink） */
+/** 链接地址：主机名 IDNA 编码后百分号编码 */
 export function normalizeLink(url: string): string {
   const trimmed = url.trim();
   return normalizeUrl(/[^\0-\x7F]/.test(trimmed) ? recodeHost(trimmed, domainToAscii) : trimmed);
@@ -253,7 +253,7 @@ function percentDecode(text: string): string {
 }
 
 /**
- * 自动链接显示的文字（url 为链接地址，text 为源码中的文字）。与 markdown-it 一致：裸网址（linkify）的地址可能补了
+ * 自动链接显示的文字（url 为链接地址，text 为源码中的文字）。裸网址（linkify）的地址可能补了
  * http:// 或 mailto:，带上补全的前缀还原后再去掉；尖括号里的邮箱不带前缀（因此主机名不还原）
  */
 export function autolinkLabel(url: string, text: string, linkify: boolean): string {
@@ -261,7 +261,7 @@ export function autolinkLabel(url: string, text: string, linkify: boolean): stri
   return normalizeLinkText(prefix + text).slice(prefix.length);
 }
 
-/** 自动链接显示的文字：xn-- 主机名还原为 Unicode，百分号编码还原（markdown-it 的 normalizeLinkText） */
+/** 自动链接显示的文字：xn-- 主机名还原为 Unicode，百分号编码还原 */
 export function normalizeLinkText(url: string): string {
   const trimmed = url.trim();
   const decoded = /xn--/i.test(trimmed) ? recodeHost(trimmed, domainToUnicode) : trimmed;

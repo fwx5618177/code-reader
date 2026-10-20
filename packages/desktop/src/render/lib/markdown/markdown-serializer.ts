@@ -2,8 +2,7 @@
 // ProseMirror 文档 → Markdown 的序列化引擎
 // 节点规则写入文本、管理块的前缀（引用的 "> "、列表续行缩进）与块间空行；
 // 行内内容按标记的开闭输出定界符（可交换顺序的标记重新排序以减少开闭次数，强调类标记把首尾空白移到定界符外）。
-// 行为与 prosemirror-markdown 的 MarkdownSerializerState 一致（保存格式不变），但不依赖它——
-// 它在模块顶层创建 markdown-it 实例，引入它就会把 markdown-it 打进渲染包
+// 输出与此前使用的序列化实现逐字节一致（保存格式不变）
 // ================================
 
 import type { Mark, Node as PMNode } from 'prosemirror-model';

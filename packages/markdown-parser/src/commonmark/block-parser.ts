@@ -622,7 +622,7 @@ export class BlockParser {
     const first = this.indented ? '' : line.charAt(this.nextNonspace);
     let restCache: string | null = null;
     const rest = () => (restCache ??= line.slice(this.nextNonspace));
-    /** 本行会是引用中段落的惰性续行：与 markdown-it 一致，脚注与缩写定义不打断引用里的惰性续行（列表、脚注里的会打断） */
+    /** 本行会是引用中段落的惰性续行：脚注与缩写定义不打断引用里的惰性续行（列表、脚注里的会打断） */
     const lazyInQuote = () =>
       container.kind !== 'paragraph' && !this.allClosed && !this.blank && this.tip.kind === 'paragraph' && this.unmatchedQuote();
 
@@ -659,7 +659,7 @@ export class BlockParser {
       return 2;
     }
 
-    // 自定义容器 ::: 名称（与 markdown-it-container 一致，可以打断段落）
+    // 自定义容器 ::: 名称（可以打断段落）
     if (this.options.containers && first === ':' && (match = CONTAINER_OPEN.exec(rest()))) {
       const name = match[2]!.trim().split(/\s+/)[0] ?? '';
       const allowed = this.options.containers === true || this.options.containers.includes(name);
@@ -886,7 +886,7 @@ export class BlockParser {
   }
 
   /**
-   * 定义列表的说明行（: 或 ~ 后跟空白或行尾）。与 markdown-it-deflist 一致，术语是紧邻的单行段落（紧凑），
+   * 定义列表的说明行（: 或 ~ 后跟空白或行尾）。术语是紧邻的单行段落（紧凑），
    * 或隔一个空行的单行段落（松散）；紧跟在定义列表后的术语并入同一个列表，一个术语可以有多条说明。
    * 说明的续行需要缩进到标记之后两列
    */
@@ -1067,7 +1067,7 @@ export class BlockParser {
         if (block.fenced) {
           const newline = block.content.indexOf('\n');
           let info = block.content.slice(0, newline).trimStart();
-          // ```py {.cls data-x=1}：末尾的 {…} 是代码块的属性（与 markdown-it-attrs 一致，} 之后不能再有字符）
+          // ```py {.cls data-x=1}：末尾的 {…} 是代码块的属性（} 之后不能再有字符）
           const found = this.options.attributes ? trailingAttributes(info) : null;
           if (found) {
             block.attributes = found.attributes;
@@ -1227,7 +1227,7 @@ export class BlockParser {
           const node = create(BlockType.DefinitionDescription);
           const children = visitAll(block.children);
           node.marker = block.listData!.bulletChar!;
-          // 与 markdown-it-deflist 一致：术语与说明之间没有空行、说明只有一个段落时不加 <p>
+          // 术语与说明之间没有空行、说明只有一个段落时不加 <p>
           node.tight = block.listData!.tight && children.length === 1 && children[0]!.type === BlockType.Paragraph;
           node.children = children;
           return node;

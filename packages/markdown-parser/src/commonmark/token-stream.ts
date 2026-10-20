@@ -1,8 +1,7 @@
 // ================================
-// @code-reader/markdown-parser - markdown-it 兼容的 token 流
-// 把语法树转成与 markdown-it 相同结构的扁平 token 序列（*_open / *_close 成对、inline 带 children、
-// map 为 0 起的 [起始行, 结束行)），可以直接交给 prosemirror-markdown 等基于 markdown-it token 的工具。
-// 比 markdown-it 多出的信息：每个 token 的 position 是源码中的绝对位置（行内 token 也有）。
+// @code-reader/markdown-parser - token 流
+// 把语法树转成扁平 token 序列（*_open / *_close 成对、inline 带 children、map 为 0 起的 [起始行, 结束行)），
+// 便于按规则表构建编辑器文档、提取链接与块 id。每个 token 的 position 是源码中的绝对位置（行内 token 也有）。
 // ================================
 
 import { lineStartsOf } from './block-parser';
@@ -22,21 +21,21 @@ import {
   type TableNode,
 } from './types';
 
-/** 与 markdown-it 的 Token 字段一致 */
+/** token：type / tag / nesting 描述元素与开闭，map 为行区间，position 为源码位置 */
 export class Token {
   attrs: Array<[string, string]> | null = null;
-  /** 0 起的 [起始行, 结束行)；表格单元格的 inline token 为 null（与 markdown-it 一致） */
+  /** 0 起的 [起始行, 结束行)；表格单元格的 inline token 为 null */
   map: [number, number] | null = null;
   level = 0;
   children: Token[] | null = null;
   content = '';
   markup = '';
   info = '';
-  /** 附加数据：结构由产生该 token 的语法（任务列表项、脚注、扩展）决定，与 markdown-it 一样不限定类型 */
+  /** 附加数据：结构由产生该 token 的语法（任务列表项、脚注、扩展）决定，不限定类型 */
   meta: any = null;
   block = false;
   hidden = false;
-  /** 源码中的绝对位置（markdown-it 没有） */
+  /** 源码中的绝对位置 */
   position: Position | null = null;
 
   constructor(
@@ -65,7 +64,7 @@ export class Token {
   }
 }
 
-/** {…} 属性写入 token（与 markdown-it-attrs 相同：class 追加，其余覆盖） */
+/** {…} 属性写入 token：class 追加，其余覆盖 */
 function applyAttributes(token: Token, attributes: Record<string, string> | undefined): void {
   if (!attributes) return;
   for (const [name, value] of Object.entries(attributes)) {
@@ -74,7 +73,7 @@ function applyAttributes(token: Token, attributes: Record<string, string> | unde
   }
 }
 
-/** 行内元素对应的 markdown-it token：类型前缀、标签、默认标记 */
+/** 行内元素对应的 token：类型前缀、标签、默认标记 */
 const WRAPPED_INLINE: Partial<Record<InlineType, [string, string, string]>> = {
   [InlineType.Bold]: ['strong', 'strong', '**'],
   [InlineType.Italic]: ['em', 'em', '*'],
@@ -117,7 +116,7 @@ class TokenWriter {
   }
 
   /**
-   * markdown-it 的列表项（与列表）一直延伸到其后第一个非空行之前：项之间、列表末尾的空行算在项内。
+   * 列表项（与列表）的 map 一直延伸到其后第一个非空行之前：项之间、列表末尾的空行算在项内。
    * from 为 0 起的行号，limit 为所在容器的结束行
    */
   private skipBlankLines(from: number, limit: number, inQuote: boolean): number {
@@ -168,7 +167,7 @@ class TokenWriter {
       }
       case BlockType.ThematicBreak: {
         const token = this.push('hr', 'hr', 0, node);
-        // 带属性的分隔线（--- {#id}）由段落变来，markup 为整行内容（与 markdown-it-attrs 一致）
+        // 带属性的分隔线（--- {#id}）由段落变来，markup 为整行内容
         token.markup = node.attributes ? node.raw.trim() : node.raw.replace(/[ \t]/g, '').trimEnd();
         applyAttributes(token, node.attributes);
         return;
@@ -185,10 +184,10 @@ class TokenWriter {
         const token = this.push('fence', 'code', 0, node);
         token.content = node.content ?? '';
         token.markup = node.marker ?? '```';
-        // 与 markdown-it 一致：信息串保留原样（未去转义、未去首尾空白）
+        // 信息串保留原样（未去转义、未去首尾空白）
         token.info = node.raw.split(/\r\n|\n|\r/, 1)[0]!.trimStart().slice(token.markup.length);
         if (node.attributes) {
-          // markdown-it-attrs 去掉末尾的 {…} 及其前面的一个空格
+          // 去掉末尾的 {…} 及其前面的一个空格
           token.info = token.info.slice(0, token.info.lastIndexOf('{')).replace(/[ \n]$/, '');
           applyAttributes(token, node.attributes);
         }
@@ -236,8 +235,8 @@ class TokenWriter {
         this.table(node as TableNode);
         return;
       case BlockType.FootnoteDefinition: {
-        // 与 markdown-it-footnote 一致：定义的内容收集到文末（见 footnotes）；
-        // 保留源码时原位输出（与 markdown-it-footnote 块级规则生成、尚未移到文末的 token 相同），没有被引用的定义也保留
+        // 定义的内容收集到文末（见 footnotes）；
+        // 保留源码时原位输出（不收集到文末），没有被引用的定义也保留
         if (!this.preserveSource) return;
         this.push('footnote_reference_open', '', 1, node).meta = { label: node.footnoteId ?? '' };
         this.blocks(node.children ?? [], node.position.endLine, inQuote);
@@ -245,7 +244,7 @@ class TokenWriter {
         return;
       }
       case BlockType.AbbreviationDefinition: {
-        // 缩写定义只在保留源码时输出（markdown-it-abbr 不生成 token）
+        // 缩写定义只在保留源码时输出
         if (!this.preserveSource) return;
         const token = this.push('abbr_definition', '', 0, node);
         token.content = node.content ?? '';
@@ -254,7 +253,7 @@ class TokenWriter {
         return;
       }
       case BlockType.FrontMatter: {
-        // 与 markdown-it-front-matter 一致：meta 为 YAML 文本，渲染时隐藏
+        // meta 为 YAML 文本，渲染时隐藏
         const token = this.push('front_matter', '', 0, node);
         token.hidden = true;
         token.markup = node.raw;
@@ -267,7 +266,7 @@ class TokenWriter {
         open.markup = node.marker ?? ':::';
         open.info = node.info ?? '';
         applyAttributes(open, node.attributes);
-        // markdown-it-container 的 map 结束于闭合行之前（未闭合时到容器末尾）
+        // 容器的 map 结束于闭合行之前（未闭合时到容器末尾）
         const lines = node.raw.split(/\r\n|\n|\r/);
         const closing = lines.length > 1 && new RegExp(`^[ \\t]*:{${open.markup.length},}[ \\t]*$`).test(lines[lines.length - 1]!);
         if (closing) open.map = [open.map![0], open.map![1] - 1];
@@ -290,7 +289,7 @@ class TokenWriter {
   }
 
   /**
-   * 定义列表（与 markdown-it-deflist 的 token 与 map 相同）：术语的 map 为 [行, 行]；说明延伸到其后第一个非空行，
+   * 定义列表：术语的 map 为 [行, 行]；说明延伸到其后第一个非空行，
    * 新术语之后第一条说明的 map 从术语所在行开始
    */
   private definitionList(node: BlockNode, limit: number, inQuote: boolean): void {
@@ -322,7 +321,7 @@ class TokenWriter {
     this.push('dl_close', 'dl', -1);
   }
 
-  /** 文末的脚注（与 markdown-it-footnote 的 token 相同）：回链 footnote_anchor 放在最后一个段落的 paragraph_close 之前 */
+  /** 文末的脚注：回链 footnote_anchor 放在最后一个段落的 paragraph_close 之前 */
   footnotes(document: BlockNode): void {
     const entries = collectFootnotes(document);
     if (entries.length === 0) return;
@@ -336,7 +335,7 @@ class TokenWriter {
       const id = entry.index - 1;
       plain('footnote_open', 1, { id, label: entry.label });
       if (entry.inline) {
-        // 行内脚注的段落由 markdown-it-footnote 用 new Token 创建：level 为 0，content 为原始内容
+        // 行内脚注的段落 level 为 0，content 为原始内容
         const open = new Token('paragraph_open', 'p', 1);
         const inline = new Token('inline', '', 0);
         const close = new Token('paragraph_close', 'p', -1);
@@ -487,7 +486,7 @@ class InlineWriter {
           this.text(this.source.slice(node.position.start, node.position.end), node);
           return;
         }
-        // 尖括号自动链接的 markup 为 autolink，裸网址为 linkify（与 markdown-it 一致）
+        // 尖括号自动链接的 markup 为 autolink，裸网址为 linkify
         const markup = node.marker === 'linkify' ? 'linkify' : 'autolink';
         const open = this.push('link_open', 'a', 1, node);
         open.attrSet('href', normalizeLink(url));
@@ -516,14 +515,14 @@ class InlineWriter {
         applyAttributes(token, node.attributes);
         const children = node.children ?? [];
         token.children = new InlineWriter(this.source, this.preserveSource).write(children);
-        // 与 markdown-it 一致：content 为方括号内的原始文本
+        // content 为方括号内的原始文本
         const labelStart = node.position.start + 2;
         const labelEnd = children.length > 0 ? children[children.length - 1]!.position.end : labelStart;
         token.content = this.source.slice(labelStart, labelEnd);
         return;
       }
       case InlineType.Abbreviation: {
-        // markdown-it-abbr 用 new Token 创建这三个 token，level 都是 0
+        // 缩写的三个 token level 都是 0
         const tokens = [this.push('abbr_open', 'abbr', 1, node), this.push('text', '', 0, node), this.push('abbr_close', 'abbr', -1, null)];
         tokens[0]!.attrs = [['title', node.title ?? '']];
         tokens[1]!.content = node.content;
@@ -534,7 +533,7 @@ class InlineWriter {
         this.push('html_inline', '', 0, node).content = node.content;
         return;
       case InlineType.FootnoteRef: {
-        // 与 markdown-it-footnote 一致：id 从 0 开始；行内脚注只有 id（保留源码时 content 为方括号内的原文）
+        // id 从 0 开始；行内脚注只有 id（保留源码时 content 为方括号内的原文）
         const token = this.push('footnote_ref', '', 0, node);
         const id = (node.footnoteIndex ?? 1) - 1;
         token.meta = node.footnoteId === undefined ? { id } : { id, subId: node.footnoteSubId ?? 0, label: node.footnoteId };
@@ -564,9 +563,9 @@ export interface TokenOptions {
 }
 
 /**
- * 语法树 → markdown-it 兼容的 token 序列
+ * 语法树 → token 序列
  */
-export function toMarkdownItTokens(source: string, document: BlockNode, { footnotes = true, preserveSource = false }: TokenOptions = {}): Token[] {
+export function toTokenStream(source: string, document: BlockNode, { footnotes = true, preserveSource = false }: TokenOptions = {}): Token[] {
   const writer = new TokenWriter(source, preserveSource);
   writer.blocks(document.children ?? [], document.position.endLine);
   if (footnotes && !preserveSource) writer.footnotes(document);
@@ -587,10 +586,9 @@ export interface TokenizerEnv {
 }
 
 /**
- * markdown-it 兼容的分词器：parse(src) 返回与 markdown-it 结构相同的 token 序列，
- * 可直接作为 prosemirror-markdown 的 MarkdownParser 的 tokenizer
+ * 分词器：parse(src, env) 返回 token 序列；env.key 相同的连续解析走增量解析
  */
-export class MarkdownItCompatTokenizer {
+export class TokenStreamTokenizer {
   private readonly options: CommonMarkOptions;
   private readonly parser: CommonMarkParser;
   private readonly tokenOptions: TokenOptions;
@@ -613,7 +611,7 @@ export class MarkdownItCompatTokenizer {
   parse(source: string, env?: unknown): Token[] {
     const key = env !== null && typeof env === 'object' ? (env as TokenizerEnv).key : undefined;
     const document = key === undefined ? this.parser.parse(source).document : this.incremental(key).update(source).result.document;
-    return toMarkdownItTokens(source, document, this.tokenOptions);
+    return toTokenStream(source, document, this.tokenOptions);
   }
 
   /** 释放某篇文档的增量解析状态（文档关闭时调用） */

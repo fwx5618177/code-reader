@@ -8,7 +8,7 @@
 // 脚注、高亮 / 插入 / 上下标、定义列表、::: 容器、缩写与裸网址自动链接由解析器的对应选项识别
 // ================================
 
-import type { BlockExtension, InlineExtension, MarkdownItToken } from '@code-reader/markdown-parser';
+import type { BlockExtension, InlineExtension, MarkdownToken } from '@code-reader/markdown-parser';
 import { parseWikiLinkInner } from './wiki-link';
 
 const DOLLAR = 0x24; // $
@@ -135,7 +135,7 @@ const CJK_CHAR = /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/;
  * CommonMark 把段落内的单个换行渲染为空格，这会在中文句子中插入多余空格。
  * 两侧都是中日韩文字时，软换行直接移除，前后两段文本合并为一个文本 token
  */
-function removeCjkSoftbreaks(children: MarkdownItToken[]): void {
+function removeCjkSoftbreaks(children: MarkdownToken[]): void {
   for (let i = 1; i < children.length - 1; i++) {
     if (children[i].type !== 'softbreak') continue;
     const prev = children[i - 1];
@@ -158,10 +158,10 @@ const CONTAINER_TOKEN = /^container_(.+)_(open|close)$/;
 
 /**
  * 解析后的统一处理：块级公式去掉首尾空白，中日韩文字之间的软换行不产生空格；
- * YAML 头部与缩写定义的文本放入 content（prosemirror-markdown 从 content 创建文本节点，缩写定义取源码原行）；
+ * YAML 头部与缩写定义的文本放入 content（TokenDocumentBuilder 从 content 创建文本节点，缩写定义取源码原行）；
  * 自定义容器与行内脚注改用固定的 token 类型
  */
-export function finalizeTokens(tokens: MarkdownItToken[], source: string): MarkdownItToken[] {
+export function finalizeTokens(tokens: MarkdownToken[], source: string): MarkdownToken[] {
   for (const token of tokens) {
     if (token.type === 'math_block') token.content = token.content.trim();
     else if (token.type === 'front_matter') token.content = token.meta as string;
@@ -179,7 +179,7 @@ export function finalizeTokens(tokens: MarkdownItToken[], source: string): Markd
 }
 
 /** 行内 token：行内脚注 ^[…]（footnote_ref 没有标签）改为 footnote_inline；去掉中日韩文字之间的软换行 */
-function finalizeInline(children: MarkdownItToken[]): void {
+function finalizeInline(children: MarkdownToken[]): void {
   for (const child of children) {
     if (child.type === 'footnote_ref' && child.meta?.label === undefined) child.type = 'footnote_inline';
   }

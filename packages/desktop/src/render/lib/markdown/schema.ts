@@ -199,7 +199,7 @@ const EXTRA_NODES: Record<string, NodeSpec> = {
       return ['dl', { class: 'definition-list' }, 0];
     },
   },
-  // tight：术语与第一条说明之间不空行（与 markdown-it-deflist 一致按术语计，该术语的各条说明共用）
+  // tight：术语与第一条说明之间不空行（按术语计，该术语的各条说明共用）
   definition_term: {
     content: 'inline*',
     defining: true,

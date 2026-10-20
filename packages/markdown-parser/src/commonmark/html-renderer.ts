@@ -2,7 +2,7 @@
 // @code-reader/markdown-parser - HTML 渲染
 // 按 CommonMark 参考实现（commonmark.js）的 HTML 约定输出：块级元素各占一行，
 // 紧凑列表中的段落不加 <p>，URL 做百分号编码，文本与属性做 HTML 转义。
-// 扩展语法的输出与 markdown-it 对应插件一致（脚注收集到文末、定义列表、自定义容器、高亮等）。
+// 扩展语法：脚注收集到文末，定义列表、自定义容器、高亮、插入、上下标、缩写各有对应的元素。
 // 不安全的链接（javascript: 等）输出空地址；扩展节点、代码高亮可以自定义
 // ================================
 
@@ -208,7 +208,7 @@ class HtmlRenderer {
     if (highlighted && highlighted.startsWith('<pre')) {
       writer.write(highlighted);
     } else {
-      // 与 markdown-it 一致：语言 class 追加在 {…} 的 class 之后
+      // 语言 class 追加在 {…} 的 class 之后
       const attributes = language ? mergeAttributes(node.attributes, { class: this.langPrefix + language }) : node.attributes;
       const body = highlighted || `${escapeHtml(content)}${content && !content.endsWith('\n') ? '\n' : ''}`;
       writer.write(`<pre><code${attributeString(attributes)}>${body}</code></pre>`);
@@ -291,7 +291,7 @@ class HtmlRenderer {
         this.table(node as TableNode, writer);
         return;
       case BlockType.Container:
-        // 与 markdown-it-container 一致：容器名追加在 {…} 的 class 之后
+        // 容器名追加在 {…} 的 class 之后
         this.wrap(writer, `<div${attributeString(mergeAttributes(node.attributes, { class: node.name ?? '' }))}>`, '</div>', node.children ?? []);
         return;
       case BlockType.DefinitionList:
@@ -329,7 +329,7 @@ class HtmlRenderer {
     }
   }
 
-  /** 文末的脚注列表（与 markdown-it-footnote 的结构相同）：回链放在最后一个段落里 */
+  /** 文末的脚注列表：回链放在最后一个段落里 */
   footnotes(entries: readonly FootnoteEntry[], writer: HtmlWriter): void {
     writer.cr();
     writer.write(`<hr class="footnotes-sep"${this.close}\n<section class="footnotes">\n<ol class="footnotes-list">\n`);
@@ -338,7 +338,7 @@ class HtmlRenderer {
         return ` <a href="#fnref${footnoteRefId(entry.index, sub)}" class="footnote-backref">\u21a9\uFE0E</a>`;
       }).join('');
       writer.write(`<li id="fn${entry.index}" class="footnote-item">`);
-      // 内容紧接在 <li> 之后（与 markdown-it-footnote 一致）：在新的缓冲中渲染，第一个块前不换行
+      // 内容紧接在 <li> 之后：在新的缓冲中渲染，第一个块前不换行
       const body = new HtmlWriter();
       const blocks = entry.definition?.children ?? [];
       const last = blocks[blocks.length - 1];

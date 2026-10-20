@@ -1,25 +1,16 @@
 // ================================
 // 扩展语法与 HTML 渲染：GFM 扩展自动链接（用例取自 GFM 规范）、排版替换、{…} 属性、YAML 头部、
 // 表格单元格位置、引用定义、脚注编号；渲染选项（安全链接、代码高亮、扩展节点）；
-// 插件语法的 HTML 与 markdown-it 对应插件的输出逐字比较
+// 扩展语法的 HTML 与 fixtures/reference.json 中冻结的参照输出逐字比较
 // ================================
 
-import MarkdownIt from 'markdown-it';
-import abbr from 'markdown-it-abbr';
-import container from 'markdown-it-container';
-import deflist from 'markdown-it-deflist';
-import footnote from 'markdown-it-footnote';
-import ins from 'markdown-it-ins';
-import mark from 'markdown-it-mark';
-import sub from 'markdown-it-sub';
-import sup from 'markdown-it-sup';
 import { describe, expect, it } from 'vitest';
 import {
   BlockType,
   domainToAscii,
   domainToUnicode,
   InlineType,
-  MarkdownItCompatTokenizer,
+  TokenStreamTokenizer,
   parseCommonMark,
   renderHtml,
   type CommonMarkOptions,
@@ -27,6 +18,7 @@ import {
   type InlineExtension,
   type TableNode,
 } from '../src';
+import { referenceHtml, referenceTokens } from './helpers/reference';
 import { shape } from './helpers/token-shape';
 
 const html = (markdown: string, options: CommonMarkOptions = {}, render: HtmlRenderOptions = {}) =>
@@ -91,8 +83,8 @@ describe('GFM 扩展自动链接（linkify）', () => {
     expect(html('www.x.com')).toBe('<p>www.x.com</p>\n');
   });
 
-  it('token 与 markdown-it linkify 的结构相同（markup 为 linkify，info 为 auto）', () => {
-    const tokens = new MarkdownItCompatTokenizer({ linkify: true }).parse('见 https://a.b/c。');
+  it('token 结构：markup 为 linkify，info 为 auto', () => {
+    const tokens = new TokenStreamTokenizer({ linkify: true }).parse('见 https://a.b/c。');
     expect(tokens[1]!.children!.map((token) => [token.type, token.markup, token.info, token.content])).toEqual([
       ['text', '', '', '见 '],
       ['link_open', 'linkify', 'auto', ''],
@@ -101,7 +93,7 @@ describe('GFM 扩展自动链接（linkify）', () => {
     ]);
   });
 
-  // markdown-it 默认的 linkify-it 也识别裸域名；这些用例两边的识别规则相同，逐 token 比较
+  // 裸域名识别：逐 token 与参照输出比较
   it.each([
     'see example.com now',
     'example.com/path?q=1#x.',
@@ -116,10 +108,9 @@ describe('GFM 扩展自动链接（linkify）', () => {
     'xn--80ak6aa92e.com',
     '[文本 example.com](u) `example.com`',
     'example.com.',
-  ])('裸域名（linkifyBareDomains）与 markdown-it linkify 一致：%j', (markdown) => {
-    const markdownIt = new MarkdownIt('commonmark', { linkify: true }).enable(['linkify']);
-    const ours = new MarkdownItCompatTokenizer({ gfm: false, strikethrough: false, linkify: true, linkifyBareDomains: true });
-    expect(ours.parse(markdown).map(shape)).toEqual(markdownIt.parse(markdown, {}).map(shape));
+  ])('裸域名（linkifyBareDomains）：%j', (markdown) => {
+    const ours = new TokenStreamTokenizer({ gfm: false, strikethrough: false, linkify: true, linkifyBareDomains: true });
+    expect(ours.parse(markdown).map(shape)).toEqual(referenceTokens('linkify', markdown));
   });
 
   it('裸域名默认不识别（README.md 这类文件名也会被当成域名）', () => {
@@ -127,7 +118,7 @@ describe('GFM 扩展自动链接（linkify）', () => {
   });
 });
 
-describe('链接地址规范化（与 markdown-it 的 normalizeLink / normalizeLinkText 相同）', () => {
+describe('链接地址规范化（IDN 主机名转 Punycode、百分号编码；链接文字反向解码）', () => {
   it.each([
     '<http://a.com/%E4%B8%AD?x=%25>',
     '<http://xn--fiq228c.com/a>',
@@ -141,10 +132,9 @@ describe('链接地址规范化（与 markdown-it 的 normalizeLink / normalizeL
     '[r](/相对/路径) [r](//中文.com/a) [r](HTTP://中文.COM/A) [r](ftp://中文.com/a)',
     '<http://a.com/%C3%28%E4%B8>',
   ])('IDN 主机名与百分号解码：%j', (markdown) => {
-    const markdownIt = new MarkdownIt('commonmark', { linkify: true }).enable(['linkify']);
-    const ours = new MarkdownItCompatTokenizer({ gfm: false, strikethrough: false, linkify: true });
-    expect(ours.parse(markdown).map(shape)).toEqual(markdownIt.parse(markdown, {}).map(shape));
-    expect(html(markdown, { gfm: false, linkify: true })).toBe(markdownIt.render(markdown));
+    const ours = new TokenStreamTokenizer({ gfm: false, strikethrough: false, linkify: true });
+    expect(ours.parse(markdown).map(shape)).toEqual(referenceTokens('linkify', markdown));
+    expect(html(markdown, { gfm: false, linkify: true })).toBe(referenceHtml('linkify', markdown));
   });
 
   it('Punycode（RFC 3492 的示例）', () => {
@@ -157,13 +147,12 @@ describe('链接地址规范化（与 markdown-it 的 normalizeLink / normalizeL
 });
 
 describe('排版替换（replacements）', () => {
-  const markdownIt = new MarkdownIt('commonmark', { typographer: true }).enable(['replacements']);
-  const ours = new MarkdownItCompatTokenizer({ replacements: true, gfm: false, strikethrough: false });
+  const ours = new TokenStreamTokenizer({ replacements: true, gfm: false, strikethrough: false });
 
   it.each(['(c) (C) (r) (tm) (TM) +- a -- b --- c ... ?..... !!!!! ????? ,, x..y', '-- 开头与结尾 --', '`(c)` 代码中不替换 [(c)](u)'])(
-    '与 markdown-it 一致：%j',
+    '%j',
     (markdown) => {
-      expect(ours.parse(markdown).map(shape)).toEqual(markdownIt.parse(markdown, {}).map(shape));
+      expect(ours.parse(markdown).map(shape)).toEqual(referenceTokens('replacements', markdown));
     }
   );
 });
@@ -182,7 +171,7 @@ describe('{…} 属性（attributes）', () => {
   });
 
   it('属性进入 token 的 attrs', () => {
-    const tokens = new MarkdownItCompatTokenizer({ attributes: true }).parse('# T {#t}\n\n`c`{.k}');
+    const tokens = new TokenStreamTokenizer({ attributes: true }).parse('# T {#t}\n\n`c`{.k}');
     expect(tokens[0]!.attrs).toEqual([['id', 't']]);
     expect(tokens[4]!.children![0]!.attrs).toEqual([['class', 'k']]);
   });
@@ -246,16 +235,7 @@ describe('脚注', () => {
   });
 });
 
-describe('插件语法的 HTML 与 markdown-it 一致', () => {
-  const markdownIt = new MarkdownIt('commonmark', { html: false })
-    .use(footnote)
-    .use(deflist)
-    .use(container, 'note')
-    .use(mark)
-    .use(ins)
-    .use(sub)
-    .use(sup)
-    .use(abbr);
+describe('扩展语法的 HTML', () => {
   const options: CommonMarkOptions = {
     html: false,
     gfm: false,
@@ -277,8 +257,7 @@ describe('插件语法的 HTML 与 markdown-it 一致', () => {
     '==mark== ++ins++ H~2~O 2^10^',
     '*[HTML]: Hyper Text\nThe HTML spec.',
   ])('%j', (markdown) => {
-    // commonmark 预设的 xhtmlOut 为 true，与本包默认相同
-    expect(html(markdown, options)).toBe(markdownIt.render(markdown));
+    expect(html(markdown, options)).toBe(referenceHtml('plugins', markdown));
   });
 });
 

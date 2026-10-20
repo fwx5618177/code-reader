@@ -7,7 +7,7 @@
 // 目标匹配规则与链接解析一致（忽略大小写与 .md 等扩展名）。
 // ================================
 
-import type { MarkdownItToken as Token } from '@code-reader/markdown-parser';
+import type { MarkdownToken as Token } from '@code-reader/markdown-parser';
 import { createTokenizer, type WikiLinkParts } from '../markdown';
 import { displayTitle, normalizeLinkTarget, textExtension } from './link-index';
 

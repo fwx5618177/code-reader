@@ -53,5 +53,5 @@ export { collectFootnotes } from './footnotes';
 export type { FootnoteEntry } from './footnotes';
 export { IncrementalCommonMarkParser } from './incremental-document';
 export type { DocumentUpdate } from './incremental-document';
-export { Token as MarkdownItToken, toMarkdownItTokens, MarkdownItCompatTokenizer } from './markdown-it-tokens';
-export type { TokenOptions, TokenizerOptions, TokenizerEnv } from './markdown-it-tokens';
+export { Token as MarkdownToken, toTokenStream, TokenStreamTokenizer } from './token-stream';
+export type { TokenOptions, TokenizerOptions, TokenizerEnv } from './token-stream';

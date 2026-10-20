@@ -1,8 +1,8 @@
 // ================================
 // @code-reader/markdown-parser - {…} 属性（attributes 选项）
-// 写法与 markdown-it-attrs 相同：{#id .class key=value key="带空格的值"}。
+// 写法：{#id .class key=value key="带空格的值"}。
 // 本包更严格：{…} 中任何一项不合法时整体保留为文本（如 R Markdown 的 ```{r}、正文中的 {不是 属性}）。
-// 块级属性的归属与 markdown-it-attrs 一致：
+// 块级属性的归属：
 // - 标题、段落、术语、表格单元格末尾的 {…} 属于该块；围栏代码块信息串末尾的 {…} 属于代码块
 // - 列表项第一个块末尾的 {…} 属于列表项（li）；单独一行写在列表项第一段之后的 {…} 属于所在列表
 // - 紧跟在表格、列表之后、只有 {…} 的段落属于该表格 / 列表（段落本身去掉）
@@ -16,7 +16,7 @@ export type Attributes = Record<string, string>;
 
 const ATTRIBUTE_TOKEN = /^(?:#([\w:.-]+)|\.([\w-]+)|([A-Za-z_:][\w:.-]*)=(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))$/;
 
-/** 合并属性：class 追加（空格分隔），其余同名覆盖；顺序按第一次出现（与 markdown-it 的 attrJoin / attrSet 相同） */
+/** 合并属性：class 追加（空格分隔），其余同名覆盖；顺序按第一次出现 */
 export function mergeAttributes(target: Attributes | undefined, extra: Attributes | undefined): Attributes | undefined {
   if (!extra) return target;
   const merged: Attributes = { ...target };
@@ -139,5 +139,5 @@ function absorbAttributeParagraphs(children: BlockNode[], ownLine: Set<BlockNode
   }
 }
 
-/** 只有分隔符加 {…} 的段落内容（--- {#id}）：与 markdown-it-attrs 一致，分隔符与 { 之间最多一个空格 */
+/** 只有分隔符加 {…} 的段落内容（--- {#id}）：分隔符与 { 之间最多一个空格 */
 export const THEMATIC_BREAK_WITH_ATTRIBUTES = /^[-*_]{3,} ?\{[^}]*\}$/;

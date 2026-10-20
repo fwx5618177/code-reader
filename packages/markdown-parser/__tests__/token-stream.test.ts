@@ -1,14 +1,14 @@
 // ================================
-// markdown-it 兼容 token 流：与 markdown-it（commonmark 预设 + 表格 + 删除线，html 关闭）逐个 token 对照。
+// token 流：与冻结的参照输出（fixtures/reference.json 的 core 组：CommonMark + 表格 + 删除线，html 关闭）逐个 token 对照。
 // 语料为 652 个 CommonMark 规范用例与 GFM / 扩展用例；比较 type、tag、nesting、level、map、content、
 // markup、info、attrs、hidden 与行内 children。统计结构一致率并设下限，只能提高不能回退
 // ================================
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import MarkdownIt from 'markdown-it';
 import { describe, expect, it } from 'vitest';
-import { MarkdownItCompatTokenizer, type InlineExtension, type BlockExtension } from '../src';
+import { TokenStreamTokenizer, type InlineExtension, type BlockExtension } from '../src';
+import { referenceTokens } from './helpers/reference';
 import { shape } from './helpers/token-shape';
 
 interface SpecExample {
@@ -20,19 +20,18 @@ interface SpecExample {
 const examples: SpecExample[] = JSON.parse(readFileSync(resolve(__dirname, 'fixtures/commonmark-0.31.2.json'), 'utf-8'));
 
 /** 与编辑器相同的方言：CommonMark + 表格 + ~~删除线~~，不识别 HTML、不自动链接网址 */
-const markdownIt = new MarkdownIt('commonmark', { html: false, linkify: false }).enable(['table', 'strikethrough']);
-const ours = new MarkdownItCompatTokenizer({ html: false, taskLists: false, footnotes: false, singleTildeStrikethrough: false });
+const ours = new TokenStreamTokenizer({ html: false, taskLists: false, footnotes: false, singleTildeStrikethrough: false });
 
 const compare = (markdown: string) => ({
-  expected: markdownIt.parse(markdown, {}).map(shape),
+  expected: referenceTokens('core', markdown),
   actual: ours.parse(markdown).map(shape),
 });
 
 /** 结构一致的规范用例数下限：已全部一致，任何回退都会失败 */
 const SPEC_FLOOR = 652;
 
-describe('markdown-it 兼容 token 流', () => {
-  it('CommonMark 规范用例：token 流与 markdown-it 一致', () => {
+describe('token 流', () => {
+  it('CommonMark 规范用例：token 流与参照输出一致', () => {
     const failures: number[] = [];
     for (const example of examples) {
       const { expected, actual } = compare(example.markdown);
@@ -81,7 +80,7 @@ describe('语法扩展', () => {
       return line.trimEnd().endsWith('$$') ? { content: line.trimEnd().slice(0, -2) || undefined, closed: true } : { content: line, closed: false };
     },
   };
-  const tokenizer = new MarkdownItCompatTokenizer({ inlineExtensions: [math], blockExtensions: [mathBlock] });
+  const tokenizer = new TokenStreamTokenizer({ inlineExtensions: [math], blockExtensions: [mathBlock] });
 
   it('行内扩展在触发字符处先于内置语法，内容不再解析强调', () => {
     const [, inline] = tokenizer.parse('设 $a*b*c$ 与 *强调*');
@@ -116,7 +115,7 @@ describe('语法扩展', () => {
         return text[pos + 1] === '[' && close !== -1 ? { length: close + 2 - pos, content: text.slice(pos + 2, close) } : null;
       },
     };
-    const [, inline] = new MarkdownItCompatTokenizer({ inlineExtensions: [link] }).parse('文字 ![[笔记]] 与 ![图](a.png)');
+    const [, inline] = new TokenStreamTokenizer({ inlineExtensions: [link] }).parse('文字 ![[笔记]] 与 ![图](a.png)');
     expect(inline!.children!.map((t) => [t.type, t.content])).toEqual([
       ['text', '文字 !'],
       ['wiki_link', '笔记'],
@@ -138,7 +137,7 @@ describe('语法扩展', () => {
 });
 
 describe('保留源码的 token（preserveSource，给编辑器用）', () => {
-  const tokenizer = new MarkdownItCompatTokenizer({ footnotes: true, abbreviations: true, preserveSource: true });
+  const tokenizer = new TokenStreamTokenizer({ footnotes: true, abbreviations: true, preserveSource: true });
   const brief = (markdown: string) =>
     tokenizer.parse(markdown).map((token) => [token.type, token.meta, token.type === 'inline' ? token.children!.map((child) => [child.type, child.content]) : token.content]);
 
@@ -166,8 +165,8 @@ describe('保留源码的 token（preserveSource，给编辑器用）', () => {
     expect(tokens[3]).toMatchObject({ type: 'abbr_definition', content: 'Hyper Text', meta: { label: 'HTML', title: 'Hyper Text' }, hidden: true, map: [2, 3] });
   });
 
-  it('默认（不保留源码）时与 markdown-it 插件一致：不输出缩写定义', () => {
-    const plain = new MarkdownItCompatTokenizer({ abbreviations: true });
+  it('默认（不保留源码）时不输出缩写定义', () => {
+    const plain = new TokenStreamTokenizer({ abbreviations: true });
     expect(plain.parse('*[HTML]: Hyper Text\n').map((token) => token.type)).toEqual([]);
   });
 });
@@ -175,8 +174,8 @@ describe('保留源码的 token（preserveSource，给编辑器用）', () => {
 describe('env.key 增量解析', () => {
   it('同一 key 的连续编辑：token 与每次整篇解析相同；不同 key 互不影响；超过上限按最近使用淘汰', () => {
     const options = { footnotes: true, abbreviations: true, definitionLists: true, attributes: true, incrementalDocuments: 2 };
-    const keyed = new MarkdownItCompatTokenizer(options);
-    const fresh = new MarkdownItCompatTokenizer(options);
+    const keyed = new TokenStreamTokenizer(options);
+    const fresh = new TokenStreamTokenizer(options);
     const shapeOf = (tokens: ReturnType<typeof keyed.parse>) => JSON.stringify(tokens);
     let text = Array.from({ length: 60 }, (_, i) => `## 节 ${i}\n\n正文 ${i}[^n${i % 3}] *强调*\n\n- a\n- b {.x}\n\n[^n${i % 3}]: 注\n`).join('\n');
     const other = '# 另一篇\n';
