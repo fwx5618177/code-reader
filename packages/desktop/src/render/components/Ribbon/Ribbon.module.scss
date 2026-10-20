@@ -17,8 +17,7 @@
   min-width: $ribbon-width;
   max-width: $ribbon-width;
   height: 100%;
-  background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border-primary);
+  background-color: var(--bg-canvas);
   flex-shrink: 0;
   user-select: none;
   transition:

@@ -212,8 +212,8 @@ export class App {
     if (!ok) throw new Error(`找不到可点击的元素：${selector}${text ? `（${text}）` : ''}`);
   }
 
-  /** 真实的鼠标点击（元素中心）：需要 mousedown 的组件（如公式节点）用它 */
-  async mouseClick(selector) {
+  /** 元素滚动到可见后的中心坐标 */
+  async center(selector) {
     const box = await this.call((sel) => {
       const element = document.querySelector(sel);
       if (!element) return null;
@@ -222,9 +222,28 @@ export class App {
       return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
     }, selector);
     if (!box) throw new Error(`找不到元素：${selector}`);
+    return box;
+  }
+
+  /** 真实的鼠标点击（元素中心）：需要 mousedown 的组件（如公式节点）用它 */
+  async mouseClick(selector) {
+    const box = await this.center(selector);
     for (const type of ['mousePressed', 'mouseReleased']) {
       await this.session.send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
     }
+  }
+
+  /** 真实的鼠标拖动：在元素中心按下，分步水平移动 dx 后松开（拖拽分隔条等用它） */
+  async mouseDrag(selector, dx, { steps = 10 } = {}) {
+    const box = await this.center(selector);
+    const send = (type, x, buttons) =>
+      this.session.send('Input.dispatchMouseEvent', { type, x, y: box.y, button: 'left', buttons, clickCount: 1 });
+    await send('mousePressed', box.x, 1);
+    for (let step = 1; step <= steps; step++) {
+      await send('mouseMoved', box.x + (dx * step) / steps, 1);
+      await sleep(16);
+    }
+    await send('mouseReleased', box.x + dx, 0);
   }
 
   exists(selector) {

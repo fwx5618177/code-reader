@@ -50,7 +50,7 @@ src/render/styles/
   box-shadow: var(--shadow-md);
   
   // 非主题相关 - 使用 SCSS 变量
-  width: $sidebar-width;
+  height: $tab-height;
   transition: $transition-colors;
   font-weight: $font-weight-medium;
   z-index: $z-dropdown;
@@ -89,7 +89,8 @@ src/render/styles/
 
 | 变量 | 用途 |
 |------|------|
-| `--bg-primary` | 主背景（编辑区域） |
+| `--bg-canvas` | 应用底色（标题栏、Ribbon、侧栏、状态栏所在的外框） |
+| `--bg-primary` | 主背景（内容卡片、编辑区域） |
 | `--bg-secondary` | 次级背景（侧边栏、面板） |
 | `--bg-tertiary` | 第三级背景（头部、卡片） |
 | `--bg-quaternary` | 第四级背景（模态框、下拉菜单） |
@@ -212,9 +213,6 @@ src/render/styles/
 | 变量 | 值 | 用途 |
 |------|-----|------|
 | `$ribbon-width` | 48px | 左侧图标栏宽度 |
-| `$sidebar-width` | 280px | 侧边栏宽度 |
-| `$sidebar-min-width` | 180px | 侧边栏最小宽度 |
-| `$sidebar-max-width` | 480px | 侧边栏最大宽度 |
 | `$titlebar-height` | 38px | 标题栏高度 |
 | `$header-height` | 48px | 主头部高度 |
 | `$tab-height` | 36px | 标签栏高度 |
@@ -297,7 +295,18 @@ src/render/styles/
 
 // 输入框基础样式
 @include input-base;
+
+// 一到三级标题的彩条（左竖条 + 同色浅底：强调色 / 信息色 / 成功色）
+@include heading-accents;
+
+// [[双链]] 高亮小标签
+@include wiki-link-chip;
 ```
+
+## 应用布局
+
+- **外框与内容卡片**：标题栏、Ribbon、侧栏、状态栏都放在 `--bg-canvas` 上；主内容区（`.main-content`）是浮在底色上的卡片，使用 `--bg-primary`、`--border-primary` 描边与 `--radius-lg` 圆角，四周留出底色。
+- **可调整宽度的面板**：侧面板用 `components/ResizablePanel` 包一层，宽度由组件按保存的尺寸设置，面板自身的样式不要再写固定宽度。面板 ID、默认值与上下限集中在 `lib/layout/panel-sizes.ts` 的 `PANELS`，尺寸保存在 localStorage 的 `panel-sizes` 键。把手支持拖动、方向键（Shift 加大步长）、Home / End，双击或回车还原。
 
 ## 主题切换
 

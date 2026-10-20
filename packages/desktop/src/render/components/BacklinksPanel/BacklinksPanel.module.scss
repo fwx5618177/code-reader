@@ -4,11 +4,10 @@
 
 @use '../../styles/variables' as *;
 
+// 宽度由外层 ResizablePanel 控制（可拖动左边缘调整）
 .panel {
   display: flex;
   flex-direction: column;
-  width: 320px;
-  min-width: 260px;
   height: 100%;
   border-left: 1px solid var(--border-primary);
   background-color: var(--bg-secondary);
@@ -17,7 +16,6 @@
 // 嵌入应用侧栏时填满侧栏
 .embedded {
   flex: 1;
-  width: auto;
   min-width: 0;
   height: auto;
   min-height: 0;

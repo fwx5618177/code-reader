@@ -59,6 +59,7 @@ pnpm start:desktop     # 构建并启动应用
 
 - **标题栏左侧**是知识库选择器：可以建多个互相独立的知识库（如“工作”“个人”），在这里切换、新建、改名或删除，见第 10 节。
 - **最左侧的竖排按钮（Ribbon）**：上面是快速笔记与录音，中间切换侧栏显示的内容（每个模式各自记住上次打开的面板），最下面是使用指南与设置。
+- **调整面板宽度**：侧栏、写作时右侧的反向链接面板、知识库右侧的条目详情、分栏编辑的两栏之间都有分隔条。鼠标移到边缘出现竖线后拖动即可调整，双击还原默认宽度；也可以用 Tab 把焦点移到分隔条上，用 ← → 调整（按住 Shift 步子更大），Home / End 调到最窄 / 最宽，回车还原。宽度在重启后保持。
 
 | 模式 | 侧栏面板 |
 |------|----------|
@@ -295,6 +296,7 @@ Markdown 文档没有“编辑 / 预览”的割裂：你输入的语法会立�
 - 从左侧打开的文档进入聚焦栏；把标签拖到另一栏的标签栏即可移过去。
 - 两栏打开同一篇文档时，一栏的修改（正文和标题）会在片刻后同步到另一栏，适合一边看前文一边写后文。
 - 反向链接面板、大纲、底部字数与保存状态、版本历史以及插件命令都作用于聚焦栏的文档。
+- 拖动两栏之间的分隔条调整左右宽度（双击恢复各占一半），比例在重启后保持。
 - 再点一次分栏按钮（或 ⌘\\）关闭分栏，两栏的标签合并到一起。
 
 | 快捷键 | 作用 |
@@ -898,7 +900,7 @@ export function deactivate() {}
 | `toolbar` | 标签栏按钮（每个插件最多 3 个），`icon` 取 `calendar` `clock` `chart` `hash` `type` `list` `check` `star` `bookmark` `tag` `zap` `wand` `sparkles` `quote` `link` `sigma` `puzzle` |
 | `views` | 侧栏「插件视图」中的视图（每个插件最多 5 个），内容由 `app.views.set` 提供 |
 | `configuration` | 配置项，类型为 `string` / `number` / `boolean`，必须给出 `default`；可选 `description`、`enum`（及等长的 `enumDescriptions`）、`minimum` / `maximum`（仅数字） |
-| `themes` | 配色主题（每个插件最多 5 个，不运行插件代码）：`type` 为 `dark` / `light`（决定基础配色），`colors` 覆盖界面颜色变量（`--bg-primary` `--bg-secondary` `--bg-tertiary` `--bg-quaternary` `--bg-hover` `--bg-active` `--bg-selected` `--bg-highlight` `--border-*` `--text-*` `--accent-*` `--color-success/warning/error/info`（及 `-bg`）`--scrollbar-thumb*`），值只能是 `#rrggbb`、`rgb()`、`hsl()` 这类颜色。启用插件后在 **设置 → 外观 → 插件主题** 选用，再点一次或选择内置模式即取消 |
+| `themes` | 配色主题（每个插件最多 5 个，不运行插件代码）：`type` 为 `dark` / `light`（决定基础配色），`colors` 覆盖界面颜色变量（`--bg-canvas` `--bg-primary` `--bg-secondary` `--bg-tertiary` `--bg-quaternary` `--bg-hover` `--bg-active` `--bg-selected` `--bg-highlight` `--border-*` `--text-*` `--accent-*` `--color-success/warning/error/info`（及 `-bg`）`--scrollbar-thumb*`），值只能是 `#rrggbb`、`rgb()`、`hsl()` 这类颜色。启用插件后在 **设置 → 外观 → 插件主题** 选用，再点一次或选择内置模式即取消 |
 | `languages` | 代码块语言（每个插件最多 10 个，不运行插件代码）：加入代码块的语言列表，写 ` ```dataview ` 或别名 ` ```dv ` 时按 `grammar` 指定的内置语言（如 `javascript` `python` `sql` `markdown`）高亮。不能与内置语言重名，已被内置语言占用的别名会被忽略 |
 
 贡献中引用的命令必须先在 `contributes.commands` 中声明。manifest 有任何不合法的地方，插件卡片会逐条列出原因且不能启用。

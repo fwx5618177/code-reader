@@ -52,33 +52,15 @@
 }
 
 // ================================
-// Sidebar
+// Sidebar：直接放在应用底色上，宽度由外层 ResizablePanel 控制（可拖动右边缘调整）
 // ================================
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  width: $sidebar-width;
-  min-width: $sidebar-min-width;
-  max-width: $sidebar-max-width;
   height: 100%;
-  background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border-primary);
+  background-color: var(--bg-canvas);
   overflow: hidden;
-  flex-shrink: 0;
-  position: relative;
-  transition:
-    width $transition-normal,
-    min-width $transition-normal,
-    background-color 0.3s ease,
-    border-color 0.3s ease;
-
-  &.collapsed {
-    width: 0;
-    min-width: 0;
-    border-right: none;
-    overflow: hidden;
-  }
 }
 
 // ================================
@@ -193,28 +175,7 @@
 }
 
 // ================================
-// Sidebar Resizer
-// ================================
-
-.sidebar-resizer {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 4px;
-  height: 100%;
-  cursor: col-resize;
-  background-color: transparent;
-  transition: background-color $transition-fast;
-  z-index: $z-sticky;
-
-  &:hover,
-  &.resizing {
-    background-color: var(--accent-primary);
-  }
-}
-
-// ================================
-// Main Content
+// Main Content：浮在应用底色上的内容卡片（圆角、描边，四周留出底色）
 // ================================
 
 .main-content {
@@ -222,8 +183,12 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background-color: var(--bg-primary);
   min-width: 0;
+  margin: 0 var(--spacing-2) var(--spacing-2);
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
   transition: background-color 0.3s ease;
 }
 
@@ -532,32 +497,6 @@ body.distraction-free {
   .sidebar,
   .statusbar {
     display: none !important;
-  }
-}
-
-// ================================
-// Mode-specific styles
-// ================================
-
-.layout.mode-knowledge,
-.layout.mode-journal {
-  .sidebar-section-title {
-    color: var(--accent-secondary);
-  }
-}
-
-.layout.mode-journal {
-  .quick-input-trigger {
-    border-color: var(--color-info);
-
-    svg {
-      color: var(--color-info);
-    }
-
-    &:hover {
-      border-color: var(--color-info);
-      background-color: var(--color-info-bg);
-    }
   }
 }
 
@@ -895,33 +834,4 @@ body.distraction-free {
   min-width: 0;
   overflow: hidden;
   background-color: var(--bg-primary);
-}
-
-// ================================
-// Mode-specific styles for writing
-// ================================
-
-.layout.mode-writing {
-  .main-content {
-    background-color: var(--bg-primary);
-  }
-
-  // Subtle accent for writing mode
-  .sidebar-section-title {
-    color: var(--text-muted);
-  }
-}
-
-// ================================
-// Mode-specific styles for reading
-// ================================
-
-.layout.mode-reading {
-  .main-content {
-    background-color: var(--bg-primary);
-  }
-
-  .sidebar-section-title {
-    color: var(--text-muted);
-  }
 }

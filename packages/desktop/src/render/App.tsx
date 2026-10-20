@@ -24,6 +24,7 @@ import { EMPTY_FILTERS, type ItemFilters } from './components/KnowledgeWorkspace
 import AgentActivityPanel from './components/AgentActivity';
 import { categorizationReview } from './lib/categorization/reviewStore';
 import BacklinksPanel from './components/BacklinksPanel';
+import ResizablePanel from './components/ResizablePanel';
 import {
   CalendarPanel,
   DocumentTags,
@@ -110,6 +111,7 @@ import { registerFlush } from './services/flushRegistry';
 import { getEditorManager } from './lib/core';
 import { pickRecentlyRead, resolveArticle } from './lib/reading';
 import type { PaneView } from './lib/editor-tabs';
+import { PANELS } from './lib/layout/panel-sizes';
 import './App.scss';
 
 /** 写作区的视图模式（底栏切换；⌘/ 在编辑与预览间切换，⌘⇧/ 切换分屏） */
@@ -124,8 +126,6 @@ const App: React.FC = () => {
   const [appState, dispatch] = useReducer(appReducer, DEFAULT_APP_STATE);
 
   // Local UI state
-  // 侧边栏折叠状态（当前固定为展开）
-  const sidebarCollapsed = false;
   const [explorerExpanded, setExplorerExpanded] = useState(true);
 
   // 知识库：SQLite 是唯一数据源，知识库、写作、阅读、Agent 共用
@@ -1361,15 +1361,17 @@ const App: React.FC = () => {
               }
             />
             {showBacklinks && currentKnowledgeItem && (
-              <BacklinksPanel
-                item={currentKnowledgeItem}
-                items={kb.items}
-                linkIndex={linkIndex}
-                related={relatedLinks}
-                onOpenItem={openItem}
-                onCreateNote={(title) => void createNoteFromLink(title)}
-                onClose={() => setShowBacklinks(false)}
-              />
+              <ResizablePanel spec={PANELS.backlinks} side="right" label="调整反向链接面板宽度">
+                <BacklinksPanel
+                  item={currentKnowledgeItem}
+                  items={kb.items}
+                  linkIndex={linkIndex}
+                  related={relatedLinks}
+                  onOpenItem={openItem}
+                  onCreateNote={(title) => void createNoteFromLink(title)}
+                  onClose={() => setShowBacklinks(false)}
+                />
+              </ResizablePanel>
             )}
             </PageSurface>
             <EditorFooter
@@ -1548,41 +1550,40 @@ const App: React.FC = () => {
       <div className="app-content">
         {/* Sidebar */}
         {modeConfig.ui.showSidebar && appState.sidebarVisible && (
-          <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-            {/* Explorer Section */}
-            <div className="sidebar-section">
-              <div
-                className="sidebar-section-header"
-                onClick={() => setExplorerExpanded(!explorerExpanded)}
-              >
-                <span className="section-toggle">
-                  {explorerExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                </span>
-                <span className="section-title">{activeSidebarPanel.label}</span>
-              </div>
-
-              {explorerExpanded && (
-                <div className="sidebar-section-content">{renderSidebarContent()}</div>
-              )}
-            </div>
-
-            {/* Quick Input Button - only show in non-writing modes */}
-            {appState.mode !== 'writing' && (
-              <div className="sidebar-footer">
-                <button
-                  className="quick-input-trigger"
-                  onClick={() => dispatch({ type: 'TOGGLE_QUICK_INPUT', payload: true })}
-                  title="快速输入 (⌘N)"
+          <ResizablePanel spec={PANELS.sidebar} side="left" label="调整侧栏宽度">
+            <aside className="sidebar">
+              {/* Explorer Section */}
+              <div className="sidebar-section">
+                <div
+                  className="sidebar-section-header"
+                  onClick={() => setExplorerExpanded(!explorerExpanded)}
                 >
-                  <Plus size={16} />
-                  <span>快速输入</span>
-                </button>
-              </div>
-            )}
+                  <span className="section-toggle">
+                    {explorerExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  </span>
+                  <span className="section-title">{activeSidebarPanel.label}</span>
+                </div>
 
-            {/* Resize Handle */}
-            <div className="sidebar-resizer" />
-          </aside>
+                {explorerExpanded && (
+                  <div className="sidebar-section-content">{renderSidebarContent()}</div>
+                )}
+              </div>
+
+              {/* Quick Input Button - only show in non-writing modes */}
+              {appState.mode !== 'writing' && (
+                <div className="sidebar-footer">
+                  <button
+                    className="quick-input-trigger"
+                    onClick={() => dispatch({ type: 'TOGGLE_QUICK_INPUT', payload: true })}
+                    title="快速输入 (⌘N)"
+                  >
+                    <Plus size={16} />
+                    <span>快速输入</span>
+                  </button>
+                </div>
+              )}
+            </aside>
+          </ResizablePanel>
         )}
 
         {/* Main Content */}

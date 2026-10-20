@@ -14,8 +14,7 @@
   display: flex;
   align-items: center;
   height: $titlebar-height;
-  background-color: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border-primary);
+  background-color: var(--bg-canvas);
   -webkit-app-region: drag;
   flex-shrink: 0;
   user-select: none;

@@ -17,6 +17,8 @@ import type { LinkIndex, RelatedLink } from '../../lib/links/link-index';
 import { isWritingDocument } from '../../lib/documents/constants';
 import { isReadableItem } from '../../lib/knowledge/open-target';
 import KnowledgeGraph, { type KnowledgeGraphMode } from '../KnowledgeGraph';
+import ResizablePanel from '../ResizablePanel';
+import { PANELS } from '../../lib/layout/panel-sizes';
 import { ITEM_TYPE_LABELS } from '../ReadingWorkspace/item-type';
 import { useActivityByItem, useLibraryTaskRunning } from '../AgentActivity/activity';
 import {
@@ -280,21 +282,23 @@ const KnowledgeWorkspace: React.FC<KnowledgeWorkspaceProps> = ({
         </main>
 
         {prefs.inspectorOpen && (
-          <Inspector
-            item={selectedItem}
-            kb={kb}
-            activity={selectedItem ? activityByItem.get(selectedItem.id) : undefined}
-            linkIndex={linkIndex}
-            related={related}
-            itemsById={itemsById}
-            tagNameById={tagNameById}
-            onSelectItem={onSelectItem}
-            onOpenInWriting={onOpenInWriting}
-            onOpenInReading={onOpenInReading}
-            onCreateNote={onCreateNote}
-            onRenameItem={onRenameItem}
-            onOpenSettings={onOpenSettings}
-          />
+          <ResizablePanel spec={PANELS.inspector} side="right" label="调整详情面板宽度">
+            <Inspector
+              item={selectedItem}
+              kb={kb}
+              activity={selectedItem ? activityByItem.get(selectedItem.id) : undefined}
+              linkIndex={linkIndex}
+              related={related}
+              itemsById={itemsById}
+              tagNameById={tagNameById}
+              onSelectItem={onSelectItem}
+              onOpenInWriting={onOpenInWriting}
+              onOpenInReading={onOpenInReading}
+              onCreateNote={onCreateNote}
+              onRenameItem={onRenameItem}
+              onOpenSettings={onOpenSettings}
+            />
+          </ResizablePanel>
         )}
       </div>
 

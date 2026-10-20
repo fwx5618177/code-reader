@@ -8,6 +8,7 @@
 // ================================
 
 // Background Colors (Layered depth)
+$bg-canvas: #161616; // 应用底色（外框），内容卡片放在上面
 $bg-primary: #1e1e1e; // Main background
 $bg-secondary: #252526; // Sidebar, secondary panels
 $bg-tertiary: #2d2d2d; // Headers, elevated elements
@@ -109,6 +110,7 @@ $shadow-focus: 0 0 0 2px rgba(124, 58, 237, 0.5);
 // Color Palette - Light Theme
 // ================================
 
+$light-bg-canvas: #eceef1;
 $light-bg-primary: #ffffff;
 $light-bg-secondary: #f8f9fa;
 $light-bg-tertiary: #f1f3f5;
@@ -223,9 +225,6 @@ $font-weight-bold: 700;
 // Widths
 $ribbon-width: 48px; // Left icon bar (collapsed)
 $ribbon-width-expanded: 180px; // Left icon bar (expanded with workspace selector)
-$sidebar-width: 280px; // File tree sidebar
-$sidebar-min-width: 180px;
-$sidebar-max-width: 480px;
 
 // Heights
 $titlebar-height: 38px; // macOS traffic lights area
@@ -274,6 +273,7 @@ $z-toast: 700;
 
 :root {
   // === Colors - Dark theme (default) ===
+  --bg-canvas: #{$bg-canvas};
   --bg-primary: #{$bg-primary};
   --bg-secondary: #{$bg-secondary};
   --bg-tertiary: #{$bg-tertiary};
@@ -391,6 +391,7 @@ $z-toast: 700;
 [data-theme='light'],
 :root.light {
   // === Colors ===
+  --bg-canvas: #{$light-bg-canvas};
   --bg-primary: #{$light-bg-primary};
   --bg-secondary: #{$light-bg-secondary};
   --bg-tertiary: #{$light-bg-tertiary};

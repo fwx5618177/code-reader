@@ -9,6 +9,7 @@ import type { PluginId, PluginTheme } from './types';
 
 /** 主题可以覆盖的颜色变量（与 theme-config 生成的颜色变量一致） */
 export const THEME_COLOR_VARIABLES = [
+  '--bg-canvas',
   '--bg-primary',
   '--bg-secondary',
   '--bg-tertiary',

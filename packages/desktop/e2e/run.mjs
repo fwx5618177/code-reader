@@ -232,6 +232,42 @@ const scenarios = [
     },
   },
   {
+    name: '布局：拖动侧栏与分栏分隔条调整宽度，重新加载后保持，双击还原',
+    async run(app) {
+      const sidebar = '[role=separator][aria-label="调整侧栏宽度"]';
+      const divider = '[role=separator][aria-label="调整分栏宽度"]';
+      const sidebarWidth = () => app.call((sel) => document.querySelector(sel).parentElement.getBoundingClientRect().width, sidebar);
+      const ratio = () => app.call((sel) => Number(document.querySelector(sel)?.getAttribute('aria-valuenow')), divider);
+      const doubleClick = (sel) => app.call((s) => document.querySelector(s).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })), sel);
+
+      await switchMode(app, '写作');
+      await quickOpen(app, '端到端笔记');
+      const initialWidth = await sidebarWidth();
+      await app.mouseDrag(sidebar, 60);
+      await waitFor(async () => Math.abs((await sidebarWidth()) - initialWidth - 60) < 2, { message: '拖动没有改变侧栏宽度' });
+
+      await app.press('\\', { modifiers: MOD });
+      await waitFor(async () => (await paneViews(app)).length === 2, { message: '没有分栏' });
+      const initialRatio = await ratio();
+      await app.mouseDrag(divider, -120);
+      await waitFor(async () => (await ratio()) < initialRatio - 5, { message: '拖动没有改变分栏比例' });
+      const draggedRatio = await ratio();
+
+      await reloadWithData(app);
+      await switchMode(app, '写作');
+      await waitFor(async () => Math.abs((await sidebarWidth()) - initialWidth - 60) < 2, { message: '重新加载后侧栏宽度没有保持' });
+      await waitFor(async () => (await ratio()) === draggedRatio, { message: '重新加载后分栏比例没有保持' });
+
+      await doubleClick(sidebar);
+      await doubleClick(divider);
+      await waitFor(async () => Math.abs((await sidebarWidth()) - initialWidth) < 2, { message: '双击没有还原侧栏宽度' });
+      await waitFor(async () => (await ratio()) === initialRatio, { message: '双击没有还原分栏比例' });
+      // 收尾：关闭分栏
+      await app.press('\\', { modifiers: MOD });
+      await waitFor(async () => (await paneViews(app)).length === 1, { message: '没有关闭分栏' });
+    },
+  },
+  {
     name: '补全：Markdown 正文里 $ 之内紧跟运算符的 \\ 也能补全 LaTeX 命令',
     async run(app) {
       await switchMode(app, '写作');

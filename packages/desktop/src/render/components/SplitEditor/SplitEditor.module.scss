@@ -11,7 +11,9 @@
   min-height: 0;
 }
 
+// 分栏时左栏按保存的比例固定宽度，右栏占满剩余；左栏右边缘挂着拖拽把手
 .pane {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
