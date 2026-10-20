@@ -6,6 +6,7 @@
 // 只改正文，不刷新更新时间（列表顺序不变）；内容在此期间被改过的跳过。转换后不再匹配，重复执行无副作用
 // ================================
 
+import { MAX_TRANSACTION_STATEMENTS } from '../../../shared/sql-transaction';
 import { databaseService } from '../../services/database';
 import { getFileTypeId } from '../documents/file-types';
 import { formatForFileType, isLegacyHtml, parseLegacyHtml, serializeContent } from '../markdown';
@@ -30,6 +31,9 @@ export async function migrateLegacyHtmlNotes(): Promise<number> {
       },
     ];
   });
-  if (statements.length > 0) await databaseService.transaction(statements);
+  // 主进程限制单次事务的语句数，按上限分批提交；每条更新都带内容条件，某批失败后重新启动会从剩余的继续
+  for (let start = 0; start < statements.length; start += MAX_TRANSACTION_STATEMENTS) {
+    await databaseService.transaction(statements.slice(start, start + MAX_TRANSACTION_STATEMENTS));
+  }
   return statements.length;
 }

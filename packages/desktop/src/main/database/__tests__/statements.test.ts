@@ -3,7 +3,8 @@
 // ================================
 
 import { describe, expect, it } from 'vitest';
-import { MAX_TRANSACTION_STATEMENTS, parseTransactionStatements } from '../statements';
+import { MAX_TRANSACTION_STATEMENTS } from '../../../shared/sql-transaction';
+import { parseTransactionStatements } from '../statements';
 
 describe('parseTransactionStatements', () => {
   it('返回规范化后的语句列表，参数可省略', () => {
@@ -51,6 +52,19 @@ describe('parseTransactionStatements', () => {
       expect(() => parseTransactionStatements([{ sql }])).toThrow('不允许的事务控制语句');
     }
   );
+
+  it.each(['/* x */ COMMIT', '-- x\nCOMMIT', ';  ;BEGIN', '/* a */ -- b\n /* c\n d */ ROLLBACK', '/**/ATTACH \'x.db\' AS x'])(
+    '跳过开头的注释与空语句后仍拒绝：%j',
+    (sql) => {
+      expect(() => parseTransactionStatements([{ sql }])).toThrow('不允许的事务控制语句');
+    }
+  );
+
+  it('注释里出现关键字、注释后是普通语句时放行', () => {
+    expect(() =>
+      parseTransactionStatements([{ sql: '/* COMMIT */ UPDATE tags SET usage_count = 0' }, { sql: '-- BEGIN\nSELECT 1' }])
+    ).not.toThrow();
+  });
 
   it('不误伤以相同字母开头的普通语句', () => {
     expect(() =>

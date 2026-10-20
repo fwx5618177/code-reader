@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const database = vi.hoisted(() => ({ all: vi.fn(), transaction: vi.fn() }));
 vi.mock('../../../services/database', () => ({ databaseService: database }));
 
+import { MAX_TRANSACTION_STATEMENTS } from '../../../../shared/sql-transaction';
 import { migrateLegacyHtmlNotes } from '../legacy-html-migration';
 
 beforeEach(() => {
@@ -33,6 +34,20 @@ describe('migrateLegacyHtmlNotes', () => {
       { sql: expect.any(String), params: ['第一行\n第二行', 'txt', '<p>第一行</p><p>第二行</p>'] },
     ]);
     expect(statements[0].sql).not.toContain('updated_at');
+  });
+
+  it('超过单次事务上限时按上限分批提交，不漏不重', async () => {
+    const total = MAX_TRANSACTION_STATEMENTS * 2 + 5;
+    database.all.mockResolvedValue(
+      Array.from({ length: total }, (_, index) => ({ id: `n${index}`, title: `笔记${index}`, content: `<p>${index}</p>` }))
+    );
+
+    expect(await migrateLegacyHtmlNotes()).toBe(total);
+    const batches = database.transaction.mock.calls.map(([statements]) => statements as { params: unknown[] }[]);
+    expect(batches.map((batch) => batch.length)).toEqual([MAX_TRANSACTION_STATEMENTS, MAX_TRANSACTION_STATEMENTS, 5]);
+    expect(batches.flat().map((statement) => statement.params[1])).toEqual(
+      Array.from({ length: total }, (_, index) => `n${index}`)
+    );
   });
 
   it('没有 HTML 笔记时不写入', async () => {
