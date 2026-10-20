@@ -95,6 +95,13 @@
   animation: spin 1s linear infinite;
 }
 
+// CSS Modules 会把动画名本地化，必须在本模块内定义
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .pages {
   display: flex;
   flex-direction: column;
