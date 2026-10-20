@@ -4,7 +4,9 @@
 // - 强调：分隔符栈 + “处理强调”过程（左右侧翼规则、3 的倍数规则）
 // - 链接 / 图片：方括号栈，行内目标与标题、完整 / 折叠 / 快捷引用，链接内不再有链接
 // - 代码 span、自动链接、行内 HTML、反斜杠转义、命名与数字字符引用、软 / 硬换行
-// GFM：删除线（~ 或 ~~，前后长度相同）、脚注引用 [^id]；语法扩展在触发字符处先于内置语法尝试
+// GFM：删除线（~ 或 ~~，前后长度相同）、脚注引用 [^id]、扩展自动链接（裸网址与邮箱）；
+// markdown-it 生态的常用语法：高亮 ==、插入 ++、上下标、行内脚注 ^[…]、缩写、排版替换、{…} 属性；
+// 语法扩展在触发字符处先于内置语法尝试
 // ================================
 
 import { lookupEntity } from './entities';
@@ -12,12 +14,22 @@ import {
   InlineType,
   type InlineExtension,
   type InlineNode,
+  type LinkReference,
   type Position,
   type ResolvedOptions,
-} from './commonmark-parser';
+} from './types';
 
 /** 链接引用定义：规范化后的标签 → 目标与标题 */
-export type ReferenceMap = Map<string, { url: string; title: string }>;
+export type ReferenceMap = Map<string, LinkReference>;
+
+/** 行内解析依赖的全文定义（块级解析完成后才齐全） */
+export interface InlineContext {
+  references: ReadonlyMap<string, LinkReference>;
+  /** 已定义的脚注标签：只有已定义的 [^id] 才是脚注引用 */
+  footnotes: ReadonlySet<string>;
+  /** 缩写 → 全称 */
+  abbreviations: ReadonlyMap<string, string>;
+}
 
 const ESCAPABLE = /^[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
 const ENTITY = /^&(?:#[xX][0-9a-fA-F]{1,6}|#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]{1,31});/;
@@ -48,6 +60,101 @@ const LINK_LABEL = /^\[(?:[^\\[\]]|\\[\s\S]){0,1000}\]/;
 const UNICODE_WHITESPACE = /^[\t\n\f\r ]$|^\p{Zs}$/u;
 const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
 const SPACES_AND_NEWLINE = /^[ \t]*(?:\n[ \t]*)?/;
+
+/** 可能含有裸网址或邮箱的文本（linkify 开启时不走“整段文本”的快速路径） */
+const LINKIFY_HINT = /www\.|:\/\/|@/i;
+/** linkify 的候选位置：www.、http(s)://、mailto:、邮箱的 @ */
+const LINKIFY_CANDIDATE = /www\.|https?:\/\/|mailto:|@/gi;
+/** GFM：www. 与网址前只能是行首、空白或 * _ ~ ( */
+const LINKIFY_BEFORE = /[\s*_~(]/u;
+const DOMAIN_CHAR = /[\p{L}\p{N}_-]/u;
+const EMAIL_LOCAL_CHAR = /[A-Za-z0-9._+-]/;
+const EMAIL_DOMAIN = /^[A-Za-z0-9._-]+/;
+/** GFM：链接末尾的这些标点不属于链接 */
+const TRAILING_PUNCTUATION = '?!.,:*_~';
+
+/** 上下标内容中的转义（含空格，与 markdown-it-sub / sup 相同） */
+const SCRIPT_UNESCAPE = /\\([ \\!"#$%&'()*+,./:;<=>?@[\]^_`{|}~-])/g;
+const SCRIPT_HAS_SPACE = /(^|[^\\])(\\\\)*\s/;
+
+/** {#id .class key=value} 属性块 */
+const ATTRIBUTE_BLOCK = /^\{([^{}\n]*)\}/;
+const ATTRIBUTE_TOKEN = /^(?:#([\w:.-]+)|\.([\w-]+)|([A-Za-z_:][\w:.-]*)=(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))$/;
+/** 紧跟在这些元素之后的 {…} 是元素的属性 */
+const ATTRIBUTE_TARGETS: ReadonlySet<InlineType> = new Set([
+  InlineType.Link,
+  InlineType.Image,
+  InlineType.Code,
+  InlineType.Bold,
+  InlineType.Italic,
+  InlineType.BoldItalic,
+  InlineType.Strikethrough,
+  InlineType.Mark,
+  InlineType.Insert,
+  InlineType.AutoLink,
+]);
+
+/** 解析 {…} 中的属性：空白分隔的 #id、.class、key=value；任何一项不合法都不算属性 */
+export function parseAttributes(inner: string): Record<string, string> | null {
+  const parts = inner.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+  if (!parts) return null;
+  const attributes: Record<string, string> = {};
+  const classes: string[] = [];
+  for (const part of parts) {
+    const match = ATTRIBUTE_TOKEN.exec(part);
+    if (!match) return null;
+    if (match[1] !== undefined) attributes.id = match[1];
+    else if (match[2] !== undefined) classes.push(match[2]);
+    else attributes[match[3]!] = match[4] ?? match[5] ?? match[6] ?? '';
+  }
+  if (classes.length > 0) attributes.class = [attributes.class, ...classes].filter(Boolean).join(' ');
+  return attributes;
+}
+
+/** 文本末尾的 {…} 属性（之前的空白一并去掉）：返回属性与去掉的长度 */
+export function trailingAttributes(text: string): { attributes: Record<string, string>; length: number } | null {
+  if (!text.endsWith('}')) return null;
+  const open = text.lastIndexOf('{');
+  if (open === -1) return null;
+  const attributes = parseAttributes(text.slice(open + 1, -1));
+  if (!attributes) return null;
+  let start = open;
+  while (start > 0 && (text[start - 1] === ' ' || text[start - 1] === '\t')) start--;
+  return { attributes, length: text.length - start };
+}
+
+/** 排版替换（与 markdown-it 的 replacements 规则相同） */
+const RARE_REPLACEMENT = /\+-|\.\.|\?\?\?\?|!!!!|,,|--/;
+const SCOPED_ABBREVIATION = /\((c|tm|r)\)/gi;
+const SCOPED_SYMBOLS: Record<string, string> = { c: '\u00A9', r: '\u00AE', tm: '\u2122' };
+
+function typographicReplacements(text: string): string {
+  let result = text.replace(SCOPED_ABBREVIATION, (_match, name: string) => SCOPED_SYMBOLS[name.toLowerCase()]!);
+  if (RARE_REPLACEMENT.test(result)) {
+    result = result
+      .replace(/\+-/g, '\u00B1')
+      .replace(/\.{2,}/g, '\u2026')
+      .replace(/([?!])\u2026/g, '$1..')
+      .replace(/([?!]){4,}/g, '$1$1$1')
+      .replace(/,{2,}/g, ',')
+      .replace(/(^|[^-])---(?=[^-]|$)/gm, '$1\u2014')
+      .replace(/(^|\s)--(?=\s|$)/gm, '$1\u2013')
+      .replace(/(^|[^-\s])--(?=[^-\s]|$)/gm, '$1\u2013');
+  }
+  return result;
+}
+
+/** 缩写的边界字符（与 markdown-it-abbr 相同：Unicode 标点、空白与部分 ASCII 符号） */
+const ABBREVIATION_BOUNDARY = '(?:[\\p{P}\\p{Z}]|[ \\r\\n$+<=>^`|~])';
+
+function abbreviationPattern(abbreviations: ReadonlyMap<string, string>): RegExp | null {
+  if (abbreviations.size === 0) return null;
+  const labels = [...abbreviations.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  return new RegExp(`(^|${ABBREVIATION_BOUNDARY})(${labels})(?=$|${ABBREVIATION_BOUNDARY})`, 'gu');
+}
 
 /** 解码字符引用（命名或数字）；不认识的命名引用原样返回 */
 export function decodeEntity(entity: string): string {
@@ -85,8 +192,10 @@ class Node {
   footnoteId?: string;
   name?: string;
   data?: Record<string, unknown>;
-  /** 强调与删除线的分隔符、代码 span 的反引号 */
+  /** 强调与删除线的分隔符、代码 span 的反引号、linkify 标记 */
   marker?: string;
+  /** 行内脚注的内容（已单独解析） */
+  inlineChildren?: InlineNode[];
 
   constructor(
     public type: InlineType,
@@ -133,9 +242,18 @@ interface Delimiter {
   originalCount: number;
   canOpen: boolean;
   canClose: boolean;
+  /** 成对分隔符（~~ == ++）奇数长度时多出的一个字符：作闭合时移到元素之后（与 markdown-it 一致） */
+  lone: Node | null;
   prev: Delimiter | null;
   next: Delimiter | null;
 }
+
+/** 成对分隔符对应的元素 */
+const PAIRED_TYPES: Record<string, InlineType> = {
+  '~': InlineType.Strikethrough,
+  '=': InlineType.Mark,
+  '+': InlineType.Insert,
+};
 
 interface Bracket {
   node: Node;
@@ -161,6 +279,15 @@ export interface InlineOrigin {
   startLine: number;
   starts: readonly number[];
   columns: readonly number[];
+  /** 内容相对源码删掉的字符（表格单元格中 \| 的反斜杠）：内容偏移升序，每个表示该偏移之前少了一个源码字符 */
+  gaps?: readonly number[];
+}
+
+/** 文本节点在合并时的来源范围 */
+interface TextRun {
+  content: string;
+  start: number;
+  end: number;
 }
 
 export class InlineParser {
@@ -176,18 +303,38 @@ export class InlineParser {
   private readonly specialGlobal: RegExp;
   /** 触发字符 → 行内扩展 */
   private readonly extensions = new Map<string, InlineExtension[]>();
+  private readonly context: InlineContext;
+  /** GFM 单个 ~ 的删除线（开启下标后单个 ~ 留给下标） */
+  private readonly gfmTilde: boolean;
+  private readonly abbreviations: RegExp | null;
+  /** 解析过的内容中是否出现过脚注引用（没有时不必编号） */
+  sawFootnotes = false;
 
   constructor(
     private readonly options: ResolvedOptions,
-    private readonly references: ReferenceMap = new Map()
+    context: Partial<InlineContext> = {}
   ) {
+    this.context = {
+      references: context.references ?? new Map(),
+      footnotes: context.footnotes ?? new Set(),
+      abbreviations: context.abbreviations ?? new Map(),
+    };
+    this.gfmTilde = options.singleTildeStrikethrough && !options.subscript;
+    this.abbreviations = abbreviationPattern(this.context.abbreviations);
     for (const extension of options.inlineExtensions) {
       const list = this.extensions.get(extension.trigger) ?? [];
       list.push(extension);
       this.extensions.set(extension.trigger, list);
     }
     const triggers = [...this.extensions.keys()].map((char) => char.replace(/[\\\]^-]/g, '\\$&')).join('');
-    const chars = '\\n`[\\]\\\\!<&*_' + (options.strikethrough ? '~' : '') + (options.smartPunctuation ? `'"` : '') + triggers;
+    const chars =
+      '\\n`[\\]\\\\!<&*_' +
+      (options.strikethrough || options.subscript ? '~' : '') +
+      (options.smartPunctuation ? `'"` : '') +
+      (options.mark ? '=' : '') +
+      (options.insert ? '+' : '') +
+      (options.superscript || options.footnotes ? '\\^' : '') +
+      triggers;
     this.special = new RegExp(`[${chars}]`);
     this.specialGlobal = new RegExp(`[${chars}]`, 'g');
   }
@@ -211,9 +358,11 @@ export class InlineParser {
 
     // 没有任何行内语法的内容（常见于表格单元格与短段落）：整体就是一段文本
     if (!this.subject) return [];
-    if (!this.special.test(this.subject)) {
+    if (!this.special.test(this.subject) && !(this.options.linkify && LINKIFY_HINT.test(this.subject))) {
       const text = this.options.smartPunctuation ? smartDashesAndEllipses(this.subject) : this.subject;
-      return [{ type: InlineType.Text, content: text, position: this.position(0, this.subject.length) }];
+      const result: InlineNode[] = [];
+      this.flushText(result, { content: text, start: 0, end: this.subject.length });
+      return result;
     }
 
     const root = new Node(InlineType.Text);
@@ -243,7 +392,18 @@ export class InlineParser {
         handled = this.handleDelimiter(char, block);
         break;
       case '~':
-        handled = this.options.strikethrough && this.handleDelimiter(char, block);
+        handled =
+          (this.options.subscript && this.subject[this.pos + 1] !== '~' && this.parseScript(block, '~')) ||
+          (this.options.strikethrough && this.handleDelimiter(char, block));
+        break;
+      case '=':
+      case '+':
+        handled = this.handleDelimiter(char, block);
+        break;
+      case '^':
+        handled =
+          (this.options.footnotes && this.subject[this.pos + 1] === '[' && this.parseInlineFootnote(block)) ||
+          (this.options.superscript && this.parseScript(block, '^'));
         break;
       case "'":
       case '"':
@@ -300,11 +460,222 @@ export class InlineParser {
     const match = this.specialGlobal.exec(this.subject);
     const end = match ? match.index : this.subject.length;
     if (end === this.pos) return false;
+    if (this.options.linkify && this.linkifyIn(block, end)) return true;
     const start = this.pos;
     const literal = this.subject.slice(start, end);
     this.pos = end;
     this.text(block, this.options.smartPunctuation ? smartDashesAndEllipses(literal) : literal, start);
     return true;
+  }
+
+  // ---------- GFM 扩展自动链接 ----------
+
+  /**
+   * 在当前文本 [pos, end) 中查找裸网址或邮箱；找到时输出之前的文本与链接节点（链接可以越过 end，
+   * 如网址中的 _ 与 &）。链接文字与之后的内容仍由主循环继续解析
+   */
+  private linkifyIn(block: Node, end: number): boolean {
+    const start = this.pos;
+    LINKIFY_CANDIDATE.lastIndex = start;
+    for (let match = LINKIFY_CANDIDATE.exec(this.subject); match && match.index < end; match = LINKIFY_CANDIDATE.exec(this.subject)) {
+      const candidate = match[0].toLowerCase();
+      const found =
+        candidate === '@'
+          ? this.matchEmail(match.index, start, block)
+          : candidate === 'mailto:'
+            ? this.matchMailto(match.index)
+            : this.matchUrl(match.index, candidate);
+      if (!found) {
+        LINKIFY_CANDIDATE.lastIndex = match.index + 1;
+        continue;
+      }
+      if (found.from > start) {
+        const literal = this.subject.slice(start, found.from);
+        this.pos = found.from;
+        this.text(block, this.options.smartPunctuation ? smartDashesAndEllipses(literal) : literal, start);
+      }
+      this.pos = found.to;
+      const node = new Node(InlineType.AutoLink, this.subject.slice(found.from, found.to), found.from, found.to);
+      node.url = found.url;
+      node.marker = 'linkify';
+      block.append(node);
+      return true;
+    }
+    return false;
+  }
+
+  /** GFM 有效域名：字母数字、_ 与 - 组成的段，用 . 分隔；末两段不能有 _；返回域名结束位置 */
+  private scanDomain(from: number, requirePeriod: boolean): number | null {
+    let end = from;
+    while (end < this.subject.length && (this.subject[end] === '.' || DOMAIN_CHAR.test(this.subject[end]!))) end++;
+    const segments = this.subject.slice(from, end).replace(/\.+$/, '').split('.');
+    if (segments.some((segment) => segment === '')) return null;
+    if (requirePeriod && segments.length < 2) return null;
+    if (segments.slice(-2).some((segment) => segment.includes('_'))) return null;
+    return end;
+  }
+
+  /** www.… 与 http(s)://…：域名之后到空白或 < 为止，再按 GFM 规则去掉末尾的标点 */
+  private matchUrl(from: number, prefix: string): { from: number; to: number; url: string } | null {
+    if (from > 0 && !LINKIFY_BEFORE.test(this.subject[from - 1]!)) return null;
+    const www = prefix === 'www.';
+    const domainStart = www ? from : from + prefix.length;
+    const domainEnd = this.scanDomain(domainStart, www);
+    if (domainEnd === null) return null;
+    let to = domainEnd;
+    while (to < this.subject.length && !/[\s<]/.test(this.subject[to]!)) to++;
+    to = this.trimLinkEnd(from, to);
+    if (to <= domainStart + (www ? 4 : 0)) return null;
+    const text = this.subject.slice(from, to);
+    return { from, to, url: www ? `http://${text}` : text };
+  }
+
+  /** GFM 链接末尾：去掉 ?!.,:*_~；不配对的 ) 逐个去掉；以 ; 结尾且像字符引用时去掉整个引用 */
+  private trimLinkEnd(from: number, to: number): number {
+    for (;;) {
+      const last = this.subject[to - 1]!;
+      if (to > from && TRAILING_PUNCTUATION.includes(last)) {
+        to--;
+      } else if (last === ')') {
+        const text = this.subject.slice(from, to);
+        const opening = text.split('(').length - 1;
+        const closing = text.split(')').length - 1;
+        if (closing <= opening) return to;
+        to--;
+      } else if (last === ';') {
+        const entity = /&[A-Za-z0-9]+;$/.exec(this.subject.slice(from, to));
+        if (!entity) return to;
+        to -= entity[0].length;
+      } else {
+        return to;
+      }
+    }
+  }
+
+  /** 邮箱的域名部分：至少一个 .，末尾的 . 不属于链接，最后一个字符不能是 - 或 _ */
+  private emailDomainEnd(at: number): number | null {
+    const domain = EMAIL_DOMAIN.exec(this.subject.slice(at + 1))?.[0].replace(/\.+$/, '');
+    if (!domain || !domain.includes('.') || /[-_]$/.test(domain) || domain.split('.').some((part) => part === '')) return null;
+    return at + 1 + domain.length;
+  }
+
+  /**
+   * 邮箱：从 @ 向前取本地部分。本地部分可能跨过已输出的文本节点（如 a_b@c.d 中的 _ 是单独的节点），
+   * 只吸收与源码一致、不在分隔符栈中的文本节点
+   */
+  private matchEmail(at: number, start: number, block: Node): { from: number; to: number; url: string } | null {
+    let from = at;
+    while (from > 0 && EMAIL_LOCAL_CHAR.test(this.subject[from - 1]!)) from--;
+    if (from === at) return null;
+    const to = this.emailDomainEnd(at);
+    if (to === null) return null;
+    if (from < start) from = this.absorbText(block, from, start);
+    if (from === at) return null;
+    return { from, to, url: `mailto:${this.subject.slice(from, to)}` };
+  }
+
+  private matchMailto(from: number): { from: number; to: number; url: string } | null {
+    if (from > 0 && !LINKIFY_BEFORE.test(this.subject[from - 1]!)) return null;
+    const localStart = from + 'mailto:'.length;
+    let at = localStart;
+    while (at < this.subject.length && EMAIL_LOCAL_CHAR.test(this.subject[at]!)) at++;
+    if (at === localStart || this.subject[at] !== '@') return null;
+    const to = this.emailDomainEnd(at);
+    if (to === null) return null;
+    const text = this.subject.slice(from, to);
+    return { from, to, url: text };
+  }
+
+  /**
+   * 把块末尾、从 from 开始的文本节点并入将要创建的链接：遇到不能吸收的节点时停在它之后。
+   * 返回链接实际的起点
+   */
+  private absorbText(block: Node, from: number, start: number): number {
+    const absorbed: Node[] = [];
+    let cursor = start;
+    for (let node = block.last; node && cursor > from; node = node.prev) {
+      const absorbable =
+        node.type === InlineType.Text &&
+        node.end === cursor &&
+        node.literal === this.subject.slice(node.start, node.end) &&
+        !this.isDelimiterNode(node);
+      if (!absorbable) break;
+      absorbed.push(node);
+      cursor = node.start;
+    }
+    const begin = Math.max(from, cursor);
+    for (const node of absorbed) {
+      if (node.start < begin) {
+        node.literal = this.subject.slice(node.start, begin);
+        node.end = begin;
+      } else {
+        node.unlink();
+      }
+    }
+    return begin;
+  }
+
+  private isDelimiterNode(node: Node): boolean {
+    for (let delimiter = this.delimiters; delimiter; delimiter = delimiter.prev) {
+      if (delimiter.node === node || delimiter.lone === node) return true;
+    }
+    for (let bracket = this.brackets; bracket; bracket = bracket.prev) if (bracket.node === node) return true;
+    return false;
+  }
+
+  // ---------- 上下标与行内脚注 ----------
+
+  /** ~下标~ / ^上标^：内容非空且没有未转义的空白，内容按文本处理（与 markdown-it-sub / sup 一致） */
+  private parseScript(block: Node, char: '~' | '^'): boolean {
+    const start = this.pos;
+    if (start + 2 >= this.subject.length) return false;
+    let close = start + 1;
+    while (close < this.subject.length && this.subject[close] !== char) close += this.subject[close] === '\\' ? 2 : 1;
+    if (close >= this.subject.length || close === start + 1) return false;
+    const content = this.subject.slice(start + 1, close);
+    if (SCRIPT_HAS_SPACE.test(content)) return false;
+    this.pos = close + 1;
+    const node = new Node(char === '~' ? InlineType.Subscript : InlineType.Superscript, '', start, this.pos);
+    node.marker = char;
+    node.append(new Node(InlineType.Text, content.replace(SCRIPT_UNESCAPE, '$1'), start + 1, close));
+    block.append(node);
+    return true;
+  }
+
+  /** 行内脚注 ^[内容]：方括号可以嵌套，内容单独按行内语法解析 */
+  private parseInlineFootnote(block: Node): boolean {
+    const start = this.pos;
+    let depth = 0;
+    let close = start + 1;
+    for (; close < this.subject.length; close++) {
+      const char = this.subject[close];
+      if (char === '\\') close++;
+      else if (char === '[') depth++;
+      else if (char === ']' && --depth === 0) break;
+    }
+    if (close >= this.subject.length) return false;
+    this.sawFootnotes = true;
+    const node = new Node(InlineType.FootnoteRef, this.subject.slice(start, close + 1), start, close + 1);
+    node.inlineChildren = new InlineParser(this.options, this.context).parse(
+      this.subject.slice(start + 2, close),
+      this.originOf(start + 2, close)
+    );
+    this.pos = close + 1;
+    block.append(node);
+    return true;
+  }
+
+  /** 内容中 [from, to) 一段在源码中的位置（供单独解析的子内容使用） */
+  private originOf(from: number, to: number): InlineOrigin {
+    const first = this.locate(from);
+    const starts = [first.offset];
+    const columns = [first.column - 1];
+    for (let i = this.subject.indexOf('\n', from); i !== -1 && i < to; i = this.subject.indexOf('\n', i + 1)) {
+      const line = this.locate(i + 1);
+      starts.push(line.offset);
+      columns.push(line.column - 1);
+    }
+    return { startLine: first.line, starts, columns };
   }
 
   private parseNewline(block: Node): boolean {
@@ -418,7 +789,15 @@ export class InlineParser {
     let count = 0;
     if (quote) count = 1;
     else while (this.subject[this.pos + count] === char) count++;
-    if (char === '~' && (count > 2 || (count === 1 && !this.options.singleTildeStrikethrough))) return false;
+    const paired = char === '~' || char === '=' || char === '+';
+    const exactTilde = char === '~' && this.gfmTilde;
+    if (exactTilde && count > 2) {
+      // GFM：三个及以上的 ~ 不构成删除线，整段按文本
+      this.pos += count;
+      this.text(block, char.repeat(count), start);
+      return true;
+    }
+    if (paired && !exactTilde && count < 2) return false;
 
     const before = this.charBefore();
     const afterCode = this.subject.codePointAt(this.pos + count);
@@ -436,10 +815,18 @@ export class InlineParser {
         : leftFlanking;
     const canClose = char === '_' ? rightFlanking && (!leftFlanking || afterPunctuation) : rightFlanking;
 
+    // 成对分隔符长度为奇数时，第一个字符单独作文本（作闭合时再移到元素之后）
+    let lone: Node | null = null;
+    if (paired && !exactTilde && count % 2 === 1) {
+      this.pos++;
+      lone = this.text(block, char, start);
+      count--;
+    }
+    const runStart = this.pos;
     this.pos += count;
     // 智能引号：未配对的单引号按撇号（’），双引号按左引号（“）
     const literal = char === "'" ? '\u2019' : char === '"' ? '\u201C' : char.repeat(count);
-    const node = this.text(block, literal, start);
+    const node = this.text(block, literal, runStart);
     if (canOpen || canClose) {
       const delimiter: Delimiter = {
         node,
@@ -448,6 +835,7 @@ export class InlineParser {
         originalCount: count,
         canOpen,
         canClose,
+        lone,
         prev: this.delimiters,
         next: null,
       };
@@ -480,8 +868,10 @@ export class InlineParser {
       let found = false;
       while (opener && opener !== stackBottom && opener !== bottom) {
         if (opener.char === closer.char && opener.canOpen) {
-          if (closer.char === '~') {
+          if (closer.char === '~' && this.gfmTilde) {
             found = opener.count === closer.count;
+          } else if (closer.char === '~' || closer.char === '=' || closer.char === '+') {
+            found = true;
           } else if (closer.char === "'" || closer.char === '"') {
             found = true;
           } else {
@@ -511,14 +901,18 @@ export class InlineParser {
         continue;
       }
       if (found && opener) {
-        const used = closer.char === '~' ? closer.count : closer.count >= 2 && opener.count >= 2 ? 2 : 1;
+        const paired = closer.char === '~' || closer.char === '=' || closer.char === '+';
+        const used = paired ? (closer.char === '~' && this.gfmTilde ? closer.count : 2) : closer.count >= 2 && opener.count >= 2 ? 2 : 1;
         opener.count -= used;
         closer.count -= used;
         opener.node.literal = opener.node.literal.slice(0, opener.node.literal.length - used);
         closer.node.literal = closer.node.literal.slice(0, closer.node.literal.length - used);
 
-        const type =
-          closer.char === '~' ? InlineType.Strikethrough : used === 2 ? InlineType.Bold : InlineType.Italic;
+        const type = paired
+          ? PAIRED_TYPES[closer.char]!
+          : used === 2
+            ? InlineType.Bold
+            : InlineType.Italic;
         const emphasis = new Node(type, '', opener.node.end - used, closer.node.start + used);
         emphasis.marker = closer.char.repeat(used);
         let child = opener.node.next;
@@ -528,6 +922,10 @@ export class InlineParser {
           child = next;
         }
         opener.node.insertAfter(emphasis);
+        if (closer.lone) {
+          emphasis.insertAfter(closer.lone);
+          closer.lone = null;
+        }
 
         // 移除两者之间的分隔符
         let between = closer.prev;
@@ -573,10 +971,11 @@ export class InlineParser {
 
   private parseOpenBracket(block: Node): boolean {
     const start = this.pos;
-    // GFM 脚注引用 [^id]
-    if (this.options.footnotes) {
+    // GFM 脚注引用 [^id]：只有已定义的标签才是引用（与 markdown-it-footnote、cmark-gfm 一致）
+    if (this.options.footnotes && this.subject[this.pos + 1] === '^') {
       const footnote = /^\[\^([^\]\s]+)\]/.exec(this.subject.slice(this.pos));
-      if (footnote) {
+      if (footnote && this.context.footnotes.has(footnote[1]!)) {
+        this.sawFootnotes = true;
         this.pos += footnote[0].length;
         const node = new Node(InlineType.FootnoteRef, footnote[0], start, this.pos);
         node.footnoteId = footnote[1]!;
@@ -745,7 +1144,7 @@ export class InlineParser {
         label = this.subject.slice(opener.index - 1, start + 1);
       }
       if (length === 0) this.pos = afterBracket;
-      const reference = label ? this.references.get(normalizeReference(label)) : undefined;
+      const reference = label ? this.context.references.get(normalizeReference(label)) : undefined;
       if (reference) {
         url = reference.url;
         title = reference.title;
@@ -774,56 +1173,67 @@ export class InlineParser {
     this.brackets = opener.prev;
     opener.node.unlink();
 
-    // 链接里不能再有链接：之前的链接开括号失效
+    // 链接里不能再有链接：之前的链接开括号失效，链接文字中识别出的裸网址还原为文本
     if (!image) {
       for (let bracket = this.brackets; bracket; bracket = bracket.prev) {
         if (!bracket.image) bracket.active = false;
       }
+      if (this.options.linkify) unlinkify(node);
     }
     return true;
   }
 
   // ---------- 输出 ----------
 
-  private position(start: number, end: number): Position {
+  /** 内容偏移 → 源码偏移、行、列（1 起） */
+  private locate(offset: number): { offset: number; line: number; column: number } {
+    let low = 0;
+    let high = this.lineStarts.length - 1;
+    while (low < high) {
+      const mid = (low + high + 1) >> 1;
+      if (this.lineStarts[mid]! <= offset) low = mid;
+      else high = mid - 1;
+    }
     const origin = this.origin;
-    const locate = (offset: number) => {
-      let low = 0;
-      let high = this.lineStarts.length - 1;
-      while (low < high) {
-        const mid = (low + high + 1) >> 1;
-        if (this.lineStarts[mid]! <= offset) low = mid;
-        else high = mid - 1;
-      }
-      const column = offset - this.lineStarts[low]!;
-      if (!origin) return { offset, line: this.startLine + low, column: column + 1 };
-      const k = Math.min(low, origin.starts.length - 1);
-      return { offset: origin.starts[k]! + column, line: origin.startLine + k, column: origin.columns[k]! + column + 1 };
+    const column = offset - this.lineStarts[low]!;
+    if (!origin) return { offset, line: this.startLine + low, column: column + 1 };
+    const k = Math.min(low, origin.starts.length - 1);
+    let skipped = 0;
+    if (origin.gaps) for (const gap of origin.gaps) if (gap <= offset) skipped++;
+    return {
+      offset: origin.starts[k]! + column + skipped,
+      line: origin.startLine + k,
+      column: origin.columns[k]! + column + skipped + 1,
     };
-    const from = locate(start);
-    const to = locate(end);
+  }
+
+  private position(start: number, end: number): Position {
+    const from = this.locate(start);
+    const to = this.locate(end);
     return { start: from.offset, end: to.offset, startLine: from.line, startColumn: from.column, endLine: to.line, endColumn: to.column };
   }
 
-  /** 转成对外的节点，相邻文本合并、空文本丢弃 */
+  /** 转成对外的节点：相邻文本合并、空文本丢弃，合并后的文本再做缩写、属性与排版替换 */
   private toInlineNodes(parent: Node): InlineNode[] {
     const result: InlineNode[] = [];
-    let lastTextStart = 0;
+    let run: TextRun | null = null;
     for (let node = parent.first; node; node = node.next) {
       if (node.type === InlineType.Text) {
         if (!node.literal) continue;
-        const last = result[result.length - 1];
-        if (last && last.type === InlineType.Text) {
-          last.content += node.literal;
-          last.position = this.position(lastTextStart, node.end);
-          continue;
+        if (run) {
+          run.content += node.literal;
+          run.end = node.end;
+        } else {
+          run = { content: node.literal, start: node.start, end: node.end };
         }
-        lastTextStart = node.start;
+        continue;
       }
-      const children = node.first ? this.toInlineNodes(node) : undefined;
+      if (run) this.flushText(result, run);
+      run = null;
+      const children = node.first ? this.toInlineNodes(node) : node.inlineChildren;
       const converted: InlineNode = {
         type: node.type,
-        content: children ? plainText(children) : node.literal,
+        content: children && !node.inlineChildren ? plainText(children) : node.literal,
         position: this.position(node.start, node.end),
       };
       if (children) converted.children = children;
@@ -837,7 +1247,70 @@ export class InlineParser {
       if (node.type === InlineType.Link || node.type === InlineType.Image) converted.children ??= [];
       result.push(converted);
     }
+    if (run) this.flushText(result, run);
     return result;
+  }
+
+  /**
+   * 输出一段合并后的文本：开头的 {…} 是前一个元素的属性，其余部分按缩写切分、做排版替换。
+   * 文本与源码一致时（没有实体、转义）切分后的各段有精确位置，否则都用整段的位置
+   */
+  private flushText(result: InlineNode[], run: TextRun): void {
+    if (!this.abbreviations && !this.options.attributes) {
+      const content = this.options.replacements ? typographicReplacements(run.content) : run.content;
+      result.push({ type: InlineType.Text, content, position: this.position(run.start, run.end) });
+      return;
+    }
+    const exact = run.content === this.subject.slice(run.start, run.end);
+    const span = (from: number, to: number) => (exact ? this.position(run.start + from, run.start + to) : this.position(run.start, run.end));
+    let content = run.content;
+    let offset = 0;
+
+    const previous = result[result.length - 1];
+    if (this.options.attributes && previous && ATTRIBUTE_TARGETS.has(previous.type) && content.startsWith('{')) {
+      const match = ATTRIBUTE_BLOCK.exec(content);
+      const attributes = match && parseAttributes(match[1]!);
+      if (match && attributes) {
+        previous.attributes = { ...previous.attributes, ...attributes };
+        content = content.slice(match[0].length);
+        offset = match[0].length;
+      }
+    }
+
+    const replace = (text: string) => (this.options.replacements ? typographicReplacements(text) : text);
+    const pushText = (from: number, to: number) => {
+      if (to > from) result.push({ type: InlineType.Text, content: replace(content.slice(from, to)), position: span(offset + from, offset + to) });
+    };
+    let last = 0;
+    if (this.abbreviations) {
+      this.abbreviations.lastIndex = 0;
+      for (let match = this.abbreviations.exec(content); match; match = this.abbreviations.exec(content)) {
+        const from = match.index + match[1]!.length;
+        const to = from + match[2]!.length;
+        pushText(last, from);
+        result.push({
+          type: InlineType.Abbreviation,
+          content: match[2]!,
+          title: this.context.abbreviations.get(match[2]!)!,
+          position: span(offset + from, offset + to),
+        });
+        last = to;
+      }
+    }
+    pushText(last, content.length);
+  }
+}
+
+/** 链接文字中的裸网址还原为文本 */
+function unlinkify(parent: Node): void {
+  for (let child = parent.first; child; child = child.next) {
+    if (child.type === InlineType.AutoLink && child.marker === 'linkify') {
+      child.type = InlineType.Text;
+      child.marker = undefined;
+      child.url = undefined;
+    } else {
+      unlinkify(child);
+    }
   }
 }
 

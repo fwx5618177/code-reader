@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import MarkdownIt from 'markdown-it';
 import { describe, expect, it } from 'vitest';
 import { MarkdownItCompatTokenizer, type InlineExtension, type BlockExtension } from '../src';
+import { shape } from './helpers/token-shape';
 
 interface SpecExample {
   markdown: string;
@@ -21,51 +22,6 @@ const examples: SpecExample[] = JSON.parse(readFileSync(resolve(__dirname, 'fixt
 /** 与编辑器相同的方言：CommonMark + 表格 + ~~删除线~~，不识别 HTML、不自动链接网址 */
 const markdownIt = new MarkdownIt('commonmark', { html: false, linkify: false }).enable(['table', 'strikethrough']);
 const ours = new MarkdownItCompatTokenizer({ html: false, taskLists: false, footnotes: false, singleTildeStrikethrough: false });
-
-interface Comparable {
-  type: string;
-  tag: string;
-  nesting: number;
-  level: number;
-  map: [number, number] | null;
-  content: string;
-  markup: string;
-  info: string;
-  attrs: Array<[string, string]> | null;
-  hidden: boolean;
-  children: Comparable[] | null;
-}
-
-interface TokenLike {
-  type: string;
-  tag: string;
-  nesting: number;
-  level: number;
-  map: [number, number] | null;
-  content: string;
-  markup: string;
-  info: string;
-  attrs: Array<[string, string]> | null;
-  hidden: boolean;
-  children: TokenLike[] | null;
-}
-
-/** 比较用的形状：inline token 的 content 只比较去掉各行首空白后的文本（markdown-it 保留续行多余的缩进） */
-function shape(token: TokenLike): Comparable {
-  return {
-    type: token.type,
-    tag: token.tag,
-    nesting: token.nesting,
-    level: token.level,
-    map: token.map,
-    content: token.type === 'inline' ? token.content.replace(/\n[ \t]+/g, '\n') : token.content,
-    markup: token.type === 'text' ? '' : token.markup,
-    info: token.type === 'text' ? '' : token.info,
-    attrs: token.attrs && token.attrs.length > 0 ? token.attrs.map(([k, v]) => [k, String(v)] as [string, string]) : null,
-    hidden: token.hidden,
-    children: token.children ? token.children.filter((child) => child.type !== 'text' || child.content !== '').map(shape) : null,
-  };
-}
 
 const compare = (markdown: string) => ({
   expected: markdownIt.parse(markdown, {}).map(shape),
@@ -90,6 +46,7 @@ describe('markdown-it 兼容 token 流', () => {
   it.each([
     ['表格（对齐、转义竖线、空单元格）', '| a | b | c |\n|:--|:-:|--:|\n| 1 | x \\| y | |\n| 2 |'],
     ['删除线只接受 ~~', '~~删除~~ 与 约 ~5 分钟'],
+    ['三个及以上的 ~：多出的一个在元素外', 'This will ~~~not~~~ strike. ~~~~a~~~~'],
     ['紧凑与松散列表', '- a\n- b\n\n1. x\n\n2. y\n'],
     ['嵌套列表与引用', '> - a\n>   - b\n> c\n\n- [ ] 任务\n- [x] 完成'],
     ['标题写法', '# ATX #\n\nSetext\n===\n\nSetext 2\n---'],

@@ -8,11 +8,11 @@
 
 import {
   BlockType,
-  InlineType,
   type BlockExtension,
   type BlockExtensionLine,
   type BlockNode,
   type InlineNode,
+  type LinkReference,
   type ParseWarning,
   type Position,
   type ResolvedOptions,
@@ -20,8 +20,10 @@ import {
   type TableCellNode,
   type TableNode,
   type TableRowNode,
-} from './commonmark-parser';
-import { InlineParser, unescapeString, type InlineOrigin, type ReferenceMap } from './inline-parser';
+  InlineType,
+} from './types';
+import { numberFootnotes } from './footnotes';
+import { InlineParser, trailingAttributes, unescapeString, type InlineOrigin, type ReferenceMap } from './inline-parser';
 
 const CODE_INDENT = 4;
 
@@ -58,6 +60,12 @@ const BULLET_MARKER = /^[*+-]/;
 const ORDERED_MARKER = /^(\d{1,9})([.)])/;
 const MAYBE_SPECIAL = /^[#`~*+_=<>0-9-[|:]/;
 const FOOTNOTE_DEFINITION = /^\[\^([^\]\s]+)\]:[ \t]?/;
+/** 缩写定义 *[缩写]: 全称（缩写中不能有未转义的方括号） */
+const ABBREVIATION_DEFINITION = /^\*\[((?:[^[\]\\]|\\.)+)\]:(.*)$/;
+/** 自定义容器的开始 ::: 名称 参数 */
+const CONTAINER_OPEN = /^(:{3,})(.*)$/;
+const FRONT_MATTER_OPEN = /^---[ \t]*$/;
+const FRONT_MATTER_CLOSE = /^(?:---|\.\.\.)[ \t]*$/;
 /** 能结束 GFM 表格的块开头：引用、ATX 标题、围栏、主题分隔线、列表项 */
 const TABLE_INTERRUPT = /^(?:>|#{1,6}(?:[ \t]|$)|`{3,}|~{3,}|(?:[*_-][ \t]*){3,}$|[*+-](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$))/;
 
@@ -73,7 +81,14 @@ type BlockKind =
   | 'paragraph'
   | 'table'
   | 'footnote_definition'
-  | 'extension';
+  | 'extension'
+  | 'front_matter'
+  | 'container'
+  | 'deflist'
+  | 'dt'
+  | 'dd'
+  /** 缩写定义行：只用来结束前面的段落，关闭时从树中去掉 */
+  | 'abbr_def';
 
 interface ListData {
   type: 'bullet' | 'ordered';
@@ -113,6 +128,8 @@ class Block {
   extension: BlockExtension | null = null;
   data: Record<string, unknown> | undefined = undefined;
   extensionClosed = false;
+  /** 自定义容器的名称 */
+  containerName = '';
 
   constructor(
     public kind: BlockKind,
@@ -127,34 +144,27 @@ class Block {
     return this.children[this.children.length - 1];
   }
 
-  /** 后一个兄弟块 */
-  nextSibling(): Block | undefined {
-    if (!this.parent) return undefined;
-    const siblings = this.parent.children;
-    return siblings[siblings.indexOf(this) + 1];
-  }
-
   remove(): void {
     if (!this.parent) return;
     const siblings = this.parent.children;
-    siblings.splice(siblings.indexOf(this), 1);
+    siblings.splice(siblings.lastIndexOf(this), 1);
     this.parent = null;
   }
 }
 
-const CONTAINERS: ReadonlySet<BlockKind> = new Set(['document', 'block_quote', 'item', 'footnote_definition']);
+const CONTAINERS: ReadonlySet<BlockKind> = new Set(['document', 'block_quote', 'item', 'footnote_definition', 'container', 'dd']);
 const ACCEPTS_LINES: ReadonlySet<BlockKind> = new Set(['paragraph', 'code_block', 'html_block', 'table']);
 
 function canContain(parent: BlockKind, child: BlockKind): boolean {
   if (parent === 'list') return child === 'item';
-  return CONTAINERS.has(parent) && child !== 'item';
+  if (parent === 'deflist') return child === 'dd';
+  return CONTAINERS.has(parent) && child !== 'item' && child !== 'dd';
 }
 
 const isSpaceOrTab = (char: string | undefined) => char === ' ' || char === '\t';
 
-/** 块级结束于空行：与下一个兄弟块之间隔着空行（列表松紧判断） */
-function endsWithBlankLine(block: Block): boolean {
-  const next = block.nextSibling();
+/** 块与下一个兄弟块之间隔着空行（列表松紧判断） */
+function blankLineBetween(block: Block, next: Block | undefined): boolean {
   return next !== undefined && block.endLine !== next.startLine - 1;
 }
 
@@ -162,37 +172,83 @@ function endsWithBlankLine(block: Block): boolean {
 // GFM 表格
 // ================================
 
-function splitTableRow(line: string): string[] {
-  let content = line.trim();
-  if (content.startsWith('|')) content = content.slice(1);
-  if (content.endsWith('|') && !content.endsWith('\\|')) content = content.slice(0, -1);
-  const cells: string[] = [];
-  let current = '';
+/** 表格的一个单元格：内容（\| 已还原为 |）、在行内的起止偏移，以及被去掉的反斜杠在内容中的位置 */
+interface TableCellSource {
+  text: string;
+  start: number;
+  end: number;
+  gaps: number[];
+}
+
+function splitTableRow(line: string): TableCellSource[] {
   let from = 0;
-  for (let i = 0; i < content.length; i++) {
-    const char = content.charCodeAt(i);
-    if (char === 92 /* \ */ && content.charCodeAt(i + 1) === 124 /* | */) {
-      current += content.slice(from, i) + '|';
+  let to = line.length;
+  while (from < to && isSpaceOrTab(line[from])) from++;
+  while (to > from && isSpaceOrTab(line[to - 1])) to--;
+  if (line[from] === '|') from++;
+  if (to > from && line[to - 1] === '|' && line[to - 2] !== '\\') to--;
+
+  const cells: TableCellSource[] = [];
+  const pushCell = (start: number, end: number) => {
+    while (start < end && isSpaceOrTab(line[start])) start++;
+    while (end > start && isSpaceOrTab(line[end - 1])) end--;
+    let text = '';
+    const gaps: number[] = [];
+    let copied = start;
+    for (let i = start; i < end; i++) {
+      if (line.charCodeAt(i) === 92 /* \ */ && line.charCodeAt(i + 1) === 124 /* | */) {
+        text += line.slice(copied, i);
+        gaps.push(text.length);
+        copied = i + 1;
+        i++;
+      }
+    }
+    cells.push({ text: text + line.slice(copied, end), start, end, gaps });
+  };
+  let cellStart = from;
+  for (let i = from; i < to; i++) {
+    const char = line.charCodeAt(i);
+    if (char === 92 && line.charCodeAt(i + 1) === 124) {
       i++;
-      from = i + 1;
     } else if (char === 124) {
-      cells.push((current + content.slice(from, i)).trim());
-      current = '';
-      from = i + 1;
+      pushCell(cellStart, i);
+      cellStart = i + 1;
     }
   }
-  cells.push((current + content.slice(from)).trim());
+  pushCell(cellStart, to);
   return cells;
 }
 
 function parseDelimiterRow(line: string): TableAlignment[] | null {
   if (!/^\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$/.test(line.trim()) || !line.includes('-')) return null;
   if (!line.includes('|') && !/^[ \t]*:?-+:?[ \t]*$/.test(line)) return null;
-  return splitTableRow(line).map((cell) => {
-    const left = cell.startsWith(':');
-    const right = cell.endsWith(':');
+  return splitTableRow(line).map(({ text }) => {
+    const left = text.startsWith(':');
+    const right = text.endsWith(':');
     return left && right ? 'center' : right ? 'right' : left ? 'left' : null;
   });
+}
+
+/** 块级解析的输出 */
+export interface BlockParseOutput {
+  document: BlockNode;
+  warnings: ParseWarning[];
+  references: Map<string, LinkReference>;
+  abbreviations: Map<string, string>;
+  footnotes: Set<string>;
+  /** 出现引用定义、缩写定义、脚注定义的行（1 起）：增量解析据此判断全文定义是否可能变化 */
+  definitionLines: number[];
+  /** 是否出现过脚注引用（增量解析据此决定是否重新编号） */
+  footnoteRefs: boolean;
+}
+
+/** 只解析文档一部分时（增量解析）沿用的全文定义 */
+export interface BlockParseContext {
+  references?: ReadonlyMap<string, LinkReference>;
+  abbreviations?: ReadonlyMap<string, string>;
+  footnotes?: ReadonlySet<string>;
+  /** 输入是否从文档开头开始（只有文档开头才有 YAML 头部），默认是 */
+  documentStart?: boolean;
 }
 
 // ================================
@@ -221,7 +277,13 @@ export class BlockParser {
   private lineStart = 0;
 
   private references: ReferenceMap = new Map();
+  private abbreviations = new Map<string, string>();
+  private footnoteLabels = new Set<string>();
+  private definitionLines: number[] = [];
+  private footnoteRefs = false;
   private warnings: ParseWarning[] = [];
+  /** 最近一个空行的行号（定义列表的术语与说明之间可以隔一个空行） */
+  private lastBlankLine = 0;
   /** 解析链接引用定义用的行内解析器（只在遇到以 [ 开头的段落时创建） */
   private referenceParser: InlineParser | null = null;
   /** 可能开始特殊块的行首字符（含块级扩展的触发字符） */
@@ -232,36 +294,63 @@ export class BlockParser {
     this.maybeSpecial = triggers ? new RegExp(`^[#\`~*+_=<>0-9-[|:${triggers}]`) : MAYBE_SPECIAL;
   }
 
-  parse(input: string): { document: BlockNode; warnings: ParseWarning[] } {
+  parse(input: string, context: BlockParseContext = {}): BlockParseOutput {
     this.document = new Block('document', 1, 1);
     this.tip = this.document;
     this.oldTip = this.document;
     this.lastMatchedContainer = this.document;
     this.lineNumber = 0;
     this.lastLineLength = 0;
-    this.references = new Map();
+    this.lastBlankLine = 0;
+    this.references = new Map(context.references);
+    this.abbreviations = new Map(context.abbreviations);
+    this.footnoteLabels = new Set(context.footnotes);
+    this.definitionLines = [];
     this.warnings = [];
 
-    const lineStarts = [0];
-    const lines: string[] = [];
-    const newline = /\r\n|\n|\r/g;
-    let start = 0;
-    for (let match = newline.exec(input); match; match = newline.exec(input)) {
-      lines.push(input.slice(start, match.index));
-      start = match.index + match[0].length;
-      lineStarts.push(start);
-    }
-    lines.push(input.slice(start));
+    const lineStarts = lineStartsOf(input);
+    const lines = lineStarts.map((start, index) => {
+      const next = lineStarts[index + 1];
+      if (next === undefined) return input.slice(start);
+      return input.slice(start, next - (input[next - 1] === '\n' && input[next - 2] === '\r' ? 2 : 1));
+    });
     let count = lines.length;
-    if (start === input.length && lines.length > 1) count -= 1;
-    for (let i = 0; i < count; i++) {
+    if (lineStarts[lineStarts.length - 1] === input.length && lines.length > 1) count -= 1;
+    const first = this.options.frontMatter && context.documentStart !== false ? this.frontMatter(lines, count) : 0;
+    for (let i = first; i < count; i++) {
       this.lineStart = lineStarts[i]!;
       this.incorporateLine(lines[i]!);
     }
     while (this.tip !== this.document) this.finalize(this.tip, count);
     this.finalize(this.document, count);
 
-    return { document: this.convert(this.document, input, lineStarts), warnings: this.warnings };
+    return {
+      document: this.convert(this.document, input, lineStarts),
+      warnings: this.warnings,
+      references: this.references,
+      abbreviations: this.abbreviations,
+      footnotes: this.footnoteLabels,
+      definitionLines: this.definitionLines,
+      footnoteRefs: this.footnoteRefs,
+    };
+  }
+
+  /** 文档开头的 YAML 头部：第一行为 ---，之后第一个 --- 或 ... 行结束；没有结束行时不是头部。返回正文的第一行 */
+  private frontMatter(lines: readonly string[], count: number): number {
+    if (count < 2 || !FRONT_MATTER_OPEN.test(lines[0]!)) return 0;
+    let close = 1;
+    while (close < count && !FRONT_MATTER_CLOSE.test(lines[close]!)) close++;
+    if (close >= count) return 0;
+    const block = new Block('front_matter', 1, 1);
+    block.content = lines.slice(1, close).join('\n');
+    block.open = false;
+    block.endLine = close + 1;
+    block.endColumn = lines[close]!.length;
+    block.parent = this.document;
+    this.document.children.push(block);
+    this.lineNumber = close + 1;
+    this.lastLineLength = lines[close]!.length;
+    return close + 1;
   }
 
   // ---------- 行内位置 ----------
@@ -440,6 +529,7 @@ export class BlockParser {
       }
     }
     this.lastLineLength = line.length;
+    if (this.blank) this.lastBlankLine = this.lineNumber;
   }
 
   /** 已打开的块能否继续：0 继续，1 不能，2 本行已处理完（如围栏结束） */
@@ -448,6 +538,7 @@ export class BlockParser {
     switch (block.kind) {
       case 'document':
       case 'list':
+      case 'deflist':
         return 0;
       case 'block_quote':
         if (!this.indented && line[this.nextNonspace] === '>') {
@@ -458,8 +549,9 @@ export class BlockParser {
         }
         return 1;
       case 'item':
+      case 'dd':
       case 'footnote_definition': {
-        const width = block.kind === 'item' ? block.listData!.markerOffset + block.listData!.padding : 4;
+        const width = block.listData ? block.listData.markerOffset + block.listData.padding : 4;
         if (this.blank) {
           if (block.children.length === 0) return 1;
           this.advanceNextNonspace();
@@ -472,7 +564,12 @@ export class BlockParser {
       }
       case 'heading':
       case 'thematic_break':
+      case 'front_matter':
+      case 'dt':
+      case 'abbr_def':
         return 1;
+      case 'container':
+        return this.continueContainer(block);
       case 'extension':
         return this.continueExtension(block);
       case 'code_block':
@@ -515,10 +612,16 @@ export class BlockParser {
   /** 依次尝试各种块的开头：0 都不是，1 开启了容器，2 开启了叶子块 */
   private tryBlockStarts(container: Block): 0 | 1 | 2 {
     const line = this.currentLine;
-    const rest = line.slice(this.nextNonspace);
+    // 按首字符筛选，只在可能匹配时才切出本行剩余部分
+    const first = this.indented ? '' : line.charAt(this.nextNonspace);
+    let restCache: string | null = null;
+    const rest = () => (restCache ??= line.slice(this.nextNonspace));
+    /** 本行会是引用中段落的惰性续行：与 markdown-it 一致，脚注与缩写定义不打断引用里的惰性续行（列表、脚注里的会打断） */
+    const lazyInQuote = () =>
+      container.kind !== 'paragraph' && !this.allClosed && !this.blank && this.tip.kind === 'paragraph' && this.unmatchedQuote();
 
     // 引用块
-    if (!this.indented && line[this.nextNonspace] === '>' && !this.tooDeep(container)) {
+    if (first === '>' && !this.tooDeep(container)) {
       this.advanceNextNonspace();
       this.advanceOffset(1, false);
       if (isSpaceOrTab(line[this.offset])) this.advanceOffset(1, true);
@@ -529,7 +632,7 @@ export class BlockParser {
 
     // ATX 标题
     let match: RegExpExecArray | null;
-    if (!this.indented && (match = ATX_HEADING.exec(rest))) {
+    if (first === '#' && (match = ATX_HEADING.exec(rest()))) {
       this.advanceNextNonspace();
       this.advanceOffset(match[0].length, false);
       this.closeUnmatchedBlocks();
@@ -550,8 +653,23 @@ export class BlockParser {
       return 2;
     }
 
+    // 自定义容器 ::: 名称（与 markdown-it-container 一致，可以打断段落）
+    if (this.options.containers && first === ':' && (match = CONTAINER_OPEN.exec(rest()))) {
+      const name = match[2]!.trim().split(/\s+/)[0] ?? '';
+      const allowed = this.options.containers === true || this.options.containers.includes(name);
+      if (name && allowed && !this.tooDeep(container)) {
+        this.closeUnmatchedBlocks();
+        const block = this.addChild('container', this.nextNonspace);
+        block.fenceLength = match[1]!.length;
+        block.info = match[2]!;
+        block.containerName = name;
+        this.advanceOffset(line.length - this.offset, false);
+        return 2;
+      }
+    }
+
     // 围栏代码块
-    if (!this.indented && (match = CODE_FENCE.exec(rest))) {
+    if ((first === '`' || first === '~') && (match = CODE_FENCE.exec(rest()))) {
       this.closeUnmatchedBlocks();
       const code = this.addChild('code_block', this.nextNonspace);
       code.fenced = true;
@@ -564,9 +682,9 @@ export class BlockParser {
     }
 
     // HTML 块
-    if (this.options.html && !this.indented && line[this.nextNonspace] === '<') {
+    if (this.options.html && first === '<') {
       for (let type = 1; type <= 7; type++) {
-        const open = HTML_BLOCK_OPEN[type - 1]!.exec(rest);
+        const open = HTML_BLOCK_OPEN[type - 1]!.exec(rest());
         if (!open) continue;
         if (type === 6 && !HTML_BLOCK_TAGS.has(open[1]!.toLowerCase())) continue;
         if (type === 7 && (container.kind === 'paragraph' || (!this.allClosed && !this.blank && this.tip.kind === 'paragraph'))) {
@@ -580,7 +698,7 @@ export class BlockParser {
     }
 
     // Setext 标题（段落之后的 === / ---）
-    if (!this.indented && container.kind === 'paragraph' && (match = SETEXT_UNDERLINE.exec(rest))) {
+    if ((first === '=' || first === '-') && container.kind === 'paragraph' && (match = SETEXT_UNDERLINE.exec(rest()))) {
       this.closeUnmatchedBlocks();
       this.consumeReferenceDefinitions(container);
       if (container.content.length > 0) {
@@ -592,7 +710,7 @@ export class BlockParser {
         heading.fenceChar = match[0][0]!;
         heading.parent = container.parent;
         const siblings = container.parent!.children;
-        siblings[siblings.indexOf(container)] = heading;
+        siblings[siblings.lastIndexOf(container)] = heading;
         this.tip = heading;
         this.advanceOffset(line.length - this.offset, false);
         return 2;
@@ -603,11 +721,11 @@ export class BlockParser {
     // GFM 表格：只有一行的段落 + 分隔行，列数一致
     if (
       this.options.gfm &&
-      !this.indented &&
+      (first === '|' || first === ':' || first === '-') &&
       container.kind === 'paragraph' &&
       container.content.indexOf('\n') === container.content.length - 1
     ) {
-      const alignments = parseDelimiterRow(rest);
+      const alignments = parseDelimiterRow(rest());
       const header = splitTableRow(container.content.slice(0, -1));
       if (alignments && header.length === alignments.length && container.content.includes('|')) {
         this.closeUnmatchedBlocks();
@@ -618,7 +736,7 @@ export class BlockParser {
         table.columns = container.columns;
         table.parent = container.parent;
         const siblings = container.parent!.children;
-        siblings[siblings.indexOf(container)] = table;
+        siblings[siblings.lastIndexOf(container)] = table;
         this.tip = table;
         this.advanceOffset(line.length - this.offset, false);
         return 2;
@@ -626,23 +744,44 @@ export class BlockParser {
     }
 
     // 主题分隔线
-    if (!this.indented && THEMATIC_BREAK.test(rest)) {
+    if ((first === '*' || first === '_' || first === '-') && THEMATIC_BREAK.test(rest())) {
       this.closeUnmatchedBlocks();
       this.addChild('thematic_break', this.nextNonspace);
       this.advanceOffset(line.length - this.offset, false);
       return 2;
     }
 
-    // GFM 脚注定义
-    if (this.options.footnotes && !this.indented && container.kind !== 'paragraph' && (match = FOOTNOTE_DEFINITION.exec(rest))) {
+    // GFM 脚注定义（可以打断段落，但不打断惰性续行）
+    if (this.options.footnotes && first === '[' && !lazyInQuote() && (match = FOOTNOTE_DEFINITION.exec(rest()))) {
       if (!this.tooDeep(container)) {
         this.closeUnmatchedBlocks();
         const footnote = this.addChild('footnote_definition', this.nextNonspace);
         footnote.footnoteId = match[1]!;
+        this.footnoteLabels.add(footnote.footnoteId);
+        this.definitionLines.push(this.lineNumber);
         this.advanceNextNonspace();
         this.advanceOffset(match[0].length, false);
         return 1;
       }
+    }
+
+    // 缩写定义 *[缩写]: 全称（一行；可以打断段落）
+    if (this.options.abbreviations && first === '*' && line[this.nextNonspace + 1] === '[' && !lazyInQuote() && (match = ABBREVIATION_DEFINITION.exec(rest()))) {
+      const label = match[1]!.replace(/\\(.)/g, '$1');
+      const title = match[2]!.trim();
+      if (title) {
+        this.closeUnmatchedBlocks();
+        this.addChild('abbr_def', this.nextNonspace);
+        if (!this.abbreviations.has(label)) this.abbreviations.set(label, title);
+        this.definitionLines.push(this.lineNumber);
+        this.advanceOffset(line.length - this.offset, false);
+        return 2;
+      }
+    }
+
+    // 定义列表的说明 : / ~（术语是之前的单行段落）
+    if (this.options.definitionLists && (first === ':' || first === '~') && this.tryDefinitionStart(container)) {
+      return 1;
     }
 
     // 列表项
@@ -676,6 +815,14 @@ export class BlockParser {
   }
 
   // ---------- 块级扩展 ----------
+
+  /** 本行没有匹配上的打开的块中是否有引用（此时本行是引用里段落的惰性续行） */
+  private unmatchedQuote(): boolean {
+    for (let block: Block | null = this.tip; block && block !== this.lastMatchedContainer; block = block.parent) {
+      if (block.kind === 'block_quote') return true;
+    }
+    return false;
+  }
 
   /** 在本行尝试开始块级扩展；成功时整行由扩展消耗 */
   private tryExtensionStart(container: Block): boolean {
@@ -716,6 +863,112 @@ export class BlockParser {
     }
     if (result.data) block.data = { ...block.data, ...result.data };
     if (result.closed) block.extensionClosed = true;
+  }
+
+  // ---------- 自定义容器与定义列表 ----------
+
+  /** 容器在不少于开头冒号数、之后只有空白的 ::: 行结束（先关闭内部打开的块）；其余行继续属于容器 */
+  private continueContainer(block: Block): 0 | 2 {
+    const line = this.currentLine;
+    if (this.indented || line[this.nextNonspace] !== ':') return 0;
+    const fence = /^:+/.exec(line.slice(this.nextNonspace))![0];
+    if (fence.length < block.fenceLength || /\S/.test(line.slice(this.nextNonspace + fence.length))) return 0;
+    while (this.tip !== block) this.finalize(this.tip, this.lineNumber - 1);
+    this.lastLineLength = line.length;
+    this.finalize(block, this.lineNumber);
+    return 2;
+  }
+
+  /**
+   * 定义列表的说明行（: 或 ~ 后跟空白或行尾）。与 markdown-it-deflist 一致，术语是紧邻的单行段落（紧凑），
+   * 或隔一个空行的单行段落（松散）；紧跟在定义列表后的术语并入同一个列表，一个术语可以有多条说明。
+   * 说明的续行需要缩进到标记之后两列
+   */
+  private tryDefinitionStart(container: Block): boolean {
+    const line = this.currentLine;
+    const marker = line[this.nextNonspace];
+    if (marker !== ':' && marker !== '~') return false;
+    if (!(line[this.nextNonspace + 1] === undefined || isSpaceOrTab(line[this.nextNonspace + 1]))) return false;
+
+    let list: Block;
+    let tight: boolean;
+    if (container.kind === 'deflist') {
+      // 同一术语的另一条说明
+      const previous = container.last;
+      if (!previous || previous.kind !== 'dd') return false;
+      this.closeUnmatchedBlocks();
+      list = container;
+      tight = previous.listData!.tight;
+    } else {
+      const singleLine = (block: Block | undefined): block is Block =>
+        block !== undefined && block.kind === 'paragraph' && block.content.indexOf('\n') === block.content.length - 1;
+      if (container.kind === 'paragraph' && singleLine(container)) {
+        tight = true;
+        container.endLine = container.startLine;
+        container.endColumn = this.lastLineLength;
+        this.tip = container.parent!;
+        this.oldTip = this.tip;
+        this.lastMatchedContainer = this.tip;
+        this.allClosed = true;
+        list = this.makeTerm(container);
+      } else if (
+        container.kind !== 'paragraph' &&
+        (this.allClosed || this.tip === container) &&
+        singleLine(container.last) &&
+        !container.last.open &&
+        container.last.endLine === this.lineNumber - 2 &&
+        this.lastBlankLine === this.lineNumber - 1
+      ) {
+        tight = false;
+        this.closeUnmatchedBlocks();
+        list = this.makeTerm(container.last);
+      } else {
+        return false;
+      }
+      this.tip = list;
+    }
+
+    const description = this.addChild('dd', this.nextNonspace);
+    description.listData = {
+      type: 'bullet',
+      bulletChar: marker,
+      start: 1,
+      delimiter: null,
+      padding: 2,
+      markerOffset: this.indent,
+      tight,
+    };
+    this.advanceNextNonspace();
+    this.advanceOffset(1, true);
+    // 标记后的空白全部属于标记；超过 4 列时只算一列，其余是缩进代码
+    const spacesStart = this.column;
+    this.findNextNonspace();
+    if (this.blank || this.nextNonspaceColumn - spacesStart < 5) this.advanceNextNonspace();
+    else this.advanceOffset(1, true);
+    return true;
+  }
+
+  /** 单行段落变为术语：紧跟在定义列表之后时并入该列表（重新打开），否则在原位置新建列表 */
+  private makeTerm(paragraph: Block): Block {
+    const parent = paragraph.parent!;
+    const siblings = parent.children;
+    const index = siblings.lastIndexOf(paragraph);
+    const previous = siblings[index - 1];
+    let list: Block;
+    if (previous && previous.kind === 'deflist') {
+      list = previous;
+      list.open = true;
+      siblings.splice(index, 1);
+    } else {
+      list = new Block('deflist', paragraph.startLine, paragraph.startColumn);
+      list.parent = parent;
+      siblings[index] = list;
+    }
+    paragraph.kind = 'dt';
+    paragraph.open = false;
+    paragraph.parent = list;
+    list.children.push(paragraph);
+    return list;
   }
 
   private parseListMarker(container: Block): ListData | null {
@@ -779,6 +1032,7 @@ export class BlockParser {
       if (!this.references.has(definition.label)) {
         this.references.set(definition.label, { url: definition.url, title: definition.title });
       }
+      this.definitionLines.push(paragraph.startLine);
       const consumedLines = paragraph.content.slice(0, definition.length).split('\n').length - 1;
       paragraph.sources = paragraph.sources.slice(consumedLines);
       paragraph.columns = paragraph.columns.slice(consumedLines);
@@ -816,6 +1070,7 @@ export class BlockParser {
         block.content = block.content.replace(/(\n *)+$/, '');
         break;
       case 'item':
+      case 'dd':
       case 'footnote_definition':
         if (block.last) {
           block.endLine = block.last.endLine;
@@ -825,14 +1080,24 @@ export class BlockParser {
           block.endColumn = block.listData.markerOffset + block.listData.padding;
         }
         break;
+      case 'deflist':
+        if (block.last) {
+          block.endLine = block.last.endLine;
+          block.endColumn = block.last.endColumn;
+        }
+        break;
+      case 'abbr_def':
+        block.remove();
+        break;
       case 'list': {
         const data = block.listData!;
-        for (const item of block.children) {
-          if (item.nextSibling() && endsWithBlankLine(item)) data.tight = false;
-          for (const child of item.children) {
-            if (child.nextSibling() && endsWithBlankLine(child)) data.tight = false;
+        const items = block.children;
+        for (let i = 0; i < items.length && data.tight; i++) {
+          const item = items[i]!;
+          if (blankLineBetween(item, items[i + 1])) data.tight = false;
+          for (let j = 0; j < item.children.length - 1; j++) {
+            if (blankLineBetween(item.children[j]!, item.children[j + 1])) data.tight = false;
           }
-          if (!data.tight) break;
         }
         if (block.last) {
           block.endLine = block.last.endLine;
@@ -849,8 +1114,11 @@ export class BlockParser {
   // ---------- 输出 ----------
 
   private convert(root: Block, input: string, lineStarts: number[]): BlockNode {
-    const inline = new InlineParser(this.options, this.references);
-    const footnotes = new Map<string, number>();
+    const inline = new InlineParser(this.options, {
+      references: this.references,
+      footnotes: this.footnoteLabels,
+      abbreviations: this.abbreviations,
+    });
 
     const position = (block: Block): Position => {
       const startLine = block.startLine;
@@ -869,41 +1137,101 @@ export class BlockParser {
       };
     };
 
-    const inlineOf = (block: Block): InlineNode[] => {
-      const lead = block.content.length - block.content.trimStart().length;
-      const leadLines = block.content.slice(0, lead).split('\n').length - 1;
-      const leadColumns = lead - (block.content.lastIndexOf('\n', lead - 1) + 1);
-      const starts = block.sources.slice(leadLines);
-      const columns = block.columns.slice(leadLines);
-      if (starts.length > 0) {
+    const inlineOf = (block: Block, content: string): InlineNode[] => {
+      // 开头的空白（可能跨行）不在行内内容里：换算到对应行的起始位置
+      const raw = block.content;
+      let lead = 0;
+      let leadLines = 0;
+      let leadColumns = 0;
+      while (lead < raw.length && /\s/.test(raw[lead]!)) {
+        if (raw[lead] === '\n') {
+          leadLines++;
+          leadColumns = 0;
+        } else {
+          leadColumns++;
+        }
+        lead++;
+      }
+      if (block.sources.length === 0) return inline.parse(content, block.startLine);
+      const starts = leadLines === 0 && leadColumns === 0 ? block.sources : block.sources.slice(leadLines);
+      const columns = leadLines === 0 && leadColumns === 0 ? block.columns : block.columns.slice(leadLines);
+      if (leadColumns > 0 && starts.length > 0) {
         starts[0]! += leadColumns;
         columns[0]! += leadColumns;
       }
       const origin: InlineOrigin = { startLine: block.startLine + leadLines, starts, columns };
-      return inline.parse(block.content.trim(), starts.length > 0 ? origin : block.startLine);
+      return inline.parse(content, starts.length > 0 ? origin : block.startLine);
+    };
+
+    /** 段落、标题、术语：行内内容，末尾的 {…} 作为块的属性 */
+    const textual = (node: BlockNode, block: Block): BlockNode => {
+      const content = block.content.trim();
+      const nodes = inlineOf(block, content);
+      const found = this.options.attributes ? blockAttributes(nodes) : null;
+      node.content = found ? content.slice(0, content.length - found.length).trimEnd() : content;
+      node.inline = nodes;
+      if (found) node.attributes = found.attributes;
+      return node;
+    };
+
+    const visitAll = (blocks: readonly Block[], tight = false): BlockNode[] => {
+      const result = new Array<BlockNode>(blocks.length);
+      for (let i = 0; i < blocks.length; i++) result[i] = visit(blocks[i]!, tight);
+      return result;
     };
 
     const visit = (block: Block, tight: boolean): BlockNode => {
+      if (block.kind === 'document') {
+        return { type: BlockType.Document, position: documentPosition(input, lineStarts), raw: input, children: visitAll(block.children) };
+      }
       const pos = position(block);
-      const base = { position: pos, raw: input.slice(pos.start, pos.end) };
+      const create = (type: BlockType): BlockNode => ({ type, position: pos, raw: input.slice(pos.start, pos.end) });
       switch (block.kind) {
-        case 'document':
-          return { type: BlockType.Document, ...base, raw: input, children: block.children.map((child) => visit(child, false)) };
         case 'paragraph':
-          return { type: BlockType.Paragraph, ...base, content: block.content.trim(), inline: inlineOf(block) };
-        case 'heading':
-          return {
-            type: BlockType.Heading,
-            ...base,
-            level: block.level,
-            marker: block.fenceChar || '#'.repeat(block.level),
-            content: block.content.trim(),
-            inline: inlineOf(block),
-          };
+          return textual(create(BlockType.Paragraph), block);
+        case 'heading': {
+          const node = create(BlockType.Heading);
+          node.level = block.level;
+          node.marker = block.fenceChar || '#'.repeat(block.level);
+          return textual(node, block);
+        }
+        case 'dt':
+          return textual(create(BlockType.DefinitionTerm), block);
+        case 'deflist': {
+          const node = create(BlockType.DefinitionList);
+          node.children = visitAll(block.children);
+          return node;
+        }
+        case 'dd': {
+          const node = create(BlockType.DefinitionDescription);
+          const children = visitAll(block.children);
+          node.marker = block.listData!.bulletChar!;
+          // 与 markdown-it-deflist 一致：术语与说明之间没有空行、说明只有一个段落时不加 <p>
+          node.tight = block.listData!.tight && children.length === 1 && children[0]!.type === BlockType.Paragraph;
+          node.children = children;
+          return node;
+        }
+        case 'front_matter': {
+          const node = create(BlockType.FrontMatter);
+          node.marker = '---';
+          node.content = block.content;
+          return node;
+        }
+        case 'container': {
+          const node = create(BlockType.Container);
+          node.name = block.containerName;
+          node.info = block.info;
+          node.marker = ':'.repeat(block.fenceLength);
+          node.children = visitAll(block.children);
+          return node;
+        }
+        case 'abbr_def':
+          throw new Error('缩写定义在关闭时已从树中去掉');
         case 'thematic_break':
-          return { type: BlockType.ThematicBreak, ...base };
+          return create(BlockType.ThematicBreak);
         case 'code_block': {
-          const node: BlockNode = { type: block.fenced ? BlockType.FencedCode : BlockType.CodeBlock, ...base, content: block.content };
+          const node = create(block.fenced ? BlockType.FencedCode : BlockType.CodeBlock);
+          node.content = block.content;
           if (block.fenced) {
             node.marker = block.fenceChar.repeat(block.fenceLength);
             node.info = block.info;
@@ -913,55 +1241,56 @@ export class BlockParser {
           return node;
         }
         case 'extension': {
-          const node: BlockNode = { type: BlockType.Extension, ...base, name: block.extension!.name, content: block.content };
+          const node = create(BlockType.Extension);
+          node.name = block.extension!.name;
+          node.content = block.content;
           if (block.data) node.data = block.data;
           return node;
         }
-        case 'html_block':
-          return { type: BlockType.HtmlBlock, ...base, content: block.content };
-        case 'block_quote':
-          return { type: BlockType.Blockquote, ...base, children: block.children.map((child) => visit(child, false)) };
+        case 'html_block': {
+          const node = create(BlockType.HtmlBlock);
+          node.content = block.content;
+          return node;
+        }
+        case 'block_quote': {
+          const node = create(BlockType.Blockquote);
+          node.children = visitAll(block.children);
+          return node;
+        }
         case 'list': {
           const data = block.listData!;
-          return {
-            type: BlockType.List,
-            ...base,
-            ordered: data.type === 'ordered',
-            ...(data.type === 'ordered' ? { start: data.start } : {}),
-            marker: data.bulletChar ?? data.delimiter ?? '',
-            tight: data.tight,
-            children: block.children.map((item) => visit(item, data.tight)),
-          };
+          const node = create(BlockType.List);
+          node.ordered = data.type === 'ordered';
+          if (data.type === 'ordered') node.start = data.start;
+          node.marker = data.bulletChar ?? data.delimiter ?? '';
+          node.tight = data.tight;
+          node.children = visitAll(block.children, data.tight);
+          return node;
         }
         case 'item': {
           const task = this.options.taskLists ? this.taskMarker(block) : null;
           const data = block.listData!;
-          return {
-            type: task ? BlockType.TaskListItem : BlockType.ListItem,
-            ...base,
-            marker: data.bulletChar ?? data.delimiter ?? '',
-            ...(data.type === 'ordered' ? { start: data.start } : {}),
-            ...(task ? { checked: task.checked } : {}),
-            children: block.children.map((child) => visit(child, tight)),
-          };
+          const node = create(task ? BlockType.TaskListItem : BlockType.ListItem);
+          node.marker = data.bulletChar ?? data.delimiter ?? '';
+          if (data.type === 'ordered') node.start = data.start;
+          if (task) node.checked = task.checked;
+          node.children = visitAll(block.children, tight);
+          return node;
         }
         case 'table':
-          return this.convertTable(block, base, inline);
+          return this.convertTable(block, { position: pos, raw: input.slice(pos.start, pos.end) }, inline);
         case 'footnote_definition': {
-          if (!footnotes.has(block.footnoteId)) footnotes.set(block.footnoteId, footnotes.size + 1);
-          return {
-            type: BlockType.FootnoteDefinition,
-            ...base,
-            footnoteId: block.footnoteId,
-            footnoteIndex: footnotes.get(block.footnoteId)!,
-            children: block.children.map((child) => visit(child, false)),
-          };
+          const node = create(BlockType.FootnoteDefinition);
+          node.footnoteId = block.footnoteId;
+          node.children = visitAll(block.children);
+          return node;
         }
       }
     };
 
     const document = visit(root, false);
-    if (footnotes.size > 0) assignFootnoteIndexes(document, footnotes);
+    this.footnoteRefs = inline.sawFootnotes;
+    if (this.options.footnotes && this.footnoteRefs) numberFootnotes(document);
     return document;
   }
 
@@ -986,33 +1315,36 @@ export class BlockParser {
     const lines = block.content.replace(/\n$/, '').split('\n');
     const columns = block.alignments.length;
     const row = (text: string, index: number, isHeader: boolean): TableRowNode => {
-      const cells = splitTableRow(text);
-      const lineIndex = isHeader ? 0 : index + 1;
+      // content 与 sources 不含分隔行（开表时已整行消耗），数据行在源码中的行号要跳过它
+      const sourceIndex = isHeader ? 0 : index + 1;
       const line = block.startLine + (isHeader ? 0 : index + 2);
-      let cursor = 0;
-      /** 单元格内容在源码中的位置（含转义 \| 时内容与源码不同，退回相对位置） */
-      const originOf = (content: string): InlineOrigin | number => {
-        const found = content ? text.indexOf(content, cursor) : -1;
-        const source = block.sources[lineIndex];
-        if (found === -1 || source === undefined) return line;
-        cursor = found + content.length;
-        return { startLine: line, starts: [source + found], columns: [block.columns[lineIndex]! + found] };
-      };
+      const source = block.sources[sourceIndex] ?? base.position.start;
+      const column = (block.columns[sourceIndex] ?? 0) + 1;
+      const span = (from: number, to: number): Position => ({
+        start: source + from,
+        end: source + to,
+        startLine: line,
+        startColumn: column + from,
+        endLine: line,
+        endColumn: column + to,
+      });
+      const cells = splitTableRow(text);
       return {
         type: BlockType.TableRow,
-        position: base.position,
+        position: span(0, text.length),
         raw: text,
         isHeader,
-        cells: Array.from({ length: columns }, (_, column): TableCellNode => {
-          const content = cells[column] ?? '';
+        cells: Array.from({ length: columns }, (_, cellIndex): TableCellNode => {
+          const cell = cells[cellIndex] ?? { text: '', start: text.length, end: text.length, gaps: [] };
+          const origin: InlineOrigin = { startLine: line, starts: [source + cell.start], columns: [column - 1 + cell.start], gaps: cell.gaps };
           return {
             type: BlockType.TableCell,
-            position: base.position,
-            raw: content,
-            content,
+            position: span(cell.start, cell.end),
+            raw: text.slice(cell.start, cell.end),
+            content: cell.text,
             isHeader,
-            alignment: block.alignments[column] ?? null,
-            inline: inline.parse(content, originOf(content)),
+            alignment: block.alignments[cellIndex] ?? null,
+            inline: inline.parse(cell.text, origin),
           };
         }),
       };
@@ -1029,21 +1361,49 @@ export class BlockParser {
   }
 }
 
-/** 行内脚注引用按定义顺序编号 */
-function assignFootnoteIndexes(node: BlockNode, footnotes: ReadonlyMap<string, number>): void {
-  const visitInline = (nodes: InlineNode[] | undefined) => {
-    for (const inlineNode of nodes ?? []) {
-      if (inlineNode.type === InlineType.FootnoteRef && inlineNode.footnoteId) {
-        const index = footnotes.get(inlineNode.footnoteId);
-        if (index !== undefined) inlineNode.footnoteIndex = index;
-      }
-      visitInline(inlineNode.children);
+/** 各行在源码中的起始偏移（换行为 \r\n、\n 或 \r） */
+export function lineStartsOf(input: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code === 10 /* \n */) {
+      starts.push(i + 1);
+    } else if (code === 13 /* \r */) {
+      if (input.charCodeAt(i + 1) === 10) i++;
+      starts.push(i + 1);
     }
-  };
-  visitInline(node.inline);
-  for (const child of node.children ?? []) assignFootnoteIndexes(child, footnotes);
-  if (node.type === BlockType.Table) {
-    const table = node as TableNode;
-    for (const row of [table.header, ...table.rows]) for (const cell of row.cells) visitInline(cell.inline);
   }
+  return starts;
+}
+
+/** 文档节点的位置：覆盖整个输入；末尾换行之后的空行不算一行 */
+export function documentPosition(input: string, lineStarts: readonly number[]): Position {
+  const trailingEmpty = lineStarts.length > 1 && lineStarts[lineStarts.length - 1] === input.length;
+  const endLine = Math.max(1, lineStarts.length - (trailingEmpty ? 1 : 0));
+  return {
+    start: 0,
+    end: input.length,
+    startLine: 1,
+    startColumn: 1,
+    endLine,
+    endColumn: input.length - lineStarts[endLine - 1]! + 1,
+  };
+}
+
+/** 块末尾的 {…} 属性：去掉最后一个文本节点末尾的属性（文本变空时连同之前的换行一起去掉） */
+function blockAttributes(nodes: InlineNode[]): { attributes: Record<string, string>; length: number } | null {
+  const last = nodes[nodes.length - 1];
+  if (!last || last.type !== InlineType.Text) return null;
+  const found = trailingAttributes(last.content);
+  if (!found) return null;
+  last.content = last.content.slice(0, last.content.length - found.length);
+  if (last.position.end - last.position.start >= found.length) {
+    last.position = { ...last.position, end: last.position.end - found.length, endColumn: last.position.endColumn - found.length };
+  }
+  if (!last.content) {
+    nodes.pop();
+    const previous = nodes[nodes.length - 1];
+    if (previous && (previous.type === InlineType.SoftBreak || previous.type === InlineType.LineBreak)) nodes.pop();
+  }
+  return found;
 }

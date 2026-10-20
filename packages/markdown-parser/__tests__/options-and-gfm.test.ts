@@ -28,11 +28,11 @@ describe('GFM 扩展', () => {
     expect(renderHtml(document)).toContain('<del>旧</del>');
   });
 
-  it('脚注：引用按定义顺序编号', () => {
+  it('脚注：按第一次引用编号，定义收集到文末', () => {
     const output = html('正文[^b] 与[^a]\n\n[^a]: 甲\n[^b]: 乙\n');
-    expect(output).toContain('<a href="#fn2" id="fnref2">2</a>');
-    expect(output).toContain('<a href="#fn1" id="fnref1">1</a>');
-    expect(output).toContain('<section class="footnote" id="fn1">\n<p>甲</p>\n</section>');
+    expect(output).toContain('<a href="#fn1" id="fnref1">[1]</a>');
+    expect(output).toContain('<a href="#fn2" id="fnref2">[2]</a>');
+    expect(output).toContain('<li id="fn1" class="footnote-item"><p>乙');
   });
 });
 

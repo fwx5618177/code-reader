@@ -20,6 +20,7 @@ export type {
   // 解析结果
   ParseResult,
   ParseWarning,
+  LinkReference,
 
   // 位置
   Position,
@@ -45,5 +46,10 @@ export type {
   BlockExtensionLine,
 } from './commonmark-parser';
 
-export { renderHtml, escapeHtml, normalizeUrl } from './html-renderer';
+export { renderHtml, escapeHtml, normalizeUrl, isSafeUrl } from './html-renderer';
+export type { HtmlRenderOptions, ExtensionRenderContext } from './html-renderer';
+export { collectFootnotes } from './footnotes';
+export type { FootnoteEntry } from './footnotes';
+export { IncrementalCommonMarkParser } from './incremental-document';
+export type { DocumentUpdate } from './incremental-document';
 export { Token as MarkdownItToken, toMarkdownItTokens, MarkdownItCompatTokenizer } from './markdown-it-tokens';
