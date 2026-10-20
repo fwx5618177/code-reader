@@ -380,13 +380,14 @@ const scenarios = [
     name: '标签：详情面板里添加、删除标签，笔记 YAML 同步改写',
     async run(app) {
       await switchMode(app, '知识库');
-      // 合并标签后知识库会重新加载，列表可能稍晚才渲染出该条目
+      // 合并标签后知识库会重新加载，列表可能稍晚才渲染出该条目。
+      // 只在知识库条目卡片（[data-selected]）里找：写作侧栏的文件树也是 listitem，且在 DOM 中更靠前
       await waitFor(
         () =>
           app.call(() => {
-            const item = [...document.querySelectorAll('[role=listitem]')].find((el) => el.textContent.includes('详情标签笔记'));
-            item?.querySelector('[data-selected]').click();
-            return Boolean(item);
+            const entry = [...document.querySelectorAll('[role=listitem] [data-selected]')].find((el) => el.textContent.includes('详情标签笔记'));
+            entry?.click();
+            return Boolean(entry);
           }),
         { message: '列表里没有详情标签笔记' }
       );
