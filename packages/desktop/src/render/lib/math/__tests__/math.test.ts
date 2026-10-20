@@ -93,6 +93,8 @@ describe('解析器：TeX 参数与上下标', () => {
 describe('解析器：符号与命令', () => {
   it('使用扩展符号表并标注原子类别', () => {
     expect(nodes('\\leqslant')[0]).toEqual({ type: 'symbol', name: '⩽', atom: 'rel' });
+    expect(nodes('\\lesssim')[0]).toEqual({ type: 'symbol', name: '≲', atom: 'rel' });
+    expect(nodes('\\models')[0]).toEqual({ type: 'symbol', name: '⊨', atom: 'rel' });
     expect(nodes('\\bigsqcup')[0]).toEqual({ type: 'symbol', name: '⨆', atom: 'op' });
     expect(nodes('\\setminus')[0]).toEqual({ type: 'symbol', name: '∖', atom: 'bin' });
     expect(nodes('\\varkappa')[0]).toEqual({ type: 'symbol', name: 'ϰ', atom: 'ord' });

@@ -232,6 +232,43 @@ export const EXTENDED_RELATIONS: Record<string, string> = {
   nsucc: '⊁',
   npreceq: '⋠',
   nsucceq: '⋡',
+
+  // amssymb 大小关系的变体（≲ ≳ 等）
+  leqq: '≦',
+  geqq: '≧',
+  lesssim: '≲',
+  gtrsim: '≳',
+  lessapprox: '⪅',
+  gtrapprox: '⪆',
+  lessgtr: '≶',
+  gtrless: '≷',
+  lesseqgtr: '⋚',
+  gtreqless: '⋛',
+  lesseqqgtr: '⪋',
+  gtreqqless: '⪌',
+  lessdot: '⋖',
+  gtrdot: '⋗',
+  eqslantless: '⪕',
+  eqslantgtr: '⪖',
+  lvertneqq: '≨',
+  gvertneqq: '≩',
+  precapprox: '⪷',
+  succapprox: '⪸',
+  eqsim: '≂',
+  backsim: '∽',
+  backsimeq: '⋍',
+  vartriangleleft: '⊲',
+  vartriangleright: '⊳',
+
+  // 推导与模型关系
+  vdash: '⊢',
+  dashv: '⊣',
+  models: '⊨',
+  vDash: '⊨',
+  Vdash: '⊩',
+  Vvdash: '⊪',
+  nvdash: '⊬',
+  nvDash: '⊭',
 };
 
 /** 扩展二元运算符 */
