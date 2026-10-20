@@ -7,6 +7,7 @@
 export {
   findTriggerPosition,
   filterAndSortItems,
+  isImeKeyEvent,
   isOpenCompletionShortcut,
   collectTriggers,
   resolveQuery,
@@ -22,7 +23,7 @@ export {
   type CompletionSourceOptions,
 } from './editor-completion';
 
-export { CompletionPanel, type CompletionPanelOptions } from './completion-panel';
+export { CompletionPanel, type CompletionPanelOptions, type PanelAnchor, type PanelShowOptions } from './completion-panel';
 
 export {
   EditorAutocomplete,

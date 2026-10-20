@@ -60,6 +60,8 @@ export interface EditorCompletionContext {
   textBefore: string;
   /** 当前文本块的全部文本 */
   lineText: string;
+  /** 手动打开（Ctrl+空格、Option+`、openCompletion）：提供者可以接受自动触发时不接受的空查询（同 CodeMirror 的 explicit） */
+  explicit: boolean;
 }
 
 /** 补全提供者 */
@@ -174,6 +176,14 @@ export function filterAndSortItems(
  * 手动打开补全的快捷键：Ctrl+空格；macOS 上 Ctrl+空格常被输入法占用，另用 Option+`（与 CodeMirror 相同）。
  * Option+` 在 macOS 上是死键，event.key 不可靠，按物理键位 event.code 判断
  */
+/**
+ * 输入法合成中的按键：isComposing，或 keyCode 229（Safari 在 compositionend 之后才派发确认候选的回车，
+ * 此时 isComposing 已是 false，只能靠 229 识别）。这些按键不能当作接受补全或移动选中
+ */
+export function isImeKeyEvent(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
 export function isOpenCompletionShortcut(event: KeyboardEvent): boolean {
   if (event.metaKey || event.shiftKey) return false;
   if (event.ctrlKey && !event.altKey && (event.key === ' ' || event.code === 'Space')) return true;

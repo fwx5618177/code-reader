@@ -40,7 +40,9 @@ const press = (field: HTMLTextAreaElement, init: KeyboardEventInit) =>
   field.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
 
 describe('TextFieldAutocomplete', () => {
-  beforeEach(() => vi.useFakeTimers());
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
   afterEach(() => {
     vi.useRealTimers();
     document.body.replaceChildren();
@@ -107,5 +109,56 @@ describe('TextFieldAutocomplete', () => {
     expect(autocomplete.isOpen).toBe(true);
     (document.querySelector('.pm-autocomplete-item') as HTMLElement).click();
     expect(field.value).toBe('\\aleph ');
+  });
+
+  it('面板打开时方向键移动光标：刷新前回车交还文本框，移出触发范围后关闭', async () => {
+    const { field, autocomplete, ownKeys } = setup();
+    field.focus();
+    typeInto(field, 'x \\al');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(autocomplete.isOpen).toBe(true);
+    field.setSelectionRange(1, 1);
+    press(field, { key: 'ArrowLeft' });
+    press(field, { key: 'Enter' });
+    expect(ownKeys).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(autocomplete.isOpen).toBe(false);
+    expect(field.value).toBe('x \\al');
+  });
+
+  it('输入法合成中不打开、按键归输入法；合成结束后按最终文字打开；Safari 的 229 回车不接受', async () => {
+    const { field, autocomplete, ownKeys } = setup();
+    field.focus();
+    field.dispatchEvent(new CompositionEvent('compositionstart'));
+    typeInto(field, '\\al');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(autocomplete.isOpen).toBe(false);
+    press(field, { key: 'Enter', isComposing: true });
+    expect(ownKeys).toHaveBeenCalledTimes(1);
+
+    field.dispatchEvent(new CompositionEvent('compositionend'));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(autocomplete.isOpen).toBe(true);
+    press(field, { key: 'Enter', keyCode: 229 });
+    expect(ownKeys).toHaveBeenCalledTimes(2);
+    expect(field.value).toBe('\\al');
+    expect(autocomplete.isOpen).toBe(true);
+  });
+
+  it('光标在开头且第一个字符是换行：按第一行计算，接受后插入在开头', async () => {
+    const field = document.body.appendChild(document.createElement('textarea'));
+    const any: EditorCompletionProvider = {
+      name: 'any',
+      shouldActivate: () => true,
+      getCompletions: () => [{ id: 'x', label: 'x', insertText: 'x', type: 'text' }],
+    };
+    const autocomplete = new TextFieldAutocomplete(field, { providers: [any] });
+    field.value = '\nfoo';
+    field.setSelectionRange(0, 0);
+    press(field, { key: ' ', code: 'Space', ctrlKey: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(autocomplete.isOpen).toBe(true);
+    press(field, { key: 'Enter' });
+    expect(field.value).toBe('x\nfoo');
   });
 });

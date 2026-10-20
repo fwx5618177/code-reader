@@ -323,8 +323,9 @@ function insideOpenMath(text: string): boolean {
   return delimiters.length % 2 === 1;
 }
 
-/** \ 之后的查询：只由字母组成 */
+/** \ 之后的查询：只由字母组成；自动触发至少一个字母（输入 \\ 换行、\, 间距时不弹出），手动打开可以为空 */
 const COMMAND_QUERY = /^[a-zA-Z]+$/;
+const EXPLICIT_COMMAND_QUERY = /^[a-zA-Z]*$/;
 
 export interface LatexCompletionOptions {
   /** 补全范围，默认 math */
@@ -337,7 +338,8 @@ export interface LatexCompletionOptions {
 }
 
 /**
- * LaTeX 命令补全：\ 后输入命令名（字母），完全相同 > 前缀 > 包含，同一档内常用命令在前
+ * LaTeX 命令补全：\ 后输入命令名（字母），完全相同 > 前缀 > 包含，同一档内常用命令在前；
+ * 光标紧跟在单独的 \ 后手动打开时列出常用命令（与 .tex 源码编辑器的 CodeMirror 补全一致）
  */
 export class LaTeXCompletionProvider implements EditorCompletionProvider {
   readonly name = 'latex';
@@ -347,8 +349,11 @@ export class LaTeXCompletionProvider implements EditorCompletionProvider {
 
   constructor(private readonly options: LatexCompletionOptions = {}) {}
 
-  shouldActivate(context: Pick<EditorCompletionContext, 'trigger' | 'query'> & Partial<EditorCompletionContext>): boolean {
-    if (context.trigger !== '\\' || !COMMAND_QUERY.test(context.query)) return false;
+  shouldActivate(
+    context: Pick<EditorCompletionContext, 'trigger' | 'query'> & Partial<EditorCompletionContext>
+  ): boolean {
+    const query = context.explicit ? EXPLICIT_COMMAND_QUERY : COMMAND_QUERY;
+    if (context.trigger !== '\\' || !query.test(context.query)) return false;
     if (!this.options.markdownBody) return true;
     const { textBefore = '', from = 0, to = 0 } = context;
     const before = textBefore.slice(0, textBefore.length - (to - from));

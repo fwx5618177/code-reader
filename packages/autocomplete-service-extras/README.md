@@ -43,14 +43,18 @@ const plugin = createAutocompletePlugin({
 | `providers` | 提供者：`triggerCharacters`（单字符触发符须在行首或空白后，多字符任意位置）、`triggersAnywhere`（单字符触发符也可紧跟在其他字符后，如 `x+\al`，场合由 `shouldActivate` 判断）、`shouldActivate`、`getCompletions`、`maxResults`、`filtersOwnResults`（自己匹配，插件不再按文本过滤） |
 | `wordPattern` | 没有触发符时用光标前匹配的单词作查询（触发符为空串） |
 | `maxResults` / `minTriggerLength` / `debounceMs` | 默认 10 / 1 / 100 |
-| `activateOnTyping` | 输入时自动打开，默认 true；`Ctrl+空格` 总能手动打开（macOS 上该键常被输入法占用，另有 `Option+反引号`，与 CodeMirror 相同） |
+| `activateOnTyping` | 输入（文档变化）时自动打开，默认 true；只移动光标不会打开。`Ctrl+空格` 总能手动打开（macOS 上该键常被输入法占用，另有 `Option+反引号`，与 CodeMirror 相同）；手动打开时上下文的 `explicit` 为 true，提供者可以接受空查询（如单独的 `\` 列出常用命令），面板打开期间继续按手动处理 |
 | `classPrefix` | 面板类名前缀，默认 `pm-autocomplete`（`-panel`、`-item`、`-item-active`、`-icon`、`-icon-<类型>`、`-label`、`-detail`） |
 | `container` / `iconMap` / `showDetail` / `closeOnBlur` | 面板容器（默认编辑器父节点）、图标映射、是否显示详情、失焦关闭 |
 | `onOpen` / `onSelect` / `onClose` | 显示结果、接受补全项、未接受而关闭 |
 
 需要命令式控制（手动打开、上下选择、接受）时用 `new EditorAutocomplete(options)`，它的 `createPlugin()`、`openCompletion(view)`、`moveSelection(view, ±1)`、`acceptCompletion(view)`、`close(view)` 与插件共用状态。
 
-输入后到防抖刷新之前，面板保留上一次的结果（不闪烁），但回车、Tab 交还编辑器，避免按旧位置替换。行内原子节点（图片、公式）在文本里占一个字符，替换区间与文档位置始终对齐。
+输入后到防抖刷新之前，面板保留上一次的结果（不闪烁），但回车、Tab 交还编辑器，避免按旧位置替换；面板打开时移动光标也会刷新，移出触发范围即关闭。行内原子节点（图片、公式）在文本里占一个字符，替换区间与文档位置始终对齐。
+
+输入法：合成期间（拼音字母已进入文档）不刷新，`compositionend` 后按最终文字刷新；合成中的按键（`isComposing`，或 Safari 在合成结束后才派发、`keyCode` 为 229 的确认回车）不会接受补全（`isImeKeyEvent`）。
+
+面板（`CompletionPanel`，插件与文本框共用）：默认在光标下方，下方放不下且上方更宽裕时翻到上方（加 `-panel-above` 类），超出右边时向左收回；可用区域是视口与面板所在各层滚动容器的交集。选中项移出可见区时只滚动面板自身，不会连带滚动编辑器或页面。打开期间编辑器（或文本框）带 `aria-controls`、`aria-expanded` 与指向选中项的 `aria-activedescendant`，关闭后移除。
 
 ## 文本框补全
 
@@ -62,7 +66,7 @@ const completion = new TextFieldAutocomplete(textarea, { providers: [latexProvid
 completion.detach();
 ```
 
-上下文按光标所在行计算；接受时用 `setRangeText` 替换并派发 `input` 事件，文本框自己的输入监听（预览、自动伸缩）照常运行。按键监听在捕获阶段：面板打开时方向键、回车、Tab、Esc 先由补全处理，不会触发文本框自己的快捷键（如回车结束编辑）。面板显示在文本框下方，样式类名与 ProseMirror 插件相同。补全项的 `apply`（ProseMirror 结构化插入）不适用，只用 `insertText`。
+上下文按光标所在行计算；接受时用 `setRangeText` 替换并派发 `input` 事件，文本框自己的输入监听（预览、自动伸缩）照常运行。按键监听在捕获阶段：面板打开时方向键、回车、Tab、Esc 先由补全处理，不会触发文本框自己的快捷键（如回车结束编辑）。面板显示在文本框下方（放不下时在上方），样式类名与 ProseMirror 插件相同；面板打开时用方向键、Home / End 或鼠标移动光标会按新位置刷新。补全项的 `apply`（ProseMirror 结构化插入）不适用，只用 `insertText`。
 
 ## ProseMirror 补全适配器
 

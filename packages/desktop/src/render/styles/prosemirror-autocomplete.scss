@@ -25,6 +25,11 @@
   animation: pm-autocomplete-enter 0.15s ease;
 
   @include scrollbar;
+
+  // 光标下方放不下时翻到上方：入场方向相反
+  &.pm-autocomplete-panel-above {
+    animation-name: pm-autocomplete-enter-above;
+  }
 }
 
 // ================================
@@ -35,6 +40,17 @@
   from {
     opacity: 0;
     transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pm-autocomplete-enter-above {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
   to {
     opacity: 1;

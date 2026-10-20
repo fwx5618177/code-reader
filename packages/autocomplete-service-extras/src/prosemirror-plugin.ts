@@ -12,6 +12,7 @@ import {
   MAX_TEXT_BEFORE,
   collectCompletions,
   collectTriggers,
+  isImeKeyEvent,
   isOpenCompletionShortcut,
   resolveQuery,
   type CompletionSourceOptions,
@@ -150,8 +151,16 @@ export class EditorAutocomplete {
         const container = this.options.container ?? editorView.dom.parentElement ?? document.body;
         return {
           update: (view, prevState) => {
-            const changed = !prevState.doc.eq(view.state.doc) || !prevState.selection.eq(view.state.selection);
-            if (changed && this.options.activateOnTyping) this.schedule(view);
+            const docChanged = !prevState.doc.eq(view.state.doc);
+            const selectionMoved = !prevState.selection.eq(view.state.selection);
+            const { active, context } = this.getState(view.state);
+            // 输入法合成中（拼音字母已在文档里）不刷新，合成结束后再按最终文字刷新
+            if (!view.composing) {
+              // 只有输入（文档变化）自动打开；单纯移动光标不打开（点进 \alpha 末尾再按回车应当换行）。
+              // 已打开时两者都刷新：光标移出触发范围即关闭；手动打开的继续按手动处理（与 CodeMirror 相同）
+              if (active && (docChanged || selectionMoved)) this.schedule(view, context?.explicit ?? false);
+              else if (docChanged && this.options.activateOnTyping) this.schedule(view, false);
+            }
             this.syncPanel(view, container);
           },
           destroy: () => this.destroy(),
@@ -161,6 +170,11 @@ export class EditorAutocomplete {
       props: {
         handleKeyDown: (view, event) => this.handleKeyDown(view, event),
         handleDOMEvents: {
+          compositionend: (view) => {
+            // compositionend 时 ProseMirror 可能还没把最后的文字读进文档；防抖到期时已经是最终内容
+            if (this.options.activateOnTyping) this.schedule(view, false);
+            return false;
+          },
           blur: (view) => {
             if (!this.options.closeOnBlur) return false;
             // 延迟关闭：焦点可能只是短暂离开（如切换窗口后立刻回来）
@@ -241,6 +255,8 @@ export class EditorAutocomplete {
   }
 
   private handleKeyDown(view: EditorView, event: KeyboardEvent): boolean {
+    // ProseMirror 已过滤合成中的 keydown；这里再判断一次，插件不依赖调用方的过滤
+    if (isImeKeyEvent(event)) return false;
     if (isOpenCompletionShortcut(event)) {
       event.preventDefault();
       void this.openCompletion(view);
@@ -270,10 +286,12 @@ export class EditorAutocomplete {
     }
   }
 
-  /** 防抖后刷新 */
-  private schedule(view: EditorView): void {
+  /** 防抖后刷新；到期时仍在输入法合成中则放弃（由 compositionend 重新安排） */
+  private schedule(view: EditorView, explicit: boolean): void {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => void this.refresh(view, false), this.options.debounceMs);
+    this.debounceTimer = setTimeout(() => {
+      if (!view.composing) void this.refresh(view, explicit);
+    }, this.options.debounceMs);
   }
 
   /** 光标处的补全上下文；explicit（手动打开）时忽略最小长度 */
@@ -298,6 +316,7 @@ export class EditorAutocomplete {
       to: offset,
       textBefore,
       lineText,
+      explicit,
     };
   }
 
@@ -342,10 +361,12 @@ export class EditorAutocomplete {
       this.panel.hide();
       return;
     }
-    this.panel.show(container, state.items, state.selectedIndex, () => {
-      const coords = view.coordsAtPos(context.pos);
-      const editorRect = view.dom.getBoundingClientRect();
-      return { top: coords.bottom - editorRect.top + 4, left: coords.left - editorRect.left };
+    this.panel.show({
+      container,
+      owner: view.dom,
+      items: state.items,
+      selectedIndex: state.selectedIndex,
+      anchor: () => view.coordsAtPos(context.pos),
     });
   }
 }

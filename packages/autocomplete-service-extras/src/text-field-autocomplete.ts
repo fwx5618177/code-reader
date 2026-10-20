@@ -11,6 +11,7 @@ import {
   MAX_TEXT_BEFORE,
   collectCompletions,
   collectTriggers,
+  isImeKeyEvent,
   isOpenCompletionShortcut,
   resolveQuery,
   type CompletionSourceOptions,
@@ -50,13 +51,26 @@ export class TextFieldAutocomplete {
   private generation = 0;
   /** 自己派发的 input 事件不再触发补全 */
   private applying = false;
+  /** 输入法合成中：中间文字不触发补全，合成结束后再按最终文字刷新 */
+  private composing = false;
 
   private readonly onInput = () => {
-    if (this.applying) return;
+    if (this.applying || this.composing) return;
+    this.schedule();
+  };
+  private readonly onCompositionStart = () => {
+    this.composing = true;
+  };
+  private readonly onCompositionEnd = () => {
+    this.composing = false;
     this.schedule();
   };
   private readonly onKeyDown = (event: Event) => this.handleKeyDown(event as KeyboardEvent);
   private readonly onBlur = () => this.close();
+  /** 面板打开时用鼠标移动了光标：按新位置刷新 */
+  private readonly onMouseUp = () => {
+    if (this.isOpen) this.schedule();
+  };
 
   constructor(
     private readonly field: TextField,
@@ -75,7 +89,10 @@ export class TextFieldAutocomplete {
       onPick: (index) => this.accept(index),
     });
     field.addEventListener('input', this.onInput);
+    field.addEventListener('compositionstart', this.onCompositionStart);
+    field.addEventListener('compositionend', this.onCompositionEnd);
     field.addEventListener('keydown', this.onKeyDown, true);
+    field.addEventListener('mouseup', this.onMouseUp);
     field.addEventListener('blur', this.onBlur);
   }
 
@@ -103,11 +120,16 @@ export class TextFieldAutocomplete {
   detach(): void {
     this.close();
     this.field.removeEventListener('input', this.onInput);
+    this.field.removeEventListener('compositionstart', this.onCompositionStart);
+    this.field.removeEventListener('compositionend', this.onCompositionEnd);
     this.field.removeEventListener('keydown', this.onKeyDown, true);
+    this.field.removeEventListener('mouseup', this.onMouseUp);
     this.field.removeEventListener('blur', this.onBlur);
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
+    // 输入法合成中的按键（确认候选的回车、选字的方向键）归输入法
+    if (this.composing || isImeKeyEvent(event)) return;
     if (isOpenCompletionShortcut(event)) {
       this.consume(event);
       void this.open();
@@ -134,6 +156,13 @@ export class TextFieldAutocomplete {
         this.consume(event);
         this.accept(this.selectedIndex);
         return;
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'Home':
+      case 'End':
+        // 光标在默认动作中移动：防抖后按新位置刷新，移出触发范围即关闭（期间回车交还文本框）
+        this.schedule();
+        return;
       default:
         return;
     }
@@ -144,11 +173,13 @@ export class TextFieldAutocomplete {
     event.stopImmediatePropagation();
   }
 
+  /** 防抖后刷新；面板是手动打开的则继续按手动处理 */
   private schedule(): void {
+    const explicit = this.context?.explicit ?? false;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      void this.refresh(false);
+      if (!this.composing) void this.refresh(explicit);
     }, this.options.debounceMs);
   }
 
@@ -156,7 +187,7 @@ export class TextFieldAutocomplete {
   private contextAt(explicit: boolean): EditorCompletionContext | null {
     const { value, selectionStart, selectionEnd } = this.field;
     if (selectionStart === null || selectionStart !== selectionEnd) return null;
-    const lineStart = value.lastIndexOf('\n', selectionStart - 1) + 1;
+    const lineStart = selectionStart === 0 ? 0 : value.lastIndexOf('\n', selectionStart - 1) + 1;
     const lineEndIndex = value.indexOf('\n', selectionStart);
     const lineText = value.slice(lineStart, lineEndIndex === -1 ? value.length : lineEndIndex);
     const offset = selectionStart - lineStart;
@@ -173,6 +204,7 @@ export class TextFieldAutocomplete {
       to: offset,
       textBefore,
       lineText,
+      explicit,
     };
   }
 
@@ -199,16 +231,13 @@ export class TextFieldAutocomplete {
 
   private render(): void {
     if (!this.context) return;
-    const container = this.options.container ?? this.field.parentElement ?? document.body;
-    this.panel.show(container, this.items, this.selectedIndex, (panel) => {
-      // 显示在文本框下方：坐标相对面板的定位父元素（含其滚动偏移）
-      const parent = (panel.offsetParent as HTMLElement | null) ?? document.body;
-      const parentRect = parent.getBoundingClientRect();
-      const fieldRect = this.field.getBoundingClientRect();
-      return {
-        top: fieldRect.bottom - parentRect.top + parent.scrollTop + 4,
-        left: fieldRect.left - parentRect.left + parent.scrollLeft,
-      };
+    this.panel.show({
+      container: this.options.container ?? this.field.parentElement ?? document.body,
+      owner: this.field,
+      items: this.items,
+      selectedIndex: this.selectedIndex,
+      // 锚点是整个文本框：面板在它下方，放不下时在它上方
+      anchor: () => this.field.getBoundingClientRect(),
     });
   }
 

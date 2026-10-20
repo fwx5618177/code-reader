@@ -39,11 +39,16 @@ describe('LaTeXCompletionProvider', () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it('\\ 后是字母才激活', () => {
+  it('\\ 后是字母才激活；手动打开时单独的 \\ 也激活并列出常用命令', () => {
     expect(provider.shouldActivate({ trigger: '\\', query: '' })).toBe(false);
     expect(provider.shouldActivate({ trigger: '\\', query: 'al pha' })).toBe(false);
     expect(provider.shouldActivate({ trigger: '\\', query: 'frac{' })).toBe(false);
     expect(provider.shouldActivate({ trigger: '\\', query: 'al' })).toBe(true);
+    expect(provider.shouldActivate({ trigger: '\\', query: '', explicit: true })).toBe(true);
+    expect(provider.shouldActivate({ trigger: '\\', query: '{', explicit: true })).toBe(false);
+    const common = filterAndSortItems(provider.getCompletions({ query: '' }), '', 10, new Set());
+    expect(common).toHaveLength(10);
+    expect(common.map((item) => item.label)).toContain('\\frac{}{}');
   });
 
   it('Markdown 正文：\\ 在行首、空白后或未闭合的 $ 之内才激活', () => {
@@ -52,9 +57,11 @@ describe('LaTeXCompletionProvider', () => {
     const at = (textBefore: string): EditorCompletionContext => {
       const index = textBefore.lastIndexOf('\\');
       const query = textBefore.slice(index + 1);
-      return { trigger: '\\', query, textBefore, lineText: textBefore, pos: 0, from: index, to: textBefore.length };
+      return { trigger: '\\', query, textBefore, lineText: textBefore, pos: 0, from: index, to: textBefore.length, explicit: false };
     };
     expect(body.shouldActivate(at('\\al'))).toBe(true);
+    expect(body.shouldActivate({ ...at('$x+\\'), explicit: true })).toBe(true);
+    expect(body.shouldActivate({ ...at('$a \\\\'), explicit: true })).toBe(false);
     expect(body.shouldActivate(at('公式 \\al'))).toBe(true);
     expect(body.shouldActivate(at('$x+\\al'))).toBe(true);
     expect(body.shouldActivate(at('$$a=b+\\al'))).toBe(true);

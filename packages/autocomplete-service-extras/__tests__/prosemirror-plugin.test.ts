@@ -109,7 +109,9 @@ describe('findTriggerPosition / filterAndSortItems', () => {
 });
 
 describe('EditorAutocomplete', () => {
-  beforeEach(() => vi.useFakeTimers());
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
   afterEach(() => {
     vi.useRealTimers();
     document.body.replaceChildren();
@@ -252,13 +254,51 @@ describe('EditorAutocomplete', () => {
     expect(view.state.doc.textContent).toBe('table');
     view.destroy();
   });
+
+  it('只移动光标不自动打开；打开后光标移出触发范围即关闭，刷新前回车交还编辑器', async () => {
+    const latex = provider('\\', [item('\\alpha', { filterText: 'alpha' })], { triggersAnywhere: true });
+    const autocomplete = new EditorAutocomplete({ providers: [latex], minTriggerLength: 0 });
+    const view = mount(paragraph('$x+\\alpha'), autocomplete);
+    const caretAt = (pos: number) => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
+    caretAt(view.state.doc.content.size - 1);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(autocomplete.getState(view.state).active).toBe(false);
+
+    type(view, ' \\al');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(autocomplete.getState(view.state).active).toBe(true);
+    caretAt(1);
+    expect(key(view, 'Enter')).toBe(false);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(autocomplete.getState(view.state).active).toBe(false);
+    view.destroy();
+  });
+
+  it('输入法合成中不打开；合成结束后按最终文字打开；229 的回车交还编辑器', async () => {
+    const latex = provider('\\', [item('\\alpha', { filterText: 'alpha' })], { triggersAnywhere: true });
+    const autocomplete = new EditorAutocomplete({ providers: [latex], minTriggerLength: 0 });
+    const view = mount(paragraph(''), autocomplete);
+    view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    expect(view.composing).toBe(true);
+    type(view, '\\al');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(autocomplete.getState(view.state).active).toBe(false);
+
+    view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(150);
+    expect(view.composing).toBe(false);
+    expect(autocomplete.getState(view.state).active).toBe(true);
+    expect(key(view, 'Enter', { keyCode: 229 })).toBe(false);
+    expect(view.state.doc.textContent).toBe('\\al');
+    view.destroy();
+  });
 });
 
 describe('fromServiceProvider（Emoji）', () => {
   const emoji = fromServiceProvider(new EmojiProvider(), { trigger: ':' });
   const context = (textBefore: string): EditorCompletionContext => {
     const from = textBefore.lastIndexOf(':');
-    return { trigger: ':', query: textBefore.slice(from + 1), pos: textBefore.length, from, to: textBefore.length, textBefore, lineText: textBefore };
+    return { trigger: ':', query: textBefore.slice(from + 1), pos: textBefore.length, from, to: textBefore.length, textBefore, lineText: textBefore, explicit: false };
   };
 
   it('按短代码匹配，精确匹配排在最前；别名与中文描述也能匹配', async () => {
