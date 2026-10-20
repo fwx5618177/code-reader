@@ -150,6 +150,107 @@ const EXTRA_NODES: Record<string, NodeSpec> = {
       return ['div', attrs, formatWikiLink(parts, true)];
     },
   },
+
+  // 脚注引用 [^标签]：显示为上标标签
+  footnote_ref: {
+    group: 'inline',
+    inline: true,
+    atom: true,
+    attrs: { label: { default: '' } },
+    parseDOM: [{ tag: 'sup[data-footnote-ref]', getAttrs: (dom: HTMLElement) => ({ label: dom.getAttribute('data-footnote-ref') || '' }) }],
+    toDOM(node) {
+      const label = node.attrs.label as string;
+      return ['sup', { class: 'footnote-ref', 'data-footnote-ref': label }, label];
+    },
+  },
+
+  // 行内脚注 ^[内容]：保存方括号内的原文，显示为小字注释
+  footnote_inline: {
+    group: 'inline',
+    inline: true,
+    atom: true,
+    attrs: { content: { default: '' } },
+    parseDOM: [{ tag: 'span[data-footnote-inline]', getAttrs: (dom: HTMLElement) => ({ content: dom.getAttribute('data-footnote-inline') || '' }) }],
+    toDOM(node) {
+      const content = node.attrs.content as string;
+      return ['span', { class: 'footnote-inline', 'data-footnote-inline': content }, content];
+    },
+  },
+
+  // 脚注定义 [^标签]: 内容（可以有多段，续行缩进 4 格）
+  footnote_def: {
+    group: 'block',
+    content: 'block+',
+    defining: true,
+    attrs: { label: { default: '' } },
+    parseDOM: [{ tag: 'div[data-footnote-def]', getAttrs: (dom: HTMLElement) => ({ label: dom.getAttribute('data-footnote-def') || '' }) }],
+    toDOM(node) {
+      const label = node.attrs.label as string;
+      return ['div', { class: 'footnote-def', 'data-footnote-def': label, id: `footnote-${label}` }, 0];
+    },
+  },
+
+  // 定义列表：术语一行，下一行以 : 开头的说明；tight 为术语与说明之间不空行
+  definition_list: {
+    group: 'block',
+    content: '(definition_term definition_description+)+',
+    attrs: { tight: { default: true } },
+    parseDOM: [{ tag: 'dl' }],
+    toDOM() {
+      return ['dl', { class: 'definition-list' }, 0];
+    },
+  },
+  definition_term: {
+    content: 'inline*',
+    defining: true,
+    parseDOM: [{ tag: 'dt' }],
+    toDOM() {
+      return ['dt', 0];
+    },
+  },
+  definition_description: {
+    content: 'block+',
+    defining: true,
+    parseDOM: [{ tag: 'dd' }],
+    toDOM() {
+      return ['dd', 0];
+    },
+  },
+
+  // 自定义容器 ::: 名称 参数 … :::（提示块）；info 为 ::: 之后的整行，保存时原样写回
+  container: {
+    group: 'block',
+    content: 'block+',
+    defining: true,
+    attrs: { name: { default: 'note' }, info: { default: ' note' } },
+    parseDOM: [
+      {
+        tag: 'div[data-container]',
+        getAttrs: (dom: HTMLElement) => ({
+          name: dom.getAttribute('data-container') || 'note',
+          info: ` ${dom.getAttribute('data-container-info') || dom.getAttribute('data-container') || 'note'}`,
+        }),
+      },
+    ],
+    toDOM(node) {
+      const name = node.attrs.name as string;
+      const info = (node.attrs.info as string).trim();
+      return ['div', { class: `markdown-container markdown-container-${name}`, 'data-container': name, 'data-container-info': info }, 0];
+    },
+  },
+
+  // 缩写定义 *[缩写]: 全称：整行按纯文本编辑；正文中的缩写以装饰显示全称（见 abbreviations.ts）
+  abbreviation_def: {
+    group: 'block',
+    content: 'text*',
+    marks: '',
+    code: true,
+    defining: true,
+    parseDOM: [{ tag: 'div[data-abbreviation-def]', preserveWhitespace: 'full' }],
+    toDOM() {
+      return ['div', { class: 'abbreviation-def', 'data-abbreviation-def': '' }, 0];
+    },
+  },
 };
 
 /** 标记扩展 */
@@ -163,6 +264,35 @@ const EXTRA_MARKS: Record<string, MarkSpec> = {
     ],
     toDOM() {
       return ['s', 0];
+    },
+  },
+  // ==高亮==
+  highlight: {
+    parseDOM: [{ tag: 'mark' }],
+    toDOM() {
+      return ['mark', 0];
+    },
+  },
+  // ++插入++
+  insert: {
+    parseDOM: [{ tag: 'ins' }],
+    toDOM() {
+      return ['ins', 0];
+    },
+  },
+  // H~2~O 下标与 2^10^ 上标：互斥（内容只能是纯文本）
+  subscript: {
+    excludes: 'subscript superscript',
+    parseDOM: [{ tag: 'sub' }],
+    toDOM() {
+      return ['sub', 0];
+    },
+  },
+  superscript: {
+    excludes: 'subscript superscript',
+    parseDOM: [{ tag: 'sup:not([data-footnote-ref])' }],
+    toDOM() {
+      return ['sup', 0];
     },
   },
 };
@@ -263,6 +393,9 @@ export function createMarkdownSchema(): Schema {
   }
 
   let marks = basicSchema.spec.marks;
+  // 链接：linkify 表示源码中是裸写的网址或邮箱（保存时保持裸写）
+  const link = marks.get('link')!;
+  marks = marks.update('link', { ...link, attrs: { ...link.attrs, linkify: { default: false } } });
   for (const [name, spec] of Object.entries(EXTRA_MARKS)) {
     marks = marks.addToEnd(name, spec);
   }

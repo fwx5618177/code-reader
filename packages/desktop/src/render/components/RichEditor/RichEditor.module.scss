@@ -492,6 +492,7 @@
 
   // 块级嵌入：只读显示被引用的内容，点击正文选中整个嵌入
   @include front-matter;
+  @include markdown-extensions;
   @include wiki-embed;
 
   :global(.wiki-embed-node.ProseMirror-selectednode) > :global(.wiki-embed) {
@@ -1618,6 +1619,7 @@ $page-rule-rows: repeating-linear-gradient(
   }
 
   @include front-matter;
+  @include markdown-extensions;
   @include wiki-embed;
 }
 

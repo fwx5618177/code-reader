@@ -44,10 +44,11 @@ function inlineText(tokens: Token[]): string {
 
 /**
  * 提取所有 [[双向链接]] 与 ![[嵌入]]
+ * key 为文档标识时，同一文档的连续提取只重新解析改动附近的块（增量解析）
  */
-export function extractWikiLinks(markdown: string): WikiLinkReference[] {
+export function extractWikiLinks(markdown: string, key?: string): WikiLinkReference[] {
   const references: WikiLinkReference[] = [];
-  for (const token of markdownTokenizer.parse(markdown, {})) {
+  for (const token of markdownTokenizer.parse(markdown, { key })) {
     if (token.type === 'wiki_embed') {
       const { target, heading, alias } = token.meta;
       references.push({ target, heading, alias, context: `![[${token.content}]]` });
@@ -67,10 +68,10 @@ export function extractWikiLinks(markdown: string): WikiLinkReference[] {
 
 /**
  * 提取全部标题（含引用块、列表中的标题），按文档顺序
- * 标题末尾的块 ID 标记不属于标题文本
+ * 标题末尾的块 ID 标记不属于标题文本；key 为文档标识时走增量解析（见 extractWikiLinks）
  */
-export function extractHeadings(markdown: string): MarkdownHeading[] {
-  const tokens = markdownTokenizer.parse(markdown, {});
+export function extractHeadings(markdown: string, key?: string): MarkdownHeading[] {
+  const tokens = markdownTokenizer.parse(markdown, { key });
   const headings: MarkdownHeading[] = [];
   tokens.forEach((token, index) => {
     if (token.type !== 'heading_open') return;

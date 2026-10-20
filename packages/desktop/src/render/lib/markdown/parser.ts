@@ -1,7 +1,7 @@
 // ================================
 // Markdown → ProseMirror 文档
-// 分词由 @code-reader/markdown-parser 完成（CommonMark + 表格 + ~~删除线~~ + 任务列表 + 扩展语法），
-// 输出 markdown-it 兼容的 token 流，由 prosemirror-markdown 构建文档
+// 分词由 @code-reader/markdown-parser 完成（CommonMark + 表格 + ~~删除线~~ + 任务列表 + 脚注、高亮、上下标、定义列表、
+// 容器、缩写、裸网址 + 扩展语法），输出 markdown-it 兼容的 token 流，由 prosemirror-markdown 构建文档
 // ================================
 
 import { MarkdownItCompatTokenizer, type MarkdownItToken as Token } from '@code-reader/markdown-parser';
@@ -25,32 +25,56 @@ function isTightList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hid
   return true;
 }
 
+/** 定义列表是否紧凑：每条说明的第一个段落都被标记为 hidden（术语与说明之间没有空行） */
+function isTightDefinitionList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hidden'>>, index: number): boolean {
+  let depth = 0;
+  for (let i = index + 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (depth === 0 && token.type === 'dl_close') break;
+    if (token.type === 'dd_open' && tokens[i + 1]?.type === 'paragraph_open' && !tokens[i + 1].hidden) return false;
+    if (token.nesting === 1) depth++;
+    if (token.nesting === -1) depth--;
+  }
+  return true;
+}
+
 /** 从 th/td 的 style 读取对齐方式 */
 function cellAlign(token: Pick<Token, 'attrGet'>): CellAlign {
   const match = /text-align:\s*(left|center|right)/.exec(token.attrGet('style') ?? '');
   return match ? (match[1] as CellAlign) : null;
 }
 
-/** 编辑器的 Markdown 分词器：parse(markdown) 返回 markdown-it 兼容的 token 序列 */
+/** 编辑器的 Markdown 分词器：parse(markdown, env) 返回 markdown-it 兼容的 token 序列；env.key（文档 id）相同的连续解析走增量解析 */
 export interface MarkdownTokenizer {
-  parse(markdown: string, env?: unknown): Token[];
+  parse(markdown: string, env?: { key?: string }): Token[];
 }
 
 /**
- * 创建分词器：CommonMark + 表格 + ~~删除线~~ + 文档开头的 YAML 头部 + 扩展语法；不识别 HTML、不支持脚注。
+ * 创建分词器：CommonMark + 表格 + ~~删除线~~ + 文档开头的 YAML 头部 + 脚注 + ==高亮== ++插入++ ~下标~ ^上标^ +
+ * 定义列表 + ::: 容器 + 缩写 + 裸网址自动链接 + 扩展语法；不识别 HTML。
+ * 脚注与缩写定义保留在原位（preserveSource），编辑后保存不丢内容。
  * taskLists 为 false 时保留列表项开头的 [ ] / [x] 文本（重命名改写需要与源码一致的行内内容）
  */
 export function createTokenizer({ taskLists = true }: { taskLists?: boolean } = {}): MarkdownTokenizer {
   const tokenizer = new MarkdownItCompatTokenizer({
     html: false,
-    footnotes: false,
+    footnotes: true,
     taskLists,
     singleTildeStrikethrough: false,
     frontMatter: true,
+    mark: true,
+    insert: true,
+    subscript: true,
+    superscript: true,
+    definitionLists: true,
+    containers: true,
+    abbreviations: true,
+    linkify: true,
+    preserveSource: true,
     inlineExtensions: markdownInlineExtensions,
     blockExtensions: markdownBlockExtensions,
   });
-  return { parse: (markdown) => finalizeTokens(tokenizer.parse(markdown)) };
+  return { parse: (markdown, env) => finalizeTokens(tokenizer.parse(markdown, env), markdown) };
 }
 
 /** 共享的分词器 */
@@ -102,10 +126,24 @@ function createParser(schema: Schema): MarkdownParser {
     em: { mark: 'em' },
     strong: { mark: 'strong' },
     s: { mark: 'strike' },
+    mark: { mark: 'highlight' },
+    ins: { mark: 'insert' },
+    sub: { mark: 'subscript' },
+    sup: { mark: 'superscript' },
     link: {
       mark: 'link',
-      getAttrs: (tok) => ({ href: tok.attrGet('href'), title: tok.attrGet('title') || null }),
+      getAttrs: (tok) => ({ href: tok.attrGet('href'), title: tok.attrGet('title') || null, linkify: tok.markup === 'linkify' }),
     },
+    // 正文中的缩写只是文字，全称由装饰显示
+    abbr: { ignore: true },
+    abbr_definition: { block: 'abbreviation_def', noCloseToken: true },
+    footnote_ref: { node: 'footnote_ref', noCloseToken: true, getAttrs: (tok) => ({ label: tok.meta.label }) },
+    footnote_inline: { node: 'footnote_inline', noCloseToken: true, getAttrs: (tok) => ({ content: tok.content }) },
+    footnote_reference: { block: 'footnote_def', getAttrs: (tok) => ({ label: tok.meta.label }) },
+    dl: { block: 'definition_list', getAttrs: (_tok, tokens, i) => ({ tight: isTightDefinitionList(tokens, i) }) },
+    dt: { block: 'definition_term' },
+    dd: { block: 'definition_description' },
+    container: { block: 'container', getAttrs: (tok) => ({ name: tok.meta.name, info: tok.info }) },
     code_inline: { mark: 'code', noCloseToken: true },
     table: { block: 'table' },
     thead: { ignore: true },

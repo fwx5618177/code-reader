@@ -563,6 +563,7 @@ $outline-width: 248px;
   }
 
   @include front-matter;
+  @include markdown-extensions;
   @include wiki-embed;
 
   strong {

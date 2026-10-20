@@ -13,6 +13,7 @@ import {
   InputRule,
 } from 'prosemirror-inputrules';
 import { keymap } from 'prosemirror-keymap';
+import { normalizeLink } from '@code-reader/markdown-parser';
 import { isEmbedParagraph, parseWikiLinkInner } from '../markdown/wiki-link';
 
 // ================================
@@ -48,6 +49,14 @@ export interface InputRulesConfig {
   wikiLink?: boolean;
   /** Enable task list ([ ] / [x] at list item start) */
   taskList?: boolean;
+  /** ==高亮== ++插入++ ~下标~ ^上标^ */
+  extendedMarks?: boolean;
+  /** 脚注：[^标签] 引用、段首 [^标签]: 定义、^[内容] 行内脚注 */
+  footnotes?: boolean;
+  /** 术语段落之后的段首 ": " 转换为定义列表 */
+  definitionList?: boolean;
+  /** 网址后输入空格时自动变成链接 */
+  autolink?: boolean;
 }
 
 const DEFAULT_CONFIG: InputRulesConfig = {
@@ -65,6 +74,10 @@ const DEFAULT_CONFIG: InputRulesConfig = {
   math: true,
   wikiLink: true,
   taskList: true,
+  extendedMarks: true,
+  footnotes: true,
+  definitionList: true,
+  autolink: true,
 };
 
 // ================================
@@ -215,12 +228,19 @@ function createOrderedListInputRule(orderedListType: NodeType): InputRule {
 
 function createHorizontalRuleInputRule(hrType: NodeType): InputRule {
   // --- or *** followed by space at start of line
-  return new InputRule(/^(---|\*\*\*)\s$/, (state, _match, _start, _end) => {
+  return new InputRule(/^(---|\*\*\*)\s$/, (state, match, _start, _end) => {
     const { $from } = state.selection;
 
     // Only trigger at the start of a paragraph
     if ($from.parent.type.name !== 'paragraph') {
       return null;
+    }
+
+    // 文档第一段输入 --- 加空格：文档属性（YAML 头部，与 Obsidian 相同）
+    const frontMatter = state.schema.nodes.front_matter;
+    if (frontMatter && match[1] === '---' && $from.depth === 1 && $from.index(0) === 0) {
+      const tr = state.tr.replaceWith($from.before(), $from.after(), frontMatter.create());
+      return tr.setSelection(TextSelection.create(tr.doc, 1)).scrollIntoView();
     }
 
     const hr = hrType.create();
@@ -297,6 +317,14 @@ function createMarkInputRules(schema: Schema, config: InputRulesConfig): InputRu
   }
   if (config.strikethrough && strike) {
     rules.push(markInputRule(/(?<![~\\])~~([^~\s](?:[^~]*[^~\s])?)~~$/, strike));
+  }
+  const { highlight, insert, subscript, superscript } = schema.marks;
+  if (config.extendedMarks && highlight && insert && subscript && superscript) {
+    rules.push(markInputRule(/(?<![=\\])==([^=\s](?:[^=]*[^=\s])?)==$/, highlight));
+    rules.push(markInputRule(/(?<![+\\])\+\+([^+\s](?:[^+]*[^+\s])?)\+\+$/, insert));
+    // 上下标内容不能有空白；~~ 留给删除线，^[ 留给行内脚注
+    rules.push(markInputRule(/(?<![~\\])~([^~\s]+)~$/, subscript));
+    rules.push(markInputRule(/(?<![\^\\])\^([^^\s[\]]+)\^$/, superscript));
   }
   if (config.link && link) {
     rules.push(
@@ -400,6 +428,94 @@ function createTaskListInputRule(listItemType: NodeType): InputRule {
   });
 }
 
+/**
+ * 脚注：正文中输入 [^标签] → 脚注引用；段首输入 [^标签]: 加空格 → 脚注定义；^[内容] → 行内脚注
+ */
+function createFootnoteInputRules(schema: Schema): InputRule[] {
+  const { footnote_ref: ref, footnote_def: def, footnote_inline: inline, paragraph } = schema.nodes;
+  if (!ref || !def || !inline) return [];
+  const outsideCode = (state: EditorState, start: number) =>
+    !state.doc.resolve(start).parent.type.spec.code && !state.doc.rangeHasMark(start, start, schema.marks.code);
+  return [
+    new InputRule(/^\[\^([^\]\s]+)\]:\s$/, (state, match, start, end) => {
+      const $start = state.doc.resolve(start);
+      if ($start.parent.type !== paragraph || $start.parentOffset !== 0) return null;
+      const tr = state.tr.delete(start, end);
+      const range = tr.doc.resolve(start).blockRange();
+      if (!range) return null;
+      return tr.wrap(range, [{ type: def, attrs: { label: match[1] } }]);
+    }),
+    new InputRule(/(?<!\\)\[\^([^\]\s]+)\]$/, (state, match, start, end) => {
+      // 段首的 [^标签] 可能是定义的开头，等输入 ": "
+      if (state.doc.resolve(start).parentOffset === 0 || !outsideCode(state, start)) return null;
+      return state.tr.replaceWith(start, end, ref.create({ label: match[1] }));
+    }),
+    new InputRule(/(?<!\\)\^\[([^\]]+)\]$/, (state, match, start, end) => {
+      if (!outsideCode(state, start)) return null;
+      return state.tr.replaceWith(start, end, inline.create({ content: match[1] }));
+    }),
+  ];
+}
+
+/**
+ * 定义列表：紧跟在单行段落（术语）或定义列表之后的段落，段首输入 ": " 变成说明；
+ * 在说明里回车后输入 ": " 另起一条说明
+ */
+function createDefinitionListInputRule(schema: Schema): InputRule | null {
+  const { definition_list: list, definition_term: term, definition_description: description, paragraph, hard_break: hardBreak } = schema.nodes;
+  if (!list || !term || !description) return null;
+  return new InputRule(/^:\s$/, (state, _match, start, end) => {
+    const $start = state.doc.resolve(start);
+    if ($start.parent.type !== paragraph || $start.parentOffset !== 0) return null;
+    const container = $start.node($start.depth - 1);
+    const index = $start.index($start.depth - 1);
+    const paragraphStart = $start.before();
+    // 光标之后已有的文字成为说明的内容
+    const rest = $start.parent.content.cut(end - $start.start());
+    const newDescription = description.create(null, paragraph.create(null, rest));
+    // 说明中的后续段落：另起一条说明（在说明里回车后输入 ": "）
+    if (container.type === description && index > 0) {
+      const after = $start.after($start.depth - 1);
+      const tr = state.tr.delete(paragraphStart, $start.after());
+      const insertAt = tr.mapping.map(after);
+      tr.insert(insertAt, newDescription);
+      return tr.setSelection(TextSelection.create(tr.doc, insertAt + 2));
+    }
+    const previous = index > 0 ? container.child(index - 1) : null;
+    if (!previous) return null;
+    if (previous.type === list) {
+      const tr = state.tr.replaceWith(paragraphStart - previous.nodeSize, $start.after(), list.create(previous.attrs, previous.content.addToEnd(newDescription)));
+      return tr.setSelection(TextSelection.create(tr.doc, paragraphStart + 1));
+    }
+    let singleLine = true;
+    previous.forEach((child) => {
+      if (child.type === hardBreak) singleLine = false;
+    });
+    if (previous.type !== paragraph || previous.content.size === 0 || !singleLine) return null;
+    const created = list.create({ tight: true }, [term.create(null, previous.content), newDescription]);
+    const tr = state.tr.replaceWith(paragraphStart - previous.nodeSize, $start.after(), created);
+    // 光标放到说明段落的开头：列表起点 + 1 + 术语 + 说明与段落的开始
+    return tr.setSelection(TextSelection.create(tr.doc, paragraphStart - previous.nodeSize + 1 + created.child(0).nodeSize + 2));
+  });
+}
+
+/**
+ * 网址之后输入空格：http(s):// 与 www. 开头的网址变成链接（保存时仍是裸写的网址）。
+ * 末尾的标点不算在链接里，与解析时的自动链接规则一致
+ */
+function createAutolinkInputRule(linkType: MarkType): InputRule {
+  return new InputRule(/(?<![\w@/.\\])((?:https?:\/\/|www\.)[^\s<]*[^\s<?!.,:*_~)])[?!.,:*_~)]*\s$/, (state, match, start, end) => {
+    const url = match[1];
+    const $start = state.doc.resolve(start);
+    if ($start.parent.type.spec.code || state.doc.rangeHasMark(start, end, linkType) || state.doc.rangeHasMark(start, end, state.schema.marks.code)) {
+      return null;
+    }
+    const href = normalizeLink(url.startsWith('www.') ? `http://${url}` : url);
+    // 输入的空白字符尚未写入文档，由本规则写入
+    return state.tr.insertText(match[0].slice(-1), end).addMark(start, start + url.length, linkType.create({ href, title: null, linkify: true }));
+  });
+}
+
 // ================================
 // Block Enter Keymap
 // 段落内容为特定语法时，回车将其转换为对应的块
@@ -437,9 +553,19 @@ function createTableNode(schema: Schema, headers: string[]) {
  * - $$ → 块级公式（立即进入编辑）
  * - | a | b | → 表格
  * - 文档第一段为 --- → YAML 头部（与 Typora 相同）
+ * - ::: 名称 参数 → 自定义容器（提示块）
+ * - *[缩写]: 全称 → 缩写定义
  */
 export function createBlockEnterKeymap(schema: Schema): Plugin {
-  const { code_block: codeBlock, math_block: mathBlock, table, front_matter: frontMatter } = schema.nodes;
+  const {
+    code_block: codeBlock,
+    math_block: mathBlock,
+    table,
+    front_matter: frontMatter,
+    container,
+    abbreviation_def: abbreviationDef,
+    paragraph,
+  } = schema.nodes;
 
   return keymap({
     Enter: (state: EditorState, dispatch?: (tr: Transaction) => void): boolean => {
@@ -483,6 +609,29 @@ export function createBlockEnterKeymap(schema: Schema): Plugin {
           // 光标放到第一个数据单元格
           const firstBodyCell = $from.before() + 1 + tableNode.child(0).nodeSize + 2;
           tr.setSelection(TextSelection.create(tr.doc, firstBodyCell));
+          dispatch(tr.scrollIntoView());
+        }
+        return true;
+      }
+
+      const containerOpen = container ? /^:{3,}([ \t]*([^\s:][^\s]*).*)$/.exec(text) : null;
+      if (container && containerOpen) {
+        if (dispatch) {
+          const node = container.create({ name: containerOpen[2], info: ` ${containerOpen[1].trim()}` }, paragraph.create());
+          const tr = state.tr.replaceWith($from.before(), $from.after(), node);
+          tr.setSelection(TextSelection.create(tr.doc, $from.before() + 2));
+          dispatch(tr.scrollIntoView());
+        }
+        return true;
+      }
+
+      if (abbreviationDef && /^\*\[[^\]]+\]:\s*\S/.test(text)) {
+        if (dispatch) {
+          const tr = state.tr.replaceWith($from.before(), $from.after(), [
+            abbreviationDef.create(null, schema.text(text)),
+            paragraph.create(),
+          ]);
+          tr.setSelection(TextSelection.create(tr.doc, $from.before() + text.length + 3));
           dispatch(tr.scrollIntoView());
         }
         return true;
@@ -556,6 +705,13 @@ export function createInputRulesPlugin(schema: Schema, config: InputRulesConfig 
   if (mergedConfig.taskList && schema.nodes.list_item?.spec.attrs?.checked) {
     rules.push(createTaskListInputRule(schema.nodes.list_item));
   }
+
+  if (mergedConfig.footnotes) rules.push(...createFootnoteInputRules(schema));
+
+  const definitionList = mergedConfig.definitionList ? createDefinitionListInputRule(schema) : null;
+  if (definitionList) rules.push(definitionList);
+
+  if (mergedConfig.autolink && schema.marks.link) rules.push(createAutolinkInputRule(schema.marks.link));
 
   return inputRules({ rules });
 }

@@ -24,8 +24,17 @@ function markSyntax(mark: Mark): [string, string] | null {
       return ['`', '`'];
     case 'strike':
       return ['~~', '~~'];
+    case 'highlight':
+      return ['==', '=='];
+    case 'insert':
+      return ['++', '++'];
+    case 'subscript':
+      return ['~', '~'];
+    case 'superscript':
+      return ['^', '^'];
     case 'link':
-      return ['[', `](${mark.attrs.href as string})`];
+      // 裸写的网址没有语法标记
+      return mark.attrs.linkify ? null : ['[', `](${mark.attrs.href as string})`];
     default:
       return null;
   }

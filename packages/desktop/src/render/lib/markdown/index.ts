@@ -78,6 +78,15 @@ export {
 } from './block-ref';
 export { createBlockIdPlugin } from './block-id-plugin';
 export { createLivePreviewPlugin, livePreviewKey } from './live-preview';
+export { createAbbreviationPlugin, collectAbbreviations } from './abbreviations';
+export { createFrontMatterPlugin } from './front-matter-plugin';
+export {
+  documentProperties,
+  mergeDocumentTags,
+  lintFrontMatter,
+  type DocumentProperties,
+  type FrontMatterProblem,
+} from './front-matter';
 export {
   SlashCommandProvider,
   WikiLinkCompletionProvider,

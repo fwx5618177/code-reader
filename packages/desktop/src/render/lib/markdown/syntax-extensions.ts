@@ -4,7 +4,8 @@
 // - 双向链接：[[目标]] / [[目标#标题|别名]]；独占一行的 ![[目标#标题]] 为块级嵌入
 // - 中日韩文字之间的软换行不产生空格
 // 任务列表 - [ ] / - [x] 由解析器的 taskLists 选项识别（list_item_open 的 meta.checked）；
-// 文档开头的 YAML 头部由 frontMatter 选项识别（front_matter token 的 meta 为 YAML 文本）
+// 文档开头的 YAML 头部由 frontMatter 选项识别（front_matter token 的 meta 为 YAML 文本）；
+// 脚注、高亮 / 插入 / 上下标、定义列表、::: 容器、缩写与裸网址自动链接由解析器的对应选项识别
 // ================================
 
 import type { BlockExtension, InlineExtension, MarkdownItToken } from '@code-reader/markdown-parser';
@@ -152,15 +153,35 @@ function removeCjkSoftbreaks(children: MarkdownItToken[]): void {
   }
 }
 
+/** 自定义容器的 token 类型带名称（container_名称_open），统一为 container_open / container_close，名称放入 meta */
+const CONTAINER_TOKEN = /^container_(.+)_(open|close)$/;
+
 /**
  * 解析后的统一处理：块级公式去掉首尾空白，中日韩文字之间的软换行不产生空格；
- * YAML 头部的文本放入 content（prosemirror-markdown 从 content 创建文本节点）
+ * YAML 头部与缩写定义的文本放入 content（prosemirror-markdown 从 content 创建文本节点，缩写定义取源码原行）；
+ * 自定义容器与行内脚注改用固定的 token 类型
  */
-export function finalizeTokens(tokens: MarkdownItToken[]): MarkdownItToken[] {
+export function finalizeTokens(tokens: MarkdownItToken[], source: string): MarkdownItToken[] {
   for (const token of tokens) {
     if (token.type === 'math_block') token.content = token.content.trim();
     else if (token.type === 'front_matter') token.content = token.meta as string;
-    else if (token.type === 'inline' && token.children) removeCjkSoftbreaks(token.children);
+    else if (token.type === 'abbr_definition' && token.position) token.content = source.slice(token.position.start, token.position.end).trim();
+    else if (token.type === 'inline' && token.children) finalizeInline(token.children);
+    else {
+      const container = CONTAINER_TOKEN.exec(token.type);
+      if (container) {
+        token.type = `container_${container[2]}`;
+        token.meta = { name: container[1] };
+      }
+    }
   }
   return tokens;
+}
+
+/** 行内 token：行内脚注 ^[…]（footnote_ref 没有标签）改为 footnote_inline；去掉中日韩文字之间的软换行 */
+function finalizeInline(children: MarkdownItToken[]): void {
+  for (const child of children) {
+    if (child.type === 'footnote_ref' && child.meta?.label === undefined) child.type = 'footnote_inline';
+  }
+  removeCjkSoftbreaks(children);
 }

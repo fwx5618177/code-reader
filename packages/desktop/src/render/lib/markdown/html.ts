@@ -6,6 +6,7 @@
 
 import { DOMSerializer, type Node as PMNode } from 'prosemirror-model';
 import { renderMath } from '../math';
+import { collectAbbreviations, wrapAbbreviations } from './abbreviations';
 import { blockRefId, collectDocBlocks, extractBlock, findBlockInDoc, stripBlockMarker } from './block-ref';
 import { extractHeadings, extractSection } from './extract';
 import { parseContent, type ContentFormat } from './parser';
@@ -112,7 +113,22 @@ function renderNodes(doc: PMNode): HTMLElement {
   });
 
   applyBlockMarkers(doc, anchors);
+  wrapAbbreviations(container, collectAbbreviations(doc));
+  describeFootnoteRefs(container);
   return container;
+}
+
+/** 脚注引用悬停时显示脚注内容 */
+function describeFootnoteRefs(container: HTMLElement): void {
+  const definitions = new Map<string, string>();
+  container.querySelectorAll<HTMLElement>('[data-footnote-def]').forEach((definition) => {
+    const label = definition.getAttribute('data-footnote-def') ?? '';
+    if (!definitions.has(label)) definitions.set(label, definition.textContent?.trim() ?? '');
+  });
+  container.querySelectorAll<HTMLElement>('[data-footnote-ref]').forEach((ref) => {
+    const text = definitions.get(ref.getAttribute('data-footnote-ref') ?? '');
+    if (text) ref.title = text;
+  });
 }
 
 /**

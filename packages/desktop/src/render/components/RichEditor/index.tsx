@@ -29,6 +29,8 @@ import {
   serializeContent,
   formatForFileType,
   createLivePreviewPlugin,
+  createAbbreviationPlugin,
+  createFrontMatterPlugin,
   createTableKeymap,
   SlashCommandProvider,
   WikiLinkCompletionProvider,
@@ -902,6 +904,8 @@ const RichEditorInner: React.FC<RichEditorProps> = ({
     if (isMarkdown) {
       plugins.push(
         createLivePreviewPlugin(schema),
+        createAbbreviationPlugin(),
+        createFrontMatterPlugin(),
         createBlockIdPlugin(styles.blockIdMarker),
         createRevealHighlightPlugin(),
         createBlockHandlePlugin({

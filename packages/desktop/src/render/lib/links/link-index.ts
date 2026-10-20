@@ -4,12 +4,14 @@
 // - 出链 / 反向链接（含上下文；[[笔记#标题]] 与 ![[嵌入]] 同样计入目标笔记）
 // - 未解析链接（目标文档尚不存在）
 // - 知识图谱数据（双向链接 + Agent 发现的语义关联）
+// - 文档属性（YAML 头部）的 aliases：[[别名]] 解析到该笔记（标题优先）
 //
 // 每个条目的解析结果按 (id, updatedAt) 缓存，只有修改过的笔记会被重新解析。
 // ================================
 
 import type { KnowledgeItem } from '../../types/knowledge';
 import { extractWikiLinks, type WikiLinkReference } from '../markdown/extract';
+import { documentProperties } from '../markdown/front-matter';
 import { blockRefId } from '../markdown/block-ref';
 
 /** 一条反向链接 */
@@ -74,9 +76,15 @@ function hasMarkdownLinks(item: KnowledgeItem): boolean {
   return item.type === 'note' && !!item.content && item.content.includes('[[');
 }
 
+/** 文档属性（YAML 头部）中的别名：[[别名]] 同样指向该笔记 */
+function noteAliases(item: KnowledgeItem): string[] {
+  return item.type === 'note' && item.content?.startsWith('---') ? documentProperties(item.content).aliases : [];
+}
+
 interface CacheEntry {
   updatedAt: number;
   links: WikiLinkReference[];
+  aliases: string[];
 }
 
 /** 解析缓存：条目 ID → 链接（可在多个索引实例间共享） */
@@ -87,11 +95,13 @@ export class LinkIndex {
   private byId = new Map<string, KnowledgeItem>();
   private byTitle = new Map<string, KnowledgeItem>();
   private outgoing = new Map<string, WikiLinkReference[]>();
+  /** 条目 ID → 规范化后的别名 */
+  private aliasKeys = new Map<string, string[]>();
 
   constructor(private readonly cache: LinkParseCache = new Map()) {}
 
   /**
-   * 用最新的条目列表更新索引（增量解析）
+   * 用最新的条目列表更新索引（增量解析）。标题优先于别名：别名与其他条目的标题相同时链接指向那个条目
    */
   update(items: KnowledgeItem[]): void {
     this.items = items;
@@ -106,28 +116,45 @@ export class LinkIndex {
 
     const alive = new Set<string>();
     this.outgoing = new Map();
+    this.aliasKeys = new Map();
+    const byAlias = new Map<string, KnowledgeItem>();
     for (const item of items) {
       alive.add(item.id);
-      if (!hasMarkdownLinks(item)) continue;
+      if (item.type !== 'note' || !item.content) continue;
       const updatedAt = item.updatedAt.getTime();
       let entry = this.cache.get(item.id);
       if (!entry || entry.updatedAt !== updatedAt) {
         // [[#标题]] 指向文档自身，不是条目之间的引用
-        const links = extractWikiLinks(item.content!).filter((link) => link.target);
-        entry = { updatedAt, links };
+        const links = hasMarkdownLinks(item) ? extractWikiLinks(item.content).filter((link) => link.target) : [];
+        entry = { updatedAt, links, aliases: noteAliases(item) };
         this.cache.set(item.id, entry);
       }
-      this.outgoing.set(item.id, entry.links);
+      if (entry.links.length > 0) this.outgoing.set(item.id, entry.links);
+      if (entry.aliases.length === 0) continue;
+      const keys = entry.aliases.map(normalizeLinkTarget).filter(Boolean);
+      this.aliasKeys.set(item.id, keys);
+      for (const key of keys) {
+        const existing = byAlias.get(key);
+        if (!existing || existing.updatedAt < item.updatedAt) byAlias.set(key, item);
+      }
+    }
+    for (const [key, item] of byAlias) {
+      if (!this.byTitle.has(key)) this.byTitle.set(key, item);
     }
     for (const id of this.cache.keys()) {
       if (!alive.has(id)) this.cache.delete(id);
     }
   }
 
-  /** 按标题解析链接目标（空目标即当前文档，不解析） */
+  /** 按标题或别名解析链接目标（空目标即当前文档，不解析） */
   resolve(target: string): KnowledgeItem | undefined {
     const key = normalizeLinkTarget(target);
     return key ? this.byTitle.get(key) : undefined;
+  }
+
+  /** 条目的文档属性别名（规范化后） */
+  aliasesOf(itemId: string): readonly string[] {
+    return this.aliasKeys.get(itemId) ?? [];
   }
 
   /** 条目的出链 */
@@ -135,18 +162,18 @@ export class LinkIndex {
     return this.outgoing.get(itemId) ?? [];
   }
 
-  /** 指向条目的反向链接（同一来源的多处引用分别列出） */
+  /** 指向条目的反向链接（同一来源的多处引用分别列出；用别名链接的同样计入） */
   backlinks(itemId: string): Backlink[] {
     const target = this.byId.get(itemId);
     if (!target) return [];
-    const key = normalizeLinkTarget(target.title);
+    const keys = new Set([normalizeLinkTarget(target.title), ...this.aliasesOf(itemId)]);
     const result: Backlink[] = [];
     for (const [sourceId, links] of this.outgoing) {
       if (sourceId === itemId) continue;
       const source = this.byId.get(sourceId);
       if (!source) continue;
       for (const link of links) {
-        if (normalizeLinkTarget(link.target) === key) {
+        if (keys.has(normalizeLinkTarget(link.target))) {
           result.push({
             sourceId,
             sourceTitle: displayTitle(source.title),

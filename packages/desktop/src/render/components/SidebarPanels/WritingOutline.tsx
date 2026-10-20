@@ -13,6 +13,8 @@ import styles from './WritingOutline.module.scss';
 export interface WritingOutlineProps {
   /** 当前文档内容 */
   content: string;
+  /** 当前文档的标识；提供时逐键输入只重新解析改动附近的块（增量解析） */
+  documentId?: string;
   /** occurrence：该标题在同名标题中的序号（从 0 计），用于区分重名标题 */
   onSelectHeading: (heading: string, occurrence: number) => void;
 }
@@ -48,10 +50,10 @@ const OutlineList: React.FC<OutlineListProps> = ({ headings, onSelectHeading, he
   );
 };
 
-export const WritingOutline: React.FC<WritingOutlineProps> = ({ content, onSelectHeading }) => {
+export const WritingOutline: React.FC<WritingOutlineProps> = ({ content, documentId, onSelectHeading }) => {
   // 输入时延迟解析，长文档逐键编辑不被大纲重算阻塞
   const deferredContent = useDeferredValue(content);
-  const headings = useMemo(() => extractHeadings(deferredContent), [deferredContent]);
+  const headings = useMemo(() => extractHeadings(deferredContent, documentId), [deferredContent, documentId]);
 
   if (headings.length === 0) return <PanelEmpty>文档中还没有标题。以 # 开头的行会出现在这里</PanelEmpty>;
   return <OutlineList headings={headings} onSelectHeading={onSelectHeading} />;

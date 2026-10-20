@@ -1,6 +1,6 @@
 // ================================
 // 写作编辑器补全提供者
-// - / 斜杠命令：插入标题、列表、表格、公式等结构化块
+// - / 斜杠命令：插入标题、列表、表格、公式、脚注、定义列表、提示块等结构化块，切换高亮、上下标等格式
 // - [[ 双向链接：补全已有文档标题，或创建指向新文档的链接；[[文档# 补全该文档的标题，[[文档#^ 补全块
 //   独占一段的 ![[ 插入块级嵌入
 // ================================
@@ -64,6 +64,37 @@ function insertFrontMatter(view: EditorView, from: number, to: number): void {
     tr = tr.insert(0, frontMatter.create());
     tr.setSelection(TextSelection.create(tr.doc, 1));
   }
+  view.dispatch(tr.scrollIntoView());
+  view.focus();
+}
+
+/** 提示块（::: 容器）的常用种类：名称、显示名、拼音首字母 */
+const CONTAINER_KINDS: ReadonlyArray<[name: string, label: string, keywords: string]> = [
+  ['note', '说明', 'sm'],
+  ['tip', '提示', 'ts'],
+  ['warning', '警告', 'jg'],
+  ['danger', '危险', 'wx'],
+];
+
+/** 文档中已用的脚注标签之后的下一个数字标签 */
+function nextFootnoteLabel(doc: PMNode): string {
+  let max = 0;
+  doc.descendants((node) => {
+    const label = node.type.name === 'footnote_ref' || node.type.name === 'footnote_def' ? (node.attrs.label as string) : '';
+    if (/^\d+$/.test(label)) max = Math.max(max, Number(label));
+    return true;
+  });
+  return String(max + 1);
+}
+
+/** 在光标处插入脚注引用，在文末加上对应的定义，光标移到定义中输入内容 */
+function insertFootnote(view: EditorView, from: number, to: number): void {
+  const { footnote_ref: ref, footnote_def: def, paragraph } = view.state.schema.nodes;
+  const label = nextFootnoteLabel(view.state.doc);
+  const tr = view.state.tr.replaceWith(from, to, ref.create({ label }));
+  const end = tr.doc.content.size;
+  tr.insert(end, def.create({ label }, paragraph.create()));
+  tr.setSelection(TextSelection.create(tr.doc, end + 2));
   view.dispatch(tr.scrollIntoView());
   view.focus();
 }
@@ -233,6 +264,76 @@ export class SlashCommandProvider implements CompletionProvider {
         detail: '~~文本~~',
         keywords: 'strike del scx',
         run: (view, from, to) => runAfterDelete(view, from, to, toggleMark(marks.strike)),
+      },
+      {
+        id: 'highlight',
+        label: '高亮',
+        detail: '==文本==',
+        keywords: 'highlight mark gl',
+        run: (view, from, to) => runAfterDelete(view, from, to, toggleMark(marks.highlight)),
+      },
+      {
+        id: 'insert',
+        label: '插入（下划线）',
+        detail: '++文本++',
+        keywords: 'insert underline ins cr xhx',
+        run: (view, from, to) => runAfterDelete(view, from, to, toggleMark(marks.insert)),
+      },
+      {
+        id: 'subscript',
+        label: '下标',
+        detail: 'H~2~O',
+        keywords: 'subscript sub xb',
+        run: (view, from, to) => runAfterDelete(view, from, to, toggleMark(marks.subscript)),
+      },
+      {
+        id: 'superscript',
+        label: '上标',
+        detail: '2^10^',
+        keywords: 'superscript sup sb',
+        run: (view, from, to) => runAfterDelete(view, from, to, toggleMark(marks.superscript)),
+      },
+      {
+        id: 'footnote',
+        label: '脚注',
+        detail: '[^1] 与文末的 [^1]: 内容',
+        keywords: 'footnote note jz',
+        run: insertFootnote,
+      },
+      {
+        id: 'definition-list',
+        label: '定义列表',
+        detail: '术语 换行 : 说明',
+        keywords: 'definition list term dl dylb',
+        run: (view, from, to) =>
+          insertBlock(
+            view,
+            from,
+            to,
+            nodes.definition_list.create({ tight: true }, [
+              nodes.definition_term.create(null, schema.text('术语')),
+              nodes.definition_description.create(null, nodes.paragraph.create()),
+            ]),
+            false
+          ),
+      },
+      ...CONTAINER_KINDS.map(
+        ([name, label, keywords]): SlashCommand => ({
+          id: `container-${name}`,
+          label: `提示块：${label}`,
+          detail: `::: ${name} 回车`,
+          keywords: `container callout admonition ${name} tsk ${keywords}`,
+          run: (view, from, to) =>
+            insertBlock(view, from, to, nodes.container.create({ name, info: ` ${name}` }, nodes.paragraph.create()), false),
+        })
+      ),
+      {
+        id: 'abbreviation',
+        label: '缩写定义',
+        detail: '*[缩写]: 全称',
+        keywords: 'abbreviation abbr sx sxdy',
+        run: (view, from, to) =>
+          insertBlock(view, from, to, nodes.abbreviation_def.create(null, schema.text('*[缩写]: 全称')), false),
       },
     ];
   }

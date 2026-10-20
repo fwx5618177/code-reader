@@ -267,6 +267,15 @@ class KnowledgeRepository {
     return rows.map(rowToTag);
   }
 
+  /** 条目当前的标签名 */
+  async itemTagNames(itemId: string): Promise<string[]> {
+    const rows = await databaseService.all<{ name: string }>(
+      `SELECT t.name FROM item_tags it JOIN tags t ON t.id = it.tag_id WHERE it.item_id = ? AND t.is_deleted = 0 ORDER BY t.name`,
+      [itemId]
+    );
+    return rows.map((row) => row.name);
+  }
+
   /**
    * 设置条目的标签（替换原有标签），同时维护标签使用次数
    * 标签名按层级路径规范化；层级标签缺少的父标签一并创建（使用次数 0），使父标签可筛选、可着色
