@@ -308,7 +308,7 @@ export class SlashCommandProvider implements EditorCompletionProvider {
             view,
             from,
             to,
-            nodes.definition_list.create({ tight: true }, [
+            nodes.definition_list.create(null, [
               nodes.definition_term.create(null, schema.text('术语')),
               nodes.definition_description.create(null, nodes.paragraph.create()),
             ]),

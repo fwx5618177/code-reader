@@ -45,6 +45,8 @@ describe('解析与往返', () => {
     未被引用的脚注定义: ['正文\n\n[^x]: 没有引用也保留\n', ['footnote_def']],
     紧凑定义列表: ['术语\n: 说明一\n: 说明二\n\n术语二\n: 说明\n', ['definition_list', 'definition_term', 'definition_description']],
     松散定义列表: ['术语\n\n: 第一段\n\n  第二段\n', ['definition_list']],
+    // 紧凑按术语计：同一个列表里混写时各术语保持原样；紧凑术语的说明也可以有多个段落
+    混写定义列表: ['紧凑\n: 说明\n\n松散\n\n: 说明一\n\n: 说明二\n\n又紧凑\n: 第一段\n\n  第二段\n: 另一条\n', ['definition_list']],
     提示块: ['::: warning 注意事项\n内容 **粗体**\n:::\n', ['container']],
     嵌套提示块: [':::: note\n外层\n\n::: tip\n内层\n:::\n::::\n', ['container']],
     缩写: ['*[HTML]: Hyper Text Markup Language\n\nHTML 文档\n', ['abbreviation_def']],

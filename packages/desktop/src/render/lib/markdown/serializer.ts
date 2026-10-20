@@ -175,12 +175,13 @@ function createSerializer(escapeExtraCharacters: RegExp): MarkdownSerializer {
       footnote_def(state, node) {
         state.wrapBlock('    ', `[^${node.attrs.label as string}]: `, node, () => state.renderContent(node));
       },
-      // 术语一行，说明以 ": " 开头、续行缩进 2 格；紧凑时术语与说明、说明与说明之间不空行。
+      // 术语一行，说明以 ": " 开头、续行缩进 2 格；紧凑按术语计：紧凑时术语与说明、说明与说明之间不空行。
       // 说明之后的术语总是隔一个空行（否则会成为说明段落的惰性续行）
       definition_list(state, node) {
-        const tight = node.attrs.tight as boolean;
+        let tight = true;
         node.forEach((child, _offset, index) => {
           if (child.type === markdownSchema.nodes.definition_term) {
+            tight = child.attrs.tight as boolean;
             state.renderInline(child);
             if (tight) state.ensureNewLine();
             else state.closeBlock(child);

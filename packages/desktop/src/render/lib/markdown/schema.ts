@@ -190,19 +190,20 @@ const EXTRA_NODES: Record<string, NodeSpec> = {
     },
   },
 
-  // 定义列表：术语一行，下一行以 : 开头的说明；tight 为术语与说明之间不空行
+  // 定义列表：术语一行，下一行以 : 开头的说明
   definition_list: {
     group: 'block',
     content: '(definition_term definition_description+)+',
-    attrs: { tight: { default: true } },
     parseDOM: [{ tag: 'dl' }],
     toDOM() {
       return ['dl', { class: 'definition-list' }, 0];
     },
   },
+  // tight：术语与第一条说明之间不空行（与 markdown-it-deflist 一致按术语计，该术语的各条说明共用）
   definition_term: {
     content: 'inline*',
     defining: true,
+    attrs: { tight: { default: true } },
     parseDOM: [{ tag: 'dt' }],
     toDOM() {
       return ['dt', 0];

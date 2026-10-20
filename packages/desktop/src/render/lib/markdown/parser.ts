@@ -25,15 +25,16 @@ function isTightList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hid
   return true;
 }
 
-/** 定义列表是否紧凑：每条说明的第一个段落都被标记为 hidden（术语与说明之间没有空行） */
-function isTightDefinitionList(tokens: ReadonlyArray<Pick<Token, 'type' | 'nesting' | 'hidden'>>, index: number): boolean {
-  let depth = 0;
+/**
+ * 术语是否紧凑：第一条说明紧接在术语的下一行（与 markdown-it-deflist 一致按术语计）。
+ * 按源码行号判断：说明有多个块时段落不会被标记为 hidden，光看 hidden 分不出来
+ */
+function isTightDefinitionTerm(tokens: ReadonlyArray<{ type: string; position?: Token['position'] }>, index: number): boolean {
+  const termLine = tokens[index]?.position?.startLine;
   for (let i = index + 1; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (depth === 0 && token.type === 'dl_close') break;
-    if (token.type === 'dd_open' && tokens[i + 1]?.type === 'paragraph_open' && !tokens[i + 1].hidden) return false;
-    if (token.nesting === 1) depth++;
-    if (token.nesting === -1) depth--;
+    if (tokens[i]!.type !== 'dd_open') continue;
+    const descriptionLine = tokens[i]!.position?.startLine;
+    return termLine === undefined || descriptionLine === undefined || descriptionLine === termLine + 1;
   }
   return true;
 }
@@ -140,8 +141,8 @@ function createParser(schema: Schema): MarkdownParser {
     footnote_ref: { node: 'footnote_ref', noCloseToken: true, getAttrs: (tok) => ({ label: tok.meta.label }) },
     footnote_inline: { node: 'footnote_inline', noCloseToken: true, getAttrs: (tok) => ({ content: tok.content }) },
     footnote_reference: { block: 'footnote_def', getAttrs: (tok) => ({ label: tok.meta.label }) },
-    dl: { block: 'definition_list', getAttrs: (_tok, tokens, i) => ({ tight: isTightDefinitionList(tokens, i) }) },
-    dt: { block: 'definition_term' },
+    dl: { block: 'definition_list' },
+    dt: { block: 'definition_term', getAttrs: (_tok, tokens, i) => ({ tight: isTightDefinitionTerm(tokens, i) }) },
     dd: { block: 'definition_description' },
     container: { block: 'container', getAttrs: (tok) => ({ name: tok.meta.name, info: tok.info }) },
     code_inline: { mark: 'code', noCloseToken: true },

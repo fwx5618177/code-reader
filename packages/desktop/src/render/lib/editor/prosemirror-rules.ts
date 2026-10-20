@@ -484,7 +484,7 @@ function createDefinitionListInputRule(schema: Schema): InputRule | null {
     const previous = index > 0 ? container.child(index - 1) : null;
     if (!previous) return null;
     if (previous.type === list) {
-      const tr = state.tr.replaceWith(paragraphStart - previous.nodeSize, $start.after(), list.create(previous.attrs, previous.content.addToEnd(newDescription)));
+      const tr = state.tr.replaceWith(paragraphStart - previous.nodeSize, $start.after(), list.create(null, previous.content.addToEnd(newDescription)));
       return tr.setSelection(TextSelection.create(tr.doc, paragraphStart + 1));
     }
     let singleLine = true;
@@ -492,7 +492,7 @@ function createDefinitionListInputRule(schema: Schema): InputRule | null {
       if (child.type === hardBreak) singleLine = false;
     });
     if (previous.type !== paragraph || previous.content.size === 0 || !singleLine) return null;
-    const created = list.create({ tight: true }, [term.create(null, previous.content), newDescription]);
+    const created = list.create(null, [term.create(null, previous.content), newDescription]);
     const tr = state.tr.replaceWith(paragraphStart - previous.nodeSize, $start.after(), created);
     // 光标放到说明段落的开头：列表起点 + 1 + 术语 + 说明与段落的开始
     return tr.setSelection(TextSelection.create(tr.doc, paragraphStart - previous.nodeSize + 1 + created.child(0).nodeSize + 2));
