@@ -893,9 +893,6 @@ const WritingSidebar: React.FC<WritingSidebarProps> = ({
                   >
                     <div className={styles.resultTitle}>{result.title || '无标题'}</div>
                     {result.snippet && <Snippet snippet={result.snippet} className={styles.resultSnippet} />}
-                    <div className={styles.resultScore}>
-                      匹配度: {Math.round(result.score * 100)}%
-                    </div>
                   </div>
                 ))
               ) : (
