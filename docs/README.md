@@ -7,7 +7,7 @@
 | [USER_GUIDE.md](./USER_GUIDE.md) | 使用指南：界面布局与侧栏面板、支持的文件格式与条目类型、Markdown 写作（标签页与两栏编辑、页面设置、版本保留）与公式、知识库与 AI 配置（归类审阅、日历日记）、双向链接与块级引用、图谱与实体关系、阅读模式（扫描版 PDF 识别、跨页高亮）、多知识库与数据位置、快捷键、插件的使用与编写 |
 | [PRODUCT.md](./PRODUCT.md) | 产品定位、核心理念、三大模式、不做什么、路线图、产品演进 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 技术架构、存储与版本、UI 架构、LaTeX 与 Markdown 链路、子包接入对照、关键问题与根因记录 |
-| [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) | format-parser 能否替代 markdown-it：CommonMark 规范一致性、性能与增量对比、分阶段方案 |
+| [FORMAT_PARSER_RESEARCH.md](./FORMAT_PARSER_RESEARCH.md) | format-parser / markdown-parser 替代 markdown-it：规范一致性、token 流对照、性能与替换过程 |
 
 模块级说明就近放在代码旁：
 
@@ -38,7 +38,7 @@ pnpm workspace monorepo，所有子包位于 `packages/`：
 | `syntax-parser` | 零依赖的手写 LaTeX 解析器与 LaTeX 语言配置（desktop 用于语法诊断、折叠、大纲，以及源码编辑器的注释、自动配对与环境缩进） |
 | `syntax-parser-extras` | desktop 未使用的语言注册表与高亮引擎、Lezer 增量解析封装、AST 缓存、正则 LaTeX 块扫描器（按需引入） |
 | `format-parser` | LaTeX 解析（交叉引用索引、文档元数据）与按内容识别格式（desktop 用其做交叉引用检查与无扩展名文档的格式判断） |
-| `markdown-parser` | 零依赖的 CommonMark / GFM 解析器与 HTML 渲染器（CommonMark 规范 100% 通过）和增量解析（由 format-parser 拆出，desktop 暂不接入，目标是替代 markdown-it） |
+| `markdown-parser` | 零依赖的 CommonMark / GFM 解析器（规范 100% 通过、语法扩展、源码绝对位置、markdown-it 兼容 token 流）、HTML 渲染器与增量解析；编辑器的 Markdown 分词已由它完成 |
 | `autocomplete-service` | 通用自动补全服务：补全提供者（Markdown / Emoji / 代码片段）与 CodeMirror 适配器（desktop 用于代码块片段补全与 Markdown 编辑器的 Emoji 补全） |
 | `autocomplete-service-extras` | desktop 未使用的 ProseMirror 补全适配器与补全预设（按需引入） |
 | `fuzzy-match-algorithm` | 补全与拼写建议的核心算法：Levenshtein / Damerau-Levenshtein 编辑距离、模糊评分、Radix Tree |

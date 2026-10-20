@@ -12,16 +12,19 @@ Markdown 解析已经拆成独立子包 `@code-reader/markdown-parser`，第 5 �
 | 算法 | 块级按结构整段消费，行内递归匹配 | 块级为规范的“打开的块”逐行算法，行内为分隔符栈和方括号栈，与 commonmark.js 相同 |
 | 链接引用定义 / 字符引用 | 不支持 / 不解码 | 全部支持，内置 HTML5 命名字符引用表（2125 个） |
 | HTML 渲染器 | 无 | `renderHtml`，输出格式与 commonmark.js 一致 |
-| 88 万字符 | 解析 28ms | 解析 42ms、解析加渲染 54ms（markdown-it 为 25ms 和 30ms）。规范化的算法比原来的近似实现慢一些，仍在同一数量级 |
+| 88 万字符 | 解析 28ms | 解析 27ms、生成 markdown-it 兼容 token 7ms（markdown-it 为 25ms）。编辑器完整分词（含扩展与后处理）93 万字符 40ms，markdown-it 26ms；常见笔记在 5ms 以内 |
 | 健壮性 | 8 例死循环 | 随机输入 2 万次无异常，单次不超过 50ms |
-| GFM | 以开关硬编码 | 表格、任务列表项、删除线、脚注；智能标点、`hardBreaks`、`maxNestingDepth` 均已实现 |
+| GFM | 以开关硬编码 | 表格、任务列表项、删除线、脚注（可单独开关）；智能标点、`hardBreaks`、`maxNestingDepth`、仅 `~~` 删除线均已实现 |
+| 扩展接口 | 无 | `inlineExtensions`（触发字符 + match）、`blockExtensions`（可跨行的叶子块，可在引用与列表中，可选能否打断段落） |
+| 位置信息 | 行内节点相对段落文字 | 块级与行内都是源码中的绝对位置（引用 `>`、列表缩进等前缀已计入）；markdown-it 只有块级行号 |
+| 编辑器对接 | 无 | `MarkdownItCompatTokenizer` 输出与 markdown-it 相同结构的 token，652 个规范用例逐个 token 对照全部一致（`__tests__/markdown-it-tokens.test.ts`，下限 652） |
 
-剩余阶段：
-- **阶段 2 扩展接口**：未做。
-- **阶段 3 真正的增量**：未做。
-- **阶段 4 编辑器集成**：未做。
+阶段状态：
+- **阶段 2 扩展接口**：已完成。桌面端的公式 `$…$` / `$$…$$`、双向链接 `[[…]]`、块级嵌入 `![[…]]` 都改写为扩展（`desktop/src/render/lib/markdown/syntax-extensions.ts`），任务列表用解析器选项，中文软换行在 token 后处理中合并。
+- **阶段 4 编辑器集成**：已完成，编辑器已替换。走的是“输出 markdown-it 兼容 token 流、复用 prosemirror-markdown”这条路，链接改写、块 ID、标题 / 链接提取等用法不变。替换前对照了旧管线：仓库文档、用户笔记与规范用例共 689 篇，688 篇 token 完全一致，另 1 篇只多出公式定界符元数据；桌面端 1326 个测试与真实应用里的渲染、保存状态都已验证。desktop 不再直接依赖 markdown-it（prosemirror-markdown 自身仍引入它，用于其默认解析器）。
+- **阶段 3 真正的增量**：未做。编辑器只在打开文档与提取链接时整篇解析，输入时不重新解析，目前没有性能压力。
 
-在这三项完成之前，编辑器仍用 markdown-it。下文保留调研时的原始结论。
+下文保留调研时的原始结论。
 
 ## 1. 结论
 
