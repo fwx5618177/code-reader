@@ -62,7 +62,7 @@ import { onKnowledgeChanged } from './lib/knowledge/changes';
 import { refreshAfterSync } from './lib/sync/refresh';
 import { captureQuickInput, requestProcessing } from './lib/knowledge/service';
 import { knowledgeRepository } from './lib/knowledge/repository';
-import { syncTagsFromFrontMatter } from './lib/knowledge/front-matter-tags';
+import { syncTagsFromFrontMatter, writeBackAgentTags } from './lib/knowledge/front-matter-tags';
 import { SMART_FOLDER_PRESETS } from './lib/knowledge/filter-rules';
 import { buildFolderTree, wouldCreateCycle, type FolderTreeNode } from './lib/folders/types';
 import {
@@ -181,6 +181,9 @@ const App: React.FC = () => {
       .catch((error) => console.error('同步双向链接与文档属性失败:', error));
   }, []);
   const documentsConfig = useMemo(() => ({ onDocumentSaved: syncDocumentLinks }), [syncDocumentLinks]);
+
+  // AI 自动打的标签写回笔记的 YAML（写了 tags 键的笔记），再刷新该条目
+  useEffect(() => writeBackAgentTags((itemId) => void linkSyncRef.current.refresh(itemId)), []);
 
   // Writing mode state - using useDocuments hook for document management
   // Auto-save is now handled internally by the hook via AutoSaveManager

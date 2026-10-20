@@ -16,12 +16,26 @@ const repo = vi.hoisted(() => ({
 }));
 const live = vi.hoisted(() => new Map<string, { model: { getContent: () => string; updateContent: (content: string) => void } }>());
 const flushAll = vi.hoisted(() => vi.fn(async () => {}));
+const completedListeners = vi.hoisted(() => new Set<(event: { type: string; targetItemId: string | null }) => void>());
 
 vi.mock('../repository', () => ({ knowledgeRepository: repo }));
 vi.mock('../../core', () => ({ getEditorManager: () => ({ get: (id: string) => live.get(id) ?? null }) }));
 vi.mock('../../../services/flushRegistry', () => ({ flushAll }));
+vi.mock('../../agent/agentStore', () => ({
+  agentActivity: {
+    onTaskCompleted: (listener: (event: { type: string; targetItemId: string | null }) => void) => {
+      completedListeners.add(listener);
+      return () => completedListeners.delete(listener);
+    },
+  },
+}));
 
-import { syncTagsFromFrontMatter, writeTagsToFrontMatter, YAML_TAGS_METADATA_KEY } from '../front-matter-tags';
+import {
+  syncTagsFromFrontMatter,
+  writeBackAgentTags,
+  writeTagsToFrontMatter,
+  YAML_TAGS_METADATA_KEY,
+} from '../front-matter-tags';
 
 const note = (id: string, content: string, metadata?: Record<string, unknown>): KnowledgeItem =>
   ({ id, type: 'note', title: id, content, metadata }) as KnowledgeItem;
@@ -76,8 +90,35 @@ describe('界面改标签后写回 YAML', () => {
     expect(repo.patchMetadata).toHaveBeenCalledWith('closed', { [YAML_TAGS_METADATA_KEY]: ['a', 'b'] });
   });
 
-  it('没有条目时什么都不做', async () => {
+  it('没有条目时什么都不做；不涉及打开中的文档时不落盘其他分栏', async () => {
     await writeTagsToFrontMatter([]);
     expect(flushAll).not.toHaveBeenCalled();
+
+    repo.getByIds.mockResolvedValue([note('closed', '---\ntags: [a]\n---\n')]);
+    repo.itemTagNames.mockResolvedValue(['a', 'b']);
+    await writeTagsToFrontMatter(['closed']);
+    expect(flushAll).not.toHaveBeenCalled();
+    expect(repo.update).toHaveBeenCalledWith('closed', { content: '---\ntags: [a, b]\n---\n' });
+  });
+});
+
+describe('AI 提取标签后写回 YAML', () => {
+  it('只响应条目的提取标签任务；写回后回调刷新，取消后不再响应', async () => {
+    repo.getByIds.mockResolvedValue([note('a', '---\ntags: [旧]\n---\n正文')]);
+    repo.itemTagNames.mockResolvedValue(['旧', 'AI/标签']);
+    const onWritten = vi.fn();
+    const stop = writeBackAgentTags(onWritten);
+
+    for (const listener of completedListeners) {
+      listener({ type: 'summarize', targetItemId: 'a' });
+      listener({ type: 'extract-tags', targetItemId: null });
+      listener({ type: 'extract-tags', targetItemId: 'a' });
+    }
+    await vi.waitFor(() => expect(onWritten).toHaveBeenCalledWith('a'));
+    expect(repo.getByIds).toHaveBeenCalledTimes(1);
+    expect(repo.update).toHaveBeenCalledWith('a', { content: '---\ntags: [旧, AI/标签]\n---\n正文' });
+
+    stop();
+    expect(completedListeners.size).toBe(0);
   });
 });
