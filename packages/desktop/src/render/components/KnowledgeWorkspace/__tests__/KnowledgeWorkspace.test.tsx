@@ -224,6 +224,29 @@ describe('KnowledgeWorkspace', () => {
     expect(props.kb.updateItem).toHaveBeenCalledWith('n1', { folderId: null });
   });
 
+  it('详情面板连续增删标签：保存完成前的下一次修改基于新列表，保存按顺序执行', async () => {
+    const saves: Array<{ names: string[]; done: () => void }> = [];
+    const setItemTags = vi.fn(
+      (_id: string, names: string[]) => new Promise<void>((resolve) => saves.push({ names, done: resolve }))
+    );
+    renderWorkspace([make('n1', { tagIds: ['t3'] })], 'n1', { tags: TAGS, setItemTags });
+    const panel = screen.getByRole('complementary', { name: '条目详情' });
+    const input = within(panel).getByLabelText('添加标签');
+
+    fireEvent.change(input, { target: { value: '新增' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(within(panel).getByText('#新增')).toBeTruthy();
+    // 第一次保存还没完成（条目数据仍是旧的）就删除「前端」
+    fireEvent.click(within(panel).getByTitle('移除标签「前端」'));
+    expect(within(panel).queryByText('#前端')).toBeNull();
+
+    await act(async () => {});
+    expect(saves.map((save) => save.names)).toEqual([['前端', '新增']]);
+    await act(async () => saves[0]!.done());
+    expect(saves.map((save) => save.names)).toEqual([['前端', '新增'], ['新增']]);
+    await act(async () => saves[1]!.done());
+  });
+
   it('可阅读条目的详情面板提供「在阅读模式中打开」，Enter 也进入阅读模式', () => {
     const epub = make('e1', { title: '书.epub', type: 'document', filePath: '/books/书.epub' });
     const { props } = renderWorkspace([epub], 'e1');
@@ -268,7 +291,8 @@ describe('KnowledgeWorkspace', () => {
     fireEvent.change(within(dialog).getByLabelText('查找标签'), { target: { value: 're' } });
     expect(rows()).toEqual(['React2', 'react1']);
 
-    fireEvent.keyDown(dialog, { key: 'Escape' });
+    // 焦点不在对话框内（如重命名框卸载后回到 body）也能关闭
+    fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: '管理标签' })).toBeNull();
   });
 

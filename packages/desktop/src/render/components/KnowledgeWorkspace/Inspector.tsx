@@ -130,6 +130,22 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
     }
   }, []);
 
+  // 标签修改：立即显示新列表，保存按顺序排队。保存（写库、写回 YAML、重新读取条目）完成前
+  // 条目数据仍是旧的，连续增删时后一次必须基于前一次的结果，否则会把刚加的标签又删掉。
+  // 最后一次保存结束后（包括失败）回到以条目数据为准
+  const [pendingTags, setPendingTags] = useState<string[] | null>(null);
+  const tagSaves = useRef({ chain: Promise.resolve(), latest: 0 });
+  const changeTags = (names: string[]) => {
+    setPendingTags(names);
+    const queue = tagSaves.current;
+    const ticket = ++queue.latest;
+    queue.chain = queue.chain
+      .then(() => run(() => kb.setItemTags(item.id, names)))
+      .then(() => {
+        if (queue.latest === ticket) setPendingTags(null);
+      });
+  };
+
   /** 点击正文中的链接（目标#标题）：在知识库中选中目标，不存在时创建 */
   const handleWikiLink = useCallback(
     (ref: string) => {
@@ -260,11 +276,7 @@ const InspectorBody: React.FC<InspectorBodyProps> = ({
           )}
         </dl>
 
-        <TagEditor
-          names={tagNames}
-          allTags={kb.tags}
-          onChange={(names) => void run(() => kb.setItemTags(item.id, names))}
-        />
+        <TagEditor names={pendingTags ?? tagNames} allTags={kb.tags} onChange={changeTags} />
       </header>
 
       <div className={styles.tabs} role="tablist" aria-label="详情">

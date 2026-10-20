@@ -3,7 +3,7 @@
 // 接受时通过知识库服务应用（见 lib/categorization/review-actions），完成后重新加载知识库
 // ================================
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ClipboardCheck, Merge, Pencil, X } from 'lucide-react';
 import type { CategorizationProposal, ItemCategorizationProposal } from '../../types/electron';
 import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
@@ -98,6 +98,15 @@ export const CategorizationReview: React.FC<CategorizationReviewProps> = ({ kb, 
   const rejectAll = () => void submit(proposals.map((proposal) => ({ proposal, accept: false })));
 
   const close = () => categorizationReview.close();
+
+  // Esc 在 document 上监听：接受 / 拒绝后该行的按钮被卸载，焦点回到 body，绑在对话框上的 onKeyDown 收不到
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.isComposing) categorizationReview.close();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const folderLabel = (proposal: ItemCategorizationProposal) => {
     if (proposal.folderId) {
@@ -240,9 +249,6 @@ export const CategorizationReview: React.FC<CategorizationReviewProps> = ({ kb, 
         aria-modal="true"
         aria-label="待审阅归类"
         onClick={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') close();
-        }}
       >
         <header className={styles.header}>
           <h3>

@@ -3,7 +3,7 @@
 // 未搜索时按层级（“父/子”）缩进显示；重命名填写完整路径，可改变层级，子标签随之改名
 // ================================
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Ban, Merge, Search, X } from 'lucide-react';
 import type { Tag } from '../../types/knowledge';
 import type { UseKnowledgeBaseReturn } from '../../lib/knowledge/useKnowledgeBase';
@@ -122,11 +122,17 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
     });
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key !== 'Escape') return;
-    if (paletteId) setPaletteId(null);
-    else onClose();
-  };
+  // Esc 在 document 上监听：重命名框卸载后焦点会回到 body，绑在对话框上的 onKeyDown 收不到。
+  // 重命名框的 Esc 已 stopPropagation（只取消编辑），不会到达这里
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing) return;
+      if (paletteId) setPaletteId(null);
+      else onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [paletteId, onClose]);
 
   return (
     <div className={styles.overlay} onClick={onClose}>
@@ -136,7 +142,6 @@ export const TagManager: React.FC<TagManagerProps> = ({ kb, onClose }) => {
         aria-modal="true"
         aria-label="管理标签"
         onClick={(event) => event.stopPropagation()}
-        onKeyDown={handleKeyDown}
       >
         <header className={styles.header}>
           <h3>

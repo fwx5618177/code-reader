@@ -182,9 +182,9 @@ describe('CategorizationReview', () => {
     expect(mocks.applyReview).toHaveBeenLastCalledWith(PROPOSALS.map((proposal) => ({ proposal, accept: false })));
   });
 
-  it('Esc 关闭面板', async () => {
-    const { dialog } = await openPanel();
-    fireEvent.keyDown(dialog, { key: 'Escape' });
+  it('Esc 关闭面板（焦点不在面板内时也能关闭）', async () => {
+    await openPanel();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(categorizationReview.getSnapshot().open).toBe(false);
   });
 });
