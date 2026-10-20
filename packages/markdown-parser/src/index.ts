@@ -14,6 +14,7 @@ export {
 } from './commonmark';
 
 export { renderHtml, escapeHtml, normalizeUrl } from './commonmark/html-renderer';
+export { MarkdownItToken, toMarkdownItTokens, MarkdownItCompatTokenizer } from './commonmark';
 
 export type {
   ParseResult,
@@ -26,6 +27,11 @@ export type {
   TableRowNode,
   TableNode,
   CommonMarkOptions,
+  InlineExtension,
+  InlineExtensionMatch,
+  BlockExtension,
+  BlockExtensionContext,
+  BlockExtensionLine,
 } from './commonmark';
 
 export {

@@ -9,17 +9,19 @@
 import {
   BlockType,
   InlineType,
+  type BlockExtension,
+  type BlockExtensionLine,
   type BlockNode,
-  type CommonMarkOptions,
   type InlineNode,
   type ParseWarning,
   type Position,
+  type ResolvedOptions,
   type TableAlignment,
   type TableCellNode,
   type TableNode,
   type TableRowNode,
 } from './commonmark-parser';
-import { InlineParser, unescapeString, type ReferenceMap } from './inline-parser';
+import { InlineParser, unescapeString, type InlineOrigin, type ReferenceMap } from './inline-parser';
 
 const CODE_INDENT = 4;
 
@@ -70,7 +72,8 @@ type BlockKind =
   | 'html_block'
   | 'paragraph'
   | 'table'
-  | 'footnote_definition';
+  | 'footnote_definition'
+  | 'extension';
 
 interface ListData {
   type: 'bullet' | 'ordered';
@@ -103,6 +106,13 @@ class Block {
   listData: ListData | null = null;
   footnoteId = '';
   alignments: TableAlignment[] = [];
+  /** content 各行在源码中的起始偏移与列（0 起），用于行内节点的绝对位置 */
+  sources: number[] = [];
+  columns: number[] = [];
+  /** 块级扩展（kind 为 extension）及其数据、是否已在某行结束 */
+  extension: BlockExtension | null = null;
+  data: Record<string, unknown> | undefined = undefined;
+  extensionClosed = false;
 
   constructor(
     public kind: BlockKind,
@@ -158,19 +168,20 @@ function splitTableRow(line: string): string[] {
   if (content.endsWith('|') && !content.endsWith('\\|')) content = content.slice(0, -1);
   const cells: string[] = [];
   let current = '';
+  let from = 0;
   for (let i = 0; i < content.length; i++) {
-    const char = content[i]!;
-    if (char === '\\' && content[i + 1] === '|') {
-      current += '|';
+    const char = content.charCodeAt(i);
+    if (char === 92 /* \ */ && content.charCodeAt(i + 1) === 124 /* | */) {
+      current += content.slice(from, i) + '|';
       i++;
-    } else if (char === '|') {
-      cells.push(current.trim());
+      from = i + 1;
+    } else if (char === 124) {
+      cells.push((current + content.slice(from, i)).trim());
       current = '';
-    } else {
-      current += char;
+      from = i + 1;
     }
   }
-  cells.push(current.trim());
+  cells.push((current + content.slice(from)).trim());
   return cells;
 }
 
@@ -206,11 +217,20 @@ export class BlockParser {
   private blank = false;
   private partiallyConsumedTab = false;
   private lastLineLength = 0;
+  /** 当前行在源码中的起始偏移 */
+  private lineStart = 0;
 
   private references: ReferenceMap = new Map();
   private warnings: ParseWarning[] = [];
+  /** 解析链接引用定义用的行内解析器（只在遇到以 [ 开头的段落时创建） */
+  private referenceParser: InlineParser | null = null;
+  /** 可能开始特殊块的行首字符（含块级扩展的触发字符） */
+  private readonly maybeSpecial: RegExp;
 
-  constructor(private readonly options: Required<CommonMarkOptions>) {}
+  constructor(private readonly options: ResolvedOptions) {
+    const triggers = options.blockExtensions.map((extension) => extension.trigger.replace(/[\\\]^-]/g, '\\$&')).join('');
+    this.maybeSpecial = triggers ? new RegExp(`^[#\`~*+_=<>0-9-[|:${triggers}]`) : MAYBE_SPECIAL;
+  }
 
   parse(input: string): { document: BlockNode; warnings: ParseWarning[] } {
     this.document = new Block('document', 1, 1);
@@ -222,15 +242,25 @@ export class BlockParser {
     this.references = new Map();
     this.warnings = [];
 
-    const lines = input.split(/\r\n|\n|\r/);
+    const lineStarts = [0];
+    const lines: string[] = [];
+    const newline = /\r\n|\n|\r/g;
+    let start = 0;
+    for (let match = newline.exec(input); match; match = newline.exec(input)) {
+      lines.push(input.slice(start, match.index));
+      start = match.index + match[0].length;
+      lineStarts.push(start);
+    }
+    lines.push(input.slice(start));
     let count = lines.length;
-    if (/[\r\n]$/.test(input)) count -= 1;
-    for (let i = 0; i < count; i++) this.incorporateLine(lines[i]!);
+    if (start === input.length && lines.length > 1) count -= 1;
+    for (let i = 0; i < count; i++) {
+      this.lineStart = lineStarts[i]!;
+      this.incorporateLine(lines[i]!);
+    }
     while (this.tip !== this.document) this.finalize(this.tip, count);
     this.finalize(this.document, count);
 
-    const lineStarts = [0];
-    for (const match of input.matchAll(/\r\n|\n|\r/g)) lineStarts.push(match.index! + match[0].length);
     return { document: this.convert(this.document, input, lineStarts), warnings: this.warnings };
   }
 
@@ -298,6 +328,9 @@ export class BlockParser {
       this.offset++;
       this.tip.content += ' '.repeat(4 - (this.column % 4));
     }
+    this.tip.sources.push(this.lineStart + this.offset);
+    this.tip.columns.push(this.offset);
+    if (this.tip.columns.length === 1 && this.tip.kind === 'paragraph') this.tip.startColumn = this.offset + 1;
     this.tip.content += this.currentLine.slice(this.offset) + '\n';
   }
 
@@ -369,7 +402,7 @@ export class BlockParser {
     let matchedLeaf = container.kind !== 'paragraph' && ACCEPTS_LINES.has(container.kind);
     while (!matchedLeaf) {
       this.findNextNonspace();
-      if (!this.indented && !MAYBE_SPECIAL.test(this.currentLine.slice(this.nextNonspace))) {
+      if (!this.indented && !this.maybeSpecial.test(this.currentLine.charAt(this.nextNonspace))) {
         this.advanceNextNonspace();
         break;
       }
@@ -440,6 +473,8 @@ export class BlockParser {
       case 'heading':
       case 'thematic_break':
         return 1;
+      case 'extension':
+        return this.continueExtension(block);
       case 'code_block':
         if (block.fenced) {
           const match =
@@ -504,7 +539,14 @@ export class BlockParser {
         .slice(this.offset)
         .replace(/^[ \t]*#+[ \t]*$/, '')
         .replace(/[ \t]+#+[ \t]*$/, '');
+      heading.sources = [this.lineStart + this.offset];
+      heading.columns = [this.offset];
       this.advanceOffset(line.length - this.offset, false);
+      return 2;
+    }
+
+    // 块级扩展
+    if (!this.indented && this.options.blockExtensions.length > 0 && this.tryExtensionStart(container)) {
       return 2;
     }
 
@@ -545,6 +587,9 @@ export class BlockParser {
         const heading = new Block('heading', container.startLine, container.startColumn);
         heading.level = match[0][0] === '=' ? 1 : 2;
         heading.content = container.content;
+        heading.sources = container.sources;
+        heading.columns = container.columns;
+        heading.fenceChar = match[0][0]!;
         heading.parent = container.parent;
         const siblings = container.parent!.children;
         siblings[siblings.indexOf(container)] = heading;
@@ -569,6 +614,8 @@ export class BlockParser {
         const table = new Block('table', container.startLine, container.startColumn);
         table.alignments = alignments;
         table.content = container.content;
+        table.sources = container.sources;
+        table.columns = container.columns;
         table.parent = container.parent;
         const siblings = container.parent!.children;
         siblings[siblings.indexOf(container)] = table;
@@ -587,7 +634,7 @@ export class BlockParser {
     }
 
     // GFM 脚注定义
-    if (this.options.gfm && !this.indented && container.kind !== 'paragraph' && (match = FOOTNOTE_DEFINITION.exec(rest))) {
+    if (this.options.footnotes && !this.indented && container.kind !== 'paragraph' && (match = FOOTNOTE_DEFINITION.exec(rest))) {
       if (!this.tooDeep(container)) {
         this.closeUnmatchedBlocks();
         const footnote = this.addChild('footnote_definition', this.nextNonspace);
@@ -626,6 +673,49 @@ export class BlockParser {
     }
 
     return 0;
+  }
+
+  // ---------- 块级扩展 ----------
+
+  /** 在本行尝试开始块级扩展；成功时整行由扩展消耗 */
+  private tryExtensionStart(container: Block): boolean {
+    const line = this.currentLine;
+    const rest = line.slice(this.nextNonspace);
+    const lazyParagraph = container.kind === 'paragraph' || (!this.allClosed && !this.blank && this.tip.kind === 'paragraph');
+    const firstInListItem = container.kind === 'item' && container.children.length === 0;
+    for (const extension of this.options.blockExtensions) {
+      if (!rest.startsWith(extension.trigger)) continue;
+      if (lazyParagraph && !extension.interruptsParagraph) continue;
+      const result = extension.open(rest, { firstInListItem });
+      if (!result) continue;
+      this.closeUnmatchedBlocks();
+      const block = this.addChild('extension', this.nextNonspace);
+      block.extension = extension;
+      this.addExtensionLine(block, result);
+      // 没有续行处理的扩展只有一行
+      if (!extension.next) block.extensionClosed = true;
+      this.advanceOffset(line.length - this.offset, false);
+      return true;
+    }
+    return false;
+  }
+
+  /** 已打开的扩展块处理后续一行：已结束则不再匹配；否则整行交给扩展 */
+  private continueExtension(block: Block): 1 | 2 {
+    if (block.extensionClosed) return 1;
+    this.addExtensionLine(block, block.extension!.next!(this.currentLine.slice(this.offset)));
+    this.lastLineLength = this.currentLine.length;
+    return 2;
+  }
+
+  private addExtensionLine(block: Block, result: BlockExtensionLine): void {
+    if (result.content !== undefined) {
+      block.content += (block.sources.length > 0 ? '\n' : '') + result.content;
+      block.sources.push(this.lineStart + this.offset);
+      block.columns.push(this.offset);
+    }
+    if (result.data) block.data = { ...block.data, ...result.data };
+    if (result.closed) block.extensionClosed = true;
   }
 
   private parseListMarker(container: Block): ListData | null {
@@ -679,17 +769,25 @@ export class BlockParser {
 
   // ---------- 关闭块 ----------
 
-  /** 段落开头的链接引用定义：登记并从内容中去掉 */
+  /** 段落开头的链接引用定义：登记并从内容中去掉（连同对应行的源码位置） */
   private consumeReferenceDefinitions(paragraph: Block): boolean {
     let found = false;
-    const parser = new InlineParser(this.options);
     while (paragraph.content.startsWith('[')) {
-      const definition = parser.parseReference(paragraph.content);
+      this.referenceParser ??= new InlineParser(this.options);
+      const definition = this.referenceParser.parseReference(paragraph.content);
       if (!definition) break;
       if (!this.references.has(definition.label)) {
         this.references.set(definition.label, { url: definition.url, title: definition.title });
       }
+      const consumedLines = paragraph.content.slice(0, definition.length).split('\n').length - 1;
+      paragraph.sources = paragraph.sources.slice(consumedLines);
+      paragraph.columns = paragraph.columns.slice(consumedLines);
       paragraph.content = paragraph.content.slice(definition.length);
+      // 段落（或由它变成的 Setext 标题）从定义之后开始；定义占满已有的行时，列在下一行加入时确定
+      if (consumedLines > 0) {
+        paragraph.startLine += consumedLines;
+        if (paragraph.columns.length > 0) paragraph.startColumn = paragraph.columns[0]! + 1;
+      }
       found = true;
     }
     return found;
@@ -771,7 +869,19 @@ export class BlockParser {
       };
     };
 
-    const inlineOf = (text: string, line: number): InlineNode[] => inline.parse(text.trim(), line);
+    const inlineOf = (block: Block): InlineNode[] => {
+      const lead = block.content.length - block.content.trimStart().length;
+      const leadLines = block.content.slice(0, lead).split('\n').length - 1;
+      const leadColumns = lead - (block.content.lastIndexOf('\n', lead - 1) + 1);
+      const starts = block.sources.slice(leadLines);
+      const columns = block.columns.slice(leadLines);
+      if (starts.length > 0) {
+        starts[0]! += leadColumns;
+        columns[0]! += leadColumns;
+      }
+      const origin: InlineOrigin = { startLine: block.startLine + leadLines, starts, columns };
+      return inline.parse(block.content.trim(), starts.length > 0 ? origin : block.startLine);
+    };
 
     const visit = (block: Block, tight: boolean): BlockNode => {
       const pos = position(block);
@@ -780,21 +890,31 @@ export class BlockParser {
         case 'document':
           return { type: BlockType.Document, ...base, raw: input, children: block.children.map((child) => visit(child, false)) };
         case 'paragraph':
-          return { type: BlockType.Paragraph, ...base, content: block.content.trim(), inline: inlineOf(block.content, block.startLine) };
+          return { type: BlockType.Paragraph, ...base, content: block.content.trim(), inline: inlineOf(block) };
         case 'heading':
           return {
             type: BlockType.Heading,
             ...base,
             level: block.level,
+            marker: block.fenceChar || '#'.repeat(block.level),
             content: block.content.trim(),
-            inline: inlineOf(block.content, block.startLine),
+            inline: inlineOf(block),
           };
         case 'thematic_break':
           return { type: BlockType.ThematicBreak, ...base };
         case 'code_block': {
           const node: BlockNode = { type: block.fenced ? BlockType.FencedCode : BlockType.CodeBlock, ...base, content: block.content };
+          if (block.fenced) {
+            node.marker = block.fenceChar.repeat(block.fenceLength);
+            node.info = block.info;
+          }
           const language = block.info.split(/\s+/)[0];
           if (language) node.language = language;
+          return node;
+        }
+        case 'extension': {
+          const node: BlockNode = { type: BlockType.Extension, ...base, name: block.extension!.name, content: block.content };
+          if (block.data) node.data = block.data;
           return node;
         }
         case 'html_block':
@@ -814,10 +934,13 @@ export class BlockParser {
           };
         }
         case 'item': {
-          const task = this.options.gfm ? this.taskMarker(block) : null;
+          const task = this.options.taskLists ? this.taskMarker(block) : null;
+          const data = block.listData!;
           return {
             type: task ? BlockType.TaskListItem : BlockType.ListItem,
             ...base,
+            marker: data.bulletChar ?? data.delimiter ?? '',
+            ...(data.type === 'ordered' ? { start: data.start } : {}),
             ...(task ? { checked: task.checked } : {}),
             children: block.children.map((child) => visit(child, tight)),
           };
@@ -842,13 +965,20 @@ export class BlockParser {
     return document;
   }
 
-  /** GFM 任务列表项：首个段落以 [ ] / [x] 加空白开头；去掉标记并返回是否已完成 */
+  /** GFM 任务列表项：首个段落以 [ ] / [x] 加空白开头；去掉标记（连同源码位置）并返回是否已完成 */
   private taskMarker(item: Block): { checked: boolean } | null {
     const first = item.children[0];
     if (!first || first.kind !== 'paragraph') return null;
     const match = /^\[([ xX])\](?:[ \t]+|\n)/.exec(first.content);
     if (!match) return null;
     first.content = first.content.slice(match[0].length);
+    if (match[0].endsWith('\n')) {
+      first.sources = first.sources.slice(1);
+      first.columns = first.columns.slice(1);
+    } else if (first.sources.length > 0) {
+      first.sources[0]! += match[0].length;
+      first.columns[0]! += match[0].length;
+    }
     return { checked: match[1] !== ' ' };
   }
 
@@ -857,7 +987,17 @@ export class BlockParser {
     const columns = block.alignments.length;
     const row = (text: string, index: number, isHeader: boolean): TableRowNode => {
       const cells = splitTableRow(text);
+      const lineIndex = isHeader ? 0 : index + 1;
       const line = block.startLine + (isHeader ? 0 : index + 2);
+      let cursor = 0;
+      /** 单元格内容在源码中的位置（含转义 \| 时内容与源码不同，退回相对位置） */
+      const originOf = (content: string): InlineOrigin | number => {
+        const found = content ? text.indexOf(content, cursor) : -1;
+        const source = block.sources[lineIndex];
+        if (found === -1 || source === undefined) return line;
+        cursor = found + content.length;
+        return { startLine: line, starts: [source + found], columns: [block.columns[lineIndex]! + found] };
+      };
       return {
         type: BlockType.TableRow,
         position: base.position,
@@ -872,7 +1012,7 @@ export class BlockParser {
             content,
             isHeader,
             alignment: block.alignments[column] ?? null,
-            inline: inline.parse(content, line),
+            inline: inline.parse(content, originOf(content)),
           };
         }),
       };

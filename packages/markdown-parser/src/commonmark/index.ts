@@ -36,6 +36,14 @@ export type {
 
   // 配置类型
   CommonMarkOptions,
+
+  // 语法扩展
+  InlineExtension,
+  InlineExtensionMatch,
+  BlockExtension,
+  BlockExtensionContext,
+  BlockExtensionLine,
 } from './commonmark-parser';
 
 export { renderHtml, escapeHtml, normalizeUrl } from './html-renderer';
+export { Token as MarkdownItToken, toMarkdownItTokens, MarkdownItCompatTokenizer } from './markdown-it-tokens';

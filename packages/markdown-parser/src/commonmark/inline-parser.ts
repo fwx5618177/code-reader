@@ -4,11 +4,17 @@
 // - 强调：分隔符栈 + “处理强调”过程（左右侧翼规则、3 的倍数规则）
 // - 链接 / 图片：方括号栈，行内目标与标题、完整 / 折叠 / 快捷引用，链接内不再有链接
 // - 代码 span、自动链接、行内 HTML、反斜杠转义、命名与数字字符引用、软 / 硬换行
-// GFM：删除线（~ 或 ~~，前后长度相同）、脚注引用 [^id]
+// GFM：删除线（~ 或 ~~，前后长度相同）、脚注引用 [^id]；语法扩展在触发字符处先于内置语法尝试
 // ================================
 
 import { lookupEntity } from './entities';
-import { InlineType, type CommonMarkOptions, type InlineNode, type Position } from './commonmark-parser';
+import {
+  InlineType,
+  type InlineExtension,
+  type InlineNode,
+  type Position,
+  type ResolvedOptions,
+} from './commonmark-parser';
 
 /** 链接引用定义：规范化后的标签 → 目标与标题 */
 export type ReferenceMap = Map<string, { url: string; title: string }>;
@@ -77,6 +83,10 @@ class Node {
   url?: string;
   title?: string;
   footnoteId?: string;
+  name?: string;
+  data?: Record<string, unknown>;
+  /** 强调与删除线的分隔符、代码 span 的反引号 */
+  marker?: string;
 
   constructor(
     public type: InlineType,
@@ -143,35 +153,68 @@ interface Bracket {
 // 行内解析器
 // ================================
 
+/**
+ * 行内内容在源码中的位置：内容的第 k 行从源码偏移 starts[k] 开始，位于源码第 startLine + k 行的 columns[k] 列（0 起）。
+ * 容器前缀（> 、列表缩进）不在内容里，按行换算即可得到源码中的绝对位置
+ */
+export interface InlineOrigin {
+  startLine: number;
+  starts: readonly number[];
+  columns: readonly number[];
+}
+
 export class InlineParser {
   private subject = '';
   private pos = 0;
   private delimiters: Delimiter | null = null;
   private brackets: Bracket | null = null;
   private lineStarts: number[] = [];
+  private origin: InlineOrigin | null = null;
   private startLine = 1;
   private readonly special: RegExp;
+  /** 与 special 相同，带 g 标志：从当前位置查找下一个特殊字符（不切片） */
+  private readonly specialGlobal: RegExp;
+  /** 触发字符 → 行内扩展 */
+  private readonly extensions = new Map<string, InlineExtension[]>();
 
   constructor(
-    private readonly options: Required<CommonMarkOptions>,
+    private readonly options: ResolvedOptions,
     private readonly references: ReferenceMap = new Map()
   ) {
-    const chars = '\\n`[\\]\\\\!<&*_' + (options.strikethrough ? '~' : '') + (options.smartPunctuation ? `'"` : '');
+    for (const extension of options.inlineExtensions) {
+      const list = this.extensions.get(extension.trigger) ?? [];
+      list.push(extension);
+      this.extensions.set(extension.trigger, list);
+    }
+    const triggers = [...this.extensions.keys()].map((char) => char.replace(/[\\\]^-]/g, '\\$&')).join('');
+    const chars = '\\n`[\\]\\\\!<&*_' + (options.strikethrough ? '~' : '') + (options.smartPunctuation ? `'"` : '') + triggers;
     this.special = new RegExp(`[${chars}]`);
+    this.specialGlobal = new RegExp(`[${chars}]`, 'g');
   }
 
   /**
-   * 解析行内内容；startLine 为内容第一行在文档中的行号（1 起），用于节点位置
+   * 解析行内内容。origin 为数字时是内容第一行的行号（1 起），节点位置相对内容；
+   * 为 InlineOrigin 时节点位置是源码中的绝对位置
    */
-  parse(input: string, startLine = 1): InlineNode[] {
+  parse(input: string, origin: number | InlineOrigin = 1): InlineNode[] {
     // 块末尾的空白不构成硬换行
-    this.subject = input.replace(/[ \t]+$/, '');
+    let end = input.length;
+    while (end > 0 && (input.charCodeAt(end - 1) === 32 || input.charCodeAt(end - 1) === 9)) end--;
+    this.subject = end === input.length ? input : input.slice(0, end);
     this.pos = 0;
     this.delimiters = null;
     this.brackets = null;
-    this.startLine = startLine;
+    this.origin = typeof origin === 'number' ? null : origin;
+    this.startLine = typeof origin === 'number' ? origin : origin.startLine;
     this.lineStarts = [0];
-    for (let i = 0; i < this.subject.length; i++) if (this.subject.charCodeAt(i) === 10) this.lineStarts.push(i + 1);
+    for (let i = this.subject.indexOf('\n'); i !== -1; i = this.subject.indexOf('\n', i + 1)) this.lineStarts.push(i + 1);
+
+    // 没有任何行内语法的内容（常见于表格单元格与短段落）：整体就是一段文本
+    if (!this.subject) return [];
+    if (!this.special.test(this.subject)) {
+      const text = this.options.smartPunctuation ? smartDashesAndEllipses(this.subject) : this.subject;
+      return [{ type: InlineType.Text, content: text, position: this.position(0, this.subject.length) }];
+    }
 
     const root = new Node(InlineType.Text);
     while (this.pos < this.subject.length) this.parseOne(root);
@@ -183,6 +226,7 @@ export class InlineParser {
 
   private parseOne(block: Node): void {
     const char = this.subject[this.pos]!;
+    if (this.extensions.has(char) && this.parseExtension(block, char)) return;
     let handled = false;
     switch (char) {
       case '\n':
@@ -235,14 +279,31 @@ export class InlineParser {
     return node;
   }
 
+  /** 依次尝试该触发字符的行内扩展 */
+  private parseExtension(block: Node, char: string): boolean {
+    for (const extension of this.extensions.get(char)!) {
+      const match = extension.match(this.subject, this.pos);
+      if (!match || match.length <= 0) continue;
+      const start = this.pos;
+      this.pos += match.length;
+      const node = new Node(InlineType.Extension, match.content, start, this.pos);
+      node.name = extension.name;
+      if (match.data) node.data = match.data;
+      block.append(node);
+      return true;
+    }
+    return false;
+  }
+
   private parseString(block: Node): boolean {
-    const rest = this.subject.slice(this.pos);
-    const index = rest.search(this.special);
-    const length = index === -1 ? rest.length : index;
-    if (length === 0) return false;
+    this.specialGlobal.lastIndex = this.pos;
+    const match = this.specialGlobal.exec(this.subject);
+    const end = match ? match.index : this.subject.length;
+    if (end === this.pos) return false;
     const start = this.pos;
-    this.pos += length;
-    this.text(block, this.options.smartPunctuation ? smartDashesAndEllipses(rest.slice(0, length)) : rest.slice(0, length), start);
+    const literal = this.subject.slice(start, end);
+    this.pos = end;
+    this.text(block, this.options.smartPunctuation ? smartDashesAndEllipses(literal) : literal, start);
     return true;
   }
 
@@ -280,8 +341,9 @@ export class InlineParser {
 
   private parseCodeSpan(block: Node): boolean {
     const start = this.pos;
-    const ticks = /^`+/.exec(this.subject.slice(this.pos))![0];
-    const after = this.pos + ticks.length;
+    let after = this.pos;
+    while (this.subject.charCodeAt(after) === 96 /* ` */) after++;
+    const ticks = this.subject.slice(start, after);
     const closer = /`+/g;
     closer.lastIndex = after;
     let match: RegExpExecArray | null;
@@ -292,7 +354,9 @@ export class InlineParser {
         content = content.slice(1, -1);
       }
       this.pos = match.index + match[0].length;
-      block.append(new Node(InlineType.Code, content, start, this.pos));
+      const code = new Node(InlineType.Code, content, start, this.pos);
+      code.marker = ticks;
+      block.append(code);
       return true;
     }
     // 没有长度相同的结束反引号：开头的反引号按字面
@@ -354,7 +418,7 @@ export class InlineParser {
     let count = 0;
     if (quote) count = 1;
     else while (this.subject[this.pos + count] === char) count++;
-    if (char === '~' && count > 2) return false;
+    if (char === '~' && (count > 2 || (count === 1 && !this.options.singleTildeStrikethrough))) return false;
 
     const before = this.charBefore();
     const afterCode = this.subject.codePointAt(this.pos + count);
@@ -456,6 +520,7 @@ export class InlineParser {
         const type =
           closer.char === '~' ? InlineType.Strikethrough : used === 2 ? InlineType.Bold : InlineType.Italic;
         const emphasis = new Node(type, '', opener.node.end - used, closer.node.start + used);
+        emphasis.marker = closer.char.repeat(used);
         let child = opener.node.next;
         while (child && child !== closer.node) {
           const next = child.next;
@@ -509,7 +574,7 @@ export class InlineParser {
   private parseOpenBracket(block: Node): boolean {
     const start = this.pos;
     // GFM 脚注引用 [^id]
-    if (this.options.gfm) {
+    if (this.options.footnotes) {
       const footnote = /^\[\^([^\]\s]+)\]/.exec(this.subject.slice(this.pos));
       if (footnote) {
         this.pos += footnote[0].length;
@@ -527,13 +592,19 @@ export class InlineParser {
   private parseBang(block: Node): boolean {
     const start = this.pos;
     this.pos++;
-    if (this.subject[this.pos] === '[') {
+    // ![[…]] 等：方括号处能匹配行内扩展时，! 只是文本（与 markdown-it 一致）
+    if (this.subject[this.pos] === '[' && !this.extensionMatchesAt(this.pos)) {
       this.pos++;
       this.pushBracket(this.text(block, '![', start), true);
     } else {
       this.text(block, '!', start);
     }
     return true;
+  }
+
+  private extensionMatchesAt(pos: number): boolean {
+    const extensions = this.extensions.get(this.subject[pos]!);
+    return extensions !== undefined && extensions.some((extension) => (extension.match(this.subject, pos)?.length ?? 0) > 0);
   }
 
   private skipSpaces(): boolean {
@@ -715,6 +786,7 @@ export class InlineParser {
   // ---------- 输出 ----------
 
   private position(start: number, end: number): Position {
+    const origin = this.origin;
     const locate = (offset: number) => {
       let low = 0;
       let high = this.lineStarts.length - 1;
@@ -723,25 +795,30 @@ export class InlineParser {
         if (this.lineStarts[mid]! <= offset) low = mid;
         else high = mid - 1;
       }
-      return { line: this.startLine + low, column: offset - this.lineStarts[low]! + 1 };
+      const column = offset - this.lineStarts[low]!;
+      if (!origin) return { offset, line: this.startLine + low, column: column + 1 };
+      const k = Math.min(low, origin.starts.length - 1);
+      return { offset: origin.starts[k]! + column, line: origin.startLine + k, column: origin.columns[k]! + column + 1 };
     };
     const from = locate(start);
     const to = locate(end);
-    return { start, end, startLine: from.line, startColumn: from.column, endLine: to.line, endColumn: to.column };
+    return { start: from.offset, end: to.offset, startLine: from.line, startColumn: from.column, endLine: to.line, endColumn: to.column };
   }
 
   /** 转成对外的节点，相邻文本合并、空文本丢弃 */
   private toInlineNodes(parent: Node): InlineNode[] {
     const result: InlineNode[] = [];
+    let lastTextStart = 0;
     for (let node = parent.first; node; node = node.next) {
       if (node.type === InlineType.Text) {
         if (!node.literal) continue;
         const last = result[result.length - 1];
         if (last && last.type === InlineType.Text) {
           last.content += node.literal;
-          last.position = this.position(last.position.start, node.end);
+          last.position = this.position(lastTextStart, node.end);
           continue;
         }
+        lastTextStart = node.start;
       }
       const children = node.first ? this.toInlineNodes(node) : undefined;
       const converted: InlineNode = {
@@ -754,6 +831,9 @@ export class InlineParser {
       if (node.title) converted.title = node.title;
       if (node.type === InlineType.Image) converted.alt = children ? plainText(children) : '';
       if (node.footnoteId !== undefined) converted.footnoteId = node.footnoteId;
+      if (node.name !== undefined) converted.name = node.name;
+      if (node.data !== undefined) converted.data = node.data;
+      if (node.marker !== undefined) converted.marker = node.marker;
       if (node.type === InlineType.Link || node.type === InlineType.Image) converted.children ??= [];
       result.push(converted);
     }
