@@ -9,6 +9,7 @@ import { mkdirSync } from 'fs';
 import { TASK_TYPES } from '../agent/task-types';
 import { ENTITY_TYPES } from '../agent/entity-types';
 import { RELATION_TYPES } from '../agent/relation-types';
+import { highlight } from '../../shared/search-highlight';
 
 // ================================
 // Types
@@ -18,6 +19,7 @@ import { RELATION_TYPES } from '../agent/relation-types';
 export interface FTSResult {
   id: string;
   rank: number;
+  /** 命中摘要，命中的文字用 shared/search-highlight 的私用区字符包住 */
   snippet: string;
   title?: string;
   type?: string;
@@ -673,7 +675,7 @@ function buildLikeSnippet(fields: Array<string | null>, terms: string[]): string
     );
     const highlighted = field
       .slice(start, end)
-      .replace(new RegExp(pattern, 'giu'), (match) => `<mark>${match}</mark>`);
+      .replace(new RegExp(pattern, 'giu'), (match) => highlight(match));
 
     return `${start > 0 ? '...' : ''}${highlighted}${end < field.length ? '...' : ''}`;
   }
@@ -918,7 +920,8 @@ export class SQLiteService {
       SELECT
         ki.id,
         bm25(items_fts) AS rank,
-        snippet(items_fts, -1, '<mark>', '</mark>', '...', 32) AS snippet,
+        -- 高亮边界用私用区字符 U+E000 / U+E001（shared/search-highlight.ts），正文里的 <mark> 等按文字显示
+        snippet(items_fts, -1, char(57344), char(57345), '...', 32) AS snippet,
         ki.title,
         ki.type
       FROM items_fts

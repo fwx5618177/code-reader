@@ -16,7 +16,7 @@ export interface SearchHit {
   id: string;
   title: string;
   type: KnowledgeItemType;
-  /** 匹配摘要，命中词以 <mark> 包裹 */
+  /** 匹配摘要，命中的文字用 shared/search-highlight 的高亮边界包住 */
   snippet: string;
   group: SearchGroupKey;
 }
@@ -31,11 +31,6 @@ export const SEARCH_GROUPS: ReadonlyArray<{ key: SearchGroupKey; label: string }
   { key: 'documents', label: '写作文档' },
   { key: 'knowledge', label: '知识条目' },
 ];
-
-export interface SnippetSegment {
-  text: string;
-  highlight: boolean;
-}
 
 /** 数据库中的类型字段为自由文本，未知类型按普通文件展示 */
 function toItemType(type: string): KnowledgeItemType {
@@ -75,25 +70,4 @@ export function mergeSearchResults(
   }
 
   return { documents, knowledge };
-}
-
-/** <mark> 以外的 HTML 标签 */
-const NON_MARK_TAG = /<(?!\/?mark>)\/?[a-z][^>]*>/gi;
-
-/**
- * 把摘要拆成普通文本与高亮片段，以 React 文本节点渲染（不使用 innerHTML）
- * <mark> 以外的标签（如富文本正文中的段落标签）直接去掉
- */
-export function splitHighlights(snippet: string): SnippetSegment[] {
-  return snippet
-    .replace(NON_MARK_TAG, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(/<mark>([\s\S]*?)<\/mark>/i)
-    .map((text, index) => ({
-      text,
-      // split 的捕获组位于奇数位
-      highlight: index % 2 === 1,
-    }))
-    .filter((segment) => segment.text.length > 0);
 }

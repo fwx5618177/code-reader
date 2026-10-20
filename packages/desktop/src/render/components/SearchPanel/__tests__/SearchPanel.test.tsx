@@ -7,7 +7,9 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { HybridSearchResult } from '../../../types/electron';
 import type { DocumentSearchResult } from '../../../lib/writing';
-import { mergeSearchResults, splitHighlights } from '../search-results';
+import { mergeSearchResults } from '../search-results';
+import { Snippet } from '../Snippet';
+import { highlight } from '../../../../shared/search-highlight';
 import { lineSegments } from '../exact-search';
 import { DocumentEditorManager, getEditorManager } from '../../../lib/core/editor-model/editor-manager';
 import SearchPanel from '..';
@@ -58,20 +60,14 @@ describe('mergeSearchResults', () => {
   });
 });
 
-describe('splitHighlights', () => {
-  it('按 <mark> 拆分为高亮与普通片段', () => {
-    expect(splitHighlights('前<mark>命中</mark>后<mark>再次</mark>')).toEqual([
-      { text: '前', highlight: false },
-      { text: '命中', highlight: true },
-      { text: '后', highlight: false },
-      { text: '再次', highlight: true },
-    ]);
-  });
-
-  it('去掉 <mark> 以外的标签，不产生可执行 HTML', () => {
-    const segments = splitHighlights('<p>段落<img src=x onerror=alert(1)></p><mark>词</mark>');
-    expect(segments.map((s) => s.text).join('')).toBe('段落 词');
-    expect(segments.some((s) => s.text.includes('<'))).toBe(false);
+describe('Snippet', () => {
+  it('高亮片段渲染为 <mark>，正文里的尖括号按文字显示、不会被当成标记或 HTML', () => {
+    const { container } = render(
+      <Snippet snippet={`前${highlight('命中')} <mark>原文</mark>\n<img src=x onerror=alert(1)> ${highlight('再次')}`} />
+    );
+    expect([...container.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['命中', '再次']);
+    expect(container.textContent).toBe('前命中 <mark>原文</mark> <img src=x onerror=alert(1)> 再次');
+    expect(container.querySelector('img')).toBeNull();
   });
 });
 

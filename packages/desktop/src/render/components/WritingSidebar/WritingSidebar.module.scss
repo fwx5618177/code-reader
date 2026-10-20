@@ -237,13 +237,10 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 
-  // 搜索高亮样式
-  :global(mark),
-  :global(em),
-  :global(b) {
-    background-color: var(--bg-highlight, rgba(255, 215, 0, 0.3));
+  // 搜索高亮
+  :global(mark) {
+    background-color: var(--bg-highlight);
     color: inherit;
-    font-style: normal;
     font-weight: $font-weight-medium;
     padding: 0 2px;
     border-radius: 2px;

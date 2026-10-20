@@ -37,6 +37,7 @@ import {
   DEFAULT_DIFF_OPTIONS,
   initialWritingServiceState,
 } from './types';
+import { HIGHLIGHT_END, HIGHLIGHT_START } from '../../../shared/search-highlight';
 
 // ================================
 // Constants
@@ -420,6 +421,9 @@ export class WritingService implements IWritingService {
       fuzzy: opts.fuzzy,
       fuzzyThreshold: opts.fuzzyThreshold,
       highlight: opts.highlight,
+      // 与主进程的全文检索同一种高亮边界：正文里的尖括号按文字显示
+      highlightPrefix: HIGHLIGHT_START,
+      highlightSuffix: HIGHLIGHT_END,
       snippetLength: opts.snippetLength,
       fields: opts.fields as string[],
     };

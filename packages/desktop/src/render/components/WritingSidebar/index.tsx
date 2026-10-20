@@ -42,6 +42,7 @@ import { useFolders } from '../../lib/folders';
 import { useDocumentSearch } from '../../lib/writing/useWritingService';
 import type { DocumentSearchResult } from '../../lib/writing/types';
 import InputDialog, { ConfirmDialog } from '../InputDialog';
+import { Snippet } from '../SearchPanel/Snippet';
 import { VirtualizedTreeView, NodeWithMeta } from './components';
 import styles from './WritingSidebar.module.scss';
 
@@ -891,12 +892,7 @@ const WritingSidebar: React.FC<WritingSidebarProps> = ({
                     }}
                   >
                     <div className={styles.resultTitle}>{result.title || '无标题'}</div>
-                    {result.snippet && (
-                      <div
-                        className={styles.resultSnippet}
-                        dangerouslySetInnerHTML={{ __html: result.snippet }}
-                      />
-                    )}
+                    {result.snippet && <Snippet snippet={result.snippet} className={styles.resultSnippet} />}
                     <div className={styles.resultScore}>
                       匹配度: {Math.round(result.score * 100)}%
                     </div>

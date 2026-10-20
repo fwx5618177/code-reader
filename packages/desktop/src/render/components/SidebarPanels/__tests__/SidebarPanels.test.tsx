@@ -13,6 +13,7 @@ import { RecordingsPanel } from '../RecordingsPanel';
 import { SidebarSearch } from '../SidebarSearch';
 import { TagCloud } from '../TagCloud';
 import { LatexOutline, WritingOutline } from '../WritingOutline';
+import { highlight } from '../../../../shared/search-highlight';
 
 const searchDocuments = vi.hoisted(() => vi.fn());
 vi.mock('../../../lib/writing', () => ({ useWritingService: () => ({ search: searchDocuments }) }));
@@ -228,7 +229,7 @@ describe('SidebarSearch', () => {
   });
 
   const hit = (itemId: string, title: string): HybridSearchResult =>
-    ({ itemId, title, type: 'webpage', snippet: `<mark>${title}</mark>` }) as HybridSearchResult;
+    ({ itemId, title, type: 'webpage', snippet: highlight(title) }) as HybridSearchResult;
 
   it('复用全局检索，按条件过滤命中，点击打开', async () => {
     searchDocuments.mockResolvedValue([]);
