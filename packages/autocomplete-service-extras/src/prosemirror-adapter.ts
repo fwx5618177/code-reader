@@ -15,15 +15,14 @@ import {
   type CompletionItem,
   type IconMap,
 } from '@code-reader/autocomplete-service';
+import { EditorAutocomplete, type AutocompleteState } from './prosemirror-plugin';
 import {
-  EditorAutocomplete,
   fromServiceItem,
   toServiceContext,
-  type AutocompleteState,
   type EditorCompletionContext,
   type EditorCompletionItem,
   type EditorCompletionProvider,
-} from './prosemirror-plugin';
+} from './editor-completion';
 
 /** ProseMirror 适配器配置 */
 export interface ProseMirrorAdapterOptions extends BaseAdapterOptions {

@@ -14,6 +14,7 @@ import {
   filterAndSortItems,
   findTriggerPosition,
   fromServiceProvider,
+  isOpenCompletionShortcut,
   type EditorCompletionContext,
   type EditorCompletionItem,
   type EditorCompletionProvider,
@@ -82,6 +83,17 @@ describe('findTriggerPosition / filterAndSortItems', () => {
     expect(findTriggerPosition('a/b', ['/'])).toBeNull();
     expect(findTriggerPosition('x /cmd', ['/'])).toEqual({ trigger: '/', from: 2 });
     expect(findTriggerPosition('见[[页', ['[[', '/'])).toEqual({ trigger: '[[', from: 1 });
+    // 声明为任意位置的单字符触发符不要求前面是空白
+    expect(findTriggerPosition('$x+\\al', ['\\'])).toBeNull();
+    expect(findTriggerPosition('$x+\\al', ['\\'], new Set(['\\']))).toEqual({ trigger: '\\', from: 3 });
+  });
+
+  it('手动打开：Ctrl+空格与 Option+`（按物理键位，macOS 上是死键）', () => {
+    const shortcut = (init: KeyboardEventInit) => isOpenCompletionShortcut(new KeyboardEvent('keydown', init));
+    expect(shortcut({ key: ' ', code: 'Space', ctrlKey: true })).toBe(true);
+    expect(shortcut({ key: 'Dead', code: 'Backquote', altKey: true })).toBe(true);
+    expect(shortcut({ key: '`', code: 'Backquote' })).toBe(false);
+    expect(shortcut({ key: ' ', code: 'Space', ctrlKey: true, metaKey: true })).toBe(false);
   });
 
   it('按优先级、filterText 前缀、字母序排序；提供者已匹配的项不再过滤', () => {
@@ -193,6 +205,23 @@ describe('EditorAutocomplete', () => {
     expect(key(view, ' ', { ctrlKey: true })).toBe(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(autocomplete.getState(view.state).items.map((entry) => entry.label)).toEqual(['algebra', 'algorithm']);
+    view.destroy();
+  });
+
+  it('triggersAnywhere：触发符紧跟在其他字符后也能打开；Option+` 手动打开', async () => {
+    const latex = provider('\\', [item('\\alpha', { filterText: 'alpha' })], { triggersAnywhere: true });
+    const autocomplete = new EditorAutocomplete({ providers: [latex], minTriggerLength: 0 });
+    const view = mount(paragraph('$x+'), autocomplete);
+    type(view, '\\al');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(latex.contexts[0]).toMatchObject({ trigger: '\\', query: 'al', from: 3, to: 6 });
+    expect(autocomplete.acceptCompletion(view)).toBe(true);
+    expect(view.state.doc.textContent).toBe('$x+\\alpha');
+
+    type(view, ' \\');
+    expect(key(view, 'Dead', { code: 'Backquote', altKey: true })).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(autocomplete.getState(view.state).active).toBe(true);
     view.destroy();
   });
 

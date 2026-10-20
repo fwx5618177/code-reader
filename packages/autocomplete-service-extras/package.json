@@ -1,7 +1,7 @@
 {
   "name": "@code-reader/autocomplete-service-extras",
   "version": "0.1.0",
-  "description": "补全扩展：ProseMirror 补全插件（多提供者、触发符或单词触发、面板、键盘导航、结构化插入，桌面端 Markdown 编辑器使用）与基于它的补全服务适配器，以及 CodeMirror 补全预设（Markdown 编辑器、指定语言的代码编辑器）",
+  "description": "补全扩展：ProseMirror 补全插件（多提供者、触发符或单词触发、面板、键盘导航、结构化插入，桌面端 Markdown 编辑器使用）、文本框补全（textarea / input，桌面端公式源码框使用）与基于它的补全服务适配器，以及 CodeMirror 补全预设（Markdown 编辑器、指定语言的代码编辑器）",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
